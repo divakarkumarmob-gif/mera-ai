@@ -3,6 +3,7 @@ import { X, Mic, Plus, Loader2, Settings, ChevronDown, Captions, MessageSquare, 
 import { motion, AnimatePresence } from 'motion/react';
 import AgentFace from './AgentFace';
 import ChatHistoryModal from './ChatHistoryModal';
+import WhatsAppPairModal from './WhatsAppPairModal';
 import { getWsUrl } from '@/utils/api';
 import { wakeWordManager } from '@/utils/wakeWord';
 
@@ -103,6 +104,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const [showCaptions, setShowCaptions] = useState(true);
     const [captionText, setCaptionText] = useState('');
     const [showChatHistory, setShowChatHistory] = useState(false);
+    const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const captionBoxRef = useRef<HTMLDivElement>(null);
     const userScrolledUpRef = useRef(false);
@@ -705,7 +707,15 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
             <div className="w-full h-full flex flex-col flex-1 overflow-hidden">
                 <div className="w-full flex justify-between items-center mb-6 pt-4">
                     <h1 className="text-lg font-bold flex items-center gap-2">AI <span className="text-blue-400">Live Agent</span></h1>
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-3">
+                        <button
+                            onClick={() => setShowWhatsAppModal(true)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 text-xs font-semibold shadow-[0_0_15px_rgba(16,185,129,0.25)] transition-all cursor-pointer hover:scale-105 active:scale-95"
+                            title="WhatsApp Link Assistant"
+                        >
+                            <span>📲</span>
+                            <span>Link WhatsApp</span>
+                        </button>
                         <button onClick={() => setShowCaptions(!showCaptions)} className={showCaptions ? 'text-green-500' : 'text-white'}>
                             <Captions className="h-6 w-6" />
                         </button>
@@ -970,6 +980,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
             </AnimatePresence>
 
             {showChatHistory && <ChatHistoryModal onClose={() => setShowChatHistory(false)} />}
+            <WhatsAppPairModal isOpen={showWhatsAppModal} onClose={() => setShowWhatsAppModal(false)} />
         </div>
     );
 }
