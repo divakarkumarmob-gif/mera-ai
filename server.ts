@@ -292,6 +292,10 @@ CONTACTS & WHATSAPP CAPABILITIES:
   NEVER say that an SMS/OTP was sent to his phone. YOU give the code directly to DK.
 - Once a message is sent, confirm warmly and naturally: "DK, maine Rahul ko message bhej diya hai ki aaj aap nahi aaoge!"
 
+IMMEDIATE ANSWER TRIGGER ("JAWAB DO" / "REPLY KARO"):
+- Whenever DK finishes explaining something and says "Jawab do", "Reply do", "Bolo Friday", or asks for your response:
+- Stop listening immediately and deliver your full, helpful answer out loud without any hesitation or extra waiting!
+
 CORE WAKE & SLEEP BEHAVIORS:
 1. WAKE UP & GREETING:
    - When DK starts the session or says "Hello Friday" / "Hey Friday" / "Hi Friday", greet him warmly:
@@ -622,6 +626,15 @@ CONVERSATION GUIDELINES:
           turns: [{ role: "user", parts: [{ text: parsedData.text }] }],
           turnComplete: true,
         });
+      } else if (parsedData.type === "trigger_reply") {
+        try {
+          currentSession.sendClientContent({
+            turns: [{ role: "user", parts: [{ text: "Jawab do, please reply now to what I just said." }] }],
+            turnComplete: true,
+          });
+        } catch (e) {
+          console.error("Failed to trigger reply:", e);
+        }
       } else if (parsedData.interrupt) {
         clientWs.send(JSON.stringify({ interrupted: true }));
       }

@@ -793,10 +793,11 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     )}
                 </div>
 
-                <div className="flex items-center justify-center gap-6 w-full pb-6">
+                <div className="flex items-center justify-center gap-4 w-full pb-6">
                     <button
                         onClick={() => fileInputRef.current?.click()}
-                        className="p-3 rounded-full bg-slate-800/80 border border-slate-600 text-white"
+                        className="p-3 rounded-full bg-slate-800/80 border border-slate-600 text-white hover:bg-slate-700 transition-colors"
+                        title="Upload Image"
                     >
                         <Plus className="w-5 h-5" />
                     </button>
@@ -804,15 +805,32 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
 
                     <button
                         onClick={handleToggleRecording}
-                        className={`p-5 rounded-full text-white shadow-lg transition-all ${isRecording ? 'bg-red-600 shadow-red-500/40' : 'gradient-btn-primary shadow-purple-500/40'}`}
+                        className={`p-5 rounded-full text-white shadow-lg transition-all ${isRecording ? 'bg-red-600 shadow-red-500/40 hover:bg-red-500' : 'gradient-btn-primary shadow-purple-500/40 hover:scale-105'}`}
+                        title={isRecording ? "Stop Session" : "Start Session"}
                     >
                         {isRecording ? <Square className="w-7 h-7" /> : <Mic className="w-7 h-7" />}
                     </button>
 
+                    {isRecording && (
+                        <button
+                            onClick={() => {
+                                if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+                                    setStatus("Thinking...");
+                                    ws.current.send(JSON.stringify({ type: 'trigger_reply' }));
+                                }
+                            }}
+                            className="px-4 py-3 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white font-bold text-xs shadow-[0_0_20px_rgba(245,158,11,0.4)] transition-all flex items-center gap-1.5 active:scale-95 animate-pulse cursor-pointer"
+                            title="Friday ko turant bolne ke liye kahein"
+                        >
+                            <span>⚡</span>
+                            <span>Jawab Do</span>
+                        </button>
+                    )}
+
                     <button
                         onClick={handleInterrupt}
                         disabled={!isRecording}
-                        className="p-3 rounded-full bg-slate-800/80 border border-slate-600 text-white disabled:opacity-30"
+                        className="p-3 rounded-full bg-slate-800/80 border border-slate-600 text-white disabled:opacity-30 hover:bg-slate-700 transition-colors"
                         title="Interrupt AI"
                     >
                         <Loader2 className="w-5 h-5" />
