@@ -450,8 +450,9 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     source.connect(processor.current);
                     processor.current.connect(inputAudioCtx.current.destination);
                     processor.current.onaudioprocess = (e) => {
-                        // 1. Prevent speaker echo from feeding back when AI speaks
-                        if (isAiSpeaking.current || Date.now() < speakingCooldownUntilRef.current || !isInitializedRef.current) {
+                        // 1. HARD MUTE: While AI is speaking, output buffer is playing, or cooling down -> Mic is 100% OFF
+                        const isAudioStillPlaying = !!(outputAudioCtx.current && outputAudioCtx.current.currentTime < (nextStartTime.current - 0.05));
+                        if (isAiSpeaking.current || isAudioStillPlaying || Date.now() < speakingCooldownUntilRef.current || !isInitializedRef.current) {
                             setVolume(0);
                             return;
                         }
@@ -569,8 +570,9 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 source.connect(processor.current);
                 processor.current.connect(inputAudioCtx.current.destination);
                 processor.current.onaudioprocess = (e) => {
-                    // 1. Prevent speaker echo from feeding back when AI speaks
-                    if (isAiSpeaking.current || Date.now() < speakingCooldownUntilRef.current || !isInitializedRef.current) {
+                    // 1. HARD MUTE: While AI is speaking, output buffer is playing, or cooling down -> Mic is 100% OFF
+                    const isAudioStillPlaying = !!(outputAudioCtx.current && outputAudioCtx.current.currentTime < (nextStartTime.current - 0.05));
+                    if (isAiSpeaking.current || isAudioStillPlaying || Date.now() < speakingCooldownUntilRef.current || !isInitializedRef.current) {
                         setVolume(0);
                         return;
                     }
