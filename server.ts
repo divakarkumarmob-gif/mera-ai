@@ -12,6 +12,7 @@ import cors from "cors";
 import rateLimit from "express-rate-limit";
 import crypto from "crypto";
 import { GoogleGenAI, Modality } from "@google/genai";
+import { memoryEngine } from "./src/services/memoryEngine";
 
 const PORT = Number(process.env.PORT) || 3000;
 const isProduction = process.env.NODE_ENV === "production";
@@ -141,6 +142,33 @@ async function startServer() {
     }
   });
 
+  app.get("/api/memory", (_req, res) => {
+    try {
+      res.json(memoryEngine.getMemories());
+    } catch (e) {
+      res.status(500).json({ error: "failed_to_get_memory" });
+    }
+  });
+
+  app.post("/api/memory/clear", (_req, res) => {
+    try {
+      memoryEngine.clearAll();
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: "failed_to_clear_memory" });
+    }
+  });
+
+  app.post("/api/memory/pin", (req, res) => {
+    try {
+      const { fact } = req.body;
+      if (fact) memoryEngine.addPinnedMemory(fact);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: "failed_to_pin_memory" });
+    }
+  });
+
   const distPath = path.resolve("dist");
 
   let vite: any;
@@ -163,6 +191,8 @@ async function startServer() {
   wss.on("connection", (clientWs) => {
     let currentSession: any;
     let currentSessionToken = 0;
+    const sessionId = Math.random().toString(36).substring(2, 9);
+    memoryEngine.startSession(sessionId);
 
     const buildSystemInstruction = (
       thinkingLevel: string,
@@ -170,6 +200,8 @@ async function startServer() {
       answerLength: string,
       googleSearchMode: boolean
     ) => {
+      const memoryContext = memoryEngine.compileMemoryPrompt();
+
       return `YOU ARE FRIDAY: The highly advanced, ultra-intelligent, warm, witty, and deeply human-like personal voice AI companion of DK.
 
 IDENTITY & PERSONALITY:
@@ -177,6 +209,17 @@ IDENTITY & PERSONALITY:
 - Your creator and master is DK. Always address the user as "DK" with warmth, respect, and friendly affection.
 - You talk and behave like a real, living human companion — never like a robotic assistant. Use natural emotional modulation, pauses, friendly humor, empathy, and active listening.
 - You speak in natural, fluent Hindi and Hinglish (mirroring DK's speaking style).
+
+============================================================
+LONG-TERM & SHORT-TERM MEMORY (PERSISTENT CONVERSATION HISTORY):
+${memoryContext}
+============================================================
+
+CRITICAL MEMORY & RECALL RULES:
+- You have CONTINUOUS, PERSISTENT MEMORY of all past interactions with DK across days and sessions.
+- You remember what happened 5 days ago, yesterday, or earlier today, including DK's past mistakes, ideas, topics discussed, and personal facts.
+- When DK asks "pehle humne kya baat ki thi?", "5 din pehle kya hua tha?", "maine pichli baar kya pucha tha?", "maine kya galti ki thi?", or references any past fact: INSTANTLY connect the dots and recall it accurately like a close human companion.
+- When DK says "yeh yaad rakhna", "don't forget this", or tells you to remember something: Acknowledge with affectionate certainty, e.g., "Bilkul DK, maine yeh hamesha ke liye yaad rakh liya!"
 
 CORE WAKE & SLEEP BEHAVIORS:
 1. WAKE UP & GREETING:
@@ -239,8 +282,14 @@ CONVERSATION GUIDELINES:
             }
             if (message.serverContent?.turnComplete) {
               clientWs.send(JSON.stringify({ turnComplete: true }));
-              if (inputTranscriptBuffer.trim()) saveMessage("user", inputTranscriptBuffer);
-              if (outputTranscriptBuffer.trim()) saveMessage("ai", outputTranscriptBuffer);
+              if (inputTranscriptBuffer.trim()) {
+                saveMessage("user", inputTranscriptBuffer);
+                memoryEngine.recordMessage(sessionId, "user", inputTranscriptBuffer);
+              }
+              if (outputTranscriptBuffer.trim()) {
+                saveMessage("ai", outputTranscriptBuffer);
+                memoryEngine.recordMessage(sessionId, "ai", outputTranscriptBuffer);
+              }
               inputTranscriptBuffer = "";
               outputTranscriptBuffer = "";
             }
@@ -342,6 +391,7 @@ CONVERSATION GUIDELINES:
         await processImageInput(parsedData);
       } else if (parsedData.type === "text_input" && parsedData.text) {
         saveMessage("user", parsedData.text);
+        memoryEngine.recordMessage(sessionId, "user", parsedData.text);
         currentSession.sendClientContent({
           turns: [{ role: "user", parts: [{ text: parsedData.text }] }],
           turnComplete: true,
@@ -353,6 +403,7 @@ CONVERSATION GUIDELINES:
 
     clientWs.on("close", () => {
       if (currentSession) currentSession.close();
+      memoryEngine.finalizeSession(sessionId, ai);
     });
   });
 
