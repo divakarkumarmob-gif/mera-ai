@@ -94,7 +94,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const [showSettings, setShowSettings] = useState(false);
     const [selectedVoice, setSelectedVoice] = useState(() => localStorage.getItem('selectedVoice') || 'Aoede');
     const [showVoiceDropdown, setShowVoiceDropdown] = useState(false);
-    const [thinkingLevel, setThinkingLevel] = useState(() => localStorage.getItem('thinkingLevel') || 'high');
+    const [thinkingLevel, setThinkingLevel] = useState(() => localStorage.getItem('thinkingLevel') || 'low');
     const [accurateMode, setAccurateMode] = useState(() => localStorage.getItem('accurateMode') === 'true');
     const [answerLength, setAnswerLength] = useState(() => localStorage.getItem('answerLength') || 'short');
     const [googleSearchMode, setGoogleSearchMode] = useState(() => localStorage.getItem('googleSearchMode') === 'true');
@@ -454,7 +454,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         // 3. Noise Gate & Human Speech Detection
                         const isHumanSpeaking = rms >= 10;
                         if (isHumanSpeaking) {
-                            hasSpokenInTurnRef.current = true;
                             lastUserVoiceDetectedTimeRef.current = Date.now();
                             lastActivityTimeRef.current = Date.now();
                             if (isWarningSpokenRef.current) {
@@ -463,21 +462,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                             }
                         }
 
-                        // 4. Automatic Silence Detection: Trigger response 1.1s after user finishes speaking
-                        if (
-                            hasSpokenInTurnRef.current &&
-                            !isHumanSpeaking &&
-                            Date.now() - lastUserVoiceDetectedTimeRef.current >= 1100
-                        ) {
-                            hasSpokenInTurnRef.current = false;
-                            isAiThinkingRef.current = true;
-                            if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-                                setStatus("Thinking...");
-                                ws.current.send(JSON.stringify({ type: 'trigger_reply' }));
-                            }
-                        }
-
-                        // 5. Voice Gate Hangover (450ms) to keep sentence natural
+                        // 4. Voice Gate Hangover (450ms) to keep sentence natural
                         const isGateOpen = isHumanSpeaking || (Date.now() - lastUserVoiceDetectedTimeRef.current < 450);
 
                         if (isGateOpen) {
@@ -576,7 +561,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     // 3. Noise Gate & Human Speech Detection
                     const isHumanSpeaking = rms >= 10;
                     if (isHumanSpeaking) {
-                        hasSpokenInTurnRef.current = true;
                         lastUserVoiceDetectedTimeRef.current = Date.now();
                         lastActivityTimeRef.current = Date.now();
                         if (isWarningSpokenRef.current) {
@@ -585,21 +569,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         }
                     }
 
-                    // 4. Automatic Silence Detection: Trigger response 1.1s after user finishes speaking
-                    if (
-                        hasSpokenInTurnRef.current &&
-                        !isHumanSpeaking &&
-                        Date.now() - lastUserVoiceDetectedTimeRef.current >= 1100
-                    ) {
-                        hasSpokenInTurnRef.current = false;
-                        isAiThinkingRef.current = true;
-                        if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-                            setStatus("Thinking...");
-                            ws.current.send(JSON.stringify({ type: 'trigger_reply' }));
-                        }
-                    }
-
-                    // 5. Voice Gate Hangover (450ms) to keep sentence natural
+                    // 4. Voice Gate Hangover (450ms) to keep sentence natural
                     const isGateOpen = isHumanSpeaking || (Date.now() - lastUserVoiceDetectedTimeRef.current < 450);
 
                     if (isGateOpen) {
