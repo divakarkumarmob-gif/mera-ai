@@ -215,6 +215,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const isInitializedRef = useRef<boolean>(false);
     const initAckTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const mediaStreamRef = useRef<MediaStream | null>(null);
+    const shouldCloseAfterTurnRef = useRef<boolean>(false);
     const pendingImagePayloadsRef = useRef<{ id: string; file: File; caption?: string }[]>([]);
     const selectedImagesRef = useRef(selectedImages);
     useEffect(() => { selectedImagesRef.current = selectedImages; }, [selectedImages]);
@@ -451,8 +452,20 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     } else {
                         enqueueTextChunk(msg.text, false);
                     }
+
+                    if (/(chup ho rahi hoon|chup ho jata|session band|alvida|standby par ja rahi|bye dk|main chup ho)/i.test(msg.text)) {
+                        shouldCloseAfterTurnRef.current = true;
+                    }
                 } else if (msg.turnComplete) {
                     captionTurnStartedRef.current = false;
+                    if (shouldCloseAfterTurnRef.current) {
+                        shouldCloseAfterTurnRef.current = false;
+                        const delay = Math.max(1200, ((nextStartTime.current - (outputAudioCtx.current?.currentTime || 0)) * 1000) + 600);
+                        setTimeout(() => {
+                            stopRecording();
+                            setStatus("Session band ho gaya. Say 'Hello Friday' to wake.");
+                        }, delay);
+                    }
                 } else if (msg.type === 'init_ack') {
                     isInitializedRef.current = true;
                     if (initAckTimeoutRef.current) { clearTimeout(initAckTimeoutRef.current); initAckTimeoutRef.current = null; }
