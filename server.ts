@@ -13,6 +13,7 @@ import rateLimit from "express-rate-limit";
 import crypto from "crypto";
 import { GoogleGenAI, Modality } from "@google/genai";
 import { memoryEngine } from "./src/services/memoryEngine";
+import { toolsEngine } from "./src/services/toolsEngine";
 
 const PORT = Number(process.env.PORT) || 3000;
 const isProduction = process.env.NODE_ENV === "production";
@@ -179,6 +180,14 @@ async function startServer() {
     }
   });
 
+  app.get("/api/reminders", (_req, res) => {
+    res.json({ reminders: toolsEngine.getReminders() });
+  });
+
+  app.get("/api/notes", (_req, res) => {
+    res.json({ notes: toolsEngine.getNotes() });
+  });
+
   const distPath = path.resolve("dist");
 
   let vite: any;
@@ -280,10 +289,51 @@ CONVERSATION GUIDELINES:
       let inputTranscriptBuffer = "";
       let outputTranscriptBuffer = "";
 
+      const functionDeclarations: any[] = [
+        {
+          name: "add_custom_skill_or_rule",
+          description: "Add a new permanent rule, capability, habit, or behavioral instruction to Friday's brain when DK instructs to add or learn something new.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              skillName: { type: "STRING", description: "Short title or name of the new skill or rule" },
+              ruleInstruction: { type: "STRING", description: "The exact behavioral rule or action Friday must follow" },
+              triggerPhrase: { type: "STRING", description: "Optional trigger word or situation when this rule applies" },
+            },
+            required: ["skillName", "ruleInstruction"],
+          },
+        },
+        {
+          name: "set_reminder",
+          description: "Set a reminder or alarm for DK with a specific message and time duration or timestamp.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              title: { type: "STRING", description: "Reminder task or subject" },
+              timeString: { type: "STRING", description: "When to remind, e.g., 'in 10 minutes', 'tomorrow at 9am'" },
+              durationMinutes: { type: "NUMBER", description: "Duration in minutes if relative, otherwise 0" },
+            },
+            required: ["title"],
+          },
+        },
+        {
+          name: "save_quick_note",
+          description: "Save a note, idea, or todo item in DK's persistent notebook.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              title: { type: "STRING", description: "Note title" },
+              content: { type: "STRING", description: "Exact note text or todo item" },
+            },
+            required: ["title", "content"],
+          },
+        },
+      ];
+
       return await ai.live.connect({
         model: "gemini-3.1-flash-live-preview",
         callbacks: {
-          onmessage: (message: any) => {
+          onmessage: async (message: any) => {
             const audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
             const transcript = message.serverContent?.outputTranscription?.text;
             const inputTranscript = message.serverContent?.inputTranscription?.text;
@@ -312,6 +362,46 @@ CONVERSATION GUIDELINES:
               inputTranscriptBuffer = "";
               outputTranscriptBuffer = "";
             }
+
+            // Handle Gemini Live Function Calling
+            if (message.toolCall?.functionCalls) {
+              const functionResponses: any[] = [];
+              for (const call of message.toolCall.functionCalls) {
+                console.log(`[Friday Tools] Calling function: ${call.name}`, call.args);
+                let result: any = { success: true };
+
+                if (call.name === "add_custom_skill_or_rule") {
+                  const { skillName, ruleInstruction, triggerPhrase } = call.args || {};
+                  const fact = `Rule/Skill: "${skillName}" -> ${ruleInstruction}${triggerPhrase ? ` (When: ${triggerPhrase})` : ""}`;
+                  memoryEngine.addPersonalVaultFact("custom_skill", fact);
+                  result = { success: true, message: `Skill "${skillName}" successfully integrated into Friday's brain!` };
+                  clientWs.send(JSON.stringify({ type: "skill_added", skill: { skillName, ruleInstruction } }));
+                } else if (call.name === "set_reminder") {
+                  const { title, timeString, durationMinutes } = call.args || {};
+                  const reminder = toolsEngine.addReminder(title, timeString, durationMinutes);
+                  result = { success: true, message: `Reminder set: "${title}" for ${timeString || `${durationMinutes}m`}` };
+                  clientWs.send(JSON.stringify({ type: "reminder_created", reminder }));
+                } else if (call.name === "save_quick_note") {
+                  const { title, content } = call.args || {};
+                  const note = toolsEngine.addNote(title, content);
+                  result = { success: true, message: `Note "${title}" saved to DK's notebook.` };
+                  clientWs.send(JSON.stringify({ type: "note_saved", note }));
+                }
+
+                functionResponses.push({
+                  response: { output: result },
+                  id: call.id,
+                });
+              }
+
+              try {
+                if (currentSession) {
+                  currentSession.sendToolResponse({ functionResponses });
+                }
+              } catch (err) {
+                console.error("[Friday Tools] Failed to send tool response:", err);
+              }
+            }
           },
         },
         config: {
@@ -324,7 +414,10 @@ CONVERSATION GUIDELINES:
           thinkingConfig: {
             thinkingLevel: (["low", "medium", "high"].includes(effectiveThinking) ? effectiveThinking : "high") as any,
           },
-          ...(googleSearchMode ? { tools: [{ googleSearch: {} }] } : {}),
+          tools: [
+            ...(googleSearchMode ? [{ googleSearch: {} }] : []),
+            { functionDeclarations },
+          ],
           systemInstruction,
         },
       });
