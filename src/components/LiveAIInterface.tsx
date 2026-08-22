@@ -39,7 +39,13 @@ function createAudioContext(sampleRate?: number): AudioContext {
     return new AudioCtx();
 }
 
-async function playAudioChunk(audioCtx: AudioContext, base64Audio: string, nextStartTime: { current: number }, isAiSpeaking: { current: boolean }) {
+async function playAudioChunk(
+    audioCtx: AudioContext,
+    base64Audio: string,
+    nextStartTime: { current: number },
+    isAiSpeaking: { current: boolean },
+    speakingCooldownUntilRef?: { current: number }
+) {
     try {
         if (!base64Audio || !audioCtx || audioCtx.state === 'closed') return;
         const binary = atob(base64Audio);
@@ -59,14 +65,20 @@ async function playAudioChunk(audioCtx: AudioContext, base64Audio: string, nextS
         const source = audioCtx.createBufferSource();
         source.buffer = buffer;
         source.connect(audioCtx.destination);
-        source.onended = () => {
-            if (audioCtx.currentTime >= nextStartTime.current - 0.1) isAiSpeaking.current = false;
-        };
 
         const startTime = Math.max(audioCtx.currentTime, nextStartTime.current);
         source.start(startTime);
         nextStartTime.current = startTime + buffer.duration;
         isAiSpeaking.current = true;
+
+        source.onended = () => {
+            if (audioCtx.currentTime >= nextStartTime.current - 0.08) {
+                isAiSpeaking.current = false;
+                if (speakingCooldownUntilRef) {
+                    speakingCooldownUntilRef.current = Date.now() + 500; // 500ms safety cooldown to let speaker sound decay
+                }
+            }
+        };
     } catch (e) {
         console.error("Error playing audio chunk:", e);
     }
@@ -176,7 +188,9 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
 
     useEffect(() => {
         const interval = setInterval(() => {
-            if (!isAiSpeaking.current && status === "Speaking...") setStatus("Listening...");
+            if (!isAiSpeaking.current && Date.now() > speakingCooldownUntilRef.current && status === "Speaking...") {
+                setStatus("Listening...");
+            }
         }, 200);
         return () => clearInterval(interval);
     }, [status]);
@@ -219,6 +233,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const shouldCloseAfterTurnRef = useRef<boolean>(false);
     const lastActivityTimeRef = useRef<number>(Date.now());
     const isWarningSpokenRef = useRef<boolean>(false);
+    const speakingCooldownUntilRef = useRef<number>(0);
     const pendingImagePayloadsRef = useRef<{ id: string; file: File; caption?: string }[]>([]);
     const selectedImagesRef = useRef(selectedImages);
     useEffect(() => { selectedImagesRef.current = selectedImages; }, [selectedImages]);
@@ -412,7 +427,13 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
             if (withMic && !isRecording) {
                 setStatus("Requesting Microphone...");
                 try {
-                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        audio: {
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            autoGainControl: true,
+                        },
+                    });
                     setIsRecording(true);
                     setStatus("Listening...");
                     mediaStreamRef.current = stream;
@@ -425,7 +446,11 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     source.connect(processor.current);
                     processor.current.connect(inputAudioCtx.current.destination);
                     processor.current.onaudioprocess = (e) => {
-                        if (isAiSpeaking.current || !isInitializedRef.current) return;
+                        // Prevent speaker echo from feeding back into Gemini Live and falsely interrupting turns
+                        if (isAiSpeaking.current || Date.now() < speakingCooldownUntilRef.current || !isInitializedRef.current) {
+                            setVolume(0);
+                            return;
+                        }
                         const pcm = e.inputBuffer.getChannelData(0);
                         ws.current?.send(JSON.stringify({ audio: pcmToBase64(pcm) }));
                         let sum = 0;
@@ -433,7 +458,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         const vol = (sum / pcm.length) * 1000;
                         setVolume(vol);
 
-                        if (vol > 15 && !isAiSpeaking.current) {
+                        if (vol > 18) {
                             lastActivityTimeRef.current = Date.now();
                             if (isWarningSpokenRef.current) {
                                 isWarningSpokenRef.current = false;
@@ -454,7 +479,13 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         if (withMic) {
             setStatus("Requesting Microphone...");
             try {
-                stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                stream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true,
+                    },
+                });
                 setStatus("Connecting...");
             } catch (err) {
                 console.error("Error accessing audio", err);
@@ -502,7 +533,11 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 source.connect(processor.current);
                 processor.current.connect(inputAudioCtx.current.destination);
                 processor.current.onaudioprocess = (e) => {
-                    if (isAiSpeaking.current || !isInitializedRef.current) return;
+                    // Prevent speaker echo from feeding back into Gemini Live and falsely interrupting turns
+                    if (isAiSpeaking.current || Date.now() < speakingCooldownUntilRef.current || !isInitializedRef.current) {
+                        setVolume(0);
+                        return;
+                    }
                     const pcm = e.inputBuffer.getChannelData(0);
                     ws.current?.send(JSON.stringify({ audio: pcmToBase64(pcm) }));
                     let sum = 0;
@@ -510,7 +545,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     const vol = (sum / pcm.length) * 1000;
                     setVolume(vol);
 
-                    if (vol > 15 && !isAiSpeaking.current) {
+                    if (vol > 18) {
                         lastActivityTimeRef.current = Date.now();
                         if (isWarningSpokenRef.current) {
                             isWarningSpokenRef.current = false;
@@ -528,7 +563,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 if (msg.audio) {
                     if (outputAudioCtx.current) {
                         setStatus("Speaking...");
-                        playAudioChunk(outputAudioCtx.current, msg.audio, nextStartTime, isAiSpeaking);
+                        playAudioChunk(outputAudioCtx.current, msg.audio, nextStartTime, isAiSpeaking, speakingCooldownUntilRef);
                     }
                 } else if (msg.type === 'thinking') {
                     setStatus("Thinking...");
