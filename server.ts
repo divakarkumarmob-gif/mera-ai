@@ -507,8 +507,9 @@ CONVERSATION GUIDELINES:
                 }
 
                 functionResponses.push({
-                  response: { output: result },
                   id: call.id,
+                  name: call.name,
+                  response: { output: result },
                 });
               }
 

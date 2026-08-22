@@ -1,12 +1,16 @@
-import makeWASocket, {
-  DisconnectReason,
-  useMultiFileAuthState,
-  fetchLatestBaileysVersion,
-  WASocket,
-} from "@whiskeysockets/baileys";
+import * as BaileysModule from "@whiskeysockets/baileys";
 import pino from "pino";
 import path from "path";
 import fs from "fs";
+
+// Resolve Baileys exports safely across CJS/ESM bundling
+const baileys: any = BaileysModule;
+const makeWASocket = baileys.default?.default || baileys.default || baileys.makeWASocket || baileys;
+const DisconnectReason = baileys.DisconnectReason || baileys.default?.DisconnectReason;
+const useMultiFileAuthState = baileys.useMultiFileAuthState || baileys.default?.useMultiFileAuthState;
+const fetchLatestBaileysVersion = baileys.fetchLatestBaileysVersion || baileys.default?.fetchLatestBaileysVersion;
+
+type WASocket = any;
 
 const authFolder = path.resolve("data", "whatsapp_auth");
 try {
@@ -27,8 +31,13 @@ class WhatsAppBotService {
 
   public async initSocket() {
     try {
+      if (!makeWASocket || typeof makeWASocket !== "function") {
+        console.warn("[WhatsAppBot] makeWASocket is not a function:", typeof makeWASocket);
+        return;
+      }
       const { state, saveCreds } = await useMultiFileAuthState(authFolder);
-      const { version } = await fetchLatestBaileysVersion();
+      const versionResult = await fetchLatestBaileysVersion?.();
+      const version = versionResult?.version;
 
       const logger = pino({ level: "silent" }) as any;
 
