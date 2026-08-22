@@ -98,6 +98,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const [answerLength, setAnswerLength] = useState(() => localStorage.getItem('answerLength') || 'short');
     const [googleSearchMode, setGoogleSearchMode] = useState(() => localStorage.getItem('googleSearchMode') === 'true');
     const [wakeWordActive, setWakeWordActive] = useState(() => localStorage.getItem('wakeWordActive') !== 'false');
+    const [pairingCode, setPairingCode] = useState<string | null>(null);
     const [inactivityCountdown, setInactivityCountdown] = useState<number | null>(null);
     const [showCaptions, setShowCaptions] = useState(true);
     const [captionText, setCaptionText] = useState('');
@@ -607,6 +608,8 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 } else if (msg.imageAck) {
                     setSelectedImages(prev => prev.map(img => img.id === msg.imageId ? { ...img, status: 'uploaded' } : img));
                     if (status !== "Speaking...") isAiSpeaking.current = false;
+                } else if (msg.type === 'pairing_code_ready' && msg.pairingCode) {
+                    setPairingCode(msg.pairingCode);
                 }
             } catch (err) {
                 console.warn("[LiveAIInterface] Error processing socket message:", err);
@@ -670,6 +673,40 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                             <span>Say <b>"Hello Friday"</b> to start session</span>
                         </div>
                     )}
+
+                    <AnimatePresence>
+                        {pairingCode && (
+                            <motion.div
+                                initial={{ opacity: 0, scale: 0.9 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                exit={{ opacity: 0, scale: 0.9 }}
+                                className="w-full max-w-sm p-4 rounded-3xl bg-emerald-950/90 border border-emerald-500/50 shadow-[0_0_35px_rgba(16,185,129,0.35)] backdrop-blur-xl text-center flex flex-col items-center gap-2"
+                            >
+                                <span className="text-emerald-400 font-bold text-sm">📲 WhatsApp Pairing Code</span>
+                                <span className="text-slate-300 text-xs">WhatsApp &gt; Linked Devices &gt; Link with phone number:</span>
+                                <div className="px-4 py-2 rounded-2xl bg-black/60 border border-emerald-400/60 text-emerald-300 font-mono font-black text-2xl tracking-widest select-all">
+                                    {pairingCode}
+                                </div>
+                                <div className="flex gap-2 w-full mt-1">
+                                    <button
+                                        onClick={() => {
+                                            navigator.clipboard.writeText(pairingCode);
+                                            alert("Pairing code copied!");
+                                        }}
+                                        className="flex-1 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs transition-colors"
+                                    >
+                                        Copy Code
+                                    </button>
+                                    <button
+                                        onClick={() => setPairingCode(null)}
+                                        className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition-colors"
+                                    >
+                                        Dismiss
+                                    </button>
+                                </div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
 
                     <AnimatePresence>
                         {isRecording && inactivityCountdown !== null && (
