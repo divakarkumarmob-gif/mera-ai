@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import AgentFace from './AgentFace';
 import ChatHistoryModal from './ChatHistoryModal';
 import { getWsUrl } from '@/utils/api';
+import { wakeWordManager } from '@/utils/wakeWord';
 
 interface LiveAIInterfaceProps {
     onClose: () => void;
@@ -84,6 +85,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const [accurateMode, setAccurateMode] = useState(() => localStorage.getItem('accurateMode') === 'true');
     const [answerLength, setAnswerLength] = useState(() => localStorage.getItem('answerLength') || 'short');
     const [googleSearchMode, setGoogleSearchMode] = useState(() => localStorage.getItem('googleSearchMode') === 'true');
+    const [wakeWordActive, setWakeWordActive] = useState(() => localStorage.getItem('wakeWordActive') !== 'false');
     const [showCaptions, setShowCaptions] = useState(true);
     const [captionText, setCaptionText] = useState('');
     const [showChatHistory, setShowChatHistory] = useState(false);
@@ -322,6 +324,19 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
+    useEffect(() => {
+        if (!isRecording && wakeWordActive) {
+            const unregister = wakeWordManager.register(() => {
+                setStatus("Yes DK, main sun raha hoon...");
+                ensureConnection(true);
+            });
+            return () => unregister();
+        } else {
+            wakeWordManager.stop();
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isRecording, wakeWordActive]);
+
     const ensureConnection = async (withMic: boolean) => {
         if (ws.current && ws.current.readyState === WebSocket.OPEN) {
             if (withMic && !isRecording) {
@@ -514,6 +529,13 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     <AgentFace status={status} volume={volume} size={160} colorIndex={colorIndex} />
                     <p className="text-slate-300 text-sm font-medium">{status}</p>
 
+                    {!isRecording && wakeWordActive && (
+                        <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-xs text-cyan-300 shadow-[0_0_15px_rgba(6,182,212,0.15)] animate-pulse">
+                            <span className="w-2 h-2 rounded-full bg-cyan-400" />
+                            <span>Say <b>"Hello Friday"</b> to start session</span>
+                        </div>
+                    )}
+
                     {showCaptions && captionText && (
                         <div
                             ref={captionBoxRef}
@@ -661,6 +683,23 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                                     className={`w-12 h-7 rounded-full transition-colors relative ${googleSearchMode ? 'bg-purple-600' : 'bg-slate-700'}`}
                                 >
                                     <span className={`absolute top-1 w-5 h-5 rounded-full bg-white transition-transform ${googleSearchMode ? 'translate-x-6' : 'translate-x-1'}`} />
+                                </button>
+                            </div>
+
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <span className="text-white text-sm block">Wake Word ("Hello Friday")</span>
+                                    <span className="text-slate-400 text-xs">Say "Hello Friday" anytime to start</span>
+                                </div>
+                                <button
+                                    onClick={() => {
+                                        const next = !wakeWordActive;
+                                        setWakeWordActive(next);
+                                        localStorage.setItem('wakeWordActive', String(next));
+                                    }}
+                                    className={`w-12 h-7 rounded-full transition-colors relative ${wakeWordActive ? 'bg-cyan-500' : 'bg-slate-700'}`}
+                                >
+                                    <span className={`absolute top-1 w-5 h-5 rounded-full bg-white transition-transform ${wakeWordActive ? 'translate-x-6' : 'translate-x-1'}`} />
                                 </button>
                             </div>
                         </div>
