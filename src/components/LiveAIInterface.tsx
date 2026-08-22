@@ -235,6 +235,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const lastActivityTimeRef = useRef<number>(Date.now());
     const isWarningSpokenRef = useRef<boolean>(false);
     const speakingCooldownUntilRef = useRef<number>(0);
+    const lastUserVoiceDetectedTimeRef = useRef<number>(0);
     const pendingImagePayloadsRef = useRef<{ id: string; file: File; caption?: string }[]>([]);
     const selectedImagesRef = useRef(selectedImages);
     useEffect(() => { selectedImagesRef.current = selectedImages; }, [selectedImages]);
@@ -433,6 +434,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                             echoCancellation: true,
                             noiseSuppression: true,
                             autoGainControl: true,
+                            channelCount: 1,
                         },
                     });
                     setIsRecording(true);
@@ -447,24 +449,41 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     source.connect(processor.current);
                     processor.current.connect(inputAudioCtx.current.destination);
                     processor.current.onaudioprocess = (e) => {
-                        // Prevent speaker echo from feeding back into Gemini Live and falsely interrupting turns
+                        // 1. Prevent speaker echo from feeding back when AI speaks
                         if (isAiSpeaking.current || Date.now() < speakingCooldownUntilRef.current || !isInitializedRef.current) {
                             setVolume(0);
                             return;
                         }
-                        const pcm = e.inputBuffer.getChannelData(0);
-                        ws.current?.send(JSON.stringify({ audio: pcmToBase64(pcm) }));
-                        let sum = 0;
-                        for (let i = 0; i < pcm.length; i++) sum += Math.abs(pcm[i]);
-                        const vol = (sum / pcm.length) * 1000;
-                        setVolume(vol);
 
-                        if (vol > 18) {
+                        const pcm = e.inputBuffer.getChannelData(0);
+
+                        // 2. Calculate true RMS sound power
+                        let sumSquares = 0;
+                        for (let i = 0; i < pcm.length; i++) {
+                            sumSquares += pcm[i] * pcm[i];
+                        }
+                        const rms = Math.sqrt(sumSquares / pcm.length) * 1000;
+
+                        // 3. Noise Gate: Only stream when actual voice (RMS >= 12) is detected
+                        const isHumanSpeaking = rms >= 12;
+                        if (isHumanSpeaking) {
+                            lastUserVoiceDetectedTimeRef.current = Date.now();
                             lastActivityTimeRef.current = Date.now();
                             if (isWarningSpokenRef.current) {
                                 isWarningSpokenRef.current = false;
                                 setInactivityCountdown(null);
                             }
+                        }
+
+                        // 4. Voice Gate Hangover (450ms) to keep sentence natural
+                        const isGateOpen = isHumanSpeaking || (Date.now() - lastUserVoiceDetectedTimeRef.current < 450);
+
+                        if (isGateOpen) {
+                            ws.current?.send(JSON.stringify({ audio: pcmToBase64(pcm) }));
+                            setVolume(Math.min(100, rms * 2.2));
+                        } else {
+                            // Ignore background noise / fan / ambient room sounds
+                            setVolume(0);
                         }
                     };
                 } catch (err) {
@@ -485,6 +504,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         echoCancellation: true,
                         noiseSuppression: true,
                         autoGainControl: true,
+                        channelCount: 1,
                     },
                 });
                 setStatus("Connecting...");
@@ -534,24 +554,41 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 source.connect(processor.current);
                 processor.current.connect(inputAudioCtx.current.destination);
                 processor.current.onaudioprocess = (e) => {
-                    // Prevent speaker echo from feeding back into Gemini Live and falsely interrupting turns
+                    // 1. Prevent speaker echo from feeding back when AI speaks
                     if (isAiSpeaking.current || Date.now() < speakingCooldownUntilRef.current || !isInitializedRef.current) {
                         setVolume(0);
                         return;
                     }
-                    const pcm = e.inputBuffer.getChannelData(0);
-                    ws.current?.send(JSON.stringify({ audio: pcmToBase64(pcm) }));
-                    let sum = 0;
-                    for (let i = 0; i < pcm.length; i++) sum += Math.abs(pcm[i]);
-                    const vol = (sum / pcm.length) * 1000;
-                    setVolume(vol);
 
-                    if (vol > 18) {
+                    const pcm = e.inputBuffer.getChannelData(0);
+
+                    // 2. Calculate true RMS sound power
+                    let sumSquares = 0;
+                    for (let i = 0; i < pcm.length; i++) {
+                        sumSquares += pcm[i] * pcm[i];
+                    }
+                    const rms = Math.sqrt(sumSquares / pcm.length) * 1000;
+
+                    // 3. Noise Gate: Only stream when actual voice (RMS >= 12) is detected
+                    const isHumanSpeaking = rms >= 12;
+                    if (isHumanSpeaking) {
+                        lastUserVoiceDetectedTimeRef.current = Date.now();
                         lastActivityTimeRef.current = Date.now();
                         if (isWarningSpokenRef.current) {
                             isWarningSpokenRef.current = false;
                             setInactivityCountdown(null);
                         }
+                    }
+
+                    // 4. Voice Gate Hangover (450ms) to keep sentence natural
+                    const isGateOpen = isHumanSpeaking || (Date.now() - lastUserVoiceDetectedTimeRef.current < 450);
+
+                    if (isGateOpen) {
+                        ws.current?.send(JSON.stringify({ audio: pcmToBase64(pcm) }));
+                        setVolume(Math.min(100, rms * 2.2));
+                    } else {
+                        // Ignore background noise / fan / ambient room sounds
+                        setVolume(0);
                     }
                 };
             }
