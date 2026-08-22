@@ -228,6 +228,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const processor = useRef<ScriptProcessorNode | null>(null);
     const nextStartTime = useRef<number>(0);
     const isAiSpeaking = useRef<boolean>(false);
+    const isAiThinkingRef = useRef<boolean>(false);
     const isInitializedRef = useRef<boolean>(false);
     const initAckTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -450,9 +451,10 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     source.connect(processor.current);
                     processor.current.connect(inputAudioCtx.current.destination);
                     processor.current.onaudioprocess = (e) => {
-                        // 1. HARD MUTE: While AI is speaking, output buffer is playing, or cooling down -> Mic is 100% OFF
+                        // 1. HARD MUTE: While AI is Thinking, Speaking, output buffer is playing, or cooling down -> Mic is 100% OFF
                         const isAudioStillPlaying = !!(outputAudioCtx.current && outputAudioCtx.current.currentTime < (nextStartTime.current - 0.05));
-                        if (isAiSpeaking.current || isAudioStillPlaying || Date.now() < speakingCooldownUntilRef.current || !isInitializedRef.current) {
+                        const isAiBusy = isAiSpeaking.current || isAiThinkingRef.current || status === "Thinking..." || status === "Speaking..." || isAudioStillPlaying;
+                        if (isAiBusy || Date.now() < speakingCooldownUntilRef.current || !isInitializedRef.current) {
                             setVolume(0);
                             return;
                         }
@@ -485,6 +487,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                             Date.now() - lastUserVoiceDetectedTimeRef.current >= 1100
                         ) {
                             hasSpokenInTurnRef.current = false;
+                            isAiThinkingRef.current = true;
                             if (ws.current && ws.current.readyState === WebSocket.OPEN) {
                                 setStatus("Thinking...");
                                 ws.current.send(JSON.stringify({ type: 'trigger_reply' }));
@@ -570,9 +573,10 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 source.connect(processor.current);
                 processor.current.connect(inputAudioCtx.current.destination);
                 processor.current.onaudioprocess = (e) => {
-                    // 1. HARD MUTE: While AI is speaking, output buffer is playing, or cooling down -> Mic is 100% OFF
+                    // 1. HARD MUTE: While AI is Thinking, Speaking, output buffer is playing, or cooling down -> Mic is 100% OFF
                     const isAudioStillPlaying = !!(outputAudioCtx.current && outputAudioCtx.current.currentTime < (nextStartTime.current - 0.05));
-                    if (isAiSpeaking.current || isAudioStillPlaying || Date.now() < speakingCooldownUntilRef.current || !isInitializedRef.current) {
+                    const isAiBusy = isAiSpeaking.current || isAiThinkingRef.current || status === "Thinking..." || status === "Speaking..." || isAudioStillPlaying;
+                    if (isAiBusy || Date.now() < speakingCooldownUntilRef.current || !isInitializedRef.current) {
                         setVolume(0);
                         return;
                     }
@@ -605,6 +609,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         Date.now() - lastUserVoiceDetectedTimeRef.current >= 1100
                     ) {
                         hasSpokenInTurnRef.current = false;
+                        isAiThinkingRef.current = true;
                         if (ws.current && ws.current.readyState === WebSocket.OPEN) {
                             setStatus("Thinking...");
                             ws.current.send(JSON.stringify({ type: 'trigger_reply' }));
@@ -635,6 +640,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         playAudioChunk(outputAudioCtx.current, msg.audio, nextStartTime, isAiSpeaking, speakingCooldownUntilRef);
                     }
                 } else if (msg.type === 'thinking') {
+                    isAiThinkingRef.current = true;
                     setStatus("Thinking...");
                 } else if (msg.text) {
                     if (!captionTurnStartedRef.current) {
@@ -649,6 +655,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     }
                 } else if (msg.turnComplete) {
                     captionTurnStartedRef.current = false;
+                    isAiThinkingRef.current = false;
                     if (shouldCloseAfterTurnRef.current) {
                         shouldCloseAfterTurnRef.current = false;
                         const delay = Math.max(1200, ((nextStartTime.current - (outputAudioCtx.current?.currentTime || 0)) * 1000) + 600);
@@ -659,6 +666,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     }
                 } else if (msg.type === 'init_ack') {
                     isInitializedRef.current = true;
+                    isAiThinkingRef.current = false;
                     if (initAckTimeoutRef.current) { clearTimeout(initAckTimeoutRef.current); initAckTimeoutRef.current = null; }
                     setStatus("Listening...");
                     if (pendingImagePayloadsRef.current.length > 0) {
@@ -668,6 +676,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     }
                 } else if (msg.interrupted) {
                     isAiSpeaking.current = false;
+                    isAiThinkingRef.current = false;
                     nextStartTime.current = outputAudioCtx.current?.currentTime || 0;
                     resetTypewriter();
                     setStatus("Listening...");
