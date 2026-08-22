@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  background-color: #0a0f24;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.gradient-btn-primary {
+  background: linear-gradient(135deg, #8b5cf6, #ec4899);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(139, 92, 246, 0.5);
+  border-radius: 999px;
+}
