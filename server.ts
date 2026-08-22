@@ -15,6 +15,8 @@ import { GoogleGenAI, Modality } from "@google/genai";
 import { memoryEngine } from "./src/services/memoryEngine";
 import { toolsEngine } from "./src/services/toolsEngine";
 import { whatsappService } from "./src/services/whatsappService";
+import { contactsService } from "./src/services/contactsService";
+import { whatsappBotService } from "./src/services/whatsappBotService";
 
 const PORT = Number(process.env.PORT) || 3000;
 const isProduction = process.env.NODE_ENV === "production";
@@ -189,6 +191,35 @@ async function startServer() {
     res.json({ notes: toolsEngine.getNotes() });
   });
 
+  app.get("/api/contacts", (_req, res) => {
+    res.json({ contacts: contactsService.getAllContacts() });
+  });
+
+  app.post("/api/contacts", (req, res) => {
+    const { name, phone, relation } = req.body;
+    if (name && phone) {
+      const entry = contactsService.saveContact(name, phone, relation);
+      res.json({ ok: true, contact: entry });
+    } else {
+      res.status(400).json({ error: "name_and_phone_required" });
+    }
+  });
+
+  app.post("/api/whatsapp/pair", async (req, res) => {
+    try {
+      const { phone } = req.body;
+      if (!phone) return res.status(400).json({ error: "phone_required" });
+      const pairingCode = await whatsappBotService.requestPairingCode(phone);
+      res.json({ ok: true, pairingCode });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || "pairing_failed" });
+    }
+  });
+
+  app.get("/api/whatsapp/status", (_req, res) => {
+    res.json(whatsappBotService.getStatus());
+  });
+
   const distPath = path.resolve("dist");
 
   let vite: any;
@@ -221,6 +252,7 @@ async function startServer() {
       googleSearchMode: boolean
     ) => {
       const memoryContext = memoryEngine.compileMemoryPrompt();
+      const contactsList = contactsService.compileContactsForPrompt();
 
       return `YOU ARE FRIDAY: The highly advanced, ultra-intelligent, warm, witty, and deeply human-like personal voice AI companion of DK.
 
@@ -244,11 +276,17 @@ LONG-TERM & SHORT-TERM MEMORY (PERSISTENT CONVERSATION HISTORY):
 ${memoryContext}
 ============================================================
 
-CRITICAL MEMORY & RECALL RULES:
-- You have CONTINUOUS, PERSISTENT MEMORY of all past interactions with DK across days and sessions.
-- You remember what happened 5 days ago, yesterday, or earlier today, including DK's past mistakes, ideas, topics discussed, and personal facts.
-- When DK asks "pehle humne kya baat ki thi?", "5 din pehle kya hua tha?", "maine pichli baar kya pucha tha?", "maine kya galti ki thi?", or references any past fact: INSTANTLY connect the dots and recall it accurately like a close human companion.
-- When DK says "yeh yaad rakhna", "don't forget this", or tells you to remember something: Acknowledge with affectionate certainty, e.g., "Bilkul DK, maine yeh hamesha ke liye yaad rakh liya!"
+============================================================
+DK'S CONTACTS BOOK:
+${contactsList}
+============================================================
+
+CONTACTS & WHATSAPP CAPABILITIES:
+- You have tools to manage contacts and send messages directly:
+  1. "save_contact": Use when DK tells you to save a friend, family member, or colleague's name and number (e.g. "Rahul ka number 9876543210 save kar lo").
+  2. "send_whatsapp_to_contact": Use whenever DK asks you to message any contact on WhatsApp (e.g. "Rahul ko message bhejo ki aaj main nahi aaunga").
+  3. "pair_dedicated_whatsapp_number": Use when DK gives you his spare phone number to link your dedicated WhatsApp assistant session.
+- Once a message is sent, confirm warmly and naturally: "DK, maine Rahul ko message bhej diya hai ki aaj aap nahi aaoge!"
 
 CORE WAKE & SLEEP BEHAVIORS:
 1. WAKE UP & GREETING:
@@ -273,7 +311,6 @@ CONVERSATION GUIDELINES:
 - ${googleSearchMode
         ? "Google Search is enabled: Use it for current events and real-time facts smoothly without announcing it."
         : ""}
-- WHATSAPP SENDING: You have a tool "send_whatsapp_message" that sends WhatsApp messages in the background directly without opening any app or browser. Whenever DK asks you to send anything to his WhatsApp, call "send_whatsapp_message" with the content. If WhatsApp credentials (phone/key) are needed, ask DK naturally and save them to your personal vault.
 - If DK shares an image, talk about what you see with real human observation.
 - Speak all numbers, units, and equations in conversational spoken words (never raw symbols, math formulas or code).`;
     };
@@ -306,6 +343,42 @@ CONVERSATION GUIDELINES:
           },
         },
         {
+          name: "save_contact",
+          description: "Save a new person or contact to DK's contacts book with their name, phone number, and optional relationship.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              contactName: { type: "STRING", description: "Name of the person (e.g. 'Rahul', 'Aman', 'Priya')" },
+              phoneNumber: { type: "STRING", description: "Phone number (e.g. '9876543210' or '919876543210')" },
+              relation: { type: "STRING", description: "Optional relationship (e.g. 'Friend', 'Brother', 'Colleague', 'Mummy')" },
+            },
+            required: ["contactName", "phoneNumber"],
+          },
+        },
+        {
+          name: "send_whatsapp_to_contact",
+          description: "Send a WhatsApp message directly to any contact (e.g. Rahul, Aman, Mummy) in the background using Friday's dedicated assistant session.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              contactNameOrPhone: { type: "STRING", description: "The name of the contact in the phonebook (e.g. 'Rahul') or raw phone number" },
+              messageText: { type: "STRING", description: "The exact message to send to the contact" },
+            },
+            required: ["contactNameOrPhone", "messageText"],
+          },
+        },
+        {
+          name: "pair_dedicated_whatsapp_number",
+          description: "Request an 8-character Pairing Code to link DK's spare phone number to Friday's dedicated WhatsApp bot.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              phoneNumber: { type: "STRING", description: "The 10 or 12 digit phone number to pair (e.g. '9876543210')" },
+            },
+            required: ["phoneNumber"],
+          },
+        },
+        {
           name: "set_reminder",
           description: "Set a reminder or alarm for DK with a specific message and time duration or timestamp.",
           parameters: {
@@ -328,18 +401,6 @@ CONVERSATION GUIDELINES:
               content: { type: "STRING", description: "Exact note text or todo item" },
             },
             required: ["title", "content"],
-          },
-        },
-        {
-          name: "send_whatsapp_message",
-          description: "Silently and automatically send a WhatsApp message to DK's phone in the background without opening any app or browser tab. Use this whenever DK asks to send information, summaries, notes, or messages to his WhatsApp.",
-          parameters: {
-            type: "OBJECT",
-            properties: {
-              messageText: { type: "STRING", description: "The exact formatted content/message to deliver to DK's WhatsApp" },
-              customPhoneNumber: { type: "STRING", description: "Optional recipient phone number with country code (e.g. 919876543210)" },
-            },
-            required: ["messageText"],
           },
         },
       ];
@@ -390,6 +451,41 @@ CONVERSATION GUIDELINES:
                   memoryEngine.addPersonalVaultFact("custom_skill", fact);
                   result = { success: true, message: `Skill "${skillName}" successfully integrated into Friday's brain!` };
                   clientWs.send(JSON.stringify({ type: "skill_added", skill: { skillName, ruleInstruction } }));
+                } else if (call.name === "save_contact") {
+                  const { contactName, phoneNumber, relation } = call.args || {};
+                  const entry = contactsService.saveContact(contactName, phoneNumber, relation);
+                  result = { success: true, message: `Contact "${contactName}" (+${entry.phone}) successfully saved to DK's contacts book!` };
+                  clientWs.send(JSON.stringify({ type: "contact_saved", contact: entry }));
+                } else if (call.name === "send_whatsapp_to_contact") {
+                  const { contactNameOrPhone, messageText } = call.args || {};
+                  const contact = contactsService.findContact(contactNameOrPhone);
+                  const targetPhone = contact ? contact.phone : contactNameOrPhone.replace(/[\s\-\(\)\+]/g, "");
+
+                  // Try dedicated WhatsApp bot first, fallback to background gateway
+                  const botStatus = whatsappBotService.getStatus();
+                  let sendRes: any;
+                  if (botStatus.isConnected) {
+                    sendRes = await whatsappBotService.sendMessage(targetPhone, messageText);
+                  } else {
+                    sendRes = await whatsappService.sendBackgroundMessage(messageText, targetPhone);
+                  }
+
+                  result = {
+                    success: sendRes.success,
+                    message: sendRes.success
+                      ? `Message successfully delivered to ${contact?.name || targetPhone}: "${messageText}"`
+                      : `Delivery failed: ${sendRes.message}`,
+                  };
+                  clientWs.send(JSON.stringify({ type: "whatsapp_contact_sent", ...result }));
+                } else if (call.name === "pair_dedicated_whatsapp_number") {
+                  const { phoneNumber } = call.args || {};
+                  try {
+                    const code = await whatsappBotService.requestPairingCode(phoneNumber);
+                    result = { success: true, pairingCode: code, message: `Pairing Code generated: ${code}. Link it in WhatsApp -> Linked Devices.` };
+                    clientWs.send(JSON.stringify({ type: "pairing_code_ready", pairingCode: code }));
+                  } catch (e: any) {
+                    result = { success: false, message: `Failed to generate pairing code: ${e?.message || e}` };
+                  }
                 } else if (call.name === "set_reminder") {
                   const { title, timeString, durationMinutes } = call.args || {};
                   const reminder = toolsEngine.addReminder(title, timeString, durationMinutes);
@@ -400,11 +496,6 @@ CONVERSATION GUIDELINES:
                   const note = toolsEngine.addNote(title, content);
                   result = { success: true, message: `Note "${title}" saved to DK's notebook.` };
                   clientWs.send(JSON.stringify({ type: "note_saved", note }));
-                } else if (call.name === "send_whatsapp_message") {
-                  const { messageText, customPhoneNumber } = call.args || {};
-                  const res = await whatsappService.sendBackgroundMessage(messageText, customPhoneNumber);
-                  result = res;
-                  clientWs.send(JSON.stringify({ type: "whatsapp_sent", ...res }));
                 }
 
                 functionResponses.push({
