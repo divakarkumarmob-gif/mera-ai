@@ -6,31 +6,7 @@ export interface WakeWordConfig {
 }
 
 export function speakWakeAck(callback?: () => void) {
-    if ('speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance("Yes DK, main sun raha hoon");
-        utterance.rate = 1.05;
-        utterance.pitch = 1.0;
-        utterance.lang = 'hi-IN';
-        
-        // Try to pick a female Hindi or warm English/Hindi voice if available
-        const voices = window.speechSynthesis.getVoices();
-        const hiVoice = voices.find(v => v.lang.includes('hi') || v.name.includes('Hindi') || v.name.includes('India'));
-        if (hiVoice) {
-            utterance.voice = hiVoice;
-        }
-
-        utterance.onend = () => {
-            if (callback) callback();
-        };
-        utterance.onerror = () => {
-            if (callback) callback();
-        };
-
-        window.speechSynthesis.speak(utterance);
-    } else {
-        if (callback) callback();
-    }
+    if (callback) callback();
 }
 
 class WakeWordManager {

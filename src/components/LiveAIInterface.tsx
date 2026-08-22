@@ -350,7 +350,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     useEffect(() => {
         if (!isRecording && wakeWordActive) {
             const unregister = wakeWordManager.register(() => {
-                setStatus("Yes DK, main sun raha hoon...");
+                setStatus("Connecting AI...");
                 ensureConnection(true);
             });
             return () => unregister();
@@ -360,7 +360,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isRecording, wakeWordActive]);
 
-    // 75-second Inactivity Detection -> 15s warning -> Auto Shutdown
+    // 75-second Inactivity Detection -> 15s warning -> Auto Shutdown (Paused during Thinking & Speaking)
     useEffect(() => {
         if (!isRecording) {
             setInactivityCountdown(null);
@@ -372,7 +372,10 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         isWarningSpokenRef.current = false;
 
         const interval = setInterval(() => {
-            if (isAiSpeaking.current) {
+            // NEVER count down when AI is Thinking, Speaking, or playing output audio!
+            const isAudioStillPlaying = !!(outputAudioCtx.current && outputAudioCtx.current.currentTime < (nextStartTime.current - 0.05));
+            const isAiBusy = isAiSpeaking.current || isAiThinkingRef.current || status === "Thinking..." || status === "Speaking..." || isAudioStillPlaying;
+            if (isAiBusy) {
                 lastActivityTimeRef.current = Date.now();
                 if (isWarningSpokenRef.current) {
                     isWarningSpokenRef.current = false;
@@ -386,15 +389,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
             if (elapsed >= 75000 && !isWarningSpokenRef.current) {
                 isWarningSpokenRef.current = true;
                 setInactivityCountdown(15);
-
-                // Speak the 15-second inactivity warning
-                if ('speechSynthesis' in window) {
-                    window.speechSynthesis.cancel();
-                    const utterance = new SpeechSynthesisUtterance("DK, main 15 seconds mein band ho jaungi, kya aapko kuch poochna hai?");
-                    utterance.lang = 'hi-IN';
-                    utterance.rate = 1.05;
-                    window.speechSynthesis.speak(utterance);
-                }
             } else if (isWarningSpokenRef.current) {
                 const remaining = Math.max(0, 90 - Math.floor(elapsed / 1000));
                 setInactivityCountdown(remaining);
@@ -403,21 +397,8 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     clearInterval(interval);
                     isWarningSpokenRef.current = false;
                     setInactivityCountdown(null);
-
-                    if ('speechSynthesis' in window) {
-                        window.speechSynthesis.cancel();
-                        const utterance = new SpeechSynthesisUtterance("Theek hai DK, session band ho raha hai. Hello Friday bolkar mujhe wapas bula lena!");
-                        utterance.lang = 'hi-IN';
-                        utterance.rate = 1.05;
-                        utterance.onend = () => {
-                            stopRecording();
-                            setStatus("Session band ho gaya. Say 'Hello Friday' to wake.");
-                        };
-                        window.speechSynthesis.speak(utterance);
-                    } else {
-                        stopRecording();
-                        setStatus("Session band ho gaya. Say 'Hello Friday' to wake.");
-                    }
+                    stopRecording();
+                    setStatus("Session band ho gaya. Say 'Hello Friday' to wake.");
                 }
             }
         }, 1000);
