@@ -8,6 +8,14 @@ export interface SessionMessage {
   timestamp: number;
 }
 
+export interface PersonalVaultEntry {
+  id: string;
+  category: string;
+  exactFact: string;
+  date: string;
+  timestamp: number;
+}
+
 export interface ConversationSession {
   id: string;
   startTime: number;
@@ -20,6 +28,7 @@ export interface ConversationSession {
 }
 
 export interface LongTermMemoryData {
+  personalVault: PersonalVaultEntry[];
   pinnedMemories: { id: string; fact: string; date: string; timestamp: number }[];
   profileFacts: string[];
   knownMistakes: string[];
@@ -35,6 +44,15 @@ const memoryFilePath = path.join(dbDir, "memory.json");
 
 class MemoryEngine {
   private data: LongTermMemoryData = {
+    personalVault: [
+      {
+        id: "boss_identity_core",
+        category: "boss_identity",
+        exactFact: "DK is my creator, absolute master, and Boss. I am Friday, his dedicated, loyal personal AI companion.",
+        date: "Core Identity",
+        timestamp: Date.now(),
+      },
+    ],
     pinnedMemories: [],
     profileFacts: [],
     knownMistakes: [],
@@ -53,6 +71,15 @@ class MemoryEngine {
         const raw = fs.readFileSync(memoryFilePath, "utf-8");
         const parsed = JSON.parse(raw);
         this.data = {
+          personalVault: parsed.personalVault || [
+            {
+              id: "boss_identity_core",
+              category: "boss_identity",
+              exactFact: "DK is my creator, absolute master, and Boss. I am Friday, his dedicated, loyal personal AI companion.",
+              date: "Core Identity",
+              timestamp: Date.now(),
+            },
+          ],
           pinnedMemories: parsed.pinnedMemories || [],
           profileFacts: parsed.profileFacts || [],
           knownMistakes: parsed.knownMistakes || [],
@@ -129,13 +156,19 @@ class MemoryEngine {
         .map((m) => `${m.sender === "user" ? "DK" : "Friday"}: ${m.text}`)
         .join("\n");
 
-      const prompt = `You are Friday AI's memory summarizer. Analyze this conversation between user DK and Friday.
-Extract key long-term insights and return ONLY a valid JSON object matching this schema:
+      const prompt = `You are Friday AI's memory engine. Analyze this conversation between user DK and Friday.
+Extract long-term insights and return ONLY a valid JSON object matching this schema:
 {
-  "summary": "Brief 2-3 sentence summary of what was discussed, what DK asked, and what answers were given.",
-  "pinnedMemories": ["Array of explicit facts DK asked to remember, e.g., if DK said 'yeh yaad rakhna', 'don't forget this', 'yaad rakho', or shared personal facts"],
-  "mistakes": ["Array of any mistakes, confusion, or errors DK made or struggled with during the discussion"],
-  "profileFacts": ["New facts learned about DK, his preferences, projects, or goals"]
+  "summary": "Brief 2-3 sentence summary of what was discussed.",
+  "exactPersonalFacts": [
+    {
+      "category": "boss_identity | family_members | personal_secrets_and_facts | career_and_business | residence_and_lifestyle",
+      "exactFact": "LITERAL, EXACT, UNALTERED personal fact directly as stated by DK. (e.g., family members, count, names, relationships, personal status, secrets). DO NOT SUMMARIZE OR PARAPHRASE."
+    }
+  ],
+  "pinnedMemories": ["Array of explicit facts DK asked to remember, e.g., 'yeh yaad rakhna', 'yaad rakho', 'don't forget this'"],
+  "mistakes": ["Array of mistakes, misconceptions, or errors DK made during discussion"],
+  "profileFacts": ["General preferences, tech stack, or habits"]
 }
 
 Conversation:
@@ -155,6 +188,21 @@ ${transcript}`;
       session.summary = parsed.summary || "";
       session.pinnedFacts = Array.isArray(parsed.pinnedMemories) ? parsed.pinnedMemories : [];
       session.mistakesOrInsights = Array.isArray(parsed.mistakes) ? parsed.mistakes : [];
+
+      // Add to exact Personal Vault (NEVER SUMMARIZED)
+      if (Array.isArray(parsed.exactPersonalFacts)) {
+        for (const item of parsed.exactPersonalFacts) {
+          if (item && item.exactFact && !this.data.personalVault.some((p) => p.exactFact.toLowerCase() === item.exactFact.toLowerCase())) {
+            this.data.personalVault.push({
+              id: Math.random().toString(36).substring(2, 9),
+              category: item.category || "personal_secrets_and_facts",
+              exactFact: item.exactFact.trim(),
+              date: session.dateStr,
+              timestamp: session.startTime,
+            });
+          }
+        }
+      }
 
       // Add to global pinned memories
       if (session.pinnedFacts && session.pinnedFacts.length > 0) {
@@ -189,10 +237,23 @@ ${transcript}`;
       }
 
       this.persist();
-      console.log(`[MemoryEngine] Successfully summarized session ${session.id}: "${session.summary}"`);
+      console.log(`[MemoryEngine] Successfully processed session ${session.id}: "${session.summary}"`);
     } catch (e) {
       console.error("[MemoryEngine] Auto-summarization error:", e);
     }
+  }
+
+  public addPersonalVaultFact(category: string, exactFact: string) {
+    if (!exactFact || !exactFact.trim()) return;
+    const now = Date.now();
+    this.data.personalVault.push({
+      id: Math.random().toString(36).substring(2, 9),
+      category: category || "personal_secrets_and_facts",
+      exactFact: exactFact.trim(),
+      date: new Date(now).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
+      timestamp: now,
+    });
+    this.persist();
   }
 
   public addPinnedMemory(fact: string) {
@@ -209,6 +270,7 @@ ${transcript}`;
 
   public getMemories() {
     return {
+      personalVault: this.data.personalVault,
       pinnedMemories: this.data.pinnedMemories,
       profileFacts: this.data.profileFacts,
       knownMistakes: this.data.knownMistakes,
@@ -219,6 +281,15 @@ ${transcript}`;
 
   public clearAll() {
     this.data = {
+      personalVault: [
+        {
+          id: "boss_identity_core",
+          category: "boss_identity",
+          exactFact: "DK is my creator, absolute master, and Boss. I am Friday, his dedicated, loyal personal AI companion.",
+          date: "Core Identity",
+          timestamp: Date.now(),
+        },
+      ],
       pinnedMemories: [],
       profileFacts: [],
       knownMistakes: [],
@@ -229,34 +300,42 @@ ${transcript}`;
 
   /**
    * Compiles the full persistent memory context to inject into Friday's system prompt.
-   * Includes:
-   * 1. Explicit Pinned Memories (facts DK told Friday to remember)
-   * 2. DK's Profile & Known Mistakes
-   * 3. Summary timeline of past conversations (5 days ago, yesterday, etc.)
-   * 4. Exact transcripts of the LAST 5 CONVERSATIONS
+   * Priority 1: Exact Personal Vault (Family, Boss identity, Private Facts)
+   * Priority 2: Pinned Memories ("Yeh yaad rakhna")
+   * Priority 3: DK Profile & Past Mistakes
+   * Priority 4: Historical Sessions Timeline
+   * Priority 5: Exact Verbatim Transcripts of LAST 5 CONVERSATIONS
    */
   public compileMemoryPrompt(): string {
     const sections: string[] = [];
 
-    // 1. Explicit Pinned Memories
+    // 1. EXACT PERSONAL VAULT (CRITICAL - NEVER SUMMARIZED)
+    if (this.data.personalVault.length > 0) {
+      const vaultList = this.data.personalVault
+        .map((p, i) => `${i + 1}. [Category: ${p.category} | Added: ${p.date}]: "${p.exactFact}"`)
+        .join("\n");
+      sections.push(`### 🔒 DK'S CORE PERSONAL INFORMATION & FAMILY VAULT (EXACT LITERAL TRUTHS - NEVER SUMMARIZED):\n${vaultList}`);
+    }
+
+    // 2. Explicit Pinned Memories
     if (this.data.pinnedMemories.length > 0) {
       const pinnedList = this.data.pinnedMemories
         .slice(-20)
         .map((p, i) => `${i + 1}. [Saved on ${p.date}]: "${p.fact}"`)
         .join("\n");
-      sections.push(`### IMPORTANT FACTS DK SPECIFICALLY ASKED YOU TO REMEMBER ("YEH YAAD RAKHNA"):\n${pinnedList}`);
+      sections.push(`### 📌 IMPORTANT FACTS DK SPECIFICALLY ASKED YOU TO REMEMBER ("YEH YAAD RAKHNA"):\n${pinnedList}`);
     }
 
-    // 2. DK Profile Facts & Known Mistakes
+    // 3. DK Profile Facts & Known Mistakes
     if (this.data.profileFacts.length > 0 || this.data.knownMistakes.length > 0) {
       let profileText = "";
       if (this.data.profileFacts.length > 0) {
-        profileText += `Known Facts about DK:\n- ${this.data.profileFacts.slice(-15).join("\n- ")}\n`;
+        profileText += `General Facts & Preferences about DK:\n- ${this.data.profileFacts.slice(-15).join("\n- ")}\n`;
       }
       if (this.data.knownMistakes.length > 0) {
         profileText += `Past Mistakes/Weaknesses DK made previously (for you to help correct):\n- ${this.data.knownMistakes.slice(-15).join("\n- ")}`;
       }
-      sections.push(`### DK'S PROFILE & LEARNING CONTEXT:\n${profileText.trim()}`);
+      sections.push(`### 🎯 DK'S PROFILE & LEARNING CONTEXT:\n${profileText.trim()}`);
     }
 
     // 3. Past Sessions Timeline (Earlier than last 5)

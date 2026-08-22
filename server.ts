@@ -169,6 +169,16 @@ async function startServer() {
     }
   });
 
+  app.post("/api/memory/vault", (req, res) => {
+    try {
+      const { category, exactFact } = req.body;
+      if (exactFact) memoryEngine.addPersonalVaultFact(category, exactFact);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: "failed_to_save_vault" });
+    }
+  });
+
   const distPath = path.resolve("dist");
 
   let vite: any;
