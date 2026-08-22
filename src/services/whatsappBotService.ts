@@ -2,6 +2,7 @@ import * as BaileysModule from "@whiskeysockets/baileys";
 import pino from "pino";
 import path from "path";
 import fs from "fs";
+import QRCode from "qrcode";
 
 // Resolve Baileys exports safely across CJS/ESM bundling
 const baileys: any = BaileysModule;
@@ -21,6 +22,7 @@ class WhatsAppBotService {
   private sock: WASocket | null = null;
   private isConnected = false;
   private pairingCode: string | null = null;
+  private qrCodeDataUrl: string | null = null;
   private dedicatedPhone: string | null = null;
 
   constructor() {
@@ -46,27 +48,39 @@ class WhatsAppBotService {
         auth: state,
         logger,
         printQRInTerminal: false,
-        browser: ["Friday AI Assistant", "Chrome", "1.0.0"],
+        // Standard Linux/Chrome tuple officially supported by WhatsApp for pairing codes & QR
+        browser: ["Ubuntu", "Chrome", "20.0.04"],
+        syncFullHistory: false,
+        connectTimeoutMs: 60000,
+        defaultQueryTimeoutMs: 60000,
       });
 
       this.sock.ev.on("creds.update", saveCreds);
 
-      this.sock.ev.on("connection.update", async (update) => {
+      this.sock.ev.on("connection.update", async (update: any) => {
         const { connection, lastDisconnect, qr } = update;
 
+        if (qr) {
+          try {
+            this.qrCodeDataUrl = await QRCode.toDataURL(qr, { margin: 2, scale: 7 });
+          } catch (e) {
+            console.error("[WhatsAppBot] QR code generation error:", e);
+          }
+        }
+
         if (connection === "close") {
-          const shouldReconnect =
-            (lastDisconnect?.error as any)?.output?.statusCode !== DisconnectReason.loggedOut;
+          const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
+          const shouldReconnect = statusCode !== DisconnectReason?.loggedOut;
           this.isConnected = false;
-          console.log(
-            `[WhatsAppBot] Connection closed. Reconnecting: ${shouldReconnect}`
-          );
+          this.qrCodeDataUrl = null;
+          console.log(`[WhatsAppBot] Connection closed (${statusCode}). Reconnecting: ${shouldReconnect}`);
           if (shouldReconnect) {
             setTimeout(() => this.initSocket(), 5000);
           }
         } else if (connection === "open") {
           this.isConnected = true;
           this.pairingCode = null;
+          this.qrCodeDataUrl = null;
           console.log("[WhatsAppBot] Connected successfully to dedicated WhatsApp number!");
         }
       });
@@ -83,9 +97,16 @@ class WhatsAppBotService {
     if (cleanPhone.length === 10) cleanPhone = `91${cleanPhone}`;
     this.dedicatedPhone = cleanPhone;
 
+    if (this.isConnected) {
+      return "ALREADY_CONNECTED";
+    }
+
     if (!this.sock) {
       await this.initSocket();
     }
+
+    // Wait a brief moment for socket connection to initialize
+    await new Promise((resolve) => setTimeout(resolve, 800));
 
     if (this.sock && !this.isConnected) {
       try {
@@ -95,15 +116,36 @@ class WhatsAppBotService {
         return code;
       } catch (err: any) {
         console.error("[WhatsAppBot] Failed to request pairing code:", err);
-        throw new Error(err?.message || "Failed to generate pairing code");
+        // If failed due to stale creds, reset auth and retry once
+        try {
+          await this.resetSession();
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          const code = await this.sock.requestPairingCode(cleanPhone);
+          this.pairingCode = code;
+          return code;
+        } catch (retryErr: any) {
+          throw new Error(retryErr?.message || err?.message || "Failed to generate pairing code");
+        }
       }
     }
 
-    if (this.isConnected) {
-      return "ALREADY_CONNECTED";
-    }
+    throw new Error("WhatsApp socket not ready. Please try again.");
+  }
 
-    throw new Error("Socket not ready");
+  public async resetSession() {
+    this.isConnected = false;
+    this.pairingCode = null;
+    this.qrCodeDataUrl = null;
+    try {
+      if (this.sock) {
+        this.sock.end(undefined);
+        this.sock = null;
+      }
+      if (fs.existsSync(authFolder)) {
+        fs.rmSync(authFolder, { recursive: true, force: true });
+      }
+    } catch {}
+    await this.initSocket();
   }
 
   public async sendMessage(toPhone: string, text: string): Promise<{ success: boolean; message: string }> {
@@ -139,6 +181,7 @@ class WhatsAppBotService {
       isConnected: this.isConnected,
       dedicatedPhone: this.dedicatedPhone,
       pairingCode: this.pairingCode,
+      qrCodeDataUrl: this.qrCodeDataUrl,
     };
   }
 }

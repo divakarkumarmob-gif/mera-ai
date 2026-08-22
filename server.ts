@@ -216,6 +216,15 @@ async function startServer() {
     }
   });
 
+  app.post("/api/whatsapp/reset", async (_req, res) => {
+    try {
+      await whatsappBotService.resetSession();
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || "reset_failed" });
+    }
+  });
+
   app.get("/api/whatsapp/status", (_req, res) => {
     res.json(whatsappBotService.getStatus());
   });
