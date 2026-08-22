@@ -86,6 +86,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const [answerLength, setAnswerLength] = useState(() => localStorage.getItem('answerLength') || 'short');
     const [googleSearchMode, setGoogleSearchMode] = useState(() => localStorage.getItem('googleSearchMode') === 'true');
     const [wakeWordActive, setWakeWordActive] = useState(() => localStorage.getItem('wakeWordActive') !== 'false');
+    const [inactivityCountdown, setInactivityCountdown] = useState<number | null>(null);
     const [showCaptions, setShowCaptions] = useState(true);
     const [captionText, setCaptionText] = useState('');
     const [showChatHistory, setShowChatHistory] = useState(false);
@@ -216,6 +217,8 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const initAckTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const mediaStreamRef = useRef<MediaStream | null>(null);
     const shouldCloseAfterTurnRef = useRef<boolean>(false);
+    const lastActivityTimeRef = useRef<number>(Date.now());
+    const isWarningSpokenRef = useRef<boolean>(false);
     const pendingImagePayloadsRef = useRef<{ id: string; file: File; caption?: string }[]>([]);
     const selectedImagesRef = useRef(selectedImages);
     useEffect(() => { selectedImagesRef.current = selectedImages; }, [selectedImages]);
@@ -338,6 +341,72 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isRecording, wakeWordActive]);
 
+    // 75-second Inactivity Detection -> 15s warning -> Auto Shutdown
+    useEffect(() => {
+        if (!isRecording) {
+            setInactivityCountdown(null);
+            isWarningSpokenRef.current = false;
+            return;
+        }
+
+        lastActivityTimeRef.current = Date.now();
+        isWarningSpokenRef.current = false;
+
+        const interval = setInterval(() => {
+            if (isAiSpeaking.current) {
+                lastActivityTimeRef.current = Date.now();
+                if (isWarningSpokenRef.current) {
+                    isWarningSpokenRef.current = false;
+                    setInactivityCountdown(null);
+                }
+                return;
+            }
+
+            const elapsed = Date.now() - lastActivityTimeRef.current;
+
+            if (elapsed >= 75000 && !isWarningSpokenRef.current) {
+                isWarningSpokenRef.current = true;
+                setInactivityCountdown(15);
+
+                // Speak the 15-second inactivity warning
+                if ('speechSynthesis' in window) {
+                    window.speechSynthesis.cancel();
+                    const utterance = new SpeechSynthesisUtterance("DK, main 15 seconds mein band ho jaungi, kya aapko kuch poochna hai?");
+                    utterance.lang = 'hi-IN';
+                    utterance.rate = 1.05;
+                    window.speechSynthesis.speak(utterance);
+                }
+            } else if (isWarningSpokenRef.current) {
+                const remaining = Math.max(0, 90 - Math.floor(elapsed / 1000));
+                setInactivityCountdown(remaining);
+
+                if (remaining <= 0) {
+                    clearInterval(interval);
+                    isWarningSpokenRef.current = false;
+                    setInactivityCountdown(null);
+
+                    if ('speechSynthesis' in window) {
+                        window.speechSynthesis.cancel();
+                        const utterance = new SpeechSynthesisUtterance("Theek hai DK, session band ho raha hai. Hello Friday bolkar mujhe wapas bula lena!");
+                        utterance.lang = 'hi-IN';
+                        utterance.rate = 1.05;
+                        utterance.onend = () => {
+                            stopRecording();
+                            setStatus("Session band ho gaya. Say 'Hello Friday' to wake.");
+                        };
+                        window.speechSynthesis.speak(utterance);
+                    } else {
+                        stopRecording();
+                        setStatus("Session band ho gaya. Say 'Hello Friday' to wake.");
+                    }
+                }
+            }
+        }, 1000);
+
+        return () => clearInterval(interval);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isRecording]);
+
     const ensureConnection = async (withMic: boolean) => {
         if (ws.current && ws.current.readyState === WebSocket.OPEN) {
             if (withMic && !isRecording) {
@@ -361,7 +430,16 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         ws.current?.send(JSON.stringify({ audio: pcmToBase64(pcm) }));
                         let sum = 0;
                         for (let i = 0; i < pcm.length; i++) sum += Math.abs(pcm[i]);
-                        setVolume((sum / pcm.length) * 1000);
+                        const vol = (sum / pcm.length) * 1000;
+                        setVolume(vol);
+
+                        if (vol > 15 && !isAiSpeaking.current) {
+                            lastActivityTimeRef.current = Date.now();
+                            if (isWarningSpokenRef.current) {
+                                isWarningSpokenRef.current = false;
+                                setInactivityCountdown(null);
+                            }
+                        }
                     };
                 } catch (err) {
                     console.error("Error accessing audio", err);
@@ -429,7 +507,16 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     ws.current?.send(JSON.stringify({ audio: pcmToBase64(pcm) }));
                     let sum = 0;
                     for (let i = 0; i < pcm.length; i++) sum += Math.abs(pcm[i]);
-                    setVolume((sum / pcm.length) * 1000);
+                    const vol = (sum / pcm.length) * 1000;
+                    setVolume(vol);
+
+                    if (vol > 15 && !isAiSpeaking.current) {
+                        lastActivityTimeRef.current = Date.now();
+                        if (isWarningSpokenRef.current) {
+                            isWarningSpokenRef.current = false;
+                            setInactivityCountdown(null);
+                        }
+                    }
                 };
             }
         };
@@ -548,6 +635,20 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                             <span>Say <b>"Hello Friday"</b> to start session</span>
                         </div>
                     )}
+
+                    <AnimatePresence>
+                        {isRecording && inactivityCountdown !== null && (
+                            <motion.div
+                                initial={{ opacity: 0, scale: 0.9, y: -10 }}
+                                animate={{ opacity: 1, scale: 1, y: 0 }}
+                                exit={{ opacity: 0, scale: 0.9, y: -10 }}
+                                className="flex items-center gap-3 px-4 py-2 rounded-2xl bg-amber-500/20 border border-amber-500/60 text-amber-300 text-xs shadow-[0_0_25px_rgba(245,158,11,0.3)] backdrop-blur-md animate-bounce"
+                            >
+                                <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping" />
+                                <span><b>DK</b>, main <b>{inactivityCountdown}s</b> mein band ho jaungi! Kuch poochna hai?</span>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
 
                     {showCaptions && captionText && (
                         <div
