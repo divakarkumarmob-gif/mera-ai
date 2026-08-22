@@ -14,6 +14,7 @@ import crypto from "crypto";
 import { GoogleGenAI, Modality } from "@google/genai";
 import { memoryEngine } from "./src/services/memoryEngine";
 import { toolsEngine } from "./src/services/toolsEngine";
+import { whatsappService } from "./src/services/whatsappService";
 
 const PORT = Number(process.env.PORT) || 3000;
 const isProduction = process.env.NODE_ENV === "production";
@@ -272,6 +273,7 @@ CONVERSATION GUIDELINES:
 - ${googleSearchMode
         ? "Google Search is enabled: Use it for current events and real-time facts smoothly without announcing it."
         : ""}
+- WHATSAPP SENDING: You have a tool "send_whatsapp_message" that sends WhatsApp messages in the background directly without opening any app or browser. Whenever DK asks you to send anything to his WhatsApp, call "send_whatsapp_message" with the content. If WhatsApp credentials (phone/key) are needed, ask DK naturally and save them to your personal vault.
 - If DK shares an image, talk about what you see with real human observation.
 - Speak all numbers, units, and equations in conversational spoken words (never raw symbols, math formulas or code).`;
     };
@@ -326,6 +328,18 @@ CONVERSATION GUIDELINES:
               content: { type: "STRING", description: "Exact note text or todo item" },
             },
             required: ["title", "content"],
+          },
+        },
+        {
+          name: "send_whatsapp_message",
+          description: "Silently and automatically send a WhatsApp message to DK's phone in the background without opening any app or browser tab. Use this whenever DK asks to send information, summaries, notes, or messages to his WhatsApp.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              messageText: { type: "STRING", description: "The exact formatted content/message to deliver to DK's WhatsApp" },
+              customPhoneNumber: { type: "STRING", description: "Optional recipient phone number with country code (e.g. 919876543210)" },
+            },
+            required: ["messageText"],
           },
         },
       ];
@@ -386,6 +400,11 @@ CONVERSATION GUIDELINES:
                   const note = toolsEngine.addNote(title, content);
                   result = { success: true, message: `Note "${title}" saved to DK's notebook.` };
                   clientWs.send(JSON.stringify({ type: "note_saved", note }));
+                } else if (call.name === "send_whatsapp_message") {
+                  const { messageText, customPhoneNumber } = call.args || {};
+                  const res = await whatsappService.sendBackgroundMessage(messageText, customPhoneNumber);
+                  result = res;
+                  clientWs.send(JSON.stringify({ type: "whatsapp_sent", ...res }));
                 }
 
                 functionResponses.push({
