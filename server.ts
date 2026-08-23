@@ -614,6 +614,16 @@ CONVERSATION GUIDELINES:
         currentSession.sendRealtimeInput({
           audio: { data: parsedData.audio, mimeType: "audio/pcm;rate=16000" },
         });
+      } else if (parsedData.type === "audio_stream_end") {
+        // Client-side voice gate closed (user stopped talking). Tell Gemini
+        // explicitly so its server-side VAD flushes the buffered audio and
+        // finalizes the turn immediately, instead of waiting indefinitely
+        // for more audio that will never come until the mic re-opens.
+        try {
+          currentSession.sendRealtimeInput({ audioStreamEnd: true });
+        } catch (e) {
+          console.error("[Server] Failed to send audioStreamEnd:", e);
+        }
       } else if (parsedData.image) {
         await processImageInput(parsedData);
       } else if (parsedData.type === "text_input" && parsedData.text) {
