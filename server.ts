@@ -18,6 +18,7 @@ import { contactsService } from "./src/services/contactsService";
 import { whatsappBotService } from "./src/services/whatsappBotService";
 import { dailyUpdateService, resolveRelativeDateIST } from "./src/services/dailyUpdateService";
 import { codeAgentService } from "./src/services/codeAgentService";
+import { publicApisService } from "./src/services/publicApisService";
 import { saveMessage, getHistory, clearHistory } from "./src/services/historyService";
 
 const PORT = Number(process.env.PORT) || 3000;
@@ -548,6 +549,457 @@ HOW TO READ MESSAGES:
             required: [],
           },
         },
+        // ---------------------------------------------------------------
+        // Public API tools — Batch 1 (no API key required)
+        // ---------------------------------------------------------------
+        {
+          name: "get_weather",
+          description: "Get current weather and today's forecast for any place. Use for 'aaj mausam kaisa hai', 'weather batao', etc.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              place: { type: "STRING", description: "City or place name, e.g. 'Delhi', 'Mumbai'" },
+            },
+            required: ["place"],
+          },
+        },
+        {
+          name: "get_air_quality",
+          description: "Get current air quality index (AQI) and pollution levels for any place. Use for 'AQI batao', 'pollution kitna hai', 'hawa saaf hai kya'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              place: { type: "STRING", description: "City or place name" },
+            },
+            required: ["place"],
+          },
+        },
+        {
+          name: "get_sunrise_sunset",
+          description: "Get today's sunrise and sunset time for any place.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              place: { type: "STRING", description: "City or place name" },
+            },
+            required: ["place"],
+          },
+        },
+        {
+          name: "get_recent_earthquakes",
+          description: "Get recent significant earthquakes (magnitude 4.5+) worldwide in the last 24 hours.",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+            required: [],
+          },
+        },
+        {
+          name: "get_exchange_rate",
+          description: "Get the currency exchange rate between two currencies. Use for 'dollar ka rate kya hai', 'USD to INR kitna hai'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              fromCurrency: { type: "STRING", description: "3-letter currency code to convert from, e.g. 'USD'" },
+              toCurrency: { type: "STRING", description: "3-letter currency code to convert to, e.g. 'INR'" },
+            },
+            required: ["fromCurrency", "toCurrency"],
+          },
+        },
+        {
+          name: "get_crypto_price",
+          description: "Get the current price of a cryptocurrency. Use for 'bitcoin ka price kya hai', 'ethereum kitne ka hai'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              coinId: { type: "STRING", description: "CoinGecko coin id, e.g. 'bitcoin', 'ethereum', 'dogecoin'" },
+              vsCurrency: { type: "STRING", description: "Currency to price it in, e.g. 'usd', 'inr'. Default 'usd'." },
+            },
+            required: ["coinId"],
+          },
+        },
+        {
+          name: "get_wikipedia_summary",
+          description: "Get a short summary about any topic, person, place, or thing from Wikipedia. Use for general knowledge questions like 'X kya hai', 'X ke bare me batao'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              topic: { type: "STRING", description: "The topic, person, or thing to look up" },
+            },
+            required: ["topic"],
+          },
+        },
+        {
+          name: "get_wikiquote_summary",
+          description: "Get a short summary/overview about a person from Wikiquote, useful before sharing famous quotes context. Use for 'X ke quotes batao' style requests.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              person: { type: "STRING", description: "The person's name" },
+            },
+            required: ["person"],
+          },
+        },
+        // ---------------------------------------------------------------
+        // Public API tools — Batch 2 (no API key required)
+        // ---------------------------------------------------------------
+        {
+          name: "search_book",
+          description: "Search for a book by title and get author, publish year, subjects. Use for 'X book ke bare me batao', 'is book ka author kaun hai'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              title: { type: "STRING", description: "Book title to search for" },
+            },
+            required: ["title"],
+          },
+        },
+        {
+          name: "get_word_meaning",
+          description: "Get the dictionary meaning/definition of an English word. Use for 'X ka matlab kya hai', 'X word ka meaning batao'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              word: { type: "STRING", description: "The word to look up" },
+            },
+            required: ["word"],
+          },
+        },
+        {
+          name: "get_country_info",
+          description: "Get basic info about a country — capital, population, region, currency, languages.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              country: { type: "STRING", description: "Country name" },
+            },
+            required: ["country"],
+          },
+        },
+        {
+          name: "get_number_fact",
+          description: "Get an interesting fact about a number.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              number: { type: "NUMBER", description: "The number to get a fact about" },
+            },
+            required: ["number"],
+          },
+        },
+        {
+          name: "get_trivia_question",
+          description: "Get a random trivia question with multiple choice options. Use when DK wants to play a quiz/trivia game.",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+            required: [],
+          },
+        },
+        {
+          name: "get_pincode_info",
+          description: "Look up post office details (district, state) for an Indian PIN code.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              pincode: { type: "STRING", description: "6-digit Indian PIN code" },
+            },
+            required: ["pincode"],
+          },
+        },
+        {
+          name: "get_nearby_places",
+          description: "Find nearby places of a certain type (restaurant, atm, hospital, pharmacy, cafe, bank, etc.) around a given location.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              place: { type: "STRING", description: "The reference location, e.g. 'Connaught Place Delhi'" },
+              amenity: { type: "STRING", description: "Type of place, e.g. 'restaurant', 'atm', 'hospital', 'pharmacy', 'cafe', 'bank'" },
+            },
+            required: ["place", "amenity"],
+          },
+        },
+        {
+          name: "get_timezone_info",
+          description: "Get the current time and timezone for any place.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              place: { type: "STRING", description: "City or place name" },
+            },
+            required: ["place"],
+          },
+        },
+        // ---------------------------------------------------------------
+        // Public API tools — Batch 3 (no API key required)
+        // ---------------------------------------------------------------
+        {
+          name: "get_covid_stats",
+          description: "Get COVID-19 case statistics for a country, or 'world' for global stats.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              country: { type: "STRING", description: "Country name, or 'world' for global. Default 'world'." },
+            },
+            required: [],
+          },
+        },
+        {
+          name: "get_qr_code",
+          description: "Generate a QR code image URL for any text/link. Use for 'is link ka QR code banao'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              text: { type: "STRING", description: "The text or URL to encode as a QR code" },
+            },
+            required: ["text"],
+          },
+        },
+        {
+          name: "get_random_user",
+          description: "Generate a random fake user profile with name, avatar, email — useful for testing/demo purposes.",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+            required: [],
+          },
+        },
+        {
+          name: "get_github_user_info",
+          description: "Get public GitHub profile info for a username — name, bio, repo count, followers.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              username: { type: "STRING", description: "GitHub username" },
+            },
+            required: ["username"],
+          },
+        },
+        {
+          name: "get_github_repo_info",
+          description: "Get public info about a GitHub repository — stars, forks, description, language.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              owner: { type: "STRING", description: "Repo owner/organization name" },
+              repo: { type: "STRING", description: "Repository name" },
+            },
+            required: ["owner", "repo"],
+          },
+        },
+        {
+          name: "get_ip_lookup",
+          description: "Look up approximate location and ISP info for an IP address.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              ip: { type: "STRING", description: "The IP address to look up" },
+            },
+            required: ["ip"],
+          },
+        },
+        {
+          name: "get_dad_joke",
+          description: "Get a random dad joke to lighten the mood.",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+            required: [],
+          },
+        },
+        {
+          name: "get_chuck_norris_joke",
+          description: "Get a random Chuck Norris joke.",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+            required: [],
+          },
+        },
+        {
+          name: "get_public_holidays",
+          description: "Get the list of public holidays for a country in a given year.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              countryCode: { type: "STRING", description: "2-letter ISO country code, e.g. 'US', 'GB', 'IN'" },
+              year: { type: "NUMBER", description: "Year, defaults to current year if not given" },
+            },
+            required: ["countryCode"],
+          },
+        },
+        {
+          name: "search_anime",
+          description: "Search for anime/manga info — episodes, score, synopsis, release year.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              title: { type: "STRING", description: "Anime/manga title" },
+            },
+            required: ["title"],
+          },
+        },
+        {
+          name: "translate_text",
+          description: "Translate text into another language. Use for 'ise English me translate karo', 'is sentence ka Hindi translation batao'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              text: { type: "STRING", description: "The text to translate" },
+              targetLang: { type: "STRING", description: "Target language code, e.g. 'en', 'hi', 'fr', 'es'" },
+            },
+            required: ["text", "targetLang"],
+          },
+        },
+        // ---------------------------------------------------------------
+        // Public API tools — Batch 4 (require API key in .env)
+        // ---------------------------------------------------------------
+        {
+          name: "get_news",
+          description: "Get latest news headlines, optionally filtered by topic. Use for 'aaj ki news batao', 'X ke bare me latest news batao'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              topic: { type: "STRING", description: "Optional topic/keyword to filter news by" },
+              country: { type: "STRING", description: "2-letter country code, default 'in' for India" },
+            },
+            required: [],
+          },
+        },
+        {
+          name: "get_cricket_scores",
+          description: "Get current/live cricket match scores.",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+            required: [],
+          },
+        },
+        {
+          name: "get_sports_events",
+          description: "Search for sports events/matches (non-cricket, e.g. football, NBA, tennis) by team or league name.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              league: { type: "STRING", description: "Team, league, or event name to search for" },
+            },
+            required: ["league"],
+          },
+        },
+        {
+          name: "get_stock_price",
+          description: "Get the current stock price for a stock symbol. For Indian stocks use '.BSE' suffix, e.g. 'RELIANCE.BSE'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              symbol: { type: "STRING", description: "Stock ticker symbol" },
+            },
+            required: ["symbol"],
+          },
+        },
+        {
+          name: "get_movie_info",
+          description: "Get info about a movie — overview, release date, rating, poster.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              title: { type: "STRING", description: "Movie title" },
+            },
+            required: ["title"],
+          },
+        },
+        {
+          name: "search_pexels_image",
+          description: "Search for free stock photos matching a query.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              query: { type: "STRING", description: "What to search images for" },
+            },
+            required: ["query"],
+          },
+        },
+        {
+          name: "search_unsplash_image",
+          description: "Search for high-quality stock photos matching a query.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              query: { type: "STRING", description: "What to search images for" },
+            },
+            required: ["query"],
+          },
+        },
+        {
+          name: "get_directions",
+          description: "Get driving distance and duration between two places.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              fromPlace: { type: "STRING", description: "Starting location" },
+              toPlace: { type: "STRING", description: "Destination location" },
+            },
+            required: ["fromPlace", "toPlace"],
+          },
+        },
+        // ---------------------------------------------------------------
+        // Public API tools — Batch 5 (final key-required batch)
+        // ---------------------------------------------------------------
+        {
+          name: "get_nutrition_info",
+          description: "Get nutrition/calorie breakdown for a food item or meal description. Use for 'X me kitni calorie hai', 'ye khane me kitna protein hai'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              foodQuery: { type: "STRING", description: "Food item or quantity description, e.g. '2 rotis and a bowl of dal'" },
+            },
+            required: ["foodQuery"],
+          },
+        },
+        {
+          name: "search_recipe",
+          description: "Search for a recipe — cook time, servings, summary, source link.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              query: { type: "STRING", description: "Dish name to search a recipe for" },
+            },
+            required: ["query"],
+          },
+        },
+        {
+          name: "get_flight_status",
+          description: "Get the current status of a flight by flight number.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              flightNumber: { type: "STRING", description: "IATA flight number, e.g. 'AI101'" },
+            },
+            required: ["flightNumber"],
+          },
+        },
+        {
+          name: "search_govt_data",
+          description: "Search India government open data catalog (data.gov.in) for schemes, datasets, or public info by keyword.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              keyword: { type: "STRING", description: "Keyword to search government datasets/schemes for" },
+            },
+            required: ["keyword"],
+          },
+        },
+        {
+          name: "get_product_by_barcode",
+          description: "Look up product info (title, brand, price range) by scanning/entering a barcode/UPC number.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              upc: { type: "STRING", description: "The barcode/UPC number" },
+            },
+            required: ["upc"],
+          },
+        },
       ];
 
       return await ai.live.connect({
@@ -815,6 +1267,276 @@ HOW TO READ MESSAGES:
                       : { success: true, dateStr: resolvedDate, updateText: null, message: "Is din ke liye koi update note nahi kiya gaya tha." };
                   } catch (e: any) {
                     result = { success: false, message: `Could not fetch update: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_weather") {
+                  const { place } = call.args || {};
+                  try {
+                    result = await publicApisService.getWeather(String(place || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Weather fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_air_quality") {
+                  const { place } = call.args || {};
+                  try {
+                    result = await publicApisService.getAirQuality(String(place || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `AQI fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_sunrise_sunset") {
+                  const { place } = call.args || {};
+                  try {
+                    result = await publicApisService.getSunriseSunset(String(place || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Sunrise/sunset fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_recent_earthquakes") {
+                  try {
+                    result = await publicApisService.getRecentEarthquakes();
+                  } catch (e: any) {
+                    result = { success: false, message: `Earthquake data fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_exchange_rate") {
+                  const { fromCurrency, toCurrency } = call.args || {};
+                  try {
+                    result = await publicApisService.getExchangeRate(String(fromCurrency || ""), String(toCurrency || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Exchange rate fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_crypto_price") {
+                  const { coinId, vsCurrency } = call.args || {};
+                  try {
+                    result = await publicApisService.getCryptoPrice(String(coinId || ""), vsCurrency ? String(vsCurrency) : undefined);
+                  } catch (e: any) {
+                    result = { success: false, message: `Crypto price fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_wikipedia_summary") {
+                  const { topic } = call.args || {};
+                  try {
+                    result = await publicApisService.getWikipediaSummary(String(topic || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Wikipedia fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_wikiquote_summary") {
+                  const { person } = call.args || {};
+                  try {
+                    result = await publicApisService.getWikiquote(String(person || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Wikiquote fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "search_book") {
+                  const { title } = call.args || {};
+                  try {
+                    result = await publicApisService.searchBook(String(title || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Book search fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_word_meaning") {
+                  const { word } = call.args || {};
+                  try {
+                    result = await publicApisService.getWordMeaning(String(word || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Word meaning fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_country_info") {
+                  const { country } = call.args || {};
+                  try {
+                    result = await publicApisService.getCountryInfo(String(country || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Country info fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_number_fact") {
+                  const { number } = call.args || {};
+                  try {
+                    result = await publicApisService.getNumberFact(Number(number));
+                  } catch (e: any) {
+                    result = { success: false, message: `Number fact fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_trivia_question") {
+                  try {
+                    result = await publicApisService.getTriviaQuestion();
+                  } catch (e: any) {
+                    result = { success: false, message: `Trivia fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_pincode_info") {
+                  const { pincode } = call.args || {};
+                  try {
+                    result = await publicApisService.getPinCodeInfo(String(pincode || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `PIN code fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_nearby_places") {
+                  const { place, amenity } = call.args || {};
+                  try {
+                    result = await publicApisService.getNearbyPlaces(String(place || ""), String(amenity || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Nearby places fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_timezone_info") {
+                  const { place } = call.args || {};
+                  try {
+                    result = await publicApisService.getTimeZoneInfo(String(place || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Timezone fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_covid_stats") {
+                  const { country } = call.args || {};
+                  try {
+                    result = await publicApisService.getCovidStats(country ? String(country) : undefined);
+                  } catch (e: any) {
+                    result = { success: false, message: `COVID stats fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_qr_code") {
+                  const { text } = call.args || {};
+                  result = publicApisService.getQrCodeUrl(String(text || ""));
+                } else if (call.name === "get_random_user") {
+                  try {
+                    result = await publicApisService.getRandomUser();
+                  } catch (e: any) {
+                    result = { success: false, message: `Random user generate fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_github_user_info") {
+                  const { username } = call.args || {};
+                  try {
+                    result = await publicApisService.getGithubUserInfo(String(username || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `GitHub user fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_github_repo_info") {
+                  const { owner, repo } = call.args || {};
+                  try {
+                    result = await publicApisService.getGithubRepoInfo(String(owner || ""), String(repo || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `GitHub repo fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_ip_lookup") {
+                  const { ip } = call.args || {};
+                  try {
+                    result = await publicApisService.getIpLookup(String(ip || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `IP lookup fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_dad_joke") {
+                  try {
+                    result = await publicApisService.getDadJoke();
+                  } catch (e: any) {
+                    result = { success: false, message: `Joke fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_chuck_norris_joke") {
+                  try {
+                    result = await publicApisService.getChuckNorrisJoke();
+                  } catch (e: any) {
+                    result = { success: false, message: `Joke fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_public_holidays") {
+                  const { countryCode, year } = call.args || {};
+                  try {
+                    result = await publicApisService.getPublicHolidays(String(countryCode || ""), year ? Number(year) : undefined);
+                  } catch (e: any) {
+                    result = { success: false, message: `Holiday list fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "search_anime") {
+                  const { title } = call.args || {};
+                  try {
+                    result = await publicApisService.searchAnime(String(title || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Anime search fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "translate_text") {
+                  const { text, targetLang } = call.args || {};
+                  try {
+                    result = await publicApisService.translateText(String(text || ""), String(targetLang || "en"));
+                  } catch (e: any) {
+                    result = { success: false, message: `Translation fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_news") {
+                  const { topic, country } = call.args || {};
+                  try {
+                    result = await publicApisService.getNews(topic ? String(topic) : undefined, country ? String(country) : undefined);
+                  } catch (e: any) {
+                    result = { success: false, message: `News fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_cricket_scores") {
+                  try {
+                    result = await publicApisService.getCricketScores();
+                  } catch (e: any) {
+                    result = { success: false, message: `Cricket scores fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_sports_events") {
+                  const { league } = call.args || {};
+                  try {
+                    result = await publicApisService.getSportsEvents(String(league || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Sports events fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_stock_price") {
+                  const { symbol } = call.args || {};
+                  try {
+                    result = await publicApisService.getStockPrice(String(symbol || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Stock price fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_movie_info") {
+                  const { title } = call.args || {};
+                  try {
+                    result = await publicApisService.getMovieInfo(String(title || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Movie info fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "search_pexels_image") {
+                  const { query } = call.args || {};
+                  try {
+                    result = await publicApisService.searchPexelsImage(String(query || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Pexels search fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "search_unsplash_image") {
+                  const { query } = call.args || {};
+                  try {
+                    result = await publicApisService.searchUnsplashImage(String(query || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Unsplash search fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_directions") {
+                  const { fromPlace, toPlace } = call.args || {};
+                  try {
+                    result = await publicApisService.getDirections(String(fromPlace || ""), String(toPlace || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Directions fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_nutrition_info") {
+                  const { foodQuery } = call.args || {};
+                  try {
+                    result = await publicApisService.getNutritionInfo(String(foodQuery || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Nutrition info fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "search_recipe") {
+                  const { query } = call.args || {};
+                  try {
+                    result = await publicApisService.searchRecipe(String(query || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Recipe search fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_flight_status") {
+                  const { flightNumber } = call.args || {};
+                  try {
+                    result = await publicApisService.getFlightStatus(String(flightNumber || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Flight status fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "search_govt_data") {
+                  const { keyword } = call.args || {};
+                  try {
+                    result = await publicApisService.searchGovtData(String(keyword || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Govt data search fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_product_by_barcode") {
+                  const { upc } = call.args || {};
+                  try {
+                    result = await publicApisService.getProductByBarcode(String(upc || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Barcode lookup fail hui: ${e?.message || e}` };
                   }
                 }
 
