@@ -264,13 +264,18 @@ ${contactsList}
 CONTACTS & WHATSAPP CAPABILITIES:
 - You have tools to manage contacts and send messages directly:
   1. "save_contact": Use when DK tells you to save a friend, family member, or colleague's name and number (e.g. "Rahul ka number 9876543210 save kar lo").
-  2. "send_whatsapp_to_contact": Use whenever DK asks you to message any contact on WhatsApp (e.g. "Rahul ko message bhejo ki aaj main nahi aaunga").
-  3. "pair_dedicated_whatsapp_number": Use when DK gives you his spare phone number to link your dedicated WhatsApp assistant session.
+  2. "delete_contact": Use when DK asks to delete, remove, or forget a saved contact (e.g. "Rahul ka contact delete karo").
+  3. "send_whatsapp_to_contact": Use whenever DK asks you to message any contact on WhatsApp (e.g. "Rahul ko message bhejo ki aaj main nahi aaunga").
+  4. "pair_dedicated_whatsapp_number": Use when DK gives you his spare phone number to link your dedicated WhatsApp assistant session.
 - CRITICAL RULE FOR PAIRING:
   When you call "pair_dedicated_whatsapp_number", it returns an 8-character Pairing Code (e.g. "ABCD-1234").
   You MUST speak this exact 8-character code out loud to DK letter by letter and tell him to enter it into WhatsApp -> Linked Devices -> Link with phone number!
   NEVER say that an SMS/OTP was sent to his phone. YOU give the code directly to DK.
-- Once a message is sent, confirm warmly and naturally: "DK, maine Rahul ko message bhej diya hai ki aaj aap nahi aaoge!"
+- CRITICAL — CHECK THE ACTUAL RESULT BEFORE CONFIRMING:
+  After calling "send_whatsapp_to_contact", the tool result will have a "success" field (true or false). You MUST check this field before responding.
+  - If success is true: confirm warmly and naturally, e.g. "DK, maine Rahul ko message bhej diya hai ki aaj aap nahi aaoge!"
+  - If success is false: NEVER say the message was sent. Instead tell DK honestly it failed and read out the reason from the result's "message" field, e.g. "DK, message Rahul ko nahi ja paaya — connection stale ho gaya tha, dobara try kar raha hoon" or "DK, ye number WhatsApp par valid nahi lag raha."
+  - Do not guess or assume success — always base your spoken confirmation strictly on the "success" field returned by the tool.
 
 IMMEDIATE ANSWER TRIGGER ("JAWAB DO" / "REPLY KARO"):
 - Whenever DK finishes explaining something and says "Jawab do", "Reply do", "Bolo Friday", or asks for your response:
@@ -305,7 +310,15 @@ CONVERSATION GUIDELINES:
 
 WHATSAPP MESSAGE READING:
 - You can read WhatsApp messages received on your linked dedicated number using the 'get_whatsapp_messages' tool.
-- Use this ONLY when DK explicitly asks — e.g. 'koi message hai?', 'Rahul ne kya bheja?', '5 din pehle kya msg tha?', 'Family Group me koi msg aya?'
+- INTENT RECOGNITION (CRITICAL): Before responding to anything related to WhatsApp, first understand DK's underlying intent — he wants to know about his WhatsApp messages/notifications. Treat ALL of the following (and any similarly-phrased variation) as the SAME intent — "check WhatsApp for me" — and always call 'get_whatsapp_messages' to get the real, current answer instead of guessing or assuming:
+  * "koi message hai?" / "koi msg aaya?" / "kuch aaya whatsapp par?"
+  * "whatsapp par koi update hai?" / "whatsapp check karo"
+  * "kisi ka message aaya?" / "kisi ne message kiya kya?" / "kisne msg kiya"
+  * "[Name] ne kya bheja?" / "[Name] ka reply aaya?" / "[Name] ki chat batao" / "[Name] se kya baat hui"
+  * "5 din pehle kya msg tha?" / "kal ka msg dikhao" / "last message kya tha"
+  * "Family Group me koi msg aaya?" / "[GroupName] me kuch naya hai?"
+  * Any question referring to a specific time, sender, group, or simply "latest"/"naya" in a WhatsApp context
+  - In short: whenever DK's question is about WhatsApp activity in ANY form (a specific chat, a specific time, a specific person, or just generally "anything new"), your first step is always to call the tool — never answer from memory or assumption, and never guess whether something is there or not without checking.
 - Do NOT announce new messages automatically on session start — only when DK asks.
 
 HOW TO READ MESSAGES (CRITICAL RULES):
@@ -337,6 +350,12 @@ HOW TO READ MESSAGES (CRITICAL RULES):
    [Location] → "apni location share ki"
 
 6. NO MESSAGES: "Koi naya WhatsApp message nahi hai, DK."
+
+7. REMEMBERING THE SENDER'S NUMBER FOR A FOLLOW-UP REPLY (CRITICAL):
+   - Every message returned by 'get_whatsapp_messages' includes a "senderPhone" field. You MUST keep this number in mind for the rest of the conversation after you read that message aloud — even if you don't repeat every digit to DK.
+   - If DK then says anything that refers back to that sender without naming them explicitly — e.g. "isi ko reply karo", "usi unknown number pe bhej do", "ussi ko bol do main busy hoon", "wapas usko message karo" — you MUST call 'send_whatsapp_to_contact' with contactNameOrPhone set to that exact "senderPhone" value from the most recently read message (prefixed with the country code digits exactly as given, no spaces or symbols).
+   - NEVER call 'send_whatsapp_to_contact' with a vague or made-up value like "unknown" or the sender's display name when the target is an unsaved/unknown contact — it must be the real senderPhone digits, or the send will fail.
+   - If more than one unknown sender was read in the same conversation, use the number from the one DK most recently referred to or asked about — if genuinely ambiguous, ask DK to confirm which person before sending.
 
 7. VOICE OUTPUT MANDATORY:
    - When 'get_whatsapp_messages' returns results, you MUST speak your reply out loud in voice immediately. Never return an empty voice turn or text-only reply.`;
@@ -380,6 +399,17 @@ HOW TO READ MESSAGES (CRITICAL RULES):
               relation: { type: "STRING", description: "Optional relationship (e.g. 'Friend', 'Brother', 'Colleague', 'Mummy')" },
             },
             required: ["contactName", "phoneNumber"],
+          },
+        },
+        {
+          name: "delete_contact",
+          description: "Delete/remove a person from DK's contacts book by name or phone number. Use when DK says to delete, remove, or forget a saved contact (e.g. 'Rahul ka contact delete karo', 'is number ko hata do').",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              contactNameOrPhone: { type: "STRING", description: "The name of the contact to delete (e.g. 'Rahul') or their phone number" },
+            },
+            required: ["contactNameOrPhone"],
           },
         },
         {
@@ -521,6 +551,13 @@ HOW TO READ MESSAGES (CRITICAL RULES):
                   const entry = await contactsService.saveContact(contactName, phoneNumber, relation);
                   result = { success: true, message: `Contact "${contactName}" (+${entry.phone}) successfully saved to DK's contacts book!` };
                   clientWs.send(JSON.stringify({ type: "contact_saved", contact: entry }));
+                } else if (call.name === "delete_contact") {
+                  const { contactNameOrPhone } = call.args || {};
+                  const delRes = await contactsService.deleteContact(contactNameOrPhone);
+                  result = delRes.deleted
+                    ? { success: true, message: `Contact "${delRes.name}" (+${delRes.phone}) has been deleted from DK's contacts book.` }
+                    : { success: false, message: `No matching contact found for "${contactNameOrPhone}" — nothing was deleted.` };
+                  clientWs.send(JSON.stringify({ type: "contact_deleted", ...result }));
                 } else if (call.name === "send_whatsapp_to_contact") {
                   const { contactNameOrPhone, messageText } = call.args || {};
                   const contact = await contactsService.findContact(contactNameOrPhone);
