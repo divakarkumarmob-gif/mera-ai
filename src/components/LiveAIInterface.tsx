@@ -244,8 +244,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const lastActivityTimeRef = useRef<number>(Date.now());
     const isWarningSpokenRef = useRef<boolean>(false);
     const speakingCooldownUntilRef = useRef<number>(0);
-    const lastUserVoiceDetectedTimeRef = useRef<number>(0);
-    const wasGateOpenRef = useRef<boolean>(false);
     const hasSpokenInTurnRef = useRef<boolean>(false);
     const pendingImagePayloadsRef = useRef<{ id: string; file: File; caption?: string }[]>([]);
     const selectedImagesRef = useRef(selectedImages);
@@ -449,17 +447,15 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
 
             const pcm = e.inputBuffer.getChannelData(0);
 
-            // 2. Calculate true RMS sound power
+            // 2. Calculate true RMS sound power (only used for the UI volume
+            // meter now — no longer used to decide whether to send audio).
             let sumSquares = 0;
             for (let i = 0; i < pcm.length; i++) {
                 sumSquares += pcm[i] * pcm[i];
             }
             const rms = Math.sqrt(sumSquares / pcm.length) * 1000;
-
-            // 3. Noise Gate & Human Speech Detection
             const isHumanSpeaking = rms >= 10;
             if (isHumanSpeaking) {
-                lastUserVoiceDetectedTimeRef.current = Date.now();
                 lastActivityTimeRef.current = Date.now();
                 if (isWarningSpokenRef.current) {
                     isWarningSpokenRef.current = false;
@@ -467,31 +463,18 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 }
             }
 
-            // 4. Voice Gate Hangover (900ms) to keep sentence natural.
-            // Was 450ms — too short for normal speech with brief mid-sentence
-            // pauses (e.g. "aaj... Bihar ke... mausam ka haal batao"). A pause
-            // longer than the hangover would close the gate and stop sending
-            // audio mid-sentence, so Gemini's server-side turn/silence
-            // detection never saw the rest of the sentence and got stuck in
-            // "Listening..." waiting for more audio that never arrived.
-            const isGateOpen = isHumanSpeaking || (Date.now() - lastUserVoiceDetectedTimeRef.current < 900);
-
-            if (isGateOpen) {
-                ws.current?.send(JSON.stringify({ audio: pcmToBase64(pcm) }));
-                setVolume(Math.min(100, rms * 2.2));
-                wasGateOpenRef.current = true;
-            } else {
-                // Gate just closed (user stopped talking) — tell Gemini explicitly
-                // that the audio stream paused so its server-side VAD flushes and
-                // finalizes the turn now, instead of silently waiting forever for
-                // more audio (which is why replies were stuck on "Listening...").
-                if (wasGateOpenRef.current) {
-                    wasGateOpenRef.current = false;
-                    ws.current?.send(JSON.stringify({ type: 'audio_stream_end' }));
-                }
-                // Ignore background noise / fan / ambient room sounds
-                setVolume(0);
-            }
+            // 3. Always forward audio to Gemini, loud or quiet — no custom
+            // noise gate, no manual "user stopped talking" guessing on our
+            // end. Gemini's own server-side automatic VAD is built exactly
+            // for this: it needs a continuous, uninterrupted audio stream
+            // (including the quiet parts) to reliably detect real speech
+            // pauses and end turns on its own — the same way it works in
+            // apps that don't do any custom client-side gating. Cutting the
+            // stream ourselves (old behavior) is what caused both earlier
+            // bugs: replies stuck on "Listening..." and sentences getting
+            // chopped into fragments.
+            ws.current?.send(JSON.stringify({ audio: pcmToBase64(pcm) }));
+            setVolume(Math.min(100, rms * 2.2));
         };
     };
 
@@ -851,6 +834,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                             <span>Jawab Do</span>
                         </button>
                     )}
+
 
                     <button
                         onClick={handleInterrupt}
