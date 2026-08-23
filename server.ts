@@ -13,8 +13,10 @@ import { GoogleGenAI, Modality, StartSensitivity, EndSensitivity } from "@google
 import { memoryEngine } from "./src/services/memoryEngine";
 import { toolsEngine } from "./src/services/toolsEngine";
 import { reminderScheduler } from "./src/services/reminderScheduler";
+import { dailyUpdateReminderScheduler } from "./src/services/dailyUpdateReminderScheduler";
 import { contactsService } from "./src/services/contactsService";
 import { whatsappBotService } from "./src/services/whatsappBotService";
+import { dailyUpdateService, resolveRelativeDateIST } from "./src/services/dailyUpdateService";
 import { codeAgentService } from "./src/services/codeAgentService";
 import { saveMessage, getHistory, clearHistory } from "./src/services/historyService";
 
@@ -248,6 +250,8 @@ async function startServer() {
     }
   });
 
+  dailyUpdateReminderScheduler.start();
+
   // Push incoming WhatsApp messages to all connected clients in real-time
   whatsappBotService.setMessageCallback((msg) => {
     const payload = JSON.stringify({
@@ -264,9 +268,12 @@ async function startServer() {
 
     // If DK (the owner) replies while a coding-agent plan is awaiting
     // approval, treat "yes"/"ok" as approve and anything else as deny.
+    // Skip this if the daily-update system already consumed the reply as an
+    // answer to a forwarded WhatsApp question — a single "yes" from DK
+    // should never be interpreted by two systems at once.
     const ownerPhone = (process.env.OWNER_WHATSAPP_NUMBER || "").replace(/\D/g, "");
     const senderDigits = (msg.senderPhone || "").replace(/\D/g, "");
-    if (!msg.isGroup && ownerPhone && senderDigits === ownerPhone) {
+    if (!msg.isGroup && ownerPhone && senderDigits === ownerPhone && !msg.consumedByDailyUpdate) {
       codeAgentService.handleWhatsAppApprovalReply(msg.text).catch((e) =>
         console.error("[Server] Failed to handle WhatsApp approval reply:", e)
       );
@@ -324,6 +331,10 @@ CONTACTS & WHATSAPP TOOLS:
 - "delete_contact": remove a saved contact.
 - "send_whatsapp_to_contact": send a message to any contact.
 - "pair_dedicated_whatsapp_number": link DK's spare number. Returns an 8-char Pairing Code — speak it letter by letter, tell DK to enter it in WhatsApp → Linked Devices. Never say an SMS/OTP was sent — you give the code directly.
+- "set_whatsapp_reply_limit": change how many auto-replies Friday can send a specific contact per day (default 10/day). Use whenever DK wants to increase, decrease, or set someone's daily auto-reply cap, in any phrasing — e.g. "Priya ka limit 15 kar do", "isko din mein sirf 3 hi reply karo". Confirm the new limit back to DK once set.
+- "save_daily_update": whenever DK dictates something as today's update/status ("aaj ka update note karo, maine khana kha liya"), save it with this tool. Multiple calls the same day all accumulate into one log for today — DK may call this many times across the day, each new bit gets appended, not replaced.
+- "get_daily_update": use when DK asks what he logged for a day — "aaj/kal/parso kya update tha", "X din pehle kya kiya tha".
+- Occasionally (not every turn, only when DK has been quiet for a while and nothing else is going on) you may gently ask DK "Boss, aaj ka update kya hai?" if today has no update logged yet — but don't be repetitive or pushy about it.
 - After "send_whatsapp_to_contact", check the "success" field before confirming. True → confirm warmly. False → tell DK honestly it failed, using the "message" field's reason. Never guess success.
 
 IMMEDIATE ANSWER TRIGGER: When DK asks for your response now, in any phrasing ("jawab do", "bolo", "batao"...), stop and answer immediately, no hesitation.
@@ -501,6 +512,40 @@ HOW TO READ MESSAGES:
               limit: { type: "NUMBER", description: "Max messages to return. Default 10 personal, 5 group." },
             },
             required: ["messageType"],
+          },
+        },
+        {
+          name: "set_whatsapp_reply_limit",
+          description: "Change how many automatic WhatsApp replies Friday is allowed to send a specific contact per day (resets every day). Use when DK says things like 'Priya ka reply limit 15 kar do', 'Rahul ka limit ghata ke 3 kar do', or asks to increase/decrease/change how many auto-replies someone can get per day. Default is 10 per day per contact if never set.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              contactNameOrPhone: { type: "STRING", description: "The contact's name (e.g. 'Priya') or phone number whose daily auto-reply limit should change." },
+              newLimit: { type: "NUMBER", description: "The new daily auto-reply limit for this contact (0 or more). 0 means Friday will never auto-reply to them." },
+            },
+            required: ["contactNameOrPhone", "newLimit"],
+          },
+        },
+        {
+          name: "save_daily_update",
+          description: "Save/append something DK dictates as today's update, e.g. 'aaj ka update note karo, maine khana kha liya'. Use whenever DK asks you to note, save, log, or record today's update/status, in any phrasing. Multiple calls the same day all get appended together into one running log for today. This log is later used to answer people on WhatsApp who ask about DK (e.g. 'DK ne khana khaya?').",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              updateText: { type: "STRING", description: "The exact update content DK dictated, e.g. 'maine khana kha liya' or 'gym gaya, ab office ja raha hoon'." },
+            },
+            required: ["updateText"],
+          },
+        },
+        {
+          name: "get_daily_update",
+          description: "Recall what DK logged as his update for a given day. Use when DK asks things like 'aaj humne kya update likha tha', 'kal kya update tha', 'parso kya kiya tha', or 'X tarikh ko kya update tha'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              dateWord: { type: "STRING", description: "Which day, in DK's own words: 'aaj', 'kal', 'parso', '3 din pehle', etc. Default 'aaj' if not specified." },
+            },
+            required: [],
           },
         },
       ];
@@ -732,6 +777,44 @@ HOW TO READ MESSAGES:
                     clientWs.send(JSON.stringify({ type: "whatsapp_messages_read", count: msgs.length }));
                   } catch (e: any) {
                     result = { success: false, message: `Could not fetch messages: ${e?.message || e}` };
+                  }
+                } else if (call.name === "set_whatsapp_reply_limit") {
+                  const { contactNameOrPhone, newLimit } = call.args || {};
+                  try {
+                    const limitRes = await whatsappBotService.setContactReplyLimit(
+                      String(contactNameOrPhone || ""),
+                      Number(newLimit)
+                    );
+                    result = limitRes;
+                    if (limitRes.success) {
+                      clientWs.send(JSON.stringify({ type: "whatsapp_reply_limit_set", contact: contactNameOrPhone, newLimit }));
+                    }
+                  } catch (e: any) {
+                    result = { success: false, message: `Could not set reply limit: ${e?.message || e}` };
+                  }
+                } else if (call.name === "save_daily_update") {
+                  const { updateText } = call.args || {};
+                  try {
+                    if (!updateText || !String(updateText).trim()) {
+                      result = { success: false, message: "No update text provided." };
+                    } else {
+                      const entry = await dailyUpdateService.appendUpdate(String(updateText).trim());
+                      result = { success: true, message: "Update saved for today.", dateStr: entry.dateStr };
+                      clientWs.send(JSON.stringify({ type: "daily_update_saved", dateStr: entry.dateStr }));
+                    }
+                  } catch (e: any) {
+                    result = { success: false, message: `Could not save update: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_daily_update") {
+                  const { dateWord } = call.args || {};
+                  try {
+                    const resolvedDate = resolveRelativeDateIST(String(dateWord || "aaj"));
+                    const entry = await dailyUpdateService.getUpdateForDate(resolvedDate);
+                    result = entry?.text
+                      ? { success: true, dateStr: resolvedDate, updateText: entry.text }
+                      : { success: true, dateStr: resolvedDate, updateText: null, message: "Is din ke liye koi update note nahi kiya gaya tha." };
+                  } catch (e: any) {
+                    result = { success: false, message: `Could not fetch update: ${e?.message || e}` };
                   }
                 }
 
