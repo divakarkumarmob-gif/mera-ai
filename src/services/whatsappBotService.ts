@@ -41,10 +41,12 @@ class WhatsAppBotService {
   private dedicatedPhone: string | null = null;
   private clearAuthFn: (() => Promise<void>) | null = null;
 
-  // Incoming message storage
+  // Incoming message storage & Auto-reply
   private messageCache: IncomingMessage[] = []; // RAM — max 200, newest first
   private groupNameCache: Map<string, string> = new Map();
   private messageCallback: ((msg: IncomingMessage) => void) | null = null;
+  private autoReplyEnabled = true;
+  private autoReplyCooldown: Map<string, number> = new Map(); // senderPhone -> timestamp
 
   constructor() {
     this.initSocket().catch((err) => {
@@ -283,6 +285,30 @@ class WhatsAppBotService {
           // Notify server → broadcast to WebSocket clients
           if (this.messageCallback) this.messageCallback(incoming);
 
+          // Instant auto-reply for 1-on-1 personal chats (15-min cooldown per sender to prevent spam)
+          if (!isGroup && this.autoReplyEnabled && this.sock && this.isConnected) {
+            const now = Date.now();
+            const lastReplyTime = this.autoReplyCooldown.get(senderPhone) || 0;
+            const COOLDOWN_MS = 15 * 60 * 1000;
+
+            if (now - lastReplyTime > COOLDOWN_MS) {
+              this.autoReplyCooldown.set(senderPhone, now);
+              const greeting = !isUnknownContact ? `Haanji ${senderName} ji, ` : "";
+              const autoReplyText = `${greeting}Boss abhi busy hain, jaise hi wo aayenge main unko aapka message bol dunga, jaldi hi wo reply denge.`;
+
+              setTimeout(async () => {
+                try {
+                  if (this.sock && this.isConnected) {
+                    await this.sock.sendMessage(remoteJid, { text: autoReplyText });
+                    console.log(`[WhatsAppBot] Auto-reply sent to ${senderName} (+${senderPhone}): "${autoReplyText}"`);
+                  }
+                } catch (replyErr) {
+                  console.error(`[WhatsAppBot] Failed to send auto-reply to ${senderPhone}:`, replyErr);
+                }
+              }, 1200);
+            }
+          }
+
           console.log(
             `[WhatsAppBot] Incoming ${isGroup ? `group(${groupName})` : "personal"} msg from ${senderName}: "${text.substring(0, 80)}"`
           );
@@ -421,12 +447,17 @@ class WhatsAppBotService {
     }
   }
 
+  public setAutoReply(enabled: boolean) {
+    this.autoReplyEnabled = enabled;
+  }
+
   public getStatus() {
     return {
       isConnected: this.isConnected,
       dedicatedPhone: this.dedicatedPhone,
       pairingCode: this.pairingCode,
       qrCodeDataUrl: this.qrCodeDataUrl,
+      autoReplyEnabled: this.autoReplyEnabled,
     };
   }
 }
