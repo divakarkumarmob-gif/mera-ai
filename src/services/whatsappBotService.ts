@@ -22,6 +22,7 @@ export interface IncomingMessage {
   senderPhone: string;
   senderName: string;           // From contacts book (preferred) or WhatsApp displayName
   senderDisplayName: string;    // Raw WhatsApp profile name
+  replyJid: string;             // Correct JID to use when replying (handles @lid senders)
   groupId: string | null;       // @g.us JID if group, else null
   groupName: string | null;     // Human-readable group subject
   isGroup: boolean;
@@ -228,14 +229,38 @@ class WhatsAppBotService {
           if (!text) continue;
 
           const isGroup = remoteJid.endsWith("@g.us");
+          const isLid = remoteJid.endsWith("@lid");
           const senderJid: string = isGroup
-            ? (msg.key.participant || remoteJid)
+            ? (msg.key.participant || msg.key.participantAlt || remoteJid)
             : remoteJid;
-          const senderPhone = (senderJid || "")
+
+          // WhatsApp's newer LID (Linked ID) system means remoteJid/participant
+          // can be an internal ID like "123456@lid" instead of a real phone
+          // number JID ("91XXXXXXXXXX@s.whatsapp.net"). If we blindly strip
+          // digits from a @lid JID we get a fake "phone number" that will
+          // never match a saved contact and can never be sent a message.
+          // Baileys attaches the real phone-number JID as senderPn / participantPn
+          // (or msg.key.remoteJidAlt / participantAlt) when a message arrives
+          // via LID — prefer that for phone extraction and future sends.
+          const realPhoneJid: string | undefined =
+            (msg as any).key?.senderPn ||
+            (msg as any).key?.participantPn ||
+            (isGroup ? (msg as any).key?.participantAlt : (msg as any).key?.remoteJidAlt) ||
+            (!isLid ? senderJid : undefined);
+
+          const senderPhone = (realPhoneJid || senderJid || "")
             .split("@")[0]
             .split(":")[0]
             .replace(/\D/g, "");
           const senderDisplayName: string = msg.pushName || (senderPhone ? `+${senderPhone}` : "Unknown");
+
+          // Keep the raw JID actually usable for a reply. If we only have a
+          // @lid identity and no resolved phone JID, replying must go back
+          // to that same @lid JID — sending to "@s.whatsapp.net" with the
+          // decoded LID digits will silently fail (wrong recipient / no-op).
+          const replyJid: string = realPhoneJid
+            ? `${senderPhone}@s.whatsapp.net`
+            : senderJid;
 
           let groupName: string | null = null;
           if (isGroup) groupName = await this.getGroupName(remoteJid);
@@ -260,6 +285,7 @@ class WhatsAppBotService {
             senderPhone,
             senderName,
             senderDisplayName,
+            replyJid,
             groupId: isGroup ? remoteJid : null,
             groupName,
             isGroup,
@@ -314,7 +340,7 @@ class WhatsAppBotService {
                       isUnknownContact,
                       (incoming as any).relation
                     );
-                    await this.sock.sendMessage(remoteJid, { text: aiReply });
+                    await this.sock.sendMessage(replyJid, { text: aiReply });
                     console.log(`[WhatsAppBot] Smart AI Reply sent to ${senderName} (+${senderPhone}): "${aiReply}"`);
                   }
                 } catch (replyErr) {
