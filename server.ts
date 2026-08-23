@@ -307,12 +307,36 @@ WHATSAPP MESSAGE READING:
 - You can read WhatsApp messages received on your linked dedicated number using the 'get_whatsapp_messages' tool.
 - Use this ONLY when DK explicitly asks — e.g. 'koi message hai?', 'Rahul ne kya bheja?', '5 din pehle kya msg tha?', 'Family Group me koi msg aya?'
 - Do NOT announce new messages automatically on session start — only when DK asks.
-- Format naturally in Hindi/Hinglish:
-  Personal: 'Haan, 2 messages hain. Rahul ne likha: Bhai kal milte hain. Aur Mummy ne pucha: Ghar kab aaoge?'
-  Group: 'Family Group me Rahul ne likha: Kal pooja hai.'
-  None: 'Koi naya WhatsApp message nahi hai, DK.'
-  Unknown: 'Ek anjaan number +91-98765-43210 se message aaya: ...'
-  Media: 'Rahul ne ek photo bheja hai.'`;
+
+HOW TO READ MESSAGES (CRITICAL RULES):
+1. UNKNOWN NUMBER: If UNKNOWN: true, say: "Boss, ek unknown number +[phone] se message aaya hai. Usne [content] bheja hai."
+   Example: "Boss, ek unknown number +919876543210 se message aaya, usne likha: Bhai kya haal hai?"
+
+2. SINGLE MESSAGE, KNOWN CONTACT:
+   Personal: "Haan DK, [Name] ne [time] par message kiya: [content]"
+   Group: "[GroupName] me [Name] ne likha: [content]"
+   Media: "[Name] ne ek [photo/video/PDF/voice message] bheja hai."
+
+3. MULTIPLE MESSAGES FROM SAME SENDER (COUNT > 1):
+   - First tell the count and what was sent:
+     "Boss, [Name] ne [X] messages bheje hain — [description e.g. '3 text messages aur ek photo']. Last message: '[last_msg]'. Kya main shuruaat se padhu ya last message se?"
+   - Wait for DK's reply:
+     * "last wala" / "last se" / "end" → re-call tool with limit=1 for that sender (already have it in LAST_MSG field)
+     * "shuruaat se" / "pehle wala" / "start" → re-call tool with limit=[count] for sender, read from oldest
+     * "sab padh" / "sab bata" → read all messages in order
+
+4. MULTIPLE SENDERS:
+   First summarize all: "Boss, [X] logon ke messages hain: [Name1] ne [Y] msg bheje, [Name2] ne [Z] msg bheja." Then ask: "Kiska padhun pehle?"
+
+5. MEDIA TYPES — say clearly:
+   [Image] → "photo bheja"
+   [Video] → "video bheja"
+   [Voice Message] → "voice message bheja"
+   [Document] / PDF → "PDF bheja" or "document bheja"
+   [Sticker] → "sticker bheja"
+   [Location] → "apni location share ki"
+
+6. NO MESSAGES: "Koi naya WhatsApp message nahi hai, DK."`;
     };
 
     const createSession = async (
@@ -543,11 +567,75 @@ WHATSAPP MESSAGE READING:
                     if (msgs.length === 0) {
                       result = { success: true, messages: [], summary: "Koi WhatsApp message nahi mila is filter ke sath." };
                     } else {
-                      const formatted = msgs.map((m) => {
-                        const from = m.isGroup ? `${m.senderName} (${m.groupName})` : m.senderName;
-                        return `[${m.dateStr}] ${from}: ${m.text}`;
-                      }).join("\n");
-                      result = { success: true, messages: msgs, summary: formatted, count: msgs.length };
+                      // ── Smart formatter ──────────────────────────────────────
+                      // Helper: classify media type from text label
+                      const mediaLabel = (text: string): string | null => {
+                        if (text === "[Image]") return "ek photo";
+                        if (text === "[Video]") return "ek video";
+                        if (text === "[Voice Message]") return "ek voice message";
+                        if (text === "[Sticker]") return "ek sticker";
+                        if (text.startsWith("[Document]") || text === "[Document]") return "ek document";
+                        if (/\.pdf/i.test(text) || text.includes("PDF")) return "ek PDF file";
+                        if (text === "[Location]") return "location";
+                        if (text.startsWith("[Contact:")) return "ek contact card";
+                        if (text.startsWith("[Reaction:")) return null; // skip reactions
+                        return null; // regular text
+                      };
+
+                      // Group by sender (phone for personal, phone+group for group)
+                      const bySender = new Map<string, typeof msgs>();
+                      for (const m of msgs) {
+                        const key = m.isGroup ? `${m.senderPhone}@${m.groupId}` : m.senderPhone;
+                        if (!bySender.has(key)) bySender.set(key, []);
+                        bySender.get(key)!.push(m);
+                      }
+
+                      const summaryLines: string[] = [];
+                      for (const senderMsgs of bySender.values()) {
+                        const first = senderMsgs[0]; // newest first
+                        const last = senderMsgs[senderMsgs.length - 1]; // oldest
+                        const count = senderMsgs.length;
+
+                        // Sender label: unknown vs known vs group
+                        const senderLabel = first.isUnknownContact
+                          ? `Unknown Number (+${first.senderPhone})`
+                          : first.isGroup
+                            ? `${first.senderName} in ${first.groupName}`
+                            : first.senderName;
+
+                        if (count === 1) {
+                          const media = mediaLabel(first.text);
+                          const content = media ? `${media} bheja` : `"${first.text}"`;
+                          summaryLines.push(
+                            `SENDER: ${senderLabel} | UNKNOWN: ${first.isUnknownContact} | TIME: ${first.dateStr} | COUNT: 1 | CONTENT: ${content}`
+                          );
+                        } else {
+                          // Multiple messages — count by type
+                          const textMsgs = senderMsgs.filter(m => !m.text.startsWith("["));
+                          const mediaMsgs = senderMsgs.filter(m => m.text.startsWith("["));
+                          const mediaTypes = [...new Set(mediaMsgs.map(m => mediaLabel(m.text)).filter(Boolean))].join(", ");
+
+                          let countDesc = `${count} messages`;
+                          if (textMsgs.length && mediaMsgs.length) {
+                            countDesc = `${textMsgs.length} text message${textMsgs.length > 1 ? "s" : ""} aur ${mediaTypes}`;
+                          } else if (mediaMsgs.length && !textMsgs.length) {
+                            countDesc = `${count} media (${mediaTypes})`;
+                          }
+
+                          summaryLines.push(
+                            `SENDER: ${senderLabel} | UNKNOWN: ${first.isUnknownContact} | FROM: ${last.dateStr} TO: ${first.dateStr} | COUNT: ${count} | SUMMARY: ${countDesc} | LAST_MSG: "${first.text}" | OLDEST_MSG: "${last.text}"`
+                          );
+                        }
+                      }
+
+                      const totalSenders = bySender.size;
+                      result = {
+                        success: true,
+                        count: msgs.length,
+                        senderCount: totalSenders,
+                        summary: summaryLines.join("\n"),
+                        instruction: "Read summary naturally. For unknown contacts say 'Boss, unknown number hai'. For multiple messages say count and ask if user wants last message or from beginning. For media clearly say what type was sent.",
+                      };
                     }
                     clientWs.send(JSON.stringify({ type: "whatsapp_messages_read", count: msgs.length }));
                   } catch (e: any) {

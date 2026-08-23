@@ -19,14 +19,15 @@ type WASocket = any;
 export interface IncomingMessage {
   id: string;
   senderPhone: string;
-  senderName: string;         // From contacts book (preferred) or WhatsApp displayName
-  senderDisplayName: string;  // Raw WhatsApp profile name
-  groupId: string | null;     // @g.us JID if group, else null
-  groupName: string | null;   // Human-readable group subject
+  senderName: string;           // From contacts book (preferred) or WhatsApp displayName
+  senderDisplayName: string;    // Raw WhatsApp profile name
+  groupId: string | null;       // @g.us JID if group, else null
+  groupName: string | null;     // Human-readable group subject
   isGroup: boolean;
+  isUnknownContact: boolean;    // true = not saved in DK's contacts book
   text: string;
-  timestamp: number;          // ms epoch
-  dateStr: string;            // Formatted IST date string
+  timestamp: number;            // ms epoch
+  dateStr: string;              // Formatted IST date string
   isRead: boolean;
 }
 
@@ -237,9 +238,13 @@ class WhatsAppBotService {
 
           // Resolve name from DK's contacts book
           let senderName = senderDisplayName;
+          let isUnknownContact = true;
           try {
             const contact = await contactsService.findContact(senderPhone);
-            if (contact && contact.id !== "temp") senderName = contact.name;
+            if (contact && contact.id !== "temp") {
+              senderName = contact.name;
+              isUnknownContact = false; // Found in contacts book
+            }
           } catch {}
 
           const ts = msg.messageTimestamp
@@ -254,6 +259,7 @@ class WhatsAppBotService {
             groupId: isGroup ? remoteJid : null,
             groupName,
             isGroup,
+            isUnknownContact,
             text,
             timestamp: ts,
             dateStr: new Date(ts).toLocaleString("en-IN", {
