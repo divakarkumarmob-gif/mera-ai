@@ -37,6 +37,11 @@ export interface CodeAgentPlan {
   files: FilePlanItem[];
 }
 
+export interface GeneratedFileChange {
+  path: string;
+  content: string;
+}
+
 export interface CodeAgentRequest {
   id: string;
   instruction: string;
@@ -44,8 +49,13 @@ export interface CodeAgentRequest {
   createdAt: number;
   updatedAt: number;
   plan?: CodeAgentPlan;
+  generatedChanges?: GeneratedFileChange[];
   branchUrl?: string;
   prUrl?: string;
+  prNumber?: number;
+  commitUrl?: string;
+  commitSha?: string;
+  pushedToMain?: boolean;
   error?: string;
 }
 
@@ -63,9 +73,8 @@ async function callModel(prompt: string): Promise<string | null> {
       const response = await ai.models.generateContent({
         model,
         contents: prompt,
-        config: { responseMimeType: "application/json" },
       });
-      const text = response.text;
+      const text = response.text?.();
       if (text) {
         console.log(`[CodeAgent] Model call succeeded using ${model}`);
         return text;
@@ -81,72 +90,48 @@ async function callModel(prompt: string): Promise<string | null> {
 class CodeAgentService {
   /** Kicks off a new request: creates the Firestore doc, then analyzes in the background. */
   public async createRequest(instruction: string): Promise<string> {
-    const id = Math.random().toString(36).substring(2, 10);
-    const now = Date.now();
+    const id = `req_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const request: CodeAgentRequest = {
       id,
-      instruction: instruction.trim(),
+      instruction,
       status: "analyzing",
-      createdAt: now,
-      updatedAt: now,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
     };
     await requestsCol().doc(id).set(request);
-    this.analyze(id).catch((e) => {
+    this.analyzeAndPlan(id, instruction).catch((e) => {
       console.error(`[CodeAgent] Analysis failed for request ${id}:`, e);
       this.markFailed(id, e?.message || String(e));
     });
     return id;
   }
 
-  /** Stage 1: pick relevant files. Stage 2: diagnostic analysis + plan (no code written yet). */
-  private async analyze(id: string) {
+  /** Stage 1: analyze and generate a plan. */
+  private async analyzeAndPlan(id: string, instruction: string) {
     const doc = await requestsCol().doc(id).get();
+    if (!doc.exists) return;
     const request = doc.data() as CodeAgentRequest;
-    if (!request) return;
 
     const allFiles = await githubService.listRepoFiles();
+    const candidateFiles = allFiles
+      .filter((p) => /\.(ts|tsx|js|jsx|json|html|css|md)$/i.test(p))
+      .slice(0, 80);
 
-    const pickPrompt = `You are a senior engineer picking which files are relevant to investigate for this instruction from DK, the project owner.
-Instruction: "${request.instruction}"
+    const planPrompt = `You are an expert software engineer reviewing a codebase.
+Instruction: "${instruction}"
+Candidate file paths in repo:
+${JSON.stringify(candidateFiles, null, 2)}
 
-Full list of files in the repo:
-${allFiles.join("\n")}
-
-Return ONLY a JSON object: { "relevantFiles": ["path1", "path2", ...] }
-Pick at most 8 files that are most likely relevant. Be selective.`;
-
-    const pickRaw = await callModel(pickPrompt);
-    let relevantFiles: string[] = [];
-    try {
-      relevantFiles = JSON.parse(pickRaw || "{}").relevantFiles || [];
-    } catch {
-      relevantFiles = [];
-    }
-    relevantFiles = relevantFiles.filter((f) => allFiles.includes(f)).slice(0, 8);
-
-    if (relevantFiles.length === 0) {
-      await this.markFailed(id, "Could not identify relevant files in the repo for this instruction.");
-      return;
-    }
-
-    const fileContents = await githubService.getMultipleFiles(relevantFiles);
-    const filesBlock = fileContents
-      .map((f) => `--- FILE: ${f.path} ---\n${f.content}`)
-      .join("\n\n");
-
-    const planPrompt = `You are DK's AI coding agent working on his existing GitHub project. Analyze like a careful senior engineer — diagnostic first, never guess.
-
-DK's instruction: "${request.instruction}"
-
-Relevant file contents:
-${filesBlock}
-
-Return ONLY a JSON object matching this schema:
+Provide a structured plan to fulfill the instruction. Return ONLY valid JSON:
 {
-  "diagnosis": "If this is a bug/debug-style request, the likely root cause based on code analysis. Empty string if this is a feature request, not a bug report.",
-  "summary": "2-4 sentence plain-language summary of what will change and why.",
+  "diagnosis": "If this was a bug report, diagnose the root cause concisely. If a feature request, explain the architecture approach.",
+  "summary": "1-2 sentence overall summary of what changes will be made.",
   "files": [
-    { "path": "exact/file/path.ts", "action": "modify" | "create", "changeSummary": "short description of what changes in this file" }
+    {
+      "path": "exact/path/from/repo.ts",
+      "action": "modify" | "create",
+      "changeSummary": "Concise description of the edit or what this file does."
+    }
   ]
 }
 
@@ -214,7 +199,6 @@ Rules:
     return doc.exists ? (doc.data() as CodeAgentRequest) : null;
   }
 
-  /** Returns the single most recent request still awaiting approval, if any — used to interpret a plain WhatsApp reply. */
   public async getPendingRequest(): Promise<CodeAgentRequest | null> {
     const snap = await requestsCol().where("status", "==", "pending_approval").orderBy("createdAt", "desc").limit(1).get();
     if (snap.empty) return null;
@@ -233,10 +217,6 @@ Rules:
     await requestsCol().doc(id).set({ status: "denied", updatedAt: Date.now() }, { merge: true });
   }
 
-  /**
-   * If there's exactly one request pending approval, interprets a plain WhatsApp
-   * reply as approve/deny. Returns true if it consumed the message this way.
-   */
   public async handleWhatsAppApprovalReply(text: string): Promise<boolean> {
     const pending = await this.getPendingRequest();
     if (!pending) return false;
@@ -250,7 +230,6 @@ Rules:
     return true;
   }
 
-  /** Generates full new content for each planned file and commits them as a PR on a new branch. */
   private async applyChanges(id: string) {
     const request = await this.getRequest(id);
     if (!request || !request.plan) return;
@@ -284,7 +263,7 @@ ${original ? `Current content:\n${original}` : "This is a new file."}`;
     }
 
     const branchName = `friday-agent/${id}`;
-    const { branchUrl, prUrl } = await githubService.commitChangesAsPR(
+    const { branchUrl, prUrl, prNumber } = await githubService.commitChangesAsPR(
       branchName,
       changes,
       `Friday Coding Agent: ${request.instruction}`.slice(0, 200),
@@ -293,16 +272,94 @@ ${original ? `Current content:\n${original}` : "This is a new file."}`;
     );
 
     await requestsCol().doc(id).set(
-      { status: "completed", branchUrl, prUrl, updatedAt: Date.now() },
+      {
+        status: "completed",
+        generatedChanges: changes,
+        branchUrl,
+        prUrl,
+        prNumber: prNumber || null,
+        updatedAt: Date.now(),
+      },
       { merge: true }
     );
 
     const ownerPhone = process.env.OWNER_WHATSAPP_NUMBER;
     if (ownerPhone) {
       await whatsappBotService
-        .sendMessage(ownerPhone, `✅ Changes ready for review: ${prUrl}`)
+        .sendMessage(ownerPhone, `✅ Changes ready for review:\n${prUrl}\n\nClick "Push to main origin" in Dashboard to commit directly.`)
         .catch((e) => console.error("[CodeAgent] Failed to send completion WhatsApp message:", e));
     }
+  }
+
+  /**
+   * Commits the changes directly to the repository's origin base/main branch.
+   */
+  public async pushToMain(id: string): Promise<{ commitUrl: string; commitSha: string; baseBranch: string }> {
+    const request = await this.getRequest(id);
+    if (!request) throw new Error("Request not found");
+
+    let changes = request.generatedChanges;
+
+    if (!changes || changes.length === 0) {
+      if (!request.plan || !request.plan.files.length) {
+        throw new Error("No changes available to push");
+      }
+      // Generate if not cached
+      changes = [];
+      for (const fileItem of request.plan.files) {
+        const original = fileItem.action === "modify" ? await githubService.getFileContent(fileItem.path) : "";
+        const genPrompt = `You are DK's AI coding agent. Generate the COMPLETE new content for this file, applying the planned change. Return ONLY a JSON object: { "content": "...full file content..." } — no markdown fences, no explanation.
+
+Instruction: "${request.instruction}"
+Overall plan summary: ${request.plan.summary}
+This file: ${fileItem.path}
+Change needed: ${fileItem.changeSummary}
+${original ? `Current content:\n${original}` : "This is a new file."}`;
+
+        const raw = await callModel(genPrompt);
+        if (!raw) throw new Error(`Failed to generate content for ${fileItem.path}`);
+        let content: string;
+        try {
+          content = JSON.parse(raw).content;
+        } catch {
+          throw new Error(`Failed to parse generated content for ${fileItem.path}`);
+        }
+        changes.push({ path: fileItem.path, content });
+      }
+    }
+
+    const { commitSha, commitUrl, baseBranch } = await githubService.commitChangesToBase(
+      changes,
+      `Friday Coding Agent: ${request.instruction}`.slice(0, 200)
+    );
+
+    if (request.prNumber) {
+      try {
+        await githubService.mergePR(request.prNumber, `Merge via Friday: ${request.instruction}`);
+      } catch (e) {
+        console.warn("[CodeAgent] PR merge note:", e);
+      }
+    }
+
+    await requestsCol().doc(id).set(
+      {
+        pushedToMain: true,
+        commitUrl,
+        commitSha,
+        status: "completed",
+        updatedAt: Date.now(),
+      },
+      { merge: true }
+    );
+
+    const ownerPhone = process.env.OWNER_WHATSAPP_NUMBER;
+    if (ownerPhone) {
+      await whatsappBotService
+        .sendMessage(ownerPhone, `🚀 Successfully committed changes directly to origin/${baseBranch}:\n${commitUrl}`)
+        .catch((e) => console.error("[CodeAgent] Failed to send pushToMain WhatsApp message:", e));
+    }
+
+    return { commitUrl, commitSha, baseBranch };
   }
 }
 

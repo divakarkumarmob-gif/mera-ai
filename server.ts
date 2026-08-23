@@ -207,6 +207,15 @@ async function startServer() {
     }
   });
 
+  app.post("/api/code-agent/requests/:id/push-to-main", async (req, res) => {
+    try {
+      const result = await codeAgentService.pushToMain(req.params.id);
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "failed_to_push_to_main" });
+    }
+  });
+
   const distPath = path.resolve("dist");
 
   let vite: any;

@@ -97,10 +97,24 @@ class GitHubService {
     return results;
   }
 
+  public async getBaseBranch(): Promise<string> {
+    const { owner, name } = getConfig();
+    if (process.env.GITHUB_BASE_BRANCH) {
+      return process.env.GITHUB_BASE_BRANCH;
+    }
+    try {
+      const repoInfo = await ghFetch(`/repos/${owner}/${name}`);
+      if (repoInfo.default_branch) {
+        return repoInfo.default_branch;
+      }
+    } catch {}
+    return "master";
+  }
+
   /**
    * Creates a new branch off the base branch, commits the given file changes to it
    * (create or update — existing files are overwritten with new full content), and
-   * opens a Pull Request against the base branch. Never writes to the base branch.
+   * opens a Pull Request against the base branch.
    */
   public async commitChangesAsPR(
     branchName: string,
@@ -108,8 +122,9 @@ class GitHubService {
     commitMessage: string,
     prTitle: string,
     prBody: string
-  ): Promise<{ branchUrl: string; prUrl: string }> {
-    const { owner, name, baseBranch } = getConfig();
+  ): Promise<{ branchUrl: string; prUrl: string; prNumber?: number }> {
+    const { owner, name } = getConfig();
+    const baseBranch = await this.getBaseBranch();
 
     if (changes.length === 0) {
       throw new Error("[GitHubService] No file changes to commit.");
@@ -152,27 +167,115 @@ class GitHubService {
       }),
     });
 
-    // 5. Create the new branch pointing at that commit (never touches base branch's ref).
+    // 5. Create the new branch pointing at that commit.
     await ghFetch(`/repos/${owner}/${name}/git/refs`, {
       method: "POST",
       body: JSON.stringify({ ref: `refs/heads/${branchName}`, sha: newCommit.sha }),
     });
 
     // 6. Open a Pull Request for human review/merge.
-    const pr = await ghFetch(`/repos/${owner}/${name}/pulls`, {
-      method: "POST",
-      body: JSON.stringify({
-        title: prTitle,
-        head: branchName,
-        base: baseBranch,
-        body: prBody,
-      }),
-    });
+    let prUrl = `https://github.com/${owner}/${name}/tree/${branchName}`;
+    let prNumber: number | undefined;
+    try {
+      const pr = await ghFetch(`/repos/${owner}/${name}/pulls`, {
+        method: "POST",
+        body: JSON.stringify({
+          title: prTitle,
+          head: branchName,
+          base: baseBranch,
+          body: prBody,
+        }),
+      });
+      prUrl = pr.html_url;
+      prNumber = pr.number;
+    } catch (e) {
+      console.warn("[GitHubService] Pull request creation notice:", e);
+    }
 
     return {
       branchUrl: `https://github.com/${owner}/${name}/tree/${branchName}`,
-      prUrl: pr.html_url,
+      prUrl,
+      prNumber,
     };
+  }
+
+  /**
+   * Commits the given file changes directly to the repository's base/main branch (e.g. master/main)
+   * on GitHub origin.
+   */
+  public async commitChangesToBase(
+    changes: FileChange[],
+    commitMessage: string
+  ): Promise<{ commitSha: string; commitUrl: string; baseBranch: string }> {
+    const { owner, name } = getConfig();
+    const baseBranch = await this.getBaseBranch();
+
+    if (changes.length === 0) {
+      throw new Error("[GitHubService] No file changes to commit.");
+    }
+
+    // 1. Resolve base branch head commit + its tree.
+    const baseRef = await ghFetch(`/repos/${owner}/${name}/git/ref/heads/${encodeURIComponent(baseBranch)}`);
+    const baseCommitSha = baseRef.object.sha;
+    const baseCommit = await ghFetch(`/repos/${owner}/${name}/git/commits/${baseCommitSha}`);
+    const baseTreeSha = baseCommit.tree.sha;
+
+    // 2. Create a blob for each changed file.
+    const treeEntries = [];
+    for (const change of changes) {
+      const blob = await ghFetch(`/repos/${owner}/${name}/git/blobs`, {
+        method: "POST",
+        body: JSON.stringify({ content: change.content, encoding: "utf-8" }),
+      });
+      treeEntries.push({
+        path: change.path,
+        mode: "100644",
+        type: "blob",
+        sha: blob.sha,
+      });
+    }
+
+    // 3. Create a new tree layered on top of the base tree.
+    const newTree = await ghFetch(`/repos/${owner}/${name}/git/trees`, {
+      method: "POST",
+      body: JSON.stringify({ base_tree: baseTreeSha, tree: treeEntries }),
+    });
+
+    // 4. Create the commit.
+    const newCommit = await ghFetch(`/repos/${owner}/${name}/git/commits`, {
+      method: "POST",
+      body: JSON.stringify({
+        message: commitMessage,
+        tree: newTree.sha,
+        parents: [baseCommitSha],
+      }),
+    });
+
+    // 5. Update the base branch reference to point directly to newCommit.
+    await ghFetch(`/repos/${owner}/${name}/git/refs/heads/${encodeURIComponent(baseBranch)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ sha: newCommit.sha, force: false }),
+    });
+
+    return {
+      commitSha: newCommit.sha,
+      commitUrl: `https://github.com/${owner}/${name}/commit/${newCommit.sha}`,
+      baseBranch,
+    };
+  }
+
+  /**
+   * Merges an existing Pull Request into the base branch if open.
+   */
+  public async mergePR(prNumber: number, commitMessage?: string): Promise<{ merged: boolean; sha: string; message: string }> {
+    const { owner, name } = getConfig();
+    return await ghFetch(`/repos/${owner}/${name}/pulls/${prNumber}/merge`, {
+      method: "PUT",
+      body: JSON.stringify({
+        commit_title: commitMessage || "Merge pull request via Friday Coding Agent",
+        merge_method: "merge",
+      }),
+    });
   }
 }
 
