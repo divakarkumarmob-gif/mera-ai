@@ -78,8 +78,20 @@ class WhatsAppBotService {
     dateFilter?: string;
     limit?: number;
   } = {}): Promise<IncomingMessage[]> {
-    const { startTs, endTs } = this.parseDateFilter(params.dateFilter);
-    const isHistoricalQuery = !!params.dateFilter;
+    // When DK asks about a specific sender or group without giving a date,
+    // don't silently narrow to 48 hours — search full history so a real
+    // "last message" or "last 5 messages" query always finds the actual data.
+    const effectiveDateFilter = params.dateFilter || (params.senderName || params.groupName ? "all" : undefined);
+    const { startTs, endTs } = params.dateFilter
+      ? this.parseDateFilter(params.dateFilter)
+      : (effectiveDateFilter === "all" ? { startTs: 0, endTs: Date.now() } : this.parseDateFilter(undefined));
+    // Treat it as a "historical" (Firestore-backed) query whenever a date
+    // filter is given, OR when DK is asking about a specific sender/group.
+    // Relying on the 48-hour RAM cache for a named person/group query is
+    // unreliable — the cache is wiped on every server restart, so a
+    // perfectly real recent message can be missed if it's just outside
+    // the RAM window or the server restarted since it arrived.
+    const isHistoricalQuery = !!params.dateFilter || !!params.senderName || !!params.groupName;
 
     let messages: IncomingMessage[];
 
@@ -179,6 +191,8 @@ class WhatsAppBotService {
     const startOfDay = (d: Date) =>
       new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
     const endOfDay = (d: Date) => startOfDay(d) + 86400000 - 1;
+    const atHour = (d: Date, hour: number, minute = 0) =>
+      new Date(d.getFullYear(), d.getMonth(), d.getDate(), hour, minute, 0).getTime();
 
     if (!dateFilter) return { startTs: now - 48 * 60 * 60 * 1000, endTs: now };
 
@@ -201,6 +215,29 @@ class WhatsAppBotService {
       return { startTs: startOfDay(d), endTs: endOfDay(d) };
     }
 
+    // Time-of-day references (optionally combined with "aaj"/"kal"/"X din pehle").
+    // Resolve the base day first (defaults to today), then narrow to the
+    // requested part of the day.
+    const isMorning = /subah|morning/.test(f);
+    const isAfternoon = /dopahar|afternoon/.test(f);
+    const isEvening = /shaam|evening/.test(f);
+    const isNight = /raat|night/.test(f);
+
+    if (isMorning || isAfternoon || isEvening || isNight) {
+      let baseDay = new Date(today);
+      if (f.includes("kal")) {
+        baseDay.setDate(today.getDate() - 1);
+      } else {
+        const dayOffsetMatch = f.match(/(\d+)\s*(?:din|days?)\s*(?:pehle|ago)/);
+        if (dayOffsetMatch) baseDay.setDate(today.getDate() - parseInt(dayOffsetMatch[1]));
+      }
+
+      if (isMorning) return { startTs: atHour(baseDay, 5), endTs: atHour(baseDay, 12) };
+      if (isAfternoon) return { startTs: atHour(baseDay, 12), endTs: atHour(baseDay, 17) };
+      if (isEvening) return { startTs: atHour(baseDay, 17), endTs: atHour(baseDay, 21) };
+      if (isNight) return { startTs: atHour(baseDay, 21), endTs: endOfDay(baseDay) };
+    }
+
     if (f.includes("week") || f.includes("hafte")) {
       return { startTs: now - 7 * 86400000, endTs: now };
     }
@@ -208,7 +245,18 @@ class WhatsAppBotService {
       return { startTs: now - 30 * 86400000, endTs: now };
     }
 
-    return { startTs: now - 48 * 60 * 60 * 1000, endTs: now };
+    // "last"/"latest"/"abhi" type phrases that don't specify a real date
+    // range should NOT be silently narrowed to 48 hours — that can miss
+    // the actual last message if it's older. Search the full available
+    // history instead so a real result is always found.
+    if (/last|latest|abhi|recent/.test(f)) {
+      return { startTs: 0, endTs: now };
+    }
+
+    // Unrecognized filter text — rather than silently defaulting to a
+    // narrow 48-hour window (which can make historical queries look like
+    // "no messages found"), fall back to searching all available history.
+    return { startTs: 0, endTs: now };
   }
 
   /** Wire up the Baileys messages.upsert listener — called inside initSocket(). */
