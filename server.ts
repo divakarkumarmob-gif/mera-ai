@@ -199,6 +199,21 @@ async function startServer() {
     }
   });
 
+  // Push incoming WhatsApp messages to all connected clients in real-time
+  whatsappBotService.setMessageCallback((msg) => {
+    const payload = JSON.stringify({
+      type: "whatsapp_incoming",
+      sender: msg.senderName,
+      text: msg.text,
+      time: msg.dateStr,
+      isGroup: msg.isGroup,
+      groupName: msg.groupName,
+    });
+    for (const client of connectedClients) {
+      if (client.readyState === client.OPEN) client.send(payload);
+    }
+  });
+
   wss.on("connection", (clientWs) => {
     connectedClients.add(clientWs);
     clientWs.on("close", () => connectedClients.delete(clientWs));
@@ -286,7 +301,18 @@ CONVERSATION GUIDELINES:
         ? "Google Search is enabled: Use it for current events and real-time facts smoothly without announcing it."
         : ""}
 - If DK shares an image, talk about what you see with real human observation.
-- Speak all numbers, units, and equations in conversational spoken words (never raw symbols, math formulas or code).`;
+- Speak all numbers, units, and equations in conversational spoken words (never raw symbols, math formulas or code).
+
+WHATSAPP MESSAGE READING:
+- You can read WhatsApp messages received on your linked dedicated number using the 'get_whatsapp_messages' tool.
+- Use this ONLY when DK explicitly asks — e.g. 'koi message hai?', 'Rahul ne kya bheja?', '5 din pehle kya msg tha?', 'Family Group me koi msg aya?'
+- Do NOT announce new messages automatically on session start — only when DK asks.
+- Format naturally in Hindi/Hinglish:
+  Personal: 'Haan, 2 messages hain. Rahul ne likha: Bhai kal milte hain. Aur Mummy ne pucha: Ghar kab aaoge?'
+  Group: 'Family Group me Rahul ne likha: Kal pooja hai.'
+  None: 'Koi naya WhatsApp message nahi hai, DK.'
+  Unknown: 'Ek anjaan number +91-98765-43210 se message aaya: ...'
+  Media: 'Rahul ne ek photo bheja hai.'`;
     };
 
     const createSession = async (
@@ -375,6 +401,21 @@ CONVERSATION GUIDELINES:
               content: { type: "STRING", description: "Exact note text or todo item" },
             },
             required: ["title", "content"],
+          },
+        },
+        {
+          name: "get_whatsapp_messages",
+          description: "Read WhatsApp messages received on Friday's linked number. Use when DK asks about messages, notifications, or what someone sent — e.g. 'koi message hai?', 'Rahul ne kya likha?', '5 din pehle kya msg tha?'. Can filter by personal/group, sender name, group name, and date.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              messageType: { type: "STRING", description: "Type: 'personal' for 1-on-1 chats, 'group' for group chats, 'all' for both." },
+              senderName: { type: "STRING", description: "Filter by sender name, e.g. 'Rahul'. Optional." },
+              groupName: { type: "STRING", description: "Filter by group name, e.g. 'Family Group'. Optional." },
+              dateFilter: { type: "STRING", description: "Date: 'aaj', 'kal', '5 din pehle', 'pichle hafte'. Blank = last 48 hours." },
+              limit: { type: "NUMBER", description: "Max messages to return. Default 10 personal, 5 group." },
+            },
+            required: ["messageType"],
           },
         },
       ];
@@ -489,6 +530,29 @@ CONVERSATION GUIDELINES:
                   const note = await toolsEngine.addNote(title, content);
                   result = { success: true, message: `Note "${title}" saved to DK's notebook.` };
                   clientWs.send(JSON.stringify({ type: "note_saved", note }));
+                } else if (call.name === "get_whatsapp_messages") {
+                  const { messageType, senderName, groupName, dateFilter, limit } = call.args || {};
+                  try {
+                    const msgs = await whatsappBotService.getMessages({
+                      messageType: messageType || "all",
+                      senderName,
+                      groupName,
+                      dateFilter,
+                      limit: limit ? parseInt(limit) : undefined,
+                    });
+                    if (msgs.length === 0) {
+                      result = { success: true, messages: [], summary: "Koi WhatsApp message nahi mila is filter ke sath." };
+                    } else {
+                      const formatted = msgs.map((m) => {
+                        const from = m.isGroup ? `${m.senderName} (${m.groupName})` : m.senderName;
+                        return `[${m.dateStr}] ${from}: ${m.text}`;
+                      }).join("\n");
+                      result = { success: true, messages: msgs, summary: formatted, count: msgs.length };
+                    }
+                    clientWs.send(JSON.stringify({ type: "whatsapp_messages_read", count: msgs.length }));
+                  } catch (e: any) {
+                    result = { success: false, message: `Could not fetch messages: ${e?.message || e}` };
+                  }
                 }
 
                 functionResponses.push({

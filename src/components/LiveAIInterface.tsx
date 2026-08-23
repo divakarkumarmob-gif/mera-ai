@@ -102,6 +102,8 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const [wakeWordActive, setWakeWordActive] = useState(() => localStorage.getItem('wakeWordActive') !== 'false');
     const [pairingCode, setPairingCode] = useState<string | null>(null);
     const [dueReminder, setDueReminder] = useState<{ title: string; timeString: string } | null>(null);
+    const [whatsappNotif, setWhatsappNotif] = useState<{ sender: string; text: string; isGroup: boolean; groupName?: string | null } | null>(null);
+    const whatsappNotifTimerRef = useRef<any>(null);
     const [inactivityCountdown, setInactivityCountdown] = useState<number | null>(null);
     const [showCaptions, setShowCaptions] = useState(true);
     const [captionText, setCaptionText] = useState('');
@@ -721,6 +723,19 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     // Auto-dismiss the banner after 15s so it doesn't linger forever
                     // if the user doesn't interact with it.
                     setTimeout(() => setDueReminder(null), 15000);
+                } else if (msg.type === 'whatsapp_incoming') {
+                    setWhatsappNotif({
+                        sender: msg.sender || 'Unknown',
+                        text: msg.text || '',
+                        isGroup: !!msg.isGroup,
+                        groupName: msg.groupName,
+                    });
+                    // Auto-dismiss personal messages after 12s, group after 8s
+                    clearTimeout(whatsappNotifTimerRef.current);
+                    whatsappNotifTimerRef.current = setTimeout(
+                        () => setWhatsappNotif(null),
+                        msg.isGroup ? 8000 : 12000
+                    );
                 }
             } catch (err) {
                 console.warn("[LiveAIInterface] Error processing socket message:", err);
@@ -797,6 +812,38 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                                 <span className="text-amber-200 text-sm font-medium truncate">{dueReminder.title}</span>
                             </div>
                             <button onClick={() => setDueReminder(null)} className="text-amber-300/70 hover:text-amber-200 shrink-0">
+                                <X className="h-4 w-4" />
+                            </button>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+
+                <AnimatePresence>
+                    {whatsappNotif && (
+                        <motion.div
+                            initial={{ opacity: 0, y: -10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -10 }}
+                            className={`w-full mb-4 flex items-center justify-between gap-3 px-4 py-3 rounded-2xl ${
+                                whatsappNotif.isGroup
+                                    ? 'bg-blue-500/15 border border-blue-500/40 shadow-[0_0_20px_rgba(59,130,246,0.2)]'
+                                    : 'bg-emerald-500/15 border border-emerald-500/40 shadow-[0_0_20px_rgba(16,185,129,0.2)]'
+                            }`}
+                        >
+                            <div className="flex items-center gap-2 min-w-0">
+                                <span>{whatsappNotif.isGroup ? '👥' : '💬'}</span>
+                                <div className="min-w-0">
+                                    <p className={`text-xs font-bold ${
+                                        whatsappNotif.isGroup ? 'text-blue-300' : 'text-emerald-300'
+                                    }`}>
+                                        {whatsappNotif.isGroup
+                                            ? `${whatsappNotif.sender} (${whatsappNotif.groupName || 'Group'})`
+                                            : whatsappNotif.sender}
+                                    </p>
+                                    <p className="text-slate-200 text-xs truncate max-w-[220px]">{whatsappNotif.text}</p>
+                                </div>
+                            </div>
+                            <button onClick={() => setWhatsappNotif(null)} className="text-slate-400 hover:text-white shrink-0">
                                 <X className="h-4 w-4" />
                             </button>
                         </motion.div>
