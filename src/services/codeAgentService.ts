@@ -14,6 +14,16 @@ import { whatsappBotService } from "./whatsappBotService";
 // ---------------------------------------------------------------------------
 
 const MODEL_CHAIN = ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite"];
+
+// Helper: extract a readable error message from anything the SDK throws
+function extractError(e: any): string {
+  if (typeof e === "string") return e;
+  if (e?.message) return e.message;
+  // SDK sometimes throws a plain object like { error: { code, message } }
+  if (e?.error?.message) return `[${e.error.code}] ${e.error.message}`;
+  if (e?.error) return JSON.stringify(e.error);
+  try { return JSON.stringify(e); } catch { return String(e); }
+}
 const APPROVE_WORDS = new Set(["yes", "ok", "okay", "haan", "yep", "yeah", "y"]);
 
 export type RequestStatus =
@@ -68,22 +78,34 @@ async function callModel(prompt: string): Promise<string | null> {
     return null;
   }
   const ai = new GoogleGenAI({ apiKey });
-  for (const model of MODEL_CHAIN) {
+
+  for (let i = 0; i < MODEL_CHAIN.length; i++) {
+    const model = MODEL_CHAIN[i];
+    console.log(`[CodeAgent] Trying model ${i + 1}/${MODEL_CHAIN.length}: ${model}`);
     try {
       const response = await ai.models.generateContent({
         model,
         contents: prompt,
       });
       const text = response.text?.();
-      if (text) {
-        console.log(`[CodeAgent] Model call succeeded using ${model}`);
+      if (text && text.trim()) {
+        console.log(`[CodeAgent] ✅ Success with ${model}`);
         return text;
       }
+      console.warn(`[CodeAgent] ${model} returned empty response, trying next...`);
     } catch (e: any) {
-      console.error(`[CodeAgent] ${model} failed (${e?.message || e}), trying next model...`);
+      const errMsg = extractError(e);
+      const is503 = errMsg.includes("503") || errMsg.includes("UNAVAILABLE") || errMsg.includes("high demand");
+      console.error(`[CodeAgent] ❌ ${model} failed: ${errMsg}`);
+      if (i < MODEL_CHAIN.length - 1) {
+        // Wait 2s before next attempt to let transient 503 spikes clear
+        const delayMs = is503 ? 2000 : 500;
+        console.log(`[CodeAgent] Waiting ${delayMs}ms before trying next model...`);
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
     }
   }
-  console.error("[CodeAgent] All models in the fallback chain failed.");
+  console.error("[CodeAgent] ❌ All models in the fallback chain failed.");
   return null;
 }
 
