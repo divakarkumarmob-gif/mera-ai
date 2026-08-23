@@ -1,6 +1,7 @@
 import * as BaileysModule from "@whiskeysockets/baileys";
 import pino from "pino";
 import QRCode from "qrcode";
+import { GoogleGenAI } from "@google/genai";
 import { useFirestoreAuthState } from "./whatsappAuthState";
 import { db } from "./firebaseAdmin";
 import { contactsService } from "./contactsService";
@@ -46,7 +47,7 @@ class WhatsAppBotService {
   private groupNameCache: Map<string, string> = new Map();
   private messageCallback: ((msg: IncomingMessage) => void) | null = null;
   private autoReplyEnabled = true;
-  private autoReplyCooldown: Map<string, number> = new Map(); // senderPhone -> timestamp
+  private autoReplyCooldown: Map<string, { count: number; resetTime: number; lastReply: number }> = new Map();
 
   constructor() {
     this.initSocket().catch((err) => {
@@ -285,27 +286,41 @@ class WhatsAppBotService {
           // Notify server → broadcast to WebSocket clients
           if (this.messageCallback) this.messageCallback(incoming);
 
-          // Instant auto-reply for 1-on-1 personal chats (15-min cooldown per sender to prevent spam)
+          // ── Smart AI Auto-Reply for 1-on-1 Personal Chats ──────────────────────────
           if (!isGroup && this.autoReplyEnabled && this.sock && this.isConnected) {
             const now = Date.now();
-            const lastReplyTime = this.autoReplyCooldown.get(senderPhone) || 0;
-            const COOLDOWN_MS = 15 * 60 * 1000;
+            const senderKey = senderPhone || remoteJid;
+            const tracker = this.autoReplyCooldown.get(senderKey) || { count: 0, resetTime: now + 30 * 60 * 1000, lastReply: 0 };
 
-            if (now - lastReplyTime > COOLDOWN_MS) {
-              this.autoReplyCooldown.set(senderPhone, now);
-              const greeting = !isUnknownContact ? `Haanji ${senderName} ji, ` : "";
-              const autoReplyText = `${greeting}Boss abhi busy hain, jaise hi wo aayenge main unko aapka message bol dunga, jaldi hi wo reply denge.`;
+            // Reset counter every 30 minutes
+            if (now > tracker.resetTime) {
+              tracker.count = 0;
+              tracker.resetTime = now + 30 * 60 * 1000;
+            }
+
+            // Max 8 AI replies per 30 mins, and at least 6 seconds between replies
+            if (tracker.count < 8 && (now - tracker.lastReply > 6000)) {
+              tracker.count++;
+              tracker.lastReply = now;
+              this.autoReplyCooldown.set(senderKey, tracker);
 
               setTimeout(async () => {
                 try {
                   if (this.sock && this.isConnected) {
-                    await this.sock.sendMessage(remoteJid, { text: autoReplyText });
-                    console.log(`[WhatsAppBot] Auto-reply sent to ${senderName} (+${senderPhone}): "${autoReplyText}"`);
+                    const aiReply = await this.generateSmartAutoReply(
+                      senderName,
+                      senderPhone,
+                      text,
+                      isUnknownContact,
+                      (incoming as any).relation
+                    );
+                    await this.sock.sendMessage(remoteJid, { text: aiReply });
+                    console.log(`[WhatsAppBot] Smart AI Reply sent to ${senderName} (+${senderPhone}): "${aiReply}"`);
                   }
                 } catch (replyErr) {
-                  console.error(`[WhatsAppBot] Failed to send auto-reply to ${senderPhone}:`, replyErr);
+                  console.error(`[WhatsAppBot] Failed to send AI auto-reply to ${senderPhone}:`, replyErr);
                 }
-              }, 1200);
+              }, 1500);
             }
           }
 
@@ -317,6 +332,72 @@ class WhatsAppBotService {
         }
       }
     });
+  }
+
+  /**
+   * Generates a smart, human-like AI auto-reply for WhatsApp messages using Gemini.
+   * Handles: identity ("who made you / who are you"), privacy guard for DK's data, normal chat.
+   */
+  private async generateSmartAutoReply(
+    senderName: string,
+    senderPhone: string,
+    messageText: string,
+    isUnknownContact: boolean,
+    relation?: string
+  ): Promise<string> {
+    try {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        const greeting = !isUnknownContact ? `Haanji ${senderName} ji, ` : "";
+        return `${greeting}Boss (DK) abhi busy hain, jaise hi wo aayenge main unko aapka message bol dunga, jaldi hi wo reply denge.`;
+      }
+
+      const ai = new GoogleGenAI({ apiKey });
+      const prompt = `You are Friday, the highly intelligent, polite, warm, witty and deeply human-like personal voice AI companion of DK (Divakar Kumar).
+You are managing DK's personal WhatsApp account while DK is away/busy.
+
+Incoming WhatsApp message details:
+- Sender Name: "${senderName}"
+- Contact Status: ${isUnknownContact ? "Unknown Contact (Not saved in phonebook)" : `Saved in phonebook${relation ? ` (Relationship: ${relation})` : ""}`}
+- Sender Phone: +${senderPhone}
+- Message Received: "${messageText}"
+
+YOUR RULES FOR GENERATING THE WHATSAPP REPLY:
+1. IDENTITY & CREATOR:
+   - If they ask who you are, your name, who made you, or whose number this is (e.g. "tumhara naam kya hai?", "kaun ho tum?", "tumhe kisne banaya?", "ye kiska number hai?"):
+     Reply warmly: "Main Friday hoon — DK Boss (Divakar Kumar) ka personal AI assistant! DK abhi thode busy hain. Aap bataiye, aapko kya kaam hai ya kya janna hai?"
+   - Always clarify that you are DK's AI contact assistant.
+
+2. PRIVACY & SECURITY GUARD (STRICT ABSOLUTE RULE):
+   - If they ask for DK's private or personal confidential data (such as personal home address, bank account/money details, passwords, confidential personal life secrets, private schedule):
+     STRICTLY REFUSE politely: "Yeh personal jaankari main share nahi kar sakti. Iska jawab sirf DK boss hi de sakte hain. Maine unko aapka message note kar diya hai."
+
+3. GENERAL & FRIENDLY CONVERSATIONS:
+   - For greetings ("Hi", "Hello", "Kaise ho"): Greet back warmly in friendly Hinglish, let them know DK is occupied, and ask how you can assist or take a note.
+   - For normal/general questions (weather, general help, normal knowledge): Answer politely, smartly and helpfully in 1-2 natural sentences.
+
+4. PASSING MESSAGES TO DK:
+   - If they leave a message, request a callback, or ask when DK will be available:
+     Assure them: "Maine aapka message note kar liya hai, jaise hi DK aayenge main unko bol dungi aur wo jaldi hi reply denge."
+
+5. TONE & STYLE:
+   - Natural Hindi/Hinglish (mix of Hindi and English).
+   - Crisp, polite, human-like (maximum 2-3 short sentences).
+   - Return ONLY the exact message text to send on WhatsApp. Do not include quotes, prefixes like 'Friday:' or markdown headers.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
+      });
+
+      const reply = response.text?.trim();
+      if (reply) return reply;
+    } catch (err) {
+      console.error("[WhatsAppBot] Gemini smart auto-reply failed, using fallback:", err);
+    }
+
+    const greeting = !isUnknownContact ? `Haanji ${senderName} ji, ` : "";
+    return `${greeting}Boss (DK) abhi busy hain, jaise hi wo aayenge main unko aapka message bol dunga, jaldi hi wo reply denge.`;
   }
 
   // ── Existing public methods ────────────────────────────────────────────────
