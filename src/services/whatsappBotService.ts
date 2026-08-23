@@ -410,8 +410,18 @@ class WhatsAppBotService {
 
   /**
    * Generates a smart, human-like AI auto-reply for WhatsApp messages using Gemini.
+   * Tries a chain of models (newest/best first) so a single model being
+   * overloaded, rate-limited, or briefly down doesn't fall back to the
+   * generic "DK is busy" text — only falls back if EVERY model fails.
    * Handles: identity ("who made you / who are you"), privacy guard for DK's data, normal chat.
    */
+  private static readonly AUTO_REPLY_MODEL_CHAIN = [
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+  ];
+
   private async generateSmartAutoReply(
     senderName: string,
     senderPhone: string,
@@ -419,15 +429,19 @@ class WhatsAppBotService {
     isUnknownContact: boolean,
     relation?: string
   ): Promise<string> {
-    try {
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) {
-        const greeting = !isUnknownContact ? `Haanji ${senderName} ji, ` : "";
-        return `${greeting}Boss (DK) abhi busy hain, jaise hi wo aayenge main unko aapka message bol dunga, jaldi hi wo reply denge.`;
-      }
+    const fallbackText = () => {
+      const greeting = !isUnknownContact ? `Haanji ${senderName} ji, ` : "";
+      return `${greeting}Boss (DK) abhi busy hain, jaise hi wo aayenge main unko aapka message bol dunga, jaldi hi wo reply denge.`;
+    };
 
-      const ai = new GoogleGenAI({ apiKey });
-      const prompt = `You are Friday, the highly intelligent, polite, warm, witty and deeply human-like personal voice AI companion of DK (Divakar Kumar).
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      console.error("[WhatsAppBot] GEMINI_API_KEY not set — cannot generate smart auto-reply, using fallback.");
+      return fallbackText();
+    }
+
+    const ai = new GoogleGenAI({ apiKey });
+    const prompt = `You are Friday, the highly intelligent, polite, warm, witty and deeply human-like personal voice AI companion of DK (Divakar Kumar).
 You are managing DK's personal WhatsApp account while DK is away/busy.
 
 Incoming WhatsApp message details:
@@ -459,19 +473,31 @@ YOUR RULES FOR GENERATING THE WHATSAPP REPLY:
    - Crisp, polite, human-like (maximum 2-3 short sentences).
    - Return ONLY the exact message text to send on WhatsApp. Do not include quotes, prefixes like 'Friday:' or markdown headers.`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: prompt,
-      });
+    const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T> =>
+      Promise.race([
+        p,
+        new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms)),
+      ]);
 
-      const reply = response.text?.trim();
-      if (reply) return reply;
-    } catch (err) {
-      console.error("[WhatsAppBot] Gemini smart auto-reply failed, using fallback:", err);
+    for (const model of WhatsAppBotService.AUTO_REPLY_MODEL_CHAIN) {
+      try {
+        const response = await withTimeout(
+          ai.models.generateContent({ model, contents: prompt }),
+          8000
+        );
+        const reply = response.text?.trim();
+        if (reply) {
+          console.log(`[WhatsAppBot] Auto-reply generated using ${model}`);
+          return reply;
+        }
+        console.warn(`[WhatsAppBot] ${model} returned an empty reply, trying next model...`);
+      } catch (err: any) {
+        console.error(`[WhatsAppBot] ${model} failed for auto-reply (${err?.message || err}), trying next model...`);
+      }
     }
 
-    const greeting = !isUnknownContact ? `Haanji ${senderName} ji, ` : "";
-    return `${greeting}Boss (DK) abhi busy hain, jaise hi wo aayenge main unko aapka message bol dunga, jaldi hi wo reply denge.`;
+    console.error("[WhatsAppBot] All models in the fallback chain failed — using hardcoded fallback text.");
+    return fallbackText();
   }
 
   // ── Existing public methods ────────────────────────────────────────────────
