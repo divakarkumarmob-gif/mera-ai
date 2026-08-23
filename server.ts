@@ -9,7 +9,7 @@ dotenv.config();
 
 import cors from "cors";
 import rateLimit from "express-rate-limit";
-import { GoogleGenAI, Modality } from "@google/genai";
+import { GoogleGenAI, Modality, StartSensitivity, EndSensitivity } from "@google/genai";
 import { memoryEngine } from "./src/services/memoryEngine";
 import { toolsEngine } from "./src/services/toolsEngine";
 import { reminderScheduler } from "./src/services/reminderScheduler";
@@ -263,8 +263,9 @@ IMMEDIATE ANSWER TRIGGER ("JAWAB DO" / "REPLY KARO"):
 
 CORE WAKE & SLEEP BEHAVIORS:
 1. WAKE UP & GREETING:
-   - When DK starts the session or says "Hello Friday" / "Hey Friday" / "Hi Friday", greet him warmly:
-     "Yes DK, main sun raha hoon! Kahiye, kya chal raha hai?" or "Haan DK, bataiye, main aapki kya madad kar sakti hoon?"
+   - When DK starts the session or says "Hello Friday" / "Hey Friday" / "Hi Friday", greet him warmly with something short like:
+     "Haan boss, main sun rahi hoon! Bataiye kaise help karoon?" or "Yes boss, main sun rahi hoon, kahiye kya chal raha hai?"
+   - Keep this opening line SHORT (one sentence) — DK needs to actually hear the start of it clearly, so don't front-load it with a long sentence.
    - Be enthusiastic, present, and ready to assist him with anything.
 
 2. STOP / SLEEP / CHUP HO JAO (SHUTDOWN COMMANDS):
@@ -516,6 +517,20 @@ CONVERSATION GUIDELINES:
           },
           thinkingConfig: {
             thinkingLevel: (["low", "medium", "high"].includes(effectiveThinking) ? effectiveThinking : "high") as any,
+          },
+          // VAD tuning: previously left on Gemini's generic defaults. Tuned
+          // here instead of guessed — high start-sensitivity so it notices
+          // DK starting to speak quickly, but LOW end-sensitivity + a
+          // moderate silence window so a normal mid-sentence pause isn't
+          // mistaken for "DK stopped talking", which was a contributor to
+          // the choppy audio / falsely-interrupted turns.
+          realtimeInputConfig: {
+            automaticActivityDetection: {
+              startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_HIGH,
+              endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_LOW,
+              silenceDurationMs: 600,
+              prefixPaddingMs: 200,
+            },
           },
           tools: [
             ...(googleSearchMode ? [{ googleSearch: {} }] : []),
