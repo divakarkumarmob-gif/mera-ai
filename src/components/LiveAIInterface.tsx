@@ -245,6 +245,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const isWarningSpokenRef = useRef<boolean>(false);
     const speakingCooldownUntilRef = useRef<number>(0);
     const lastUserVoiceDetectedTimeRef = useRef<number>(0);
+    const wasGateOpenRef = useRef<boolean>(false);
     const hasSpokenInTurnRef = useRef<boolean>(false);
     const pendingImagePayloadsRef = useRef<{ id: string; file: File; caption?: string }[]>([]);
     const selectedImagesRef = useRef(selectedImages);
@@ -478,7 +479,16 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
             if (isGateOpen) {
                 ws.current?.send(JSON.stringify({ audio: pcmToBase64(pcm) }));
                 setVolume(Math.min(100, rms * 2.2));
+                wasGateOpenRef.current = true;
             } else {
+                // Gate just closed (user stopped talking) — tell Gemini explicitly
+                // that the audio stream paused so its server-side VAD flushes and
+                // finalizes the turn now, instead of silently waiting forever for
+                // more audio (which is why replies were stuck on "Listening...").
+                if (wasGateOpenRef.current) {
+                    wasGateOpenRef.current = false;
+                    ws.current?.send(JSON.stringify({ type: 'audio_stream_end' }));
+                }
                 // Ignore background noise / fan / ambient room sounds
                 setVolume(0);
             }
