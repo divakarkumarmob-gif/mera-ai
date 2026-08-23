@@ -386,7 +386,25 @@ CONVERSATION GUIDELINES:
             const transcript = message.serverContent?.outputTranscription?.text;
             const inputTranscript = message.serverContent?.inputTranscription?.text;
 
-            if (audio) clientWs.send(JSON.stringify({ audio }));
+            // ── Bug Fix 1: Forward thinking state to client ──────────────
+            // Gemini Live emits a generationComplete=false / no audio frame
+            // while it is "thinking". Detect this and push a thinking event
+            // so the front-end status can show "Thinking..." and, critically,
+            // get cleared to "Listening..." when the turn actually completes.
+            const isThinkingFrame =
+              !audio && !transcript && !inputTranscript &&
+              message.serverContent?.modelTurn !== undefined &&
+              !message.serverContent?.turnComplete;
+
+            if (isThinkingFrame) {
+              clientWs.send(JSON.stringify({ type: "thinking" }));
+            }
+
+            if (audio) {
+              // AI started speaking — clear thinking state on client
+              clientWs.send(JSON.stringify({ type: "speaking" }));
+              clientWs.send(JSON.stringify({ audio }));
+            }
             if (transcript) {
               clientWs.send(JSON.stringify({ text: transcript }));
               outputTranscriptBuffer += transcript;
@@ -629,6 +647,8 @@ CONVERSATION GUIDELINES:
           console.error("[Server] Error closing Gemini Live session on client disconnect:", e)
         );
       }
+      // Bug Fix 3: Reset thinking flag on disconnect so mic is never stuck muted
+      try { clientWs.send(JSON.stringify({ interrupted: true })); } catch {}
       memoryEngine.finalizeSession(sessionId, ai);
     });
   });

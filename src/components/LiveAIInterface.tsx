@@ -571,6 +571,20 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 } else if (msg.type === 'thinking') {
                     isAiThinkingRef.current = true;
                     setStatus("Thinking...");
+                    // Bug Fix 2: Safety escape — if AI is stuck in thinking for >30s,
+                    // force-clear it so the mic is not permanently muted.
+                    clearTimeout((window as any).__thinkingTimeout);
+                    (window as any).__thinkingTimeout = setTimeout(() => {
+                        if (isAiThinkingRef.current) {
+                            console.warn('[Friday] Thinking timeout — forcing Listening state');
+                            isAiThinkingRef.current = false;
+                            setStatus('Listening...');
+                        }
+                    }, 30000);
+                } else if (msg.type === 'speaking') {
+                    // AI has audio coming — clear thinking flag immediately
+                    isAiThinkingRef.current = false;
+                    clearTimeout((window as any).__thinkingTimeout);
                 } else if (msg.text) {
                     if (!captionTurnStartedRef.current) {
                         captionTurnStartedRef.current = true;
