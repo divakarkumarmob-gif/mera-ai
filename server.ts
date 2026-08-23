@@ -2,7 +2,6 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import * as path from "path";
 import http from "http";
-import fs from "fs";
 import { WebSocketServer } from "ws";
 import dotenv from "dotenv";
 
@@ -10,13 +9,13 @@ dotenv.config();
 
 import cors from "cors";
 import rateLimit from "express-rate-limit";
-import crypto from "crypto";
 import { GoogleGenAI, Modality } from "@google/genai";
 import { memoryEngine } from "./src/services/memoryEngine";
 import { toolsEngine } from "./src/services/toolsEngine";
-import { whatsappService } from "./src/services/whatsappService";
+import { reminderScheduler } from "./src/services/reminderScheduler";
 import { contactsService } from "./src/services/contactsService";
 import { whatsappBotService } from "./src/services/whatsappBotService";
+import { saveMessage, getHistory, clearHistory } from "./src/services/historyService";
 
 const PORT = Number(process.env.PORT) || 3000;
 const isProduction = process.env.NODE_ENV === "production";
@@ -28,92 +27,10 @@ if (!process.env.GEMINI_API_KEY) {
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "placeholder-gemini-key" });
 
 // ---------------------------------------------------------------------------
-// Encrypted chat history
+// Chat history is now handled by ./src/services/historyService.ts, which
+// stores encrypted (AES-256-GCM) messages in Firestore instead of a local
+// data/history.json file. saveMessage/getHistory/clearHistory are async now.
 // ---------------------------------------------------------------------------
-function resolveEncryptionKey(): Buffer {
-  const raw = process.env.ENCRYPTION_KEY;
-  if (raw && raw.length >= 32) {
-    return crypto.createHash("sha256").update(raw).digest();
-  }
-  return crypto.randomBytes(32);
-}
-
-const ENCRYPTION_KEY = resolveEncryptionKey();
-
-function encrypt(text: string): string {
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv("aes-256-gcm", ENCRYPTION_KEY, iv);
-  const ciphertext = Buffer.concat([cipher.update(text, "utf8"), cipher.final()]);
-  const authTag = cipher.getAuthTag();
-  return Buffer.concat([iv, authTag, ciphertext]).toString("base64");
-}
-
-function decrypt(payload: string): string {
-  try {
-    const buf = Buffer.from(payload, "base64");
-    const iv = buf.subarray(0, 12);
-    const authTag = buf.subarray(12, 28);
-    const ciphertext = buf.subarray(28);
-    const decipher = crypto.createDecipheriv("aes-256-gcm", ENCRYPTION_KEY, iv);
-    decipher.setAuthTag(authTag);
-    return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
-  } catch (e) {
-    return "";
-  }
-}
-
-interface StoredMessage {
-  id: number;
-  sender: "user" | "ai";
-  ciphertext: string;
-  created_at: number;
-}
-
-const dbDir = path.resolve("data");
-try {
-  fs.mkdirSync(dbDir, { recursive: true });
-} catch {}
-const dbPath = path.join(dbDir, "history.json");
-
-let messagesStore: StoredMessage[] = [];
-try {
-  if (fs.existsSync(dbPath)) {
-    const raw = fs.readFileSync(dbPath, "utf-8");
-    messagesStore = JSON.parse(raw);
-  }
-} catch {
-  messagesStore = [];
-}
-
-function persistStore() {
-  try {
-    fs.writeFileSync(dbPath, JSON.stringify(messagesStore, null, 2), "utf-8");
-  } catch (err) {
-    console.error("Failed to persist history:", err);
-  }
-}
-
-function saveMessage(sender: "user" | "ai", text: string) {
-  if (!text || !text.trim()) return;
-  const newMsg: StoredMessage = {
-    id: messagesStore.length + 1,
-    sender,
-    ciphertext: encrypt(text.trim()),
-    created_at: Date.now()
-  };
-  messagesStore.push(newMsg);
-  persistStore();
-}
-
-function getHistory(limit = 200) {
-  const slice = messagesStore.slice(-limit);
-  return slice.map((r) => ({ id: r.id, sender: r.sender, text: decrypt(r.ciphertext), timestamp: r.created_at }));
-}
-
-function clearHistory() {
-  messagesStore = [];
-  persistStore();
-}
 
 // ---------------------------------------------------------------------------
 // Express app
@@ -128,78 +45,99 @@ async function startServer() {
 
   app.get("/health", (_req, res) => res.json({ ok: true }));
 
-  app.get("/api/history", (_req, res) => {
+  app.get("/api/history", async (req, res) => {
     try {
-      res.json({ messages: getHistory() });
+      // Default: only the most recent 50 messages (fast, low decrypt cost).
+      // Client can pass ?before=<timestamp> to page further back when the
+      // user actually asks for older history (e.g. scrolling up).
+      const limit = req.query.limit ? Math.min(Number(req.query.limit) || 50, 200) : 50;
+      const before = req.query.before ? Number(req.query.before) : undefined;
+      res.json({ messages: await getHistory(limit, before) });
     } catch (e) {
       console.error("Failed to load history:", e);
       res.status(500).json({ error: "failed_to_load_history" });
     }
   });
 
-  app.post("/api/history/clear", (_req, res) => {
+  app.post("/api/history/clear", async (_req, res) => {
     try {
-      clearHistory();
+      await clearHistory();
       res.json({ ok: true });
     } catch (e) {
       res.status(500).json({ error: "failed_to_clear_history" });
     }
   });
 
-  app.get("/api/memory", (_req, res) => {
+  app.get("/api/memory", async (_req, res) => {
     try {
-      res.json(memoryEngine.getMemories());
+      res.json(await memoryEngine.getMemories());
     } catch (e) {
       res.status(500).json({ error: "failed_to_get_memory" });
     }
   });
 
-  app.post("/api/memory/clear", (_req, res) => {
+  app.post("/api/memory/clear", async (_req, res) => {
     try {
-      memoryEngine.clearAll();
+      await memoryEngine.clearAll();
       res.json({ ok: true });
     } catch (e) {
       res.status(500).json({ error: "failed_to_clear_memory" });
     }
   });
 
-  app.post("/api/memory/pin", (req, res) => {
+  app.post("/api/memory/pin", async (req, res) => {
     try {
       const { fact } = req.body;
-      if (fact) memoryEngine.addPinnedMemory(fact);
+      if (fact) await memoryEngine.addPinnedMemory(fact);
       res.json({ ok: true });
     } catch (e) {
       res.status(500).json({ error: "failed_to_pin_memory" });
     }
   });
 
-  app.post("/api/memory/vault", (req, res) => {
+  app.post("/api/memory/vault", async (req, res) => {
     try {
       const { category, exactFact } = req.body;
-      if (exactFact) memoryEngine.addPersonalVaultFact(category, exactFact);
+      if (exactFact) await memoryEngine.addPersonalVaultFact(category, exactFact);
       res.json({ ok: true });
     } catch (e) {
       res.status(500).json({ error: "failed_to_save_vault" });
     }
   });
 
-  app.get("/api/reminders", (_req, res) => {
-    res.json({ reminders: toolsEngine.getReminders() });
+  app.get("/api/reminders", async (_req, res) => {
+    try {
+      res.json({ reminders: await toolsEngine.getReminders() });
+    } catch (e) {
+      res.status(500).json({ error: "failed_to_get_reminders" });
+    }
   });
 
-  app.get("/api/notes", (_req, res) => {
-    res.json({ notes: toolsEngine.getNotes() });
+  app.get("/api/notes", async (_req, res) => {
+    try {
+      res.json({ notes: await toolsEngine.getNotes() });
+    } catch (e) {
+      res.status(500).json({ error: "failed_to_get_notes" });
+    }
   });
 
-  app.get("/api/contacts", (_req, res) => {
-    res.json({ contacts: contactsService.getAllContacts() });
+  app.get("/api/contacts", async (_req, res) => {
+    try {
+      res.json({ contacts: await contactsService.getAllContacts() });
+    } catch (e) {
+      res.status(500).json({ error: "failed_to_get_contacts" });
+    }
   });
 
-  app.post("/api/contacts", (req, res) => {
+  app.post("/api/contacts", async (req, res) => {
     const { name, phone, relation } = req.body;
     if (name && phone) {
-      const entry = contactsService.saveContact(name, phone, relation);
-      res.json({ ok: true, contact: entry });
+      try {
+        const entry = await contactsService.saveContact(name, phone, relation);
+        res.json({ ok: true, contact: entry });
+      } catch (e) {
+        res.status(500).json({ error: "failed_to_save_contact" });
+      }
     } else {
       res.status(400).json({ error: "name_and_phone_required" });
     }
@@ -248,20 +186,38 @@ async function startServer() {
   const httpServer = http.createServer(app);
   const wss = new WebSocketServer({ server: httpServer, path: "/live" });
 
+  // Track currently-connected live-voice clients so the reminder scheduler
+  // can push due reminders to whichever app instance(s) are open right now.
+  const connectedClients = new Set<import("ws").WebSocket>();
+
+  reminderScheduler.start((reminder) => {
+    const payload = JSON.stringify({ type: "reminder_due", reminder });
+    for (const client of connectedClients) {
+      if (client.readyState === client.OPEN) {
+        client.send(payload);
+      }
+    }
+  });
+
   wss.on("connection", (clientWs) => {
+    connectedClients.add(clientWs);
+    clientWs.on("close", () => connectedClients.delete(clientWs));
+
     let currentSession: any;
     let currentSessionToken = 0;
     const sessionId = Math.random().toString(36).substring(2, 9);
     memoryEngine.startSession(sessionId);
 
-    const buildSystemInstruction = (
+    const buildSystemInstruction = async (
       thinkingLevel: string,
       accurateMode: boolean,
       answerLength: string,
       googleSearchMode: boolean
     ) => {
-      const memoryContext = memoryEngine.compileMemoryPrompt();
-      const contactsList = contactsService.compileContactsForPrompt();
+      const [memoryContext, contactsList] = await Promise.all([
+        memoryEngine.compileMemoryPrompt(),
+        contactsService.compileContactsForPrompt(),
+      ]);
 
       return `YOU ARE FRIDAY: The highly advanced, ultra-intelligent, warm, witty, and deeply human-like personal voice AI companion of DK.
 
@@ -340,7 +296,7 @@ CONVERSATION GUIDELINES:
       googleSearchMode: boolean
     ) => {
       const effectiveThinking = accurateMode || googleSearchMode ? "high" : thinkingLevel;
-      const systemInstruction = buildSystemInstruction(effectiveThinking, accurateMode, answerLength, googleSearchMode);
+      const systemInstruction = await buildSystemInstruction(effectiveThinking, accurateMode, answerLength, googleSearchMode);
 
       let inputTranscriptBuffer = "";
       let outputTranscriptBuffer = "";
@@ -444,11 +400,17 @@ CONVERSATION GUIDELINES:
             if (message.serverContent?.turnComplete) {
               clientWs.send(JSON.stringify({ turnComplete: true }));
               if (inputTranscriptBuffer.trim()) {
-                saveMessage("user", inputTranscriptBuffer);
+                // Fire-and-forget: don't block the realtime audio/transcript
+                // pipeline on a Firestore write, but do log failures.
+                saveMessage("user", inputTranscriptBuffer).catch((e) =>
+                  console.error("[Server] Failed to save user message:", e)
+                );
                 memoryEngine.recordMessage(sessionId, "user", inputTranscriptBuffer);
               }
               if (outputTranscriptBuffer.trim()) {
-                saveMessage("ai", outputTranscriptBuffer);
+                saveMessage("ai", outputTranscriptBuffer).catch((e) =>
+                  console.error("[Server] Failed to save AI message:", e)
+                );
                 memoryEngine.recordMessage(sessionId, "ai", outputTranscriptBuffer);
               }
               inputTranscriptBuffer = "";
@@ -465,27 +427,22 @@ CONVERSATION GUIDELINES:
                 if (call.name === "add_custom_skill_or_rule") {
                   const { skillName, ruleInstruction, triggerPhrase } = call.args || {};
                   const fact = `Rule/Skill: "${skillName}" -> ${ruleInstruction}${triggerPhrase ? ` (When: ${triggerPhrase})` : ""}`;
-                  memoryEngine.addPersonalVaultFact("custom_skill", fact);
+                  await memoryEngine.addPersonalVaultFact("custom_skill", fact);
                   result = { success: true, message: `Skill "${skillName}" successfully integrated into Friday's brain!` };
                   clientWs.send(JSON.stringify({ type: "skill_added", skill: { skillName, ruleInstruction } }));
                 } else if (call.name === "save_contact") {
                   const { contactName, phoneNumber, relation } = call.args || {};
-                  const entry = contactsService.saveContact(contactName, phoneNumber, relation);
+                  const entry = await contactsService.saveContact(contactName, phoneNumber, relation);
                   result = { success: true, message: `Contact "${contactName}" (+${entry.phone}) successfully saved to DK's contacts book!` };
                   clientWs.send(JSON.stringify({ type: "contact_saved", contact: entry }));
                 } else if (call.name === "send_whatsapp_to_contact") {
                   const { contactNameOrPhone, messageText } = call.args || {};
-                  const contact = contactsService.findContact(contactNameOrPhone);
+                  const contact = await contactsService.findContact(contactNameOrPhone);
                   const targetPhone = contact ? contact.phone : contactNameOrPhone.replace(/[\s\-\(\)\+]/g, "");
 
-                  // Try dedicated WhatsApp bot first, fallback to background gateway
-                  const botStatus = whatsappBotService.getStatus();
-                  let sendRes: any;
-                  if (botStatus.isConnected) {
-                    sendRes = await whatsappBotService.sendMessage(targetPhone, messageText);
-                  } else {
-                    sendRes = await whatsappService.sendBackgroundMessage(messageText, targetPhone);
-                  }
+                  // Single WhatsApp path: the dedicated Baileys bot (linked via
+                  // QR code or 8-digit pairing code in the WhatsApp Pair modal).
+                  const sendRes = await whatsappBotService.sendMessage(targetPhone, messageText);
 
                   result = {
                     success: sendRes.success,
@@ -505,12 +462,12 @@ CONVERSATION GUIDELINES:
                   }
                 } else if (call.name === "set_reminder") {
                   const { title, timeString, durationMinutes } = call.args || {};
-                  const reminder = toolsEngine.addReminder(title, timeString, durationMinutes);
+                  const reminder = await toolsEngine.addReminder(title, timeString, durationMinutes);
                   result = { success: true, message: `Reminder set: "${title}" for ${timeString || `${durationMinutes}m`}` };
                   clientWs.send(JSON.stringify({ type: "reminder_created", reminder }));
                 } else if (call.name === "save_quick_note") {
                   const { title, content } = call.args || {};
-                  const note = toolsEngine.addNote(title, content);
+                  const note = await toolsEngine.addNote(title, content);
                   result = { success: true, message: `Note "${title}" saved to DK's notebook.` };
                   clientWs.send(JSON.stringify({ type: "note_saved", note }));
                 }
@@ -591,14 +548,26 @@ CONVERSATION GUIDELINES:
       if (parsedData.type === "init") {
         try {
           if (currentSession) await currentSession.close();
-          currentSessionToken++;
-          currentSession = await createSession(
+          const myToken = ++currentSessionToken;
+          const newSession = await createSession(
             parsedData.voice,
             parsedData.thinkingLevel,
             !!parsedData.accurateMode,
             parsedData.answerLength,
             !!parsedData.googleSearchMode
           );
+
+          // If another "init" came in while we were awaiting createSession(),
+          // currentSessionToken will have moved on past myToken — that newer
+          // init already owns currentSession, so this late-resolving session
+          // is stale and must be discarded instead of overwriting it.
+          if (myToken !== currentSessionToken) {
+            console.warn("[Server] Discarding stale Gemini Live session from a superseded init request.");
+            newSession.close().catch(() => {});
+            return;
+          }
+
+          currentSession = newSession;
           clientWs.send(JSON.stringify({ type: "init_ack" }));
 
           if (pendingImages.length > 0) {
@@ -630,7 +599,11 @@ CONVERSATION GUIDELINES:
       } else if (parsedData.image) {
         await processImageInput(parsedData);
       } else if (parsedData.type === "text_input" && parsedData.text) {
-        saveMessage("user", parsedData.text);
+        // Fire-and-forget: don't delay sending the user's message to Gemini
+        // while we wait for the Firestore write to finish.
+        saveMessage("user", parsedData.text).catch((e) =>
+          console.error("[Server] Failed to save text_input message:", e)
+        );
         memoryEngine.recordMessage(sessionId, "user", parsedData.text);
         currentSession.sendClientContent({
           turns: [{ role: "user", parts: [{ text: parsedData.text }] }],
@@ -651,7 +624,11 @@ CONVERSATION GUIDELINES:
     });
 
     clientWs.on("close", () => {
-      if (currentSession) currentSession.close();
+      if (currentSession) {
+        Promise.resolve(currentSession.close()).catch((e: any) =>
+          console.error("[Server] Error closing Gemini Live session on client disconnect:", e)
+        );
+      }
       memoryEngine.finalizeSession(sessionId, ai);
     });
   });

@@ -9,9 +9,9 @@ interface AgentFaceProps {
 }
 
 const AgentFace: React.FC<AgentFaceProps> = ({ status, volume, size = 120, colorIndex }) => {
-  const isListening = status === "Recording...";
+  const isListening = status === "Listening...";
   const isSpeaking = status === "Speaking...";
-  const isThinking = status === "Processing...";
+  const isThinking = status === "Thinking...";
   
   const colors = ["#3b82f6", "#ef4444", "#22c55e", "#f59e0b", "#a855f7", "#ec4899", "#06b6d4", "#f97316", "#84cc16", "#d946ef", "#14b8a6", "#e11d48"];
   const color = colors[colorIndex % colors.length];

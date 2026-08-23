@@ -14,17 +14,43 @@ export default function ChatHistoryModal({ onClose }: { onClose: () => void }) {
     const [messages, setMessages] = useState<HistoryMessage[]>([]);
     const [loading, setLoading] = useState(true);
     const [clearing, setClearing] = useState(false);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [hasMore, setHasMore] = useState(true);
+
+    const PAGE_SIZE = 50;
 
     const load = async () => {
         setLoading(true);
         try {
-            const res = await fetch(getApiUrl('/api/history'));
+            const res = await fetch(getApiUrl(`/api/history?limit=${PAGE_SIZE}`));
             const data = await res.json();
-            setMessages(data.messages || []);
+            const batch = data.messages || [];
+            setMessages(batch);
+            setHasMore(batch.length === PAGE_SIZE);
         } catch (e) {
             console.error('Failed to load history:', e);
         } finally {
             setLoading(false);
+        }
+    };
+
+    // Fetches only the next older batch (oldest currently-loaded message's
+    // timestamp as the cursor) — not the whole history — so this stays fast
+    // even as chat history grows.
+    const loadMore = async () => {
+        if (messages.length === 0 || loadingMore) return;
+        setLoadingMore(true);
+        try {
+            const oldestTimestamp = messages[0].timestamp;
+            const res = await fetch(getApiUrl(`/api/history?limit=${PAGE_SIZE}&before=${oldestTimestamp}`));
+            const data = await res.json();
+            const olderBatch: HistoryMessage[] = data.messages || [];
+            setMessages((prev) => [...olderBatch, ...prev]);
+            setHasMore(olderBatch.length === PAGE_SIZE);
+        } catch (e) {
+            console.error('Failed to load older history:', e);
+        } finally {
+            setLoadingMore(false);
         }
     };
 
@@ -37,6 +63,7 @@ export default function ChatHistoryModal({ onClose }: { onClose: () => void }) {
         try {
             await fetch(getApiUrl('/api/history/clear'), { method: 'POST' });
             setMessages([]);
+            setHasMore(false);
         } catch (e) {
             console.error('Failed to clear history:', e);
         } finally {
@@ -87,7 +114,20 @@ export default function ChatHistoryModal({ onClose }: { onClose: () => void }) {
                                 No conversation yet. Start talking to the AI and it'll show up here.
                             </div>
                         ) : (
-                            messages.map((msg) => (
+                            <>
+                                {hasMore && (
+                                    <div className="flex justify-center pb-2">
+                                        <button
+                                            onClick={loadMore}
+                                            disabled={loadingMore}
+                                            className="text-xs text-purple-300 hover:text-purple-200 disabled:opacity-40 flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-purple-500/20 hover:border-purple-500/40 transition-colors"
+                                        >
+                                            {loadingMore ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                                            {loadingMore ? 'Loading...' : 'Load older messages'}
+                                        </button>
+                                    </div>
+                                )}
+                                {messages.map((msg) => (
                                 <div
                                     key={msg.id}
                                     className={`max-w-[85%] px-4 py-2 rounded-2xl text-sm leading-relaxed ${
@@ -101,7 +141,8 @@ export default function ChatHistoryModal({ onClose }: { onClose: () => void }) {
                                         {new Date(msg.timestamp).toLocaleString()}
                                     </div>
                                 </div>
-                            ))
+                                ))}
+                            </>
                         )}
                     </div>
                 </motion.div>

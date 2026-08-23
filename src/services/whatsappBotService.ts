@@ -1,22 +1,15 @@
 import * as BaileysModule from "@whiskeysockets/baileys";
 import pino from "pino";
-import path from "path";
-import fs from "fs";
 import QRCode from "qrcode";
+import { useFirestoreAuthState } from "./whatsappAuthState";
 
 // Resolve Baileys exports safely across CJS/ESM bundling
 const baileys: any = BaileysModule;
 const makeWASocket = baileys.default?.default || baileys.default || baileys.makeWASocket || baileys;
 const DisconnectReason = baileys.DisconnectReason || baileys.default?.DisconnectReason;
-const useMultiFileAuthState = baileys.useMultiFileAuthState || baileys.default?.useMultiFileAuthState;
 const fetchLatestBaileysVersion = baileys.fetchLatestBaileysVersion || baileys.default?.fetchLatestBaileysVersion;
 
 type WASocket = any;
-
-const authFolder = path.resolve("data", "whatsapp_auth");
-try {
-  fs.mkdirSync(authFolder, { recursive: true });
-} catch {}
 
 class WhatsAppBotService {
   private sock: WASocket | null = null;
@@ -24,6 +17,7 @@ class WhatsAppBotService {
   private pairingCode: string | null = null;
   private qrCodeDataUrl: string | null = null;
   private dedicatedPhone: string | null = null;
+  private clearAuthFn: (() => Promise<void>) | null = null;
 
   constructor() {
     this.initSocket().catch((err) => {
@@ -37,7 +31,11 @@ class WhatsAppBotService {
         console.warn("[WhatsAppBot] makeWASocket is not a function:", typeof makeWASocket);
         return;
       }
-      const { state, saveCreds } = await useMultiFileAuthState(authFolder);
+      // Auth session (creds + signal keys) now lives in Firestore instead of
+      // local disk, so pairing survives restarts/redeploys on Render's free
+      // plan (which has no persistent disk).
+      const { state, saveCreds, clearAuth } = await useFirestoreAuthState();
+      this.clearAuthFn = clearAuth;
       const versionResult = await fetchLatestBaileysVersion?.();
       const version = versionResult?.version;
 
@@ -141,10 +139,12 @@ class WhatsAppBotService {
         this.sock.end(undefined);
         this.sock = null;
       }
-      if (fs.existsSync(authFolder)) {
-        fs.rmSync(authFolder, { recursive: true, force: true });
+      if (this.clearAuthFn) {
+        await this.clearAuthFn();
       }
-    } catch {}
+    } catch (e) {
+      console.error("[WhatsAppBot] Error during resetSession:", e);
+    }
     await this.initSocket();
   }
 

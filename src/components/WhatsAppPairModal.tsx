@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Phone, Copy, Check, Loader2, Smartphone, ShieldCheck, QrCode, KeyRound, RefreshCw } from 'lucide-react';
+import { getApiUrl } from '@/utils/api';
 
 interface WhatsAppPairModalProps {
     isOpen: boolean;
@@ -21,7 +22,7 @@ export default function WhatsAppPairModal({ isOpen, onClose }: WhatsAppPairModal
 
     const fetchStatus = async () => {
         try {
-            const res = await fetch('/api/whatsapp/status');
+            const res = await fetch(getApiUrl('/api/whatsapp/status'));
             const data = await res.json();
             setIsConnected(!!data.isConnected);
             if (data.dedicatedPhone) setActivePhone(data.dedicatedPhone);
@@ -44,7 +45,7 @@ export default function WhatsAppPairModal({ isOpen, onClose }: WhatsAppPairModal
         setPairingCode(null);
         setQrCodeDataUrl(null);
         try {
-            await fetch('/api/whatsapp/reset', { method: 'POST' });
+            await fetch(getApiUrl('/api/whatsapp/reset'), { method: 'POST' });
             await fetchStatus();
         } catch {}
         finally {
@@ -65,7 +66,7 @@ export default function WhatsAppPairModal({ isOpen, onClose }: WhatsAppPairModal
 
         setIsLoading(true);
         try {
-            const res = await fetch('/api/whatsapp/pair', {
+            const res = await fetch(getApiUrl('/api/whatsapp/pair'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ phone: cleanPhone }),

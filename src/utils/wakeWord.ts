@@ -37,12 +37,15 @@ class WakeWordManager {
                 const transcript = event.results[current][0].transcript.toLowerCase().trim();
                 console.log("[WakeWord] Heard:", transcript);
 
-                // Match "hello friday", "hey friday", "friday", "ok friday"
+                // Match "hello friday", "hey friday", "hi friday" (and "he friday"
+                // as a common speech-recognition mis-hearing of "hey friday").
+                // Deliberately NOT matching bare "friday" alone — that would
+                // false-trigger on normal sentences mentioning the day of the
+                // week (e.g. "Friday ko milte hain").
                 if (
                     transcript.includes("hello friday") ||
                     transcript.includes("hey friday") ||
                     transcript.includes("hi friday") ||
-                    transcript.includes("friday") ||
                     transcript.includes("he friday")
                 ) {
                     console.log("[WakeWord] Triggered by:", transcript);

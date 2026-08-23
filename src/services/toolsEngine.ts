@@ -1,5 +1,4 @@
-import fs from "fs";
-import path from "path";
+import { db } from "./firebaseAdmin";
 
 export interface ReminderItem {
   id: string;
@@ -18,92 +17,62 @@ export interface NoteItem {
   timestamp: number;
 }
 
-const dbDir = path.resolve("data");
-try {
-  fs.mkdirSync(dbDir, { recursive: true });
-} catch {}
-
-const remindersPath = path.join(dbDir, "reminders.json");
-const notesPath = path.join(dbDir, "notes.json");
+// Firestore layout: reminders/{id}, notes/{id}
+const remindersCollection = () => db.collection("reminders");
+const notesCollection = () => db.collection("notes");
 
 class ToolsEngine {
-  private reminders: ReminderItem[] = [];
-  private notes: NoteItem[] = [];
-
-  constructor() {
-    this.load();
-  }
-
-  private load() {
-    try {
-      if (fs.existsSync(remindersPath)) {
-        this.reminders = JSON.parse(fs.readFileSync(remindersPath, "utf-8"));
-      }
-    } catch {
-      this.reminders = [];
-    }
-
-    try {
-      if (fs.existsSync(notesPath)) {
-        this.notes = JSON.parse(fs.readFileSync(notesPath, "utf-8"));
-      }
-    } catch {
-      this.notes = [];
-    }
-  }
-
-  private persistReminders() {
-    try {
-      fs.writeFileSync(remindersPath, JSON.stringify(this.reminders, null, 2), "utf-8");
-    } catch (e) {
-      console.error("[ToolsEngine] Failed to persist reminders:", e);
-    }
-  }
-
-  private persistNotes() {
-    try {
-      fs.writeFileSync(notesPath, JSON.stringify(this.notes, null, 2), "utf-8");
-    } catch (e) {
-      console.error("[ToolsEngine] Failed to persist notes:", e);
-    }
-  }
-
-  public addReminder(title: string, timeString = "soon", durationMinutes = 0): ReminderItem {
+  public async addReminder(title: string, timeString = "soon", durationMinutes = 0): Promise<ReminderItem> {
     const now = Date.now();
     const due = durationMinutes > 0 ? now + durationMinutes * 60 * 1000 : now + 60 * 60 * 1000;
+    const id = Math.random().toString(36).substring(2, 9);
     const item: ReminderItem = {
-      id: Math.random().toString(36).substring(2, 9),
+      id,
       title: title.trim(),
       timeString: timeString.trim(),
       dueTimestamp: due,
       createdDate: new Date(now).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
       isCompleted: false,
     };
-    this.reminders.push(item);
-    this.persistReminders();
+    await remindersCollection().doc(id).set(item);
     return item;
   }
 
-  public addNote(title: string, content: string): NoteItem {
+  public async addNote(title: string, content: string): Promise<NoteItem> {
     const now = Date.now();
+    const id = Math.random().toString(36).substring(2, 9);
     const item: NoteItem = {
-      id: Math.random().toString(36).substring(2, 9),
+      id,
       title: title.trim(),
       content: content.trim(),
       dateStr: new Date(now).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
       timestamp: now,
     };
-    this.notes.push(item);
-    this.persistNotes();
+    await notesCollection().doc(id).set(item);
     return item;
   }
 
-  public getReminders() {
-    return this.reminders;
+  public async getReminders(): Promise<ReminderItem[]> {
+    const snap = await remindersCollection().orderBy("dueTimestamp", "asc").get();
+    return snap.docs.map((d) => d.data() as ReminderItem);
   }
 
-  public getNotes() {
-    return this.notes;
+  /** Reminders whose due time has passed and haven't fired yet. */
+  public async getDueReminders(now = Date.now()): Promise<ReminderItem[]> {
+    const snap = await remindersCollection()
+      .where("isCompleted", "==", false)
+      .where("dueTimestamp", "<=", now)
+      .get();
+    return snap.docs.map((d) => d.data() as ReminderItem);
+  }
+
+  public async markReminderCompleted(id: string): Promise<void> {
+    await remindersCollection().doc(id).set({ isCompleted: true }, { merge: true });
+  }
+
+  public async getNotes(): Promise<NoteItem[]> {
+    const snap = await notesCollection().orderBy("timestamp", "desc").get();
+    return snap.docs.map((d) => d.data() as NoteItem);
   }
 }
 

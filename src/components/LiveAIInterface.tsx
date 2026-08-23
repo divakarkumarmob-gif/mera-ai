@@ -88,18 +88,20 @@ async function playAudioChunk(
 export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const [isRecording, setIsRecording] = useState(false);
     const [status, setStatus] = useState("Idle");
+    const statusRef = useRef("Idle");
     const [volume, setVolume] = useState(0);
     const [colorIndex, setColorIndex] = useState(0);
     const [selectedImages, setSelectedImages] = useState<{ id: string; file: File; status: 'uploading' | 'uploaded' }[]>([]);
     const [showSettings, setShowSettings] = useState(false);
     const [selectedVoice, setSelectedVoice] = useState(() => localStorage.getItem('selectedVoice') || 'Aoede');
     const [showVoiceDropdown, setShowVoiceDropdown] = useState(false);
-    const [thinkingLevel, setThinkingLevel] = useState(() => localStorage.getItem('thinkingLevel') || 'low');
-    const [accurateMode, setAccurateMode] = useState(() => localStorage.getItem('accurateMode') === 'true');
+    const [thinkingLevel, setThinkingLevel] = useState('low');
+    const [accurateMode, setAccurateMode] = useState(false);
     const [answerLength, setAnswerLength] = useState(() => localStorage.getItem('answerLength') || 'short');
-    const [googleSearchMode, setGoogleSearchMode] = useState(() => localStorage.getItem('googleSearchMode') === 'true');
+    const [googleSearchMode, setGoogleSearchMode] = useState(false);
     const [wakeWordActive, setWakeWordActive] = useState(() => localStorage.getItem('wakeWordActive') !== 'false');
     const [pairingCode, setPairingCode] = useState<string | null>(null);
+    const [dueReminder, setDueReminder] = useState<{ title: string; timeString: string } | null>(null);
     const [inactivityCountdown, setInactivityCountdown] = useState<number | null>(null);
     const [showCaptions, setShowCaptions] = useState(true);
     const [captionText, setCaptionText] = useState('');
@@ -188,6 +190,10 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         if (!box) return;
         if (!userScrolledUpRef.current) box.scrollTop = box.scrollHeight;
     }, [captionText]);
+
+    useEffect(() => {
+        statusRef.current = status;
+    }, [status]);
 
     useEffect(() => {
         const interval = setInterval(() => {
@@ -376,7 +382,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         const interval = setInterval(() => {
             // NEVER count down when AI is Thinking, Speaking, or playing output audio!
             const isAudioStillPlaying = !!(outputAudioCtx.current && outputAudioCtx.current.currentTime < (nextStartTime.current - 0.05));
-            const isAiBusy = isAiSpeaking.current || isAiThinkingRef.current || status === "Thinking..." || status === "Speaking..." || isAudioStillPlaying;
+            const isAiBusy = isAiSpeaking.current || isAiThinkingRef.current || statusRef.current === "Thinking..." || statusRef.current === "Speaking..." || isAudioStillPlaying;
             if (isAiBusy) {
                 lastActivityTimeRef.current = Date.now();
                 if (isWarningSpokenRef.current) {
@@ -409,70 +415,97 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isRecording]);
 
+    /**
+     * Wires up a MediaStream to the input AudioContext + ScriptProcessor and
+     * attaches the shared onaudioprocess handler (RMS voice detection, hard
+     * mute while AI is busy, 900ms voice-gate hangover). Used by both the
+     * "already connected, just attach mic" path and the "fresh WebSocket
+     * connect" path in ensureConnection, so the mic-gating logic only lives
+     * in one place.
+     */
+    const attachMicPipeline = async (stream: MediaStream) => {
+        inputAudioCtx.current = createAudioContext(16000);
+        outputAudioCtx.current = createAudioContext(24000);
+        try {
+            await inputAudioCtx.current.resume();
+            await outputAudioCtx.current.resume();
+        } catch (e) {
+            console.error("Failed to resume AudioContext:", e);
+        }
+
+        const source = inputAudioCtx.current.createMediaStreamSource(stream);
+        processor.current = inputAudioCtx.current.createScriptProcessor(4096, 1, 1);
+        source.connect(processor.current);
+        processor.current.connect(inputAudioCtx.current.destination);
+        processor.current.onaudioprocess = (e) => {
+            // 1. HARD MUTE: While AI is Thinking, Speaking, output buffer is playing, or cooling down -> Mic is 100% OFF
+            const isAudioStillPlaying = !!(outputAudioCtx.current && outputAudioCtx.current.currentTime < (nextStartTime.current - 0.05));
+            const isAiBusy = isAiSpeaking.current || isAiThinkingRef.current || statusRef.current === "Thinking..." || statusRef.current === "Speaking..." || isAudioStillPlaying;
+            if (isAiBusy || Date.now() < speakingCooldownUntilRef.current || !isInitializedRef.current) {
+                setVolume(0);
+                return;
+            }
+
+            const pcm = e.inputBuffer.getChannelData(0);
+
+            // 2. Calculate true RMS sound power
+            let sumSquares = 0;
+            for (let i = 0; i < pcm.length; i++) {
+                sumSquares += pcm[i] * pcm[i];
+            }
+            const rms = Math.sqrt(sumSquares / pcm.length) * 1000;
+
+            // 3. Noise Gate & Human Speech Detection
+            const isHumanSpeaking = rms >= 10;
+            if (isHumanSpeaking) {
+                lastUserVoiceDetectedTimeRef.current = Date.now();
+                lastActivityTimeRef.current = Date.now();
+                if (isWarningSpokenRef.current) {
+                    isWarningSpokenRef.current = false;
+                    setInactivityCountdown(null);
+                }
+            }
+
+            // 4. Voice Gate Hangover (900ms) to keep sentence natural.
+            // Was 450ms — too short for normal speech with brief mid-sentence
+            // pauses (e.g. "aaj... Bihar ke... mausam ka haal batao"). A pause
+            // longer than the hangover would close the gate and stop sending
+            // audio mid-sentence, so Gemini's server-side turn/silence
+            // detection never saw the rest of the sentence and got stuck in
+            // "Listening..." waiting for more audio that never arrived.
+            const isGateOpen = isHumanSpeaking || (Date.now() - lastUserVoiceDetectedTimeRef.current < 900);
+
+            if (isGateOpen) {
+                ws.current?.send(JSON.stringify({ audio: pcmToBase64(pcm) }));
+                setVolume(Math.min(100, rms * 2.2));
+            } else {
+                // Ignore background noise / fan / ambient room sounds
+                setVolume(0);
+            }
+        };
+    };
+
+    const requestMicStream = async (): Promise<MediaStream> => {
+        return navigator.mediaDevices.getUserMedia({
+            audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+                channelCount: 1,
+            },
+        });
+    };
+
     const ensureConnection = async (withMic: boolean) => {
         if (ws.current && ws.current.readyState === WebSocket.OPEN) {
             if (withMic && !isRecording) {
                 setStatus("Requesting Microphone...");
                 try {
-                    const stream = await navigator.mediaDevices.getUserMedia({
-                        audio: {
-                            echoCancellation: true,
-                            noiseSuppression: true,
-                            autoGainControl: true,
-                            channelCount: 1,
-                        },
-                    });
+                    const stream = await requestMicStream();
                     setIsRecording(true);
                     setStatus("Listening...");
                     mediaStreamRef.current = stream;
-                    inputAudioCtx.current = createAudioContext(16000);
-                    outputAudioCtx.current = createAudioContext(24000);
-                    await inputAudioCtx.current.resume();
-                    await outputAudioCtx.current.resume();
-                    const source = inputAudioCtx.current.createMediaStreamSource(stream);
-                    processor.current = inputAudioCtx.current.createScriptProcessor(4096, 1, 1);
-                    source.connect(processor.current);
-                    processor.current.connect(inputAudioCtx.current.destination);
-                    processor.current.onaudioprocess = (e) => {
-                        // 1. HARD MUTE: While AI is Thinking, Speaking, output buffer is playing, or cooling down -> Mic is 100% OFF
-                        const isAudioStillPlaying = !!(outputAudioCtx.current && outputAudioCtx.current.currentTime < (nextStartTime.current - 0.05));
-                        const isAiBusy = isAiSpeaking.current || isAiThinkingRef.current || status === "Thinking..." || status === "Speaking..." || isAudioStillPlaying;
-                        if (isAiBusy || Date.now() < speakingCooldownUntilRef.current || !isInitializedRef.current) {
-                            setVolume(0);
-                            return;
-                        }
-
-                        const pcm = e.inputBuffer.getChannelData(0);
-
-                        // 2. Calculate true RMS sound power
-                        let sumSquares = 0;
-                        for (let i = 0; i < pcm.length; i++) {
-                            sumSquares += pcm[i] * pcm[i];
-                        }
-                        const rms = Math.sqrt(sumSquares / pcm.length) * 1000;
-
-                        // 3. Noise Gate & Human Speech Detection
-                        const isHumanSpeaking = rms >= 10;
-                        if (isHumanSpeaking) {
-                            lastUserVoiceDetectedTimeRef.current = Date.now();
-                            lastActivityTimeRef.current = Date.now();
-                            if (isWarningSpokenRef.current) {
-                                isWarningSpokenRef.current = false;
-                                setInactivityCountdown(null);
-                            }
-                        }
-
-                        // 4. Voice Gate Hangover (450ms) to keep sentence natural
-                        const isGateOpen = isHumanSpeaking || (Date.now() - lastUserVoiceDetectedTimeRef.current < 450);
-
-                        if (isGateOpen) {
-                            ws.current?.send(JSON.stringify({ audio: pcmToBase64(pcm) }));
-                            setVolume(Math.min(100, rms * 2.2));
-                        } else {
-                            // Ignore background noise / fan / ambient room sounds
-                            setVolume(0);
-                        }
-                    };
+                    await attachMicPipeline(stream);
                 } catch (err) {
                     console.error("Error accessing audio", err);
                     setStatus("Error: Mic Access Failed");
@@ -486,14 +519,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         if (withMic) {
             setStatus("Requesting Microphone...");
             try {
-                stream = await navigator.mediaDevices.getUserMedia({
-                    audio: {
-                        echoCancellation: true,
-                        noiseSuppression: true,
-                        autoGainControl: true,
-                        channelCount: 1,
-                    },
-                });
+                stream = await requestMicStream();
                 setStatus("Connecting...");
             } catch (err) {
                 console.error("Error accessing audio", err);
@@ -529,57 +555,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
 
             if (withMic && stream) {
                 mediaStreamRef.current = stream;
-                inputAudioCtx.current = createAudioContext(16000);
-                outputAudioCtx.current = createAudioContext(24000);
-                try {
-                    await inputAudioCtx.current.resume();
-                    await outputAudioCtx.current.resume();
-                } catch (e) { console.error("Failed to resume AudioContext:", e); }
-
-                const source = inputAudioCtx.current.createMediaStreamSource(stream);
-                processor.current = inputAudioCtx.current.createScriptProcessor(4096, 1, 1);
-                source.connect(processor.current);
-                processor.current.connect(inputAudioCtx.current.destination);
-                processor.current.onaudioprocess = (e) => {
-                    // 1. HARD MUTE: While AI is Thinking, Speaking, output buffer is playing, or cooling down -> Mic is 100% OFF
-                    const isAudioStillPlaying = !!(outputAudioCtx.current && outputAudioCtx.current.currentTime < (nextStartTime.current - 0.05));
-                    const isAiBusy = isAiSpeaking.current || isAiThinkingRef.current || status === "Thinking..." || status === "Speaking..." || isAudioStillPlaying;
-                    if (isAiBusy || Date.now() < speakingCooldownUntilRef.current || !isInitializedRef.current) {
-                        setVolume(0);
-                        return;
-                    }
-
-                    const pcm = e.inputBuffer.getChannelData(0);
-
-                    // 2. Calculate true RMS sound power
-                    let sumSquares = 0;
-                    for (let i = 0; i < pcm.length; i++) {
-                        sumSquares += pcm[i] * pcm[i];
-                    }
-                    const rms = Math.sqrt(sumSquares / pcm.length) * 1000;
-
-                    // 3. Noise Gate & Human Speech Detection
-                    const isHumanSpeaking = rms >= 10;
-                    if (isHumanSpeaking) {
-                        lastUserVoiceDetectedTimeRef.current = Date.now();
-                        lastActivityTimeRef.current = Date.now();
-                        if (isWarningSpokenRef.current) {
-                            isWarningSpokenRef.current = false;
-                            setInactivityCountdown(null);
-                        }
-                    }
-
-                    // 4. Voice Gate Hangover (450ms) to keep sentence natural
-                    const isGateOpen = isHumanSpeaking || (Date.now() - lastUserVoiceDetectedTimeRef.current < 450);
-
-                    if (isGateOpen) {
-                        ws.current?.send(JSON.stringify({ audio: pcmToBase64(pcm) }));
-                        setVolume(Math.min(100, rms * 2.2));
-                    } else {
-                        // Ignore background noise / fan / ambient room sounds
-                        setVolume(0);
-                    }
-                };
+                await attachMicPipeline(stream);
             }
         };
 
@@ -640,6 +616,11 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     if (status !== "Speaking...") isAiSpeaking.current = false;
                 } else if (msg.type === 'pairing_code_ready' && msg.pairingCode) {
                     setPairingCode(msg.pairingCode);
+                } else if (msg.type === 'reminder_due' && msg.reminder) {
+                    setDueReminder({ title: msg.reminder.title, timeString: msg.reminder.timeString });
+                    // Auto-dismiss the banner after 15s so it doesn't linger forever
+                    // if the user doesn't interact with it.
+                    setTimeout(() => setDueReminder(null), 15000);
                 }
             } catch (err) {
                 console.warn("[LiveAIInterface] Error processing socket message:", err);
@@ -700,6 +681,25 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         </button>
                     </div>
                 </div>
+
+                <AnimatePresence>
+                    {dueReminder && (
+                        <motion.div
+                            initial={{ opacity: 0, y: -10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -10 }}
+                            className="w-full mb-4 flex items-center justify-between gap-3 px-4 py-3 rounded-2xl bg-amber-500/15 border border-amber-500/40 shadow-[0_0_20px_rgba(245,158,11,0.2)]"
+                        >
+                            <div className="flex items-center gap-2 min-w-0">
+                                <span>⏰</span>
+                                <span className="text-amber-200 text-sm font-medium truncate">{dueReminder.title}</span>
+                            </div>
+                            <button onClick={() => setDueReminder(null)} className="text-amber-300/70 hover:text-amber-200 shrink-0">
+                                <X className="h-4 w-4" />
+                            </button>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
 
                 <div className="flex-1 flex flex-col items-center justify-center gap-8 overflow-hidden">
                     <AgentFace status={status} volume={volume} size={160} colorIndex={colorIndex} />

@@ -1,5 +1,4 @@
-import fs from "fs";
-import path from "path";
+import { db } from "./firebaseAdmin";
 
 export interface ContactEntry {
   id: string;
@@ -10,79 +9,64 @@ export interface ContactEntry {
   timestamp: number;
 }
 
-const dbDir = path.resolve("data");
-try {
-  fs.mkdirSync(dbDir, { recursive: true });
-} catch {}
-
-const contactsFilePath = path.join(dbDir, "contacts.json");
+// Firestore layout: contacts/{contactId}
+const contactsCollection = () => db.collection("contacts");
 
 class ContactsService {
-  private contacts: ContactEntry[] = [];
-
-  constructor() {
-    this.load();
-  }
-
-  private load() {
-    try {
-      if (fs.existsSync(contactsFilePath)) {
-        this.contacts = JSON.parse(fs.readFileSync(contactsFilePath, "utf-8"));
-      }
-    } catch {
-      this.contacts = [];
-    }
-  }
-
-  private persist() {
-    try {
-      fs.writeFileSync(contactsFilePath, JSON.stringify(this.contacts, null, 2), "utf-8");
-    } catch (e) {
-      console.error("[ContactsService] Failed to persist contacts.json:", e);
-    }
-  }
-
-  public saveContact(name: string, phone: string, relation?: string): ContactEntry {
+  public async saveContact(name: string, phone: string, relation?: string): Promise<ContactEntry> {
     const cleanPhone = phone.replace(/[\s\-\(\)\+]/g, "").trim();
-    const existingIndex = this.contacts.findIndex(
-      (c) => c.name.toLowerCase() === name.toLowerCase().trim()
-    );
-
     const now = Date.now();
+
+    const normalizedPhone =
+      cleanPhone.startsWith("91") && cleanPhone.length === 12
+        ? cleanPhone
+        : cleanPhone.length === 10
+        ? `91${cleanPhone}`
+        : cleanPhone;
+
+    // Check for an existing contact with the same name (case-insensitive) to update in place
+    const existingSnap = await contactsCollection()
+      .where("nameLower", "==", name.toLowerCase().trim())
+      .limit(1)
+      .get();
+
+    const id = existingSnap.empty ? Math.random().toString(36).substring(2, 9) : existingSnap.docs[0].id;
+
     const entry: ContactEntry = {
-      id: Math.random().toString(36).substring(2, 9),
+      id,
       name: name.trim(),
-      phone: cleanPhone.startsWith("91") && cleanPhone.length === 12 ? cleanPhone : cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone,
+      phone: normalizedPhone,
       relation: relation?.trim() || "",
       dateAdded: new Date(now).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
       timestamp: now,
     };
 
-    if (existingIndex >= 0) {
-      this.contacts[existingIndex] = entry;
-    } else {
-      this.contacts.push(entry);
-    }
+    await contactsCollection()
+      .doc(id)
+      .set({ ...entry, nameLower: name.toLowerCase().trim() });
 
-    this.persist();
     return entry;
   }
 
-  public findContact(query: string): ContactEntry | undefined {
+  public async findContact(query: string): Promise<ContactEntry | undefined> {
     const q = query.toLowerCase().trim();
+
     // Direct name match
-    let found = this.contacts.find((c) => c.name.toLowerCase() === q);
-    if (found) return found;
+    const directSnap = await contactsCollection().where("nameLower", "==", q).limit(1).get();
+    if (!directSnap.empty) return this.stripInternal(directSnap.docs[0].data());
 
-    // Partial name match
-    found = this.contacts.find((c) => c.name.toLowerCase().includes(q) || q.includes(c.name.toLowerCase()));
-    if (found) return found;
+    // Partial name / relation match — Firestore doesn't support "contains" queries
+    // natively, so we scan (fine for a small personal contacts book).
+    const allSnap = await contactsCollection().get();
+    const all = allSnap.docs.map((d) => d.data());
 
-    // Relation match (e.g. "mummy", "brother", "papa")
-    found = this.contacts.find((c) => c.relation && (c.relation.toLowerCase().includes(q) || q.includes(c.relation.toLowerCase())));
-    if (found) return found;
+    let found = all.find((c) => c.nameLower?.includes(q) || q.includes(c.nameLower));
+    if (found) return this.stripInternal(found);
 
-    // Direct phone number match
+    found = all.find((c) => c.relation && (c.relation.toLowerCase().includes(q) || q.includes(c.relation.toLowerCase())));
+    if (found) return this.stripInternal(found);
+
+    // Direct phone number match (no lookup needed, just format it)
     const cleanPhone = query.replace(/[\s\-\(\)\+]/g, "");
     if (/^\d{10,15}$/.test(cleanPhone)) {
       return {
@@ -97,17 +81,22 @@ class ContactsService {
     return undefined;
   }
 
-  public getAllContacts(): ContactEntry[] {
-    return this.contacts;
+  public async getAllContacts(): Promise<ContactEntry[]> {
+    const snap = await contactsCollection().orderBy("timestamp", "desc").get();
+    return snap.docs.map((d) => this.stripInternal(d.data()));
   }
 
-  public compileContactsForPrompt(): string {
-    if (this.contacts.length === 0) {
+  public async compileContactsForPrompt(): Promise<string> {
+    const contacts = await this.getAllContacts();
+    if (contacts.length === 0) {
       return "No contacts saved yet. When DK gives you a contact name & number, use 'save_contact' to save them.";
     }
-    return this.contacts
-      .map((c) => `- ${c.name}${c.relation ? ` (${c.relation})` : ""}: +${c.phone}`)
-      .join("\n");
+    return contacts.map((c) => `- ${c.name}${c.relation ? ` (${c.relation})` : ""}: +${c.phone}`).join("\n");
+  }
+
+  private stripInternal(data: FirebaseFirestore.DocumentData): ContactEntry {
+    const { nameLower, ...rest } = data;
+    return rest as ContactEntry;
   }
 }
 

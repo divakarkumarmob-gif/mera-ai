@@ -8,7 +8,15 @@ services:
     envVars:
       - key: GEMINI_API_KEY
         sync: false
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: FIREBASE_CLIENT_EMAIL
+        sync: false
+      - key: FIREBASE_PRIVATE_KEY
+        sync: false
       - key: ENCRYPTION_KEY
+        sync: false
+      - key: OWNER_WHATSAPP_NUMBER
         sync: false
       - key: NODE_ENV
         value: production
