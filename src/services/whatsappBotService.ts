@@ -5,6 +5,7 @@ import { GoogleGenAI } from "@google/genai";
 import { useFirestoreAuthState } from "./whatsappAuthState";
 import { db } from "./firebaseAdmin";
 import { contactsService } from "./contactsService";
+import { dailyUpdateService } from "./dailyUpdateService";
 
 // Resolve Baileys exports safely across CJS/ESM bundling
 const baileys: any = BaileysModule;
@@ -31,11 +32,30 @@ export interface IncomingMessage {
   timestamp: number;            // ms epoch
   dateStr: string;              // Formatted IST date string
   isRead: boolean;
+  // Only set on messages from DK's own paired number: true if this message
+  // was already consumed as an answer to a forwarded daily-update question,
+  // so other owner-reply listeners (e.g. coding-agent approval) should skip it.
+  consumedByDailyUpdate?: boolean;
 }
 
 const inboxCol = () => db.collection("whatsapp_inbox");
 // Persists the linked phone number so dashboard shows 'already linked' across restarts
 const sessionMetaDoc = () => db.collection("whatsapp_auth").doc("session").collection("meta").doc("phone_meta");
+const replyLimitsCol = () => db.collection("whatsapp_reply_limits"); // {phone}: { dailyLimit }
+const replyCountsCol = () => db.collection("whatsapp_reply_counts"); // {phone}: { count, dateStr }
+
+const DEFAULT_DAILY_REPLY_LIMIT = 10;
+
+/** Today's date string in IST, used to reset per-day RAM flags/caches. */
+function todayISTLocal(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+}
+
+/** Sent once when a contact's daily auto-reply limit has been used up for the day. */
+function LIMIT_REACHED_GENERIC_REPLY(senderName: string, isUnknownContact: boolean): string {
+  const greeting = !isUnknownContact ? `${senderName} ji, ` : "";
+  return `${greeting}Boss abhi available nahi hain, unke aane ke baad main unhe aapke baare mein bata dunga, phir jo bhi wo reply denge main jaldi hi aapko bata dunga. Tab tak apna dhyan rakhiye 👍`;
+}
 
 class WhatsAppBotService {
   private sock: WASocket | null = null;
@@ -54,7 +74,10 @@ class WhatsAppBotService {
   private groupNameCache: Map<string, string> = new Map();
   private messageCallback: ((msg: IncomingMessage) => void) | null = null;
   private autoReplyEnabled = true;
-  private autoReplyCooldown: Map<string, { count: number; resetTime: number; lastReply: number }> = new Map();
+  private replyLimitCache: Map<string, number> = new Map();
+  private replyCountCache: Map<string, { count: number; dateStr: string }> = new Map();
+  private lastReplyAt: Map<string, number> = new Map(); // for the 6s min-gap only
+  private limitNoticeSentToday: Map<string, string> = new Map(); // senderKey -> IST date string, so the generic "limit reached" notice only goes out once per day
 
   constructor() {
     // Restore last-known phone from Firestore so dashboard shows 'linked' even after restart
@@ -425,46 +448,35 @@ class WhatsAppBotService {
           // Persist to Firestore
           this.saveToFirestore(incoming).catch(() => {});
 
-          // Notify server → broadcast to WebSocket clients
-          if (this.messageCallback) this.messageCallback(incoming);
+          const ownerPhone = (process.env.OWNER_WHATSAPP_NUMBER || "").replace(/\D/g, "");
+          const isFromOwner = !isGroup && !!ownerPhone && senderPhone === ownerPhone;
 
-          // ── Smart AI Auto-Reply for 1-on-1 Personal Chats ──────────────────────────
-          if (!isGroup && this.autoReplyEnabled && this.sock && this.isConnected) {
-            const now = Date.now();
-            const senderKey = senderPhone || remoteJid;
-            const tracker = this.autoReplyCooldown.get(senderKey) || { count: 0, resetTime: now + 30 * 60 * 1000, lastReply: 0 };
-
-            // Reset counter every 30 minutes
-            if (now > tracker.resetTime) {
-              tracker.count = 0;
-              tracker.resetTime = now + 30 * 60 * 1000;
+          let consumedByDailyUpdate = false;
+          if (isFromOwner) {
+            // Messages from DK's own paired number never get an auto-reply —
+            // check instead whether this is DK answering a forwarded question.
+            // Awaited (not fire-and-forget) so the messageCallback below can
+            // tell the caller whether this message was already handled here,
+            // before something else (e.g. the coding-agent approval listener
+            // in server.ts) also tries to interpret the same "yes"/"ok" reply.
+            try {
+              consumedByDailyUpdate = await this.tryForwardOwnerReplyToPendingSender(text);
+            } catch (e) {
+              console.error("[WhatsAppBot] Failed to process owner reply for forwarding:", e);
             }
-
-            // Max 8 AI replies per 30 mins, and at least 6 seconds between replies
-            if (tracker.count < 8 && (now - tracker.lastReply > 6000)) {
-              tracker.count++;
-              tracker.lastReply = now;
-              this.autoReplyCooldown.set(senderKey, tracker);
-
-              setTimeout(async () => {
-                try {
-                  if (this.sock && this.isConnected) {
-                    const aiReply = await this.generateSmartAutoReply(
-                      senderName,
-                      senderPhone,
-                      text,
-                      isUnknownContact,
-                      (incoming as any).relation
-                    );
-                    await this.sock.sendMessage(replyJid, { text: aiReply });
-                    console.log(`[WhatsAppBot] Smart AI Reply sent to ${senderName} (+${senderPhone}): "${aiReply}"`);
-                  }
-                } catch (replyErr) {
-                  console.error(`[WhatsAppBot] Failed to send AI auto-reply to ${senderPhone}:`, replyErr);
-                }
-              }, 1500);
-            }
+          } else if (!isGroup && this.autoReplyEnabled && this.sock && this.isConnected) {
+            // ── Smart AI Auto-Reply for 1-on-1 Personal Chats ──────────────────
+            this.handleIncomingForAutoReply(senderName, senderPhone, text, isUnknownContact, replyJid).catch((e) =>
+              console.error("[WhatsAppBot] Auto-reply handling failed:", e)
+            );
           }
+
+          // Notify server → broadcast to WebSocket clients. Flag whether this
+          // message from DK was already consumed by the daily-update forward
+          // flow above, so other owner-reply listeners (e.g. the coding-agent
+          // approval handler in server.ts) know to skip it rather than both
+          // systems racing to interpret the same "yes"/"ok".
+          if (this.messageCallback) this.messageCallback({ ...incoming, consumedByDailyUpdate });
 
           console.log(
             `[WhatsAppBot] Incoming ${isGroup ? `group(${groupName})` : "personal"} msg from ${senderName}: "${text.substring(0, 80)}"`
@@ -474,6 +486,247 @@ class WhatsAppBotService {
         }
       }
     });
+  }
+
+  /**
+   * Core auto-reply decision flow for a 1-on-1 message from someone who is
+   * NOT DK himself:
+   *   1. If this sender has a pending question awaiting a "should I ask DK?"
+   *      confirmation, and this message is a short affirmative — notify DK
+   *      and tell the sender Friday will check.
+   *   2. Otherwise, try to answer strictly from today's daily update log.
+   *      If that gives a real answer, send it directly (doesn't consume the
+   *      daily AI-chat limit — it's a factual lookup, not a generated reply).
+   *   3. If today's update has nothing relevant and the message looks like a
+   *      question, tell the sender Friday doesn't know and offer to ask DK,
+   *      creating a pending question.
+   *   4. If none of the above apply (ordinary chit-chat), fall through to
+   *      the normal Gemini smart-reply, still subject to the daily limit.
+   */
+  private async handleIncomingForAutoReply(
+    senderName: string,
+    senderPhone: string,
+    text: string,
+    isUnknownContact: boolean,
+    replyJid: string
+  ) {
+    // 1. Check for a pending "should I ask DK?" confirmation from this sender.
+    const pending = await dailyUpdateService.getRecentPendingForSender(senderPhone);
+    if (pending && pending.status === "awaiting_confirmation") {
+      if (dailyUpdateService.isAffirmative(text)) {
+        await dailyUpdateService.markAskedDK(pending.id);
+        if (this.sock) {
+          await this.sock.sendMessage(replyJid, {
+            text: "Theek hai, main boss se pooch ke aapko jaldi batati hoon 👍",
+          });
+        }
+        return;
+      }
+      // Not an affirmative — fall through to normal handling below (they may
+      // have asked something else entirely).
+    }
+
+    // 2. Try a factual answer from today's update log first.
+    const factualAnswer = await dailyUpdateService.answerFromTodayUpdate(text);
+    if (factualAnswer) {
+      if (this.sock) {
+        await this.sock.sendMessage(replyJid, { text: factualAnswer });
+        console.log(`[WhatsAppBot] Answered ${senderName} from today's update: "${factualAnswer}"`);
+      }
+      return;
+    }
+
+    // 3. Nothing relevant in today's update — if this looks like a question
+    // DK would want to be asked about directly, offer to check with him.
+    const looksLikeQuestion = /\?|kya|kaisa|kaisi|kahan|kab|kyu|kyun/i.test(text);
+    if (looksLikeQuestion) {
+      await dailyUpdateService.createPendingQuestion({ senderPhone, senderName, replyJid, question: text });
+      if (this.sock) {
+        await this.sock.sendMessage(replyJid, {
+          text: "Iske baare mein mujhe pata nahi, boss ne mujhe kuch nahi bataya hai. Chahe to main unse pooch loon?",
+        });
+      }
+      return;
+    }
+
+    // 4. Ordinary chat — fall through to the normal AI reply, rate-limited.
+    await this.tryFactualOrChatReply(senderName, senderPhone, text, isUnknownContact, replyJid);
+  }
+
+  /** The rate-limited Gemini smart-reply path for ordinary chit-chat, subject to the daily per-contact limit. */
+  private async tryFactualOrChatReply(
+    senderName: string,
+    senderPhone: string,
+    text: string,
+    isUnknownContact: boolean,
+    replyJid: string
+  ) {
+    const now = Date.now();
+    const senderKey = senderPhone || replyJid;
+    const lastAt = this.lastReplyAt.get(senderKey) || 0;
+    if (now - lastAt <= 6000) return; // avoid double-firing on rapid bursts
+
+    const allowed = await this.tryConsumeDailyReply(senderKey);
+    if (!allowed) {
+      const today = todayISTLocal();
+      const alreadyNotified = this.limitNoticeSentToday.get(senderKey);
+      if (alreadyNotified === today) return; // already told them once today — stay quiet now
+
+      console.log(`[WhatsAppBot] Daily auto-reply limit reached for ${senderName} (+${senderPhone}) — sending one-time generic notice.`);
+      this.limitNoticeSentToday.set(senderKey, today);
+      if (this.sock) {
+        try {
+          await this.sock.sendMessage(replyJid, { text: LIMIT_REACHED_GENERIC_REPLY(senderName, isUnknownContact) });
+        } catch (e) {
+          console.error(`[WhatsAppBot] Failed to send limit-reached notice to ${senderPhone}:`, e);
+        }
+      }
+      return;
+    }
+
+    this.lastReplyAt.set(senderKey, now);
+    setTimeout(async () => {
+      try {
+        if (this.sock && this.isConnected) {
+          const aiReply = await this.generateSmartAutoReply(senderName, senderPhone, text, isUnknownContact);
+          await this.sock.sendMessage(replyJid, { text: aiReply });
+          console.log(`[WhatsAppBot] Smart AI Reply sent to ${senderName} (+${senderPhone}): "${aiReply}"`);
+        }
+      } catch (replyErr) {
+        console.error(`[WhatsAppBot] Failed to send AI auto-reply to ${senderPhone}:`, replyErr);
+      }
+    }, 1500);
+  }
+
+  /**
+   * When DK replies from his own paired number, check if it matches the
+   * "Name- <reply>" format (or is just a plain reply while exactly one
+   * question is awaiting him) and forward the answer back to that original
+   * sender, closing out the pending question.
+   * Returns true if this message WAS a forwarded answer (i.e. consumed here),
+   * so callers know not to also try interpreting it as something else (e.g.
+   * a coding-agent plan approval).
+   */
+  private async tryForwardOwnerReplyToPendingSender(text: string): Promise<boolean> {
+    const awaiting = await dailyUpdateService.getQuestionsAwaitingDK();
+    if (awaiting.length === 0) return false;
+
+    // "Rahul- haan chalte hain" style: name prefix followed by a dash/colon.
+    const match = text.match(/^([a-zA-Z\u0900-\u097F]+)\s*[-:]\s*(.+)$/);
+    let target: (typeof awaiting)[number] | undefined;
+    let replyText: string;
+
+    if (match) {
+      const namePart = match[1].trim().toLowerCase();
+      replyText = match[2].trim();
+      target = awaiting.find((q) => q.senderName.toLowerCase().includes(namePart));
+    } else if (awaiting.length === 1) {
+      // Only one question pending — a plain reply (or a native WhatsApp
+      // swipe-reply, which Baileys delivers as plain text here) is
+      // unambiguous.
+      target = awaiting[0];
+      replyText = text.trim();
+    } else {
+      return false; // multiple pending, no name prefix — can't disambiguate safely
+    }
+
+    if (!target || !replyText) return false;
+
+    try {
+      if (this.sock) {
+        await this.sock.sendMessage(target.replyJid, { text: replyText });
+        console.log(`[WhatsAppBot] Forwarded DK's answer to ${target.senderName}: "${replyText}"`);
+      }
+      await dailyUpdateService.markAnswered(target.id);
+      return true;
+    } catch (e) {
+      console.error(`[WhatsAppBot] Failed to forward DK's reply to ${target.senderName}:`, e);
+      return false;
+    }
+  }
+
+  // ── Per-contact daily auto-reply limits ────────────────────────────────────
+
+  /**
+   * Returns true and increments today's count if this contact hasn't hit
+   * their daily auto-reply limit yet. Persists to Firestore so the count
+   * survives a server restart, but reads/writes through a RAM cache so we
+   * don't hit Firestore on every incoming message.
+   */
+  private async tryConsumeDailyReply(phone: string): Promise<boolean> {
+    const today = todayISTLocal();
+
+    let countEntry = this.replyCountCache.get(phone);
+    if (!countEntry || countEntry.dateStr !== today) {
+      // Not cached, or cached entry is from a previous day — reload from Firestore.
+      try {
+        const snap = await replyCountsCol().doc(phone).get();
+        const data = snap.exists ? snap.data() : null;
+        countEntry = data && data.dateStr === today ? { count: data.count, dateStr: data.dateStr } : { count: 0, dateStr: today };
+      } catch (e) {
+        console.error(`[WhatsAppBot] Failed to read reply count for ${phone}, defaulting to 0:`, e);
+        countEntry = { count: 0, dateStr: today };
+      }
+      this.replyCountCache.set(phone, countEntry);
+    }
+
+    const limit = await this.getContactReplyLimit(phone);
+    if (countEntry.count >= limit) return false;
+
+    countEntry.count++;
+    this.replyCountCache.set(phone, countEntry);
+    try {
+      await replyCountsCol().doc(phone).set({ count: countEntry.count, dateStr: today }, { merge: true });
+    } catch (e) {
+      console.error(`[WhatsAppBot] Failed to persist reply count for ${phone}:`, e);
+    }
+    return true;
+  }
+
+  /** Gets a contact's daily auto-reply limit (Firestore-backed, RAM-cached). Falls back to the default. */
+  public async getContactReplyLimit(phone: string): Promise<number> {
+    if (this.replyLimitCache.has(phone)) return this.replyLimitCache.get(phone)!;
+    try {
+      const snap = await replyLimitsCol().doc(phone).get();
+      const limit = snap.exists ? (snap.data()?.dailyLimit as number) : DEFAULT_DAILY_REPLY_LIMIT;
+      const resolved = typeof limit === "number" && limit >= 0 ? limit : DEFAULT_DAILY_REPLY_LIMIT;
+      this.replyLimitCache.set(phone, resolved);
+      return resolved;
+    } catch (e) {
+      console.error(`[WhatsAppBot] Failed to read reply limit for ${phone}, using default:`, e);
+      return DEFAULT_DAILY_REPLY_LIMIT;
+    }
+  }
+
+  /**
+   * Sets a contact's daily auto-reply limit. Called from the voice assistant's
+   * "set_whatsapp_reply_limit" tool so DK can say e.g. "Priya ka limit 15 kar do".
+   * Accepts a phone number or resolves a name via contactsService.
+   */
+  public async setContactReplyLimit(contactNameOrPhone: string, newLimit: number): Promise<{ success: boolean; message: string; resolvedPhone?: string }> {
+    if (!Number.isFinite(newLimit) || newLimit < 0) {
+      return { success: false, message: "Limit must be a non-negative number." };
+    }
+    let phone = contactNameOrPhone.replace(/\D/g, "");
+    try {
+      const contact = await contactsService.findContact(contactNameOrPhone);
+      if (contact && contact.id !== "temp" && contact.phone) {
+        phone = contact.phone.replace(/\D/g, "");
+      }
+    } catch {
+      // fall through with whatever digits we extracted from contactNameOrPhone
+    }
+    if (!phone) {
+      return { success: false, message: `Could not resolve a phone number for "${contactNameOrPhone}".` };
+    }
+    try {
+      await replyLimitsCol().doc(phone).set({ dailyLimit: newLimit }, { merge: true });
+      this.replyLimitCache.set(phone, newLimit);
+      return { success: true, message: `Daily auto-reply limit for +${phone} set to ${newLimit}.`, resolvedPhone: phone };
+    } catch (e: any) {
+      console.error(`[WhatsAppBot] Failed to set reply limit for ${phone}:`, e);
+      return { success: false, message: `Failed to save the new limit: ${e?.message || e}` };
+    }
   }
 
   /**

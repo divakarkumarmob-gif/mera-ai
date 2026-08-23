@@ -87,7 +87,7 @@ async function callModel(prompt: string): Promise<string | null> {
         model,
         contents: prompt,
       });
-      const text = response.text?.();
+      const text = response.text;
       if (text && text.trim()) {
         console.log(`[CodeAgent] ✅ Success with ${model}`);
         return text;

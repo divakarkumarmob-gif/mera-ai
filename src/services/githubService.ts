@@ -200,8 +200,12 @@ class GitHubService {
   }
 
   /**
-   * Commits the given file changes directly to the repository's base/main branch (e.g. master/main)
-   * on GitHub origin.
+   * ⚠️ DANGEROUS: Commits the given file changes DIRECTLY to the repository's
+   * base/main branch (e.g. master/main), bypassing the PR-review flow that
+   * commitChangesAsPR() provides. Only call this from a path that required
+   * DK's own explicit, separate confirmation (e.g. clicking "Push to main"
+   * in the dashboard after already seeing the PR diff) — never as a default
+   * or automatic follow-up to plan approval.
    */
   public async commitChangesToBase(
     changes: FileChange[],
