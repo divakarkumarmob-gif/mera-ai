@@ -50,29 +50,40 @@ class ContactsService {
 
   public async findContact(query: string): Promise<ContactEntry | undefined> {
     const q = query.toLowerCase().trim();
+    const cleanDigits = query.replace(/\D/g, "");
 
-    // Direct name match
-    const directSnap = await contactsCollection().where("nameLower", "==", q).limit(1).get();
-    if (!directSnap.empty) return this.stripInternal(directSnap.docs[0].data());
-
-    // Partial name / relation match — Firestore doesn't support "contains" queries
-    // natively, so we scan (fine for a small personal contacts book).
+    // Fetch all contacts to perform search
     const allSnap = await contactsCollection().get();
-    const all = allSnap.docs.map((d) => d.data());
+    const all = allSnap.docs.map((d) => this.stripInternal(d.data()));
 
-    let found = all.find((c) => c.nameLower?.includes(q) || q.includes(c.nameLower));
-    if (found) return this.stripInternal(found);
+    // 1. Phone matching (exact or last 10 digits match against saved contacts)
+    if (cleanDigits.length >= 10) {
+      const queryLast10 = cleanDigits.slice(-10);
+      const phoneMatch = all.find((c) => {
+        const cDigits = (c.phone || "").replace(/\D/g, "");
+        return cDigits === cleanDigits || (cDigits.length >= 10 && cDigits.slice(-10) === queryLast10);
+      });
+      if (phoneMatch) return phoneMatch;
+    }
 
-    found = all.find((c) => c.relation && (c.relation.toLowerCase().includes(q) || q.includes(c.relation.toLowerCase())));
-    if (found) return this.stripInternal(found);
+    // 2. Direct name match
+    const direct = all.find((c) => c.name?.toLowerCase().trim() === q);
+    if (direct) return direct;
 
-    // Direct phone number match (no lookup needed, just format it)
-    const cleanPhone = query.replace(/[\s\-\(\)\+]/g, "");
-    if (/^\d{10,15}$/.test(cleanPhone)) {
+    // 3. Partial name match
+    const nameMatch = all.find((c) => c.name?.toLowerCase().includes(q) || q.includes(c.name?.toLowerCase()));
+    if (nameMatch) return nameMatch;
+
+    // 4. Relation match
+    const relMatch = all.find((c) => c.relation && (c.relation.toLowerCase().includes(q) || q.includes(c.relation.toLowerCase())));
+    if (relMatch) return relMatch;
+
+    // 5. Unsaved pure phone number fallback
+    if (cleanDigits.length >= 10) {
       return {
         id: "temp",
         name: query,
-        phone: cleanPhone.startsWith("91") && cleanPhone.length === 12 ? cleanPhone : cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone,
+        phone: cleanDigits.length === 10 ? `91${cleanDigits}` : cleanDigits,
         dateAdded: new Date().toLocaleString("en-IN"),
         timestamp: Date.now(),
       };

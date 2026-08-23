@@ -228,10 +228,11 @@ class WhatsAppBotService {
           const senderJid: string = isGroup
             ? (msg.key.participant || remoteJid)
             : remoteJid;
-          const senderPhone = senderJid
-            .replace("@s.whatsapp.net", "")
-            .replace(/[^0-9]/g, "");
-          const senderDisplayName: string = msg.pushName || senderPhone;
+          const senderPhone = (senderJid || "")
+            .split("@")[0]
+            .split(":")[0]
+            .replace(/\D/g, "");
+          const senderDisplayName: string = msg.pushName || (senderPhone ? `+${senderPhone}` : "Unknown");
 
           let groupName: string | null = null;
           if (isGroup) groupName = await this.getGroupName(remoteJid);

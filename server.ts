@@ -336,7 +336,10 @@ HOW TO READ MESSAGES (CRITICAL RULES):
    [Sticker] → "sticker bheja"
    [Location] → "apni location share ki"
 
-6. NO MESSAGES: "Koi naya WhatsApp message nahi hai, DK."`;
+6. NO MESSAGES: "Koi naya WhatsApp message nahi hai, DK."
+
+7. VOICE OUTPUT MANDATORY:
+   - When 'get_whatsapp_messages' returns results, you MUST speak your reply out loud in voice immediately. Never return an empty voice turn or text-only reply.`;
     };
 
     const createSession = async (
@@ -448,28 +451,27 @@ HOW TO READ MESSAGES (CRITICAL RULES):
         model: "gemini-3.1-flash-live-preview",
         callbacks: {
           onmessage: async (message: any) => {
-            const audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
+            const parts = message.serverContent?.modelTurn?.parts || [];
+            let hasAudio = false;
+            for (const part of parts) {
+              if (part.inlineData?.data) {
+                hasAudio = true;
+                clientWs.send(JSON.stringify({ type: "speaking" }));
+                clientWs.send(JSON.stringify({ audio: part.inlineData.data }));
+              }
+            }
+
             const transcript = message.serverContent?.outputTranscription?.text;
             const inputTranscript = message.serverContent?.inputTranscription?.text;
 
-            // ── Bug Fix 1: Forward thinking state to client ──────────────
-            // Gemini Live emits a generationComplete=false / no audio frame
-            // while it is "thinking". Detect this and push a thinking event
-            // so the front-end status can show "Thinking..." and, critically,
-            // get cleared to "Listening..." when the turn actually completes.
+            // ── Bug Fix: Forward thinking state to client ──────────────
             const isThinkingFrame =
-              !audio && !transcript && !inputTranscript &&
+              !hasAudio && !transcript && !inputTranscript &&
               message.serverContent?.modelTurn !== undefined &&
               !message.serverContent?.turnComplete;
 
             if (isThinkingFrame) {
               clientWs.send(JSON.stringify({ type: "thinking" }));
-            }
-
-            if (audio) {
-              // AI started speaking — clear thinking state on client
-              clientWs.send(JSON.stringify({ type: "speaking" }));
-              clientWs.send(JSON.stringify({ audio }));
             }
             if (transcript) {
               clientWs.send(JSON.stringify({ text: transcript }));
