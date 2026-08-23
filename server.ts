@@ -15,6 +15,7 @@ import { toolsEngine } from "./src/services/toolsEngine";
 import { reminderScheduler } from "./src/services/reminderScheduler";
 import { contactsService } from "./src/services/contactsService";
 import { whatsappBotService } from "./src/services/whatsappBotService";
+import { codeAgentService } from "./src/services/codeAgentService";
 import { saveMessage, getHistory, clearHistory } from "./src/services/historyService";
 
 const PORT = Number(process.env.PORT) || 3000;
@@ -167,6 +168,45 @@ async function startServer() {
     res.json(whatsappBotService.getStatus());
   });
 
+  app.get("/api/code-agent/requests", async (_req, res) => {
+    try {
+      res.json({ requests: await codeAgentService.getRequests() });
+    } catch (e) {
+      res.status(500).json({ error: "failed_to_get_code_agent_requests" });
+    }
+  });
+
+  app.post("/api/code-agent/requests", async (req, res) => {
+    try {
+      const { instruction } = req.body;
+      if (!instruction || !String(instruction).trim()) {
+        return res.status(400).json({ error: "instruction_required" });
+      }
+      const id = await codeAgentService.createRequest(String(instruction));
+      res.json({ ok: true, id });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "failed_to_create_request" });
+    }
+  });
+
+  app.post("/api/code-agent/requests/:id/approve", async (req, res) => {
+    try {
+      await codeAgentService.approve(req.params.id);
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "failed_to_approve" });
+    }
+  });
+
+  app.post("/api/code-agent/requests/:id/deny", async (req, res) => {
+    try {
+      await codeAgentService.deny(req.params.id);
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "failed_to_deny" });
+    }
+  });
+
   const distPath = path.resolve("dist");
 
   let vite: any;
@@ -212,6 +252,16 @@ async function startServer() {
     for (const client of connectedClients) {
       if (client.readyState === client.OPEN) client.send(payload);
     }
+
+    // If DK (the owner) replies while a coding-agent plan is awaiting
+    // approval, treat "yes"/"ok" as approve and anything else as deny.
+    const ownerPhone = (process.env.OWNER_WHATSAPP_NUMBER || "").replace(/\D/g, "");
+    const senderDigits = (msg.senderPhone || "").replace(/\D/g, "");
+    if (!msg.isGroup && ownerPhone && senderDigits === ownerPhone) {
+      codeAgentService.handleWhatsAppApprovalReply(msg.text).catch((e) =>
+        console.error("[Server] Failed to handle WhatsApp approval reply:", e)
+      );
+    }
   });
 
   wss.on("connection", (clientWs) => {
@@ -251,6 +301,14 @@ ${memoryContext}
 DK'S CONTACTS BOOK:
 ${contactsList}
 ============================================================
+
+CODE CHANGES (YOUR PROJECT):
+- If DK asks for a code/feature change or bug fix in his app (e.g. "ye feature add karo", "isko fix karo", "code me change karo"), call "request_code_change" with his exact instruction. Tell him you'll analyze and come back with a plan — never claim you already made the change.
+
+MEMORY — SAVING PERSONAL FACTS:
+- Whenever DK shares a concrete personal fact — family, identity, career/business, residence/lifestyle, secrets, plans, or anything else about his life — call "remember_personal_fact" IMMEDIATELY in that same turn. Don't wait, don't just mentally note it.
+- Always call it when DK explicitly says to remember something ("yaad rakhna", "yaad rakho", "don't forget").
+- This is separate from small talk — don't call it for generic chit-chat with no real fact in it.
 
 CONTACTS & WHATSAPP TOOLS:
 - "save_contact": save a name+number DK gives you.
@@ -306,6 +364,36 @@ HOW TO READ MESSAGES:
       let outputTranscriptBuffer = "";
 
       const functionDeclarations: any[] = [
+        {
+          name: "request_code_change",
+          description: "Use when DK asks for a code/feature change or to fix a bug in his app/project (e.g. 'ye feature add karo', 'ye bug fix karo', 'code me change karo'). Sends the instruction to Friday's coding agent, which will analyze the repo and come back with a plan for DK to approve — this does NOT make any change itself.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              instruction: { type: "STRING", description: "DK's exact instruction/request for the code change, as literally as possible" },
+            },
+            required: ["instruction"],
+          },
+        },
+        {
+          name: "remember_personal_fact",
+          description: "Save an important personal fact about DK to permanent memory IMMEDIATELY, the moment DK states it — do not wait for the conversation to end. Use for anything about DK's life: family members, identity details, career/business, residence/lifestyle, secrets, or any other concrete personal detail. Also use whenever DK explicitly says to remember something ('yaad rakhna', 'yaad rakho', 'don't forget').",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              factText: {
+                type: "STRING",
+                description: "The EXACT fact as DK stated it, literal and unaltered — do not summarize or paraphrase.",
+              },
+              category: {
+                type: "STRING",
+                description:
+                  "One of: boss_identity, family_members, personal_secrets_and_facts, career_and_business, residence_and_lifestyle, general_personal_info. Use general_personal_info if nothing else fits — never skip saving just because of category.",
+              },
+            },
+            required: ["factText"],
+          },
+        },
         {
           name: "add_custom_skill_or_rule",
           description: "Add a new permanent rule, capability, habit, or behavioral instruction to Friday's brain when DK instructs to add or learn something new.",
@@ -462,6 +550,12 @@ HOW TO READ MESSAGES:
               }
               inputTranscriptBuffer = "";
               outputTranscriptBuffer = "";
+
+              // Fire-and-forget: periodically extract personal facts from the live
+              // session so they land in the vault without waiting for session end.
+              memoryEngine.maybeAutoExtract(sessionId, ai).catch((e) =>
+                console.error("[Server] Periodic memory extraction failed:", e)
+              );
             }
 
             // Handle Gemini Live Function Calling
@@ -471,7 +565,26 @@ HOW TO READ MESSAGES:
                 console.log(`[Friday Tools] Calling function: ${call.name}`, call.args);
                 let result: any = { success: true };
 
-                if (call.name === "add_custom_skill_or_rule") {
+                if (call.name === "request_code_change") {
+                  const { instruction } = call.args || {};
+                  if (instruction && String(instruction).trim()) {
+                    await codeAgentService.createRequest(String(instruction));
+                    result = {
+                      success: true,
+                      message: "Samajh gayi, main repo analyze karke plan bana rahi hoon. Aapko WhatsApp aur dashboard dono pe update milega.",
+                    };
+                  } else {
+                    result = { success: false, message: "No instruction provided." };
+                  }
+                } else if (call.name === "remember_personal_fact") {
+                  const { factText, category } = call.args || {};
+                  if (factText && String(factText).trim()) {
+                    await memoryEngine.addPersonalVaultFact(category || "general_personal_info", String(factText));
+                    result = { success: true, message: "Fact saved to permanent memory." };
+                  } else {
+                    result = { success: false, message: "No factText provided." };
+                  }
+                } else if (call.name === "add_custom_skill_or_rule") {
                   const { skillName, ruleInstruction, triggerPhrase } = call.args || {};
                   const fact = `Rule/Skill: "${skillName}" -> ${ruleInstruction}${triggerPhrase ? ` (When: ${triggerPhrase})` : ""}`;
                   await memoryEngine.addPersonalVaultFact("custom_skill", fact);
@@ -718,7 +831,7 @@ HOW TO READ MESSAGES:
           // is stale and must be discarded instead of overwriting it.
           if (myToken !== currentSessionToken) {
             console.warn("[Server] Discarding stale Gemini Live session from a superseded init request.");
-            newSession.close().catch(() => {});
+            try { (newSession as any).close(); } catch {}
             return;
           }
 

@@ -31,7 +31,7 @@ function sanitizePrivateKey(rawKey?: string): string | undefined {
   return key;
 }
 
-function buildCredential(): admin.Credential | undefined {
+function buildCredential(): admin.credential.Credential | undefined {
   // Option 1: Entire service account JSON in one env var (convenient for Render/cloud)
   if (process.env.FIREBASE_SERVICE_ACCOUNT) {
     try {

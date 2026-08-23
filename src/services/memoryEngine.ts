@@ -24,6 +24,10 @@ export interface ConversationSession {
   summary?: string;
   pinnedFacts?: string[];
   mistakesOrInsights?: string[];
+  /** Index into `messages` up to which periodic fact-extraction has already run (in-memory only, not persisted). */
+  lastExtractedIndex?: number;
+  /** Guards against overlapping periodic-extraction calls for the same session. */
+  isExtracting?: boolean;
 }
 
 const DEFAULT_VAULT_ENTRY: PersonalVaultEntry = {
@@ -73,6 +77,8 @@ class MemoryEngine {
       startTime: now,
       dateStr: new Date(now).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
       messages: [],
+      lastExtractedIndex: 0,
+      isExtracting: false,
     };
     this.activeSessions.set(sessionId, session);
     return session;
@@ -130,26 +136,40 @@ class MemoryEngine {
     }
   }
 
-  private async autoSummarizeSession(session: ConversationSession, ai: GoogleGenAI) {
+  /**
+   * Calls Gemini Flash on a slice of transcript and returns the parsed extraction
+   * JSON, or null on failure. Pure — does not write anything to Firestore.
+   */
+  private async runExtraction(
+    messages: SessionMessage[],
+    ai: GoogleGenAI
+  ): Promise<{
+    summary: string;
+    exactPersonalFacts: { category: string; exactFact: string }[];
+    pinnedMemories: string[];
+    mistakes: string[];
+    profileFacts: string[];
+  } | null> {
+    if (messages.length === 0) return null;
     try {
-      const transcript = session.messages
-        .map((m) => `${m.sender === "user" ? "DK" : "Friday"}: ${m.text}`)
-        .join("\n");
+      const transcript = messages.map((m) => `${m.sender === "user" ? "DK" : "Friday"}: ${m.text}`).join("\n");
 
-      const prompt = `You are Friday AI's memory engine. Analyze this conversation between user DK and Friday.
+      const prompt = `You are Friday AI's memory engine. Analyze this conversation snippet between user DK and Friday.
 Extract long-term insights and return ONLY a valid JSON object matching this schema:
 {
-  "summary": "Brief 2-3 sentence summary of what was discussed.",
+  "summary": "Brief 2-3 sentence summary of what was discussed in this snippet.",
   "exactPersonalFacts": [
     {
-      "category": "boss_identity | family_members | personal_secrets_and_facts | career_and_business | residence_and_lifestyle",
-      "exactFact": "LITERAL, EXACT, UNALTERED personal fact directly as stated by DK. (e.g., family members, count, names, relationships, personal status, secrets). DO NOT SUMMARIZE OR PARAPHRASE."
+      "category": "boss_identity | family_members | personal_secrets_and_facts | career_and_business | residence_and_lifestyle | general_personal_info",
+      "exactFact": "LITERAL, EXACT, UNALTERED personal fact directly as stated by DK. (e.g., family members, count, names, relationships, personal status, secrets, likes/dislikes, plans, schedule, anything about DK's life). DO NOT SUMMARIZE OR PARAPHRASE. If a fact doesn't cleanly fit another category, use 'general_personal_info' — never drop a stated personal fact just because no category fits well."
     }
   ],
   "pinnedMemories": ["Array of explicit facts DK asked to remember, e.g., 'yeh yaad rakhna', 'yaad rakho', 'don't forget this'"],
   "mistakes": ["Array of mistakes, misconceptions, or errors DK made during discussion"],
   "profileFacts": ["General preferences, tech stack, or habits"]
 }
+
+IMPORTANT: Extract EVERY concrete personal fact DK states about himself or his life, even small ones — err on the side of including, not skipping.
 
 Conversation:
 ${transcript}`;
@@ -163,74 +183,142 @@ ${transcript}`;
       });
 
       const text = response.text || "{}";
-      const parsed = JSON.parse(text);
+      return JSON.parse(text);
+    } catch (e) {
+      console.error("[MemoryEngine] Extraction call failed:", e);
+      return null;
+    }
+  }
 
-      // Update the session doc with summary + pinned/mistakes extracted from it
+  /** Writes a parsed extraction result to Firestore (vault/pinned/profile), deduping by exact text. */
+  private async applyExtraction(
+    parsed: {
+      exactPersonalFacts?: { category: string; exactFact: string }[];
+      pinnedMemories?: string[];
+      mistakes?: string[];
+      profileFacts?: string[];
+    },
+    dateStr: string,
+    timestamp: number
+  ) {
+    // Add to exact Personal Vault (NEVER SUMMARIZED) — dedup by exact text
+    if (Array.isArray(parsed.exactPersonalFacts) && parsed.exactPersonalFacts.length > 0) {
+      const existingVault = await vaultCol().get();
+      const existingFacts = new Set(existingVault.docs.map((d) => (d.data().exactFact || "").toLowerCase()));
+
+      for (const item of parsed.exactPersonalFacts) {
+        if (item?.exactFact && !existingFacts.has(item.exactFact.toLowerCase())) {
+          const id = Math.random().toString(36).substring(2, 9);
+          await vaultCol()
+            .doc(id)
+            .set({
+              id,
+              category: item.category || "general_personal_info",
+              exactFact: item.exactFact.trim(),
+              date: dateStr,
+              timestamp,
+            });
+          existingFacts.add(item.exactFact.toLowerCase());
+        }
+      }
+    }
+
+    // Add to global pinned memories — dedup by exact text
+    if (Array.isArray(parsed.pinnedMemories) && parsed.pinnedMemories.length > 0) {
+      const existingPinned = await pinnedCol().get();
+      const existingPinnedFacts = new Set(existingPinned.docs.map((d) => (d.data().fact || "").toLowerCase()));
+
+      for (const fact of parsed.pinnedMemories) {
+        if (fact && !existingPinnedFacts.has(fact.toLowerCase())) {
+          const id = Math.random().toString(36).substring(2, 9);
+          await pinnedCol().doc(id).set({
+            id,
+            fact,
+            date: dateStr,
+            timestamp,
+          });
+          existingPinnedFacts.add(fact.toLowerCase());
+        }
+      }
+    }
+
+    // Add to DK profile facts / known mistakes (single doc, arrayUnion avoids dupes)
+    const profileUpdates: Record<string, any> = {};
+    if (Array.isArray(parsed.profileFacts) && parsed.profileFacts.length > 0) {
+      profileUpdates.profileFacts = FieldValue.arrayUnion(...parsed.profileFacts);
+    }
+    if (Array.isArray(parsed.mistakes) && parsed.mistakes.length > 0) {
+      profileUpdates.knownMistakes = FieldValue.arrayUnion(...parsed.mistakes);
+    }
+    if (Object.keys(profileUpdates).length > 0) {
+      await profileDoc().set(profileUpdates, { merge: true });
+    }
+  }
+
+  /** Runs on session finalize: extracts facts from whatever hasn't been processed yet, plus writes the session summary. */
+  private async autoSummarizeSession(session: ConversationSession, ai: GoogleGenAI) {
+    try {
+      const startIdx = session.lastExtractedIndex || 0;
+      const unprocessed = session.messages.slice(startIdx);
+
+      // Full-session summary always comes from the complete transcript.
+      const parsedFull = await this.runExtraction(session.messages, ai);
+      if (!parsedFull) return;
+
       await sessionsCol().doc(session.id).set(
         {
-          summary: parsed.summary || "",
-          pinnedFacts: Array.isArray(parsed.pinnedMemories) ? parsed.pinnedMemories : [],
-          mistakesOrInsights: Array.isArray(parsed.mistakes) ? parsed.mistakes : [],
+          summary: parsedFull.summary || "",
+          pinnedFacts: Array.isArray(parsedFull.pinnedMemories) ? parsedFull.pinnedMemories : [],
+          mistakesOrInsights: Array.isArray(parsedFull.mistakes) ? parsedFull.mistakes : [],
         },
         { merge: true }
       );
 
-      // Add to exact Personal Vault (NEVER SUMMARIZED) — dedup by exact text
-      if (Array.isArray(parsed.exactPersonalFacts)) {
-        const existingVault = await vaultCol().get();
-        const existingFacts = new Set(existingVault.docs.map((d) => (d.data().exactFact || "").toLowerCase()));
-
-        for (const item of parsed.exactPersonalFacts) {
-          if (item?.exactFact && !existingFacts.has(item.exactFact.toLowerCase())) {
-            const id = Math.random().toString(36).substring(2, 9);
-            await vaultCol()
-              .doc(id)
-              .set({
-                id,
-                category: item.category || "personal_secrets_and_facts",
-                exactFact: item.exactFact.trim(),
-                date: session.dateStr,
-                timestamp: session.startTime,
-              });
-            existingFacts.add(item.exactFact.toLowerCase());
-          }
-        }
+      // Only apply facts from the slice that periodic extraction hasn't already covered,
+      // to avoid redundant work — dedup in applyExtraction makes this safe either way.
+      const parsedDelta = unprocessed.length > 0 && unprocessed.length !== session.messages.length
+        ? await this.runExtraction(unprocessed, ai)
+        : parsedFull;
+      if (parsedDelta) {
+        await this.applyExtraction(parsedDelta, session.dateStr, session.startTime);
       }
 
-      // Add to global pinned memories — dedup by exact text
-      if (Array.isArray(parsed.pinnedMemories) && parsed.pinnedMemories.length > 0) {
-        const existingPinned = await pinnedCol().get();
-        const existingPinnedFacts = new Set(existingPinned.docs.map((d) => (d.data().fact || "").toLowerCase()));
-
-        for (const fact of parsed.pinnedMemories) {
-          if (fact && !existingPinnedFacts.has(fact.toLowerCase())) {
-            const id = Math.random().toString(36).substring(2, 9);
-            await pinnedCol().doc(id).set({
-              id,
-              fact,
-              date: session.dateStr,
-              timestamp: session.startTime,
-            });
-            existingPinnedFacts.add(fact.toLowerCase());
-          }
-        }
-      }
-
-      // Add to DK profile facts / known mistakes (single doc, arrayUnion avoids dupes)
-      const profileUpdates: Record<string, any> = {};
-      if (Array.isArray(parsed.profileFacts) && parsed.profileFacts.length > 0) {
-        profileUpdates.profileFacts = FieldValue.arrayUnion(...parsed.profileFacts);
-      }
-      if (Array.isArray(parsed.mistakes) && parsed.mistakes.length > 0) {
-        profileUpdates.knownMistakes = FieldValue.arrayUnion(...parsed.mistakes);
-      }
-      if (Object.keys(profileUpdates).length > 0) {
-        await profileDoc().set(profileUpdates, { merge: true });
-      }
-
-      console.log(`[MemoryEngine] Successfully processed session ${session.id}: "${parsed.summary}"`);
+      console.log(`[MemoryEngine] Successfully processed session ${session.id}: "${parsedFull.summary}"`);
     } catch (e) {
       console.error("[MemoryEngine] Auto-summarization error:", e);
+    }
+  }
+
+  /**
+   * Called periodically during a LIVE (still-open) session — e.g. every N turns —
+   * so personal facts get into the vault without waiting for the session to end.
+   * Only processes messages since the last extraction (delta), fire-and-forget safe.
+   */
+  public async maybeAutoExtract(sessionId: string, ai: GoogleGenAI, everyNMessages = 8) {
+    const session = this.activeSessions.get(sessionId);
+    if (!session || session.isExtracting) return;
+
+    const startIdx = session.lastExtractedIndex || 0;
+    const newCount = session.messages.length - startIdx;
+    if (newCount < everyNMessages) return;
+
+    session.isExtracting = true;
+    const sliceEnd = session.messages.length;
+    const unprocessed = session.messages.slice(startIdx, sliceEnd);
+
+    try {
+      const parsed = await this.runExtraction(unprocessed, ai);
+      if (parsed) {
+        await this.applyExtraction(parsed, session.dateStr, Date.now());
+        console.log(`[MemoryEngine] Periodic extraction for session ${sessionId}: processed ${unprocessed.length} messages.`);
+      }
+      // Mark processed even if extraction failed, so we don't hammer the API retrying
+      // the same slice forever — the finalize-time pass will still catch anything missed.
+      session.lastExtractedIndex = sliceEnd;
+    } catch (e) {
+      console.error("[MemoryEngine] Periodic extraction error:", e);
+    } finally {
+      session.isExtracting = false;
     }
   }
 
