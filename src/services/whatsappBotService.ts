@@ -517,13 +517,62 @@ YOUR RULES FOR GENERATING THE WHATSAPP REPLY:
       };
     }
 
+    // Guard against a "ghost open" state: our isConnected flag says true,
+    // but the underlying WebSocket may have gone stale (receive-only).
+    // Check the raw socket readyState before trusting it to send.
+    const rawWs = this.sock?.ws?.socket || this.sock?.ws;
+    const wsState = rawWs?.readyState;
+    if (wsState !== undefined && wsState !== 1 /* OPEN */) {
+      console.warn(`[WhatsAppBot] WebSocket not actually OPEN (state=${wsState}). Forcing reconnect.`);
+      this.isConnected = false;
+      setTimeout(() => this.initSocket(), 500);
+      return {
+        success: false,
+        message: "WhatsApp connection went stale. Reconnecting now — please retry sending in a few seconds.",
+      };
+    }
+
     try {
       const jid = `${cleanPhone}@s.whatsapp.net`;
-      await this.sock.sendMessage(jid, { text: text.trim() });
-      console.log(`[WhatsAppBot] Message successfully sent to ${cleanPhone}: "${text}"`);
+
+      // Verify the number actually exists on WhatsApp before attempting send.
+      // Prevents false "success" when the JID is malformed or unregistered.
+      let exists = true;
+      try {
+        const [result] = await this.sock.onWhatsApp(jid);
+        exists = !!result?.exists;
+      } catch (checkErr) {
+        console.warn("[WhatsAppBot] onWhatsApp check failed, proceeding anyway:", checkErr);
+      }
+      if (!exists) {
+        return {
+          success: false,
+          message: `+${cleanPhone} does not appear to be a valid/registered WhatsApp number.`,
+        };
+      }
+
+      // sendMessage resolves once Baileys hands the message to its send
+      // queue — it does NOT guarantee server-side delivery. We treat the
+      // returned message key as the real signal: no key/id means Baileys
+      // itself considers the send incomplete, even without throwing.
+      const sendResult = await this.sock.sendMessage(jid, { text: text.trim() });
+
+      if (!sendResult?.key?.id) {
+        console.error("[WhatsAppBot] sendMessage returned without a message key — likely a silent failure.", sendResult);
+        return {
+          success: false,
+          message: "WhatsApp did not confirm this message was queued for delivery. Try again or re-pair the connection.",
+        };
+      }
+
+      console.log(`[WhatsAppBot] Message successfully sent to ${cleanPhone}: "${text}" (id: ${sendResult.key.id})`);
       return { success: true, message: `Message delivered to +${cleanPhone} from Friday Assistant!` };
     } catch (err: any) {
       console.error("[WhatsAppBot] Error sending message:", err);
+      // Any send failure could mean the socket is dead despite isConnected
+      // still being true — reset it so the next attempt gets a fresh session.
+      this.isConnected = false;
+      setTimeout(() => this.initSocket(), 500);
       return { success: false, message: `Failed to send WhatsApp message: ${err?.message || err}` };
     }
   }

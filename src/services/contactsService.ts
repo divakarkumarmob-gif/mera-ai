@@ -17,12 +17,12 @@ class ContactsService {
     const cleanPhone = phone.replace(/[\s\-\(\)\+]/g, "").trim();
     const now = Date.now();
 
-    const normalizedPhone =
-      cleanPhone.startsWith("91") && cleanPhone.length === 12
-        ? cleanPhone
-        : cleanPhone.length === 10
-        ? `91${cleanPhone}`
-        : cleanPhone;
+    // Normalize robustly using the last 10 digits — handles leading 0,
+    // '91' country code, spaces mid-number, or any other stray formatting
+    // that voice-dictated numbers can produce. This guarantees saved
+    // numbers line up with WhatsApp's senderPhone format (91XXXXXXXXXX).
+    const last10 = cleanPhone.replace(/\D/g, "").slice(-10);
+    const normalizedPhone = last10.length === 10 ? `91${last10}` : cleanPhone;
 
     // Check for an existing contact with the same name (case-insensitive) to update in place
     const existingSnap = await contactsCollection()
@@ -43,7 +43,7 @@ class ContactsService {
 
     await contactsCollection()
       .doc(id)
-      .set({ ...entry, nameLower: name.toLowerCase().trim() });
+      .set({ ...entry, nameLower: name.toLowerCase().trim(), phoneLast10: last10 });
 
     return entry;
   }
@@ -51,17 +51,18 @@ class ContactsService {
   public async findContact(query: string): Promise<ContactEntry | undefined> {
     const q = query.toLowerCase().trim();
     const cleanDigits = query.replace(/\D/g, "");
+    const queryLast10 = cleanDigits.slice(-10);
 
     // Fetch all contacts to perform search
     const allSnap = await contactsCollection().get();
     const all = allSnap.docs.map((d) => this.stripInternal(d.data()));
 
-    // 1. Phone matching (exact or last 10 digits match against saved contacts)
-    if (cleanDigits.length >= 10) {
-      const queryLast10 = cleanDigits.slice(-10);
+    // 1. Phone matching — always compare by last 10 digits on both sides,
+    // regardless of country code / leading zero / formatting differences.
+    if (queryLast10.length === 10) {
       const phoneMatch = all.find((c) => {
         const cDigits = (c.phone || "").replace(/\D/g, "");
-        return cDigits === cleanDigits || (cDigits.length >= 10 && cDigits.slice(-10) === queryLast10);
+        return cDigits.slice(-10) === queryLast10;
       });
       if (phoneMatch) return phoneMatch;
     }
@@ -79,17 +80,26 @@ class ContactsService {
     if (relMatch) return relMatch;
 
     // 5. Unsaved pure phone number fallback
-    if (cleanDigits.length >= 10) {
+    if (queryLast10.length === 10) {
       return {
         id: "temp",
         name: query,
-        phone: cleanDigits.length === 10 ? `91${cleanDigits}` : cleanDigits,
+        phone: `91${queryLast10}`,
         dateAdded: new Date().toLocaleString("en-IN"),
         timestamp: Date.now(),
       };
     }
 
     return undefined;
+  }
+
+  public async deleteContact(nameOrPhone: string): Promise<{ deleted: boolean; name?: string; phone?: string }> {
+    const contact = await this.findContact(nameOrPhone);
+    if (!contact || contact.id === "temp") {
+      return { deleted: false };
+    }
+    await contactsCollection().doc(contact.id).delete();
+    return { deleted: true, name: contact.name, phone: contact.phone };
   }
 
   public async getAllContacts(): Promise<ContactEntry[]> {
