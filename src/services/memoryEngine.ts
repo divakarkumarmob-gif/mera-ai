@@ -137,9 +137,19 @@ class MemoryEngine {
   }
 
   /**
-   * Calls Gemini Flash on a slice of transcript and returns the parsed extraction
+   * Calls Gemini on a slice of transcript and returns the parsed extraction
    * JSON, or null on failure. Pure — does not write anything to Firestore.
+   * Tries a chain of models (newest/best first) so a single model being
+   * overloaded, retired, or briefly down doesn't silently lose this
+   * session's memory — only gives up if EVERY model fails.
    */
+  private static readonly EXTRACTION_MODEL_CHAIN = [
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+  ];
+
   private async runExtraction(
     messages: SessionMessage[],
     ai: GoogleGenAI
@@ -151,10 +161,10 @@ class MemoryEngine {
     profileFacts: string[];
   } | null> {
     if (messages.length === 0) return null;
-    try {
-      const transcript = messages.map((m) => `${m.sender === "user" ? "DK" : "Friday"}: ${m.text}`).join("\n");
 
-      const prompt = `You are Friday AI's memory engine. Analyze this conversation snippet between user DK and Friday.
+    const transcript = messages.map((m) => `${m.sender === "user" ? "DK" : "Friday"}: ${m.text}`).join("\n");
+
+    const prompt = `You are Friday AI's memory engine. Analyze this conversation snippet between user DK and Friday.
 Extract long-term insights and return ONLY a valid JSON object matching this schema:
 {
   "summary": "Brief 2-3 sentence summary of what was discussed in this snippet.",
@@ -174,20 +184,26 @@ IMPORTANT: Extract EVERY concrete personal fact DK states about himself or his l
 Conversation:
 ${transcript}`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-        },
-      });
-
-      const text = response.text || "{}";
-      return JSON.parse(text);
-    } catch (e) {
-      console.error("[MemoryEngine] Extraction call failed:", e);
-      return null;
+    for (const model of MemoryEngine.EXTRACTION_MODEL_CHAIN) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: prompt,
+          config: {
+            responseMimeType: "application/json",
+          },
+        });
+        const text = response.text || "{}";
+        const parsed = JSON.parse(text);
+        console.log(`[MemoryEngine] Extraction succeeded using ${model}`);
+        return parsed;
+      } catch (e) {
+        console.error(`[MemoryEngine] ${model} failed for extraction (${(e as any)?.message || e}), trying next model...`);
+      }
     }
+
+    console.error("[MemoryEngine] All models in the fallback chain failed — this session's extraction is lost.");
+    return null;
   }
 
   /** Writes a parsed extraction result to Firestore (vault/pinned/profile), deduping by exact text. */
