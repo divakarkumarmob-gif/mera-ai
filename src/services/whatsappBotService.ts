@@ -34,6 +34,8 @@ export interface IncomingMessage {
 }
 
 const inboxCol = () => db.collection("whatsapp_inbox");
+// Persists the linked phone number so dashboard shows 'already linked' across restarts
+const sessionMetaDoc = () => db.collection("whatsapp_auth").doc("session").collection("meta").doc("phone_meta");
 
 class WhatsAppBotService {
   private sock: WASocket | null = null;
@@ -42,6 +44,10 @@ class WhatsAppBotService {
   private qrCodeDataUrl: string | null = null;
   private dedicatedPhone: string | null = null;
   private clearAuthFn: (() => Promise<void>) | null = null;
+  private reconnectTimer: any = null;
+  private keepAliveTimer: any = null;
+  // true while generating pairing code — suppresses QR so Baileys doesn't fight itself
+  private pairingCodeMode = false;
 
   // Incoming message storage & Auto-reply
   private messageCache: IncomingMessage[] = []; // RAM — max 200, newest first
@@ -51,9 +57,71 @@ class WhatsAppBotService {
   private autoReplyCooldown: Map<string, { count: number; resetTime: number; lastReply: number }> = new Map();
 
   constructor() {
-    this.initSocket().catch((err) => {
-      console.log("[WhatsAppBot] Init standby:", err?.message || err);
+    // Restore last-known phone from Firestore so dashboard shows 'linked' even after restart
+    this.restorePhoneFromFirestore().then(() => {
+      this.initSocket().catch((err) => {
+        console.log("[WhatsAppBot] Init standby:", err?.message || err);
+      });
     });
+  }
+
+  // ── Firestore phone persistence ───────────────────────────────────────────
+
+  private async restorePhoneFromFirestore() {
+    try {
+      const snap = await sessionMetaDoc().get();
+      if (snap.exists && (snap.data() as any)?.phone) {
+        this.dedicatedPhone = (snap.data() as any).phone;
+        console.log(`[WhatsAppBot] Restored saved phone: +${this.dedicatedPhone}`);
+      }
+    } catch (e) {
+      console.warn("[WhatsAppBot] Could not restore saved phone:", e);
+    }
+  }
+
+  private async savePhoneToFirestore(phone: string) {
+    try {
+      await sessionMetaDoc().set({ phone, savedAt: Date.now() });
+    } catch (e) {
+      console.warn("[WhatsAppBot] Could not save phone to Firestore:", e);
+    }
+  }
+
+  // ── Keep-alive ────────────────────────────────────────────────────────────
+
+  /**
+   * FIX: WhatsApp drops idle WS connections after 5-6 min.
+   * We send a harmless presence ping every 4 min to keep the connection alive indefinitely.
+   */
+  private startKeepAlive() {
+    this.stopKeepAlive();
+    this.keepAliveTimer = setInterval(async () => {
+      if (!this.sock || !this.isConnected) return;
+      try {
+        await this.sock.sendPresenceUpdate("available");
+      } catch (e) {
+        console.warn("[WhatsAppBot] Keep-alive ping failed, triggering reconnect:", (e as any)?.message);
+        this.isConnected = false;
+        this.scheduleReconnect(3000);
+      }
+    }, 4 * 60 * 1000);
+    console.log("[WhatsAppBot] Keep-alive timer started (4 min interval).");
+  }
+
+  private stopKeepAlive() {
+    if (this.keepAliveTimer) {
+      clearInterval(this.keepAliveTimer);
+      this.keepAliveTimer = null;
+    }
+  }
+
+  private scheduleReconnect(delayMs: number) {
+    if (this.reconnectTimer) return;
+    this.reconnectTimer = setTimeout(async () => {
+      this.reconnectTimer = null;
+      console.log("[WhatsAppBot] Reconnecting...");
+      await this.initSocket();
+    }, delayMs);
   }
 
   // ── Public API ─────────────────────────────────────────────────────────────
@@ -502,12 +570,13 @@ YOUR RULES FOR GENERATING THE WHATSAPP REPLY:
 
   // ── Existing public methods ────────────────────────────────────────────────
 
-  public async initSocket() {
+  public async initSocket(forPairingCode = false) {
     try {
       if (!makeWASocket || typeof makeWASocket !== "function") {
         console.warn("[WhatsAppBot] makeWASocket is not a function:", typeof makeWASocket);
         return;
       }
+      this.stopKeepAlive();
       const { state, saveCreds, clearAuth } = await useFirestoreAuthState();
       this.clearAuthFn = clearAuth;
       const versionResult = await fetchLatestBaileysVersion?.();
@@ -519,10 +588,12 @@ YOUR RULES FOR GENERATING THE WHATSAPP REPLY:
         auth: state,
         logger,
         printQRInTerminal: false,
+        // FIX 1: Built-in Baileys WS keep-alive ping every 30s prevents idle disconnects
+        keepAliveIntervalMs: 30_000,
+        connectTimeoutMs: 90_000,
+        defaultQueryTimeoutMs: 90_000,
         browser: ["Ubuntu", "Chrome", "20.0.04"],
         syncFullHistory: false,
-        connectTimeoutMs: 60000,
-        defaultQueryTimeoutMs: 60000,
       });
 
       this.sock.ev.on("creds.update", saveCreds);
@@ -533,7 +604,8 @@ YOUR RULES FOR GENERATING THE WHATSAPP REPLY:
       this.sock.ev.on("connection.update", async (update: any) => {
         const { connection, lastDisconnect, qr } = update;
 
-        if (qr) {
+        // FIX 2: Only generate QR when NOT in pairing code mode
+        if (qr && !this.pairingCodeMode) {
           try {
             this.qrCodeDataUrl = await QRCode.toDataURL(qr, { margin: 2, scale: 7 });
           } catch (e) {
@@ -542,17 +614,25 @@ YOUR RULES FOR GENERATING THE WHATSAPP REPLY:
         }
 
         if (connection === "close") {
+          this.stopKeepAlive();
           const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
           const shouldReconnect = statusCode !== DisconnectReason?.loggedOut;
           this.isConnected = false;
           this.qrCodeDataUrl = null;
-          console.log(`[WhatsAppBot] Connection closed (${statusCode}). Reconnecting: ${shouldReconnect}`);
-          if (shouldReconnect) setTimeout(() => this.initSocket(), 5000);
+          this.pairingCode = null;
+          this.pairingCodeMode = false;
+          console.log(`[WhatsAppBot] Connection closed (statusCode=${statusCode}). Reconnect: ${shouldReconnect}`);
+          if (shouldReconnect) this.scheduleReconnect(5000);
         } else if (connection === "open") {
           this.isConnected = true;
           this.pairingCode = null;
           this.qrCodeDataUrl = null;
-          console.log("[WhatsAppBot] Connected successfully to dedicated WhatsApp number!");
+          this.pairingCodeMode = false;
+          // FIX 3: Persist phone to Firestore so dashboard shows 'linked' after server restart
+          if (this.dedicatedPhone) this.savePhoneToFirestore(this.dedicatedPhone).catch(() => {});
+          // FIX 4: Start app-level keep-alive ping every 4 min
+          this.startKeepAlive();
+          console.log("[WhatsAppBot] Connected! Keep-alive active.");
         }
       });
     } catch (err) {
@@ -560,46 +640,70 @@ YOUR RULES FOR GENERATING THE WHATSAPP REPLY:
     }
   }
 
+  /**
+   * FIX: Fresh socket per request + 2.5s wait + 3 retries = reliable pairing code every time.
+   * Old approach reused an existing socket which silently failed after QR was already displayed.
+   */
   public async requestPairingCode(phoneNumber: string): Promise<string> {
     let cleanPhone = phoneNumber.replace(/[\s\-\(\)\+]/g, "").trim();
     if (cleanPhone.length === 10) cleanPhone = `91${cleanPhone}`;
     this.dedicatedPhone = cleanPhone;
+    this.pairingCodeMode = true;
 
-    if (this.isConnected) return "ALREADY_CONNECTED";
-    if (!this.sock) await this.initSocket();
+    if (this.isConnected) {
+      this.pairingCodeMode = false;
+      return "ALREADY_CONNECTED";
+    }
 
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    // Tear down any existing socket so we start with a clean slate
+    try {
+      if (this.sock) { this.sock.end(undefined); this.sock = null; }
+    } catch {}
+    this.stopKeepAlive();
 
-    if (this.sock && !this.isConnected) {
+    // Fresh init in pairing-code mode (suppresses QR)
+    await this.initSocket(true);
+
+    // Let Baileys connect to WS (pre-auth state, not yet open)
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+
+    if (!this.sock) {
+      this.pairingCodeMode = false;
+      throw new Error("WhatsApp socket not ready after init. Try again.");
+    }
+
+    // Up to 3 attempts with 1.5s between each
+    let lastErr: any;
+    for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         const code = await this.sock.requestPairingCode(cleanPhone);
+        if (!code) throw new Error("Empty code returned");
         this.pairingCode = code;
-        console.log(`[WhatsAppBot] Generated Pairing Code for ${cleanPhone}: ${code}`);
+        console.log(`[WhatsAppBot] Pairing code [attempt ${attempt}] for +${cleanPhone}: ${code}`);
         return code;
       } catch (err: any) {
-        console.error("[WhatsAppBot] Failed to request pairing code:", err);
-        try {
-          await this.resetSession();
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-          const code = await this.sock.requestPairingCode(cleanPhone);
-          this.pairingCode = code;
-          return code;
-        } catch (retryErr: any) {
-          throw new Error(retryErr?.message || err?.message || "Failed to generate pairing code");
-        }
+        lastErr = err;
+        console.warn(`[WhatsAppBot] requestPairingCode attempt ${attempt} failed: ${err?.message || err}`);
+        if (attempt < 3) await new Promise((r) => setTimeout(r, 1500));
       }
     }
 
-    throw new Error("WhatsApp socket not ready. Please try again.");
+    this.pairingCodeMode = false;
+    throw new Error(lastErr?.message || "Failed to generate pairing code after 3 attempts.");
   }
 
   public async resetSession() {
+    this.stopKeepAlive();
     this.isConnected = false;
     this.pairingCode = null;
     this.qrCodeDataUrl = null;
+    this.pairingCodeMode = false;
     try {
       if (this.sock) { this.sock.end(undefined); this.sock = null; }
       if (this.clearAuthFn) await this.clearAuthFn();
+      // Wipe saved phone so dashboard shows unlinked
+      await sessionMetaDoc().delete().catch(() => {});
+      this.dedicatedPhone = null;
     } catch (e) {
       console.error("[WhatsAppBot] Error during resetSession:", e);
     }
