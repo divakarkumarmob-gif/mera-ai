@@ -197,7 +197,21 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
 
     useEffect(() => {
         const interval = setInterval(() => {
-            if (!isAiSpeaking.current && Date.now() > speakingCooldownUntilRef.current && status === "Speaking...") {
+            const outCtx = outputAudioCtx.current;
+            const audioDrained = !outCtx || outCtx.currentTime >= nextStartTime.current - 0.05;
+
+            // Only let the turn actually end once turnComplete has arrived AND
+            // every scheduled audio chunk has really finished playing. This
+            // is checked here (not per-chunk in onended) so a brief gap
+            // between two streamed TTS chunks never gets mistaken for the
+            // turn being over.
+            if (turnCompletePendingRef.current && audioDrained) {
+                turnCompletePendingRef.current = false;
+                aiTurnActiveRef.current = false;
+                isAiSpeaking.current = false;
+            }
+
+            if (!aiTurnActiveRef.current && Date.now() > speakingCooldownUntilRef.current && status === "Speaking...") {
                 setStatus("Listening...");
             }
         }, 200);
@@ -209,6 +223,16 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         const interval = setInterval(() => {
             if (inputAudioCtx.current && inputAudioCtx.current.state === 'suspended') {
                 inputAudioCtx.current.resume();
+            }
+            // Mobile browsers often start a freshly-created AudioContext in
+            // "suspended" state when the session was opened without a direct
+            // tap (e.g. wake-word "Hello Friday" instead of pressing the mic
+            // button). If outputAudioCtx stays suspended, the AI's audio is
+            // still scheduled/generated but never actually plays — which
+            // looks like "AI spoke but I heard nothing" / mistaken for a
+            // network error. Keep retrying resume() until it takes.
+            if (outputAudioCtx.current && outputAudioCtx.current.state === 'suspended') {
+                outputAudioCtx.current.resume().catch(() => {});
             }
         }, 1000);
         return () => clearInterval(interval);
@@ -245,6 +269,21 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const isWarningSpokenRef = useRef<boolean>(false);
     const speakingCooldownUntilRef = useRef<number>(0);
     const hasSpokenInTurnRef = useRef<boolean>(false);
+    // True for the ENTIRE duration of one AI turn (from the first "thinking"/
+    // "speaking" event until turnComplete AND all buffered audio has actually
+    // finished playing). Unlike isAiSpeaking (which briefly flips false in the
+    // gap between two streamed TTS chunks), this never flickers mid-turn, so
+    // it's the flag the mic hard-mute relies on to avoid re-opening the mic
+    // between chunks and picking up stray audio.
+    const aiTurnActiveRef = useRef<boolean>(false);
+    // Set when turnComplete arrives; only actually clears aiTurnActiveRef once
+    // the queued audio has finished playing (checked by the status interval).
+    const turnCompletePendingRef = useRef<boolean>(false);
+    // Prevents two overlapping ensureConnection() calls (e.g. wake-word firing
+    // at the same moment as a manual mic tap) from both attaching a mic
+    // pipeline, which was sending duplicate audio to Gemini and made spoken
+    // numbers sound doubled/repeated.
+    const isConnectingRef = useRef<boolean>(false);
     const pendingImagePayloadsRef = useRef<{ id: string; file: File; caption?: string }[]>([]);
     const selectedImagesRef = useRef(selectedImages);
     useEffect(() => { selectedImagesRef.current = selectedImages; }, [selectedImages]);
@@ -334,10 +373,14 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         if (initAckTimeoutRef.current) { clearTimeout(initAckTimeoutRef.current); initAckTimeoutRef.current = null; }
         ws.current?.close();
         processor.current?.disconnect();
+        processor.current = null;
         if (inputAudioCtx.current && inputAudioCtx.current.state !== 'closed') inputAudioCtx.current.close();
         mediaStreamRef.current?.getTracks().forEach(t => t.stop());
         mediaStreamRef.current = null;
         stopAudio();
+        aiTurnActiveRef.current = false;
+        turnCompletePendingRef.current = false;
+        isConnectingRef.current = false;
         setIsRecording(false);
         setStatus("Idle");
     };
@@ -346,6 +389,8 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         ws.current?.send(JSON.stringify({ interrupt: true }));
         stopAudio();
         resetTypewriter();
+        aiTurnActiveRef.current = false;
+        turnCompletePendingRef.current = false;
         setStatus("Listening...");
     };
 
@@ -381,7 +426,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         const interval = setInterval(() => {
             // NEVER count down when AI is Thinking, Speaking, or playing output audio!
             const isAudioStillPlaying = !!(outputAudioCtx.current && outputAudioCtx.current.currentTime < (nextStartTime.current - 0.05));
-            const isAiBusy = isAiSpeaking.current || isAiThinkingRef.current || statusRef.current === "Thinking..." || statusRef.current === "Speaking..." || isAudioStillPlaying;
+            const isAiBusy = aiTurnActiveRef.current || isAiSpeaking.current || isAiThinkingRef.current || statusRef.current === "Thinking..." || statusRef.current === "Speaking..." || isAudioStillPlaying;
             if (isAiBusy) {
                 lastActivityTimeRef.current = Date.now();
                 if (isWarningSpokenRef.current) {
@@ -423,6 +468,19 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
      * in one place.
      */
     const attachMicPipeline = async (stream: MediaStream) => {
+        // Safety: if a previous input pipeline is still attached (e.g. from a
+        // race between wake-word trigger and a manual mic tap), tear it down
+        // fully first. Two live processors both sending mic audio to the same
+        // WebSocket is what made Gemini "hear" everything twice — including
+        // spoken numbers coming back doubled/repeated.
+        if (processor.current) {
+            try { processor.current.onaudioprocess = null; processor.current.disconnect(); } catch {}
+            processor.current = null;
+        }
+        if (inputAudioCtx.current && inputAudioCtx.current.state !== 'closed') {
+            try { await inputAudioCtx.current.close(); } catch {}
+        }
+
         inputAudioCtx.current = createAudioContext(16000);
         outputAudioCtx.current = createAudioContext(24000);
         try {
@@ -439,7 +497,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         processor.current.onaudioprocess = (e) => {
             // 1. HARD MUTE: While AI is Thinking, Speaking, output buffer is playing, or cooling down -> Mic is 100% OFF
             const isAudioStillPlaying = !!(outputAudioCtx.current && outputAudioCtx.current.currentTime < (nextStartTime.current - 0.05));
-            const isAiBusy = isAiSpeaking.current || isAiThinkingRef.current || statusRef.current === "Thinking..." || statusRef.current === "Speaking..." || isAudioStillPlaying;
+            const isAiBusy = aiTurnActiveRef.current || isAiSpeaking.current || isAiThinkingRef.current || statusRef.current === "Thinking..." || statusRef.current === "Speaking..." || isAudioStillPlaying;
             if (isAiBusy || Date.now() < speakingCooldownUntilRef.current || !isInitializedRef.current) {
                 setVolume(0);
                 return;
@@ -490,8 +548,15 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     };
 
     const ensureConnection = async (withMic: boolean) => {
+        // If a connection/mic-attach is already in flight (e.g. wake-word
+        // detection fired at the same moment as a manual mic tap), skip this
+        // call entirely instead of racing it — that race was the source of
+        // two ScriptProcessors both streaming mic audio at once.
+        if (withMic && isConnectingRef.current) return;
+
         if (ws.current && ws.current.readyState === WebSocket.OPEN) {
             if (withMic && !isRecording) {
+                isConnectingRef.current = true;
                 setStatus("Requesting Microphone...");
                 try {
                     const stream = await requestMicStream();
@@ -502,11 +567,14 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 } catch (err) {
                     console.error("Error accessing audio", err);
                     setStatus("Error: Mic Access Failed");
+                } finally {
+                    isConnectingRef.current = false;
                 }
             }
             return;
         }
 
+        if (withMic) isConnectingRef.current = true;
         setStatus("Connecting...");
         let stream: MediaStream | undefined;
         if (withMic) {
@@ -517,6 +585,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
             } catch (err) {
                 console.error("Error accessing audio", err);
                 setStatus("Error: Mic Access Failed");
+                isConnectingRef.current = false;
                 return;
             }
         }
@@ -550,6 +619,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 mediaStreamRef.current = stream;
                 await attachMicPipeline(stream);
             }
+            isConnectingRef.current = false;
         };
 
         socket.onmessage = (event) => {
@@ -558,10 +628,14 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 const msg = JSON.parse(event.data);
                 if (msg.audio) {
                     if (outputAudioCtx.current) {
+                        aiTurnActiveRef.current = true;
+                        turnCompletePendingRef.current = false;
                         setStatus("Speaking...");
                         playAudioChunk(outputAudioCtx.current, msg.audio, nextStartTime, isAiSpeaking, speakingCooldownUntilRef);
                     }
                 } else if (msg.type === 'thinking') {
+                    aiTurnActiveRef.current = true;
+                    turnCompletePendingRef.current = false;
                     isAiThinkingRef.current = true;
                     setStatus("Thinking...");
                     // Bug Fix 2: Safety escape — if AI is stuck in thinking for >30s,
@@ -571,11 +645,15 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         if (isAiThinkingRef.current) {
                             console.warn('[Friday] Thinking timeout — forcing Listening state');
                             isAiThinkingRef.current = false;
+                            aiTurnActiveRef.current = false;
+                            turnCompletePendingRef.current = false;
                             setStatus('Listening...');
                         }
                     }, 30000);
                 } else if (msg.type === 'speaking') {
                     // AI has audio coming — clear thinking flag immediately
+                    aiTurnActiveRef.current = true;
+                    turnCompletePendingRef.current = false;
                     isAiThinkingRef.current = false;
                     clearTimeout((window as any).__thinkingTimeout);
                 } else if (msg.text) {
@@ -592,6 +670,11 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 } else if (msg.turnComplete) {
                     captionTurnStartedRef.current = false;
                     isAiThinkingRef.current = false;
+                    // Don't drop aiTurnActiveRef here — text/turnComplete can
+                    // arrive before the trailing audio chunks finish playing.
+                    // The status-polling interval clears it once currentTime
+                    // actually catches up to nextStartTime.
+                    turnCompletePendingRef.current = true;
                     if (shouldCloseAfterTurnRef.current) {
                         shouldCloseAfterTurnRef.current = false;
                         const delay = Math.max(1200, ((nextStartTime.current - (outputAudioCtx.current?.currentTime || 0)) * 1000) + 600);
@@ -603,6 +686,12 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 } else if (msg.type === 'init_ack') {
                     isInitializedRef.current = true;
                     isAiThinkingRef.current = false;
+                    // Safety: a fresh session (including a settings-change
+                    // reconnect mid-turn) means any previous turn's context is
+                    // dead. If it never sent turnComplete/interrupted, clear
+                    // the flag here so the mic can't stay muted forever.
+                    aiTurnActiveRef.current = false;
+                    turnCompletePendingRef.current = false;
                     if (initAckTimeoutRef.current) { clearTimeout(initAckTimeoutRef.current); initAckTimeoutRef.current = null; }
                     setStatus("Listening...");
                     if (pendingImagePayloadsRef.current.length > 0) {
@@ -613,10 +702,14 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 } else if (msg.interrupted) {
                     isAiSpeaking.current = false;
                     isAiThinkingRef.current = false;
+                    aiTurnActiveRef.current = false;
+                    turnCompletePendingRef.current = false;
                     nextStartTime.current = outputAudioCtx.current?.currentTime || 0;
                     resetTypewriter();
                     setStatus("Listening...");
                 } else if (msg.error === "session_init_failed") {
+                    aiTurnActiveRef.current = false;
+                    turnCompletePendingRef.current = false;
                     setStatus("Error: AI session failed to start");
                 } else if (msg.imageAck) {
                     setSelectedImages(prev => prev.map(img => img.id === msg.imageId ? { ...img, status: 'uploaded' } : img));
@@ -636,6 +729,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
 
         socket.onclose = () => {
             isInitializedRef.current = false;
+            isConnectingRef.current = false;
             setIsRecording(false);
             setStatus("Idle");
             stream?.getTracks().forEach(track => track.stop());
@@ -643,6 +737,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
 
         socket.onerror = (error) => {
             console.error("WebSocket error", error);
+            isConnectingRef.current = false;
             setStatus("Error: Connection Failed");
             stream?.getTracks().forEach(track => track.stop());
         };
