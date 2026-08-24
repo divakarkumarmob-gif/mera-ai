@@ -1,4 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
+import { db } from "./firebaseAdmin";
+import { contactsService } from "./contactsService";
 import { visionMemoryService } from "./visionMemoryService";
 import { voiceBiometricsService } from "./voiceBiometricsService";
 import { codeAgentService } from "./codeAgentService";
@@ -12,6 +14,15 @@ export interface TelegramStatus {
   lastActive: number | null;
 }
 
+export interface TelegramUserProfile {
+  chatId: number;
+  username?: string;
+  firstName?: string;
+  lastName?: string;
+  fullName: string;
+  lastSeenAt: number;
+}
+
 class TelegramBotService {
   private token: string = "";
   private botUsername: string | null = null;
@@ -20,6 +31,13 @@ class TelegramBotService {
   private offset: number = 0;
   private lastActive: number | null = null;
   private messageCallback: ((msg: { sender: string; text: string; time: string; chatId: number }) => void) | null = null;
+
+  // Multi-tier model fallback chain (just like WhatsApp auto-reply)
+  private static readonly MODEL_FALLBACK_CHAIN = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+  ];
 
   constructor() {
     this.token = (process.env.TELEGRAM_BOT_TOKEN || "").trim();
@@ -108,6 +126,111 @@ class TelegramBotService {
   }
 
   /**
+   * Saves or updates a Telegram user's profile in Firestore.
+   */
+  public async saveTelegramUser(chatId: number, from: any): Promise<void> {
+    try {
+      const fullName = `${from.first_name || ""} ${from.last_name || ""}`.trim() || "Telegram User";
+      const profile: TelegramUserProfile = {
+        chatId,
+        username: from.username ? from.username.toLowerCase() : undefined,
+        firstName: from.first_name || "",
+        lastName: from.last_name || "",
+        fullName,
+        lastSeenAt: Date.now(),
+      };
+      await db.collection("telegramUsers").doc(String(chatId)).set(profile, { merge: true });
+    } catch (e) {
+      console.warn("[TelegramBot] Failed to save telegram user:", e);
+    }
+  }
+
+  /**
+   * Resolves a recipient (Contact name, username, or Chat ID) to a numeric Telegram Chat ID.
+   */
+  public async resolveTargetChatId(target: string): Promise<{ chatId?: number; name?: string; error?: string }> {
+    const raw = String(target || "").trim();
+    if (!raw) return { error: "Recipient name ya ID required hai." };
+
+    // 1. If raw is a numeric Chat ID
+    if (/^\d{5,15}$/.test(raw)) {
+      return { chatId: Number(raw), name: `User (${raw})` };
+    }
+
+    const clean = raw.replace(/^@/, "").toLowerCase().trim();
+
+    try {
+      // 2. Search in Firestore telegramUsers collection
+      const snap = await db.collection("telegramUsers").get();
+      const users = snap.docs.map((d) => d.data() as TelegramUserProfile);
+
+      // Exact username match
+      const byUsername = users.find((u) => u.username && u.username.toLowerCase() === clean);
+      if (byUsername) return { chatId: byUsername.chatId, name: byUsername.fullName || byUsername.username };
+
+      // Exact or fuzzy full name / first name match
+      const byName = users.find(
+        (u) =>
+          u.fullName.toLowerCase().includes(clean) ||
+          (u.firstName && u.firstName.toLowerCase().includes(clean))
+      );
+      if (byName) return { chatId: byName.chatId, name: byName.fullName };
+
+      // 3. Search in contactsService
+      const allContacts = await contactsService.getAllContacts();
+      const matchedContact = allContacts.find((c) =>
+        c.name.toLowerCase().includes(clean)
+      );
+
+      if (matchedContact) {
+        // Check if any telegram user has phone matching contact phone
+        const contactDigits = matchedContact.phone.replace(/\D/g, "");
+        const userByPhone = users.find((u) => {
+          const uDigits = String(u.chatId);
+          return uDigits === contactDigits || (u.username && u.username.toLowerCase() === clean);
+        });
+        if (userByPhone) return { chatId: userByPhone.chatId, name: matchedContact.name };
+      }
+    } catch (e) {
+      console.warn("[TelegramBot] Error resolving contact:", e);
+    }
+
+    return {
+      error: `Boss, '${target}' ka Telegram Chat ID nahi mila. Unhone abhi tak bot (@${this.botUsername || "FridayAIBot"}) ko start nahi kiya hai ya unka username save nahi hai.`,
+    };
+  }
+
+  /**
+   * Sends a Telegram message to anyone (Contact name, username, or Chat ID).
+   */
+  public async sendMessageToTarget(
+    target: string,
+    message: string
+  ): Promise<{ success: boolean; message: string; resolvedName?: string }> {
+    const res = await this.resolveTargetChatId(target);
+    if (!res.chatId) {
+      return {
+        success: false,
+        message: res.error || `Could not find Telegram user "${target}".`,
+      };
+    }
+
+    const sendRes = await this.sendMessage(res.chatId, message);
+    if (sendRes.success) {
+      return {
+        success: true,
+        resolvedName: res.name,
+        message: `Boss, Telegram par ${res.name || target} ko message bhej diya gaya hai: "${message}" ✅`,
+      };
+    } else {
+      return {
+        success: false,
+        message: `Telegram send failed: ${sendRes.error}`,
+      };
+    }
+  }
+
+  /**
    * Downloads a Telegram media file (photo/document) into a Buffer.
    */
   private async downloadFile(fileId: string): Promise<{ buffer: Buffer; filePath: string }> {
@@ -117,6 +240,62 @@ class TelegramBotService {
     const res = await fetch(fileUrl);
     const arrayBuffer = await res.arrayBuffer();
     return { buffer: Buffer.from(arrayBuffer), filePath };
+  }
+
+  /**
+   * Generates a conversational AI reply using a multi-tier Gemini model fallback chain.
+   */
+  private async generateSmartAiReply(senderName: string, messageText: string): Promise<string> {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return "Haanji! Friday active hai. Bataiye kya help karoon?";
+    }
+
+    const ai = new GoogleGenAI({ apiKey });
+    const prompt = `YOU ARE FRIDAY: DK's (Divakar Kumar) ultra-intelligent, witty, loyal, human-like AI companion.
+
+CHAT CONTEXT:
+Sender: "${senderName}"
+Message: "${messageText}"
+
+INSTRUCTIONS:
+1. IDENTITY & CREATOR:
+   - If they ask who you are, your name, or whose bot this is:
+     Reply: "Main Friday hoon — DK Boss (Divakar Kumar) ka personal AI assistant! DK abhi occupied hain. Aap bataiye, aapko kya kaam hai?"
+2. PRIVACY & SECURITY GUARD:
+   - If they ask for confidential private details (DK's personal passwords, bank/money, confidential secrets):
+     Strictly refuse: "Yeh personal jaankari main share nahi kar sakti. Iska jawab sirf DK boss hi de sakte hain."
+3. STYLE & TONE:
+   - Natural Hindi/Hinglish (mix of Hindi and English).
+   - Crisp, polite, and warmly intelligent (1-3 short sentences).
+   - Return ONLY the exact text to send on Telegram without markdown headers.`;
+
+    const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T> =>
+      Promise.race([
+        p,
+        new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms)),
+      ]);
+
+    for (const model of TelegramBotService.MODEL_FALLBACK_CHAIN) {
+      try {
+        const response = await withTimeout(
+          ai.models.generateContent({
+            model,
+            contents: prompt,
+          }),
+          7000
+        );
+        const reply = response.text?.trim();
+        if (reply) {
+          console.log(`[TelegramBot] Reply generated using ${model}`);
+          return reply;
+        }
+      } catch (err: any) {
+        console.warn(`[TelegramBot] ${model} failed (${err?.message || err}), falling back to next model...`);
+      }
+    }
+
+    return `Haanji ${senderName}! Main Friday hoon. DK boss abhi busy hain, jaise hi wo aayenge main aapka message unko bata dungi 👍`;
   }
 
   /**
@@ -159,7 +338,7 @@ class TelegramBotService {
   private async handleUpdate(update: any): Promise<void> {
     this.lastActive = Date.now();
 
-    // 1. Handle Inline Keyboard Button Clicks (e.g. Coding Agent Approve/Deny)
+    // 1. Handle Inline Keyboard Button Clicks (Coding Agent Approve/Deny)
     if (update.callback_query) {
       await this.handleCallbackQuery(update.callback_query);
       return;
@@ -169,11 +348,17 @@ class TelegramBotService {
     if (!msg) return;
 
     const chatId = msg.chat?.id;
-    const senderName = msg.from?.first_name ? `${msg.from.first_name} ${msg.from.last_name || ""}`.trim() : "Boss";
+    const from = msg.from || {};
+    const senderName = from.first_name ? `${from.first_name} ${from.last_name || ""}`.trim() : "Boss";
     const text = (msg.text || msg.caption || "").trim();
 
+    // Save/Update user profile in Firestore for future targeted messaging
+    if (chatId) {
+      this.saveTelegramUser(chatId, from).catch(() => {});
+    }
+
     // Broadcast incoming message to Live UI
-    if (this.messageCallback) {
+    if (this.messageCallback && chatId) {
       this.messageCallback({
         sender: `✈️ ${senderName}`,
         text: text || (msg.photo ? "📷 [Photo]" : msg.document ? "📄 [Document]" : "[Media]"),
@@ -280,25 +465,9 @@ Bataiye Boss, aaj kya help karoon?`;
       }
     }
 
-    // 9. General Smart AI Conversational Reply via Gemini
-    try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
-      const prompt = `You are Friday: DK's ultra-intelligent, witty, loyal, human-like AI companion.
-User: "${senderName}"
-Message: "${text}"
-
-Reply in natural, warm Hindi/Hinglish directly to Boss (DK). Keep it concise, helpful, and friendly.`;
-
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: prompt,
-      });
-
-      const replyText = response.text || "Haan Boss, main sun rahi hoon!";
-      await this.sendMessage(chatId, replyText);
-    } catch (e: any) {
-      await this.sendMessage(chatId, "Haan Boss, bataiye kya help karoon?");
-    }
+    // 9. General Smart AI Conversational Reply via Multi-Tier Fallback Chain
+    const replyText = await this.generateSmartAiReply(senderName, text);
+    await this.sendMessage(chatId, replyText);
   }
 
   /**

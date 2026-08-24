@@ -547,6 +547,7 @@ CONTACTS & WHATSAPP TOOLS:
 - "save_contact": save a name+number DK gives you.
 - "delete_contact": remove a saved contact.
 - "send_whatsapp_to_contact": send a message to any contact.
+- "send_telegram_to_contact": send a Telegram message to any contact, person, username, or chat ID (e.g. "Rahul ko telegram par good night bhej do", "Telegram par @rahul ko message bhejo"). Check "success" field before confirming.
 - "pair_dedicated_whatsapp_number": link DK's spare number. Returns an 8-char Pairing Code — speak it letter by letter, tell DK to enter it in WhatsApp → Linked Devices. Never say an SMS/OTP was sent — you give the code directly.
 - "set_whatsapp_reply_limit": change how many auto-replies Friday can send a specific contact per day (default 10/day). Use whenever DK wants to increase, decrease, or set someone's daily auto-reply cap, in any phrasing — e.g. "Priya ka limit 15 kar do", "isko din mein sirf 3 hi reply karo". Confirm the new limit back to DK once set.
 - "save_daily_update": whenever DK dictates something as today's update/status ("aaj ka update note karo, maine khana kha liya"), save it with this tool. Multiple calls the same day all accumulate into one log for today — DK may call this many times across the day, each new bit gets appended, not replaced.
@@ -1891,6 +1892,18 @@ HOW TO READ MESSAGES:
           },
         },
         {
+          name: "send_telegram_to_contact",
+          description: "Send a Telegram message to any person, contact name, username, or chat ID (e.g. 'Rahul ko telegram par good night bhej do', 'Telegram pe @rahul ko message bhejo'). Looks up contacts or known Telegram users and delivers the message.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              recipient: { type: "STRING", description: "Contact Name (e.g. 'Rahul', 'Amit', 'Priya'), Telegram Username (e.g. '@rahul_dev'), or Chat ID" },
+              message: { type: "STRING", description: "The message text to send" },
+            },
+            required: ["recipient", "message"],
+          },
+        },
+        {
           name: "get_linkedin_insights",
           description: "Get LinkedIn company hub page and job opening search links for any company or skill.",
           parameters: {
@@ -3111,6 +3124,20 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                           : `Telegram send failed: ${sendRes.error}`,
                       };
                     }
+                  } catch (e: any) {
+                    result = { success: false, message: `Telegram message fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "send_telegram_to_contact") {
+                  const { recipient, message } = call.args || {};
+                  try {
+                    const sendRes = await telegramBotService.sendMessageToTarget(
+                      String(recipient || ""),
+                      String(message || "")
+                    );
+                    result = {
+                      success: sendRes.success,
+                      message: sendRes.message,
+                    };
                   } catch (e: any) {
                     result = { success: false, message: `Telegram message fail hua: ${e?.message || e}` };
                   }
