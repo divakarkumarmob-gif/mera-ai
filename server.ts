@@ -24,6 +24,7 @@ import { saveMessage, getHistory, clearHistory } from "./src/services/historySer
 import { visionMemoryService } from "./src/services/visionMemoryService";
 import { voiceBiometricsService } from "./src/services/voiceBiometricsService";
 import { telegramBotService } from "./src/services/telegramBotService";
+import { instagramBotService } from "./src/services/instagramBotService";
 
 const PORT = Number(process.env.PORT) || 3000;
 const isProduction = process.env.NODE_ENV === "production";
@@ -282,6 +283,38 @@ async function startServer() {
     res.json(result);
   });
 
+  // ── Instagram Direct Bot Webhook & REST Endpoints (Meta Graph API) ─────────
+  app.get("/api/instagram/webhook", (req, res) => {
+    const mode = req.query["hub.mode"] as string;
+    const challenge = req.query["hub.challenge"] as string;
+    const verifyToken = req.query["hub.verify_token"] as string;
+    const result = instagramBotService.verifyWebhook(mode, challenge, verifyToken);
+    if (result !== null) {
+      res.status(200).send(result);
+    } else {
+      console.warn("[Server] Instagram webhook verify failed — check INSTAGRAM_VERIFY_TOKEN in .env");
+      res.status(403).send("Forbidden");
+    }
+  });
+
+  app.post("/api/instagram/webhook", express.json(), (req, res) => {
+    res.sendStatus(200); // Instant ACK to Meta
+    instagramBotService.handleWebhook(req.body).catch((err) =>
+      console.error("[Server] Instagram webhook handler error:", err)
+    );
+  });
+
+  app.get("/api/instagram/status", (_req, res) => {
+    res.json({ ok: true, ...instagramBotService.getStatus() });
+  });
+
+  app.post("/api/instagram/send", async (req, res) => {
+    const { recipient, message } = req.body || {};
+    if (!recipient || !message) return res.status(400).json({ error: "recipient_and_message_required" });
+    const result = await instagramBotService.sendMessageToTarget(recipient, message);
+    res.json(result);
+  });
+
   app.get("/api/code-agent/requests", async (_req, res) => {
     try {
       res.json({ requests: await codeAgentService.getRequests() });
@@ -485,6 +518,20 @@ async function startServer() {
   );
 
   telegramBotService.setMessageCallback((msg) => {
+    const payload = JSON.stringify({
+      type: "whatsapp_incoming",
+      sender: msg.sender,
+      text: msg.text,
+      time: msg.time,
+      isGroup: false,
+    });
+    for (const client of connectedClients) {
+      if (client.readyState === client.OPEN) client.send(payload);
+    }
+  });
+
+  // Connect Meta Instagram Direct DM live broadcasts
+  instagramBotService.setMessageCallback((msg) => {
     const payload = JSON.stringify({
       type: "whatsapp_incoming",
       sender: msg.sender,
@@ -1904,6 +1951,18 @@ HOW TO READ MESSAGES:
           },
         },
         {
+          name: "send_instagram_dm",
+          description: "Send an Instagram Direct Message (DM) to any user, handle, or contact (e.g. 'Rahul ko Instagram par message bhej do', 'Instagram par @user ko DM karo'). Note: Sensitive actions cannot be performed via Instagram.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              recipient: { type: "STRING", description: "Instagram Username (e.g. '@rahul_dev', 'rahul_kumar'), Contact Name, or IGID" },
+              message: { type: "STRING", description: "The message text to send in Instagram DM" },
+            },
+            required: ["recipient", "message"],
+          },
+        },
+        {
           name: "get_linkedin_insights",
           description: "Get LinkedIn company hub page and job opening search links for any company or skill.",
           parameters: {
@@ -3140,6 +3199,20 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                     };
                   } catch (e: any) {
                     result = { success: false, message: `Telegram message fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "send_instagram_dm") {
+                  const { recipient, message } = call.args || {};
+                  try {
+                    const sendRes = await instagramBotService.sendMessageToTarget(
+                      String(recipient || ""),
+                      String(message || "")
+                    );
+                    result = {
+                      success: sendRes.success,
+                      message: sendRes.message,
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `Instagram DM send fail hua: ${e?.message || e}` };
                   }
                 } else if (call.name === "get_linkedin_insights") {
                   const { query } = call.args || {};

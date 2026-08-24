@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { X, Mic, Plus, Loader2, Settings, ChevronDown, Captions, MessageSquare, Square, Code2, Terminal, Shield, Trash2, Key, Check, AlertCircle, Send } from 'lucide-react';
+import { X, Mic, Plus, Loader2, Settings, ChevronDown, Captions, MessageSquare, Square, Code2, Terminal, Shield, Trash2, Key, Check, AlertCircle, Send, Instagram } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import AgentFace from './AgentFace';
 import ChatHistoryModal from './ChatHistoryModal';
@@ -399,6 +399,54 @@ function TelegramBotCard() {
                 <div className="p-2.5 rounded-xl bg-slate-900/70 border border-white/10 text-center">
                     <span className="text-[11px] text-slate-400">
                         Add <code>TELEGRAM_BOT_TOKEN</code> in your <code>.env</code> to activate.
+                    </span>
+                </div>
+            )}
+        </div>
+    );
+}
+
+// ── Instagram Direct Bot Card (Meta Graph API) ────────────────────────────────
+function InstagramBotCard() {
+    const [status, setStatus] = useState<{ isConfigured: boolean; accountId: string | null } | null>(null);
+
+    useEffect(() => {
+        fetch('/api/instagram/status')
+            .then((r) => r.json())
+            .then((d) => setStatus(d))
+            .catch(() => {});
+    }, []);
+
+    return (
+        <div className="pt-3 border-t border-white/10">
+            <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                    <Instagram className="w-4 h-4 text-pink-400" />
+                    <span className="text-white font-bold text-sm">Instagram Direct Bot</span>
+                </div>
+                <span
+                    className={`text-[10px] font-black tracking-wider px-2 py-0.5 rounded-full uppercase ${
+                        status?.isConfigured
+                            ? 'bg-pink-500/20 text-pink-300 border border-pink-500/40 shadow-[0_0_8px_rgba(244,114,182,0.3)]'
+                            : 'bg-slate-800 text-slate-400 border border-slate-700'
+                    }`}
+                >
+                    {status?.isConfigured ? 'Meta Active' : 'Offline'}
+                </span>
+            </div>
+            <p className="text-xs text-slate-400 mb-2">
+                AI DM Reader & Auto-Reply. 🛡️ <i>Sensitive actions strictly blocked from IG.</i>
+            </p>
+
+            {status?.isConfigured ? (
+                <div className="p-2.5 rounded-xl bg-pink-950/40 border border-pink-500/30 text-xs text-pink-200 flex items-center justify-between">
+                    <span>Account: <b>{status.accountId || 'Connected'}</b></span>
+                    <span className="text-[10px] text-pink-300/80">Webhook: <code>/api/instagram/webhook</code></span>
+                </div>
+            ) : (
+                <div className="p-2.5 rounded-xl bg-slate-900/70 border border-white/10 text-center">
+                    <span className="text-[11px] text-slate-400">
+                        Add <code>INSTAGRAM_PAGE_ACCESS_TOKEN</code> in <code>.env</code> to activate.
                     </span>
                 </div>
             )}
@@ -1628,6 +1676,9 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
 
                             {/* Friday Telegram Bot Card */}
                             <TelegramBotCard />
+
+                            {/* Friday Instagram Direct Bot Card */}
+                            <InstagramBotCard />
                         </div>
                     </motion.div>
                 )}
