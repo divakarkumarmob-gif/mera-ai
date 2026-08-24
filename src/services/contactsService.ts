@@ -71,6 +71,24 @@ class ContactsService {
     const direct = all.find((c) => c.name?.toLowerCase().trim() === q);
     if (direct) return direct;
 
+    // 2.1 Boss / DK / Divakar / Self alias match
+    const bossAliases = ["boss", "divakar", "dk", "divakar kumar", "self", "me", "mera number", "mere"];
+    if (bossAliases.includes(q)) {
+      const bossMatch = all.find((c) => {
+        const cName = c.name?.toLowerCase().trim() || "";
+        const cRel = c.relation?.toLowerCase().trim() || "";
+        return (
+          cName === "dk" ||
+          cName.includes("divakar") ||
+          cName === "boss" ||
+          cRel === "self" ||
+          cRel === "owner" ||
+          cRel === "boss"
+        );
+      });
+      if (bossMatch) return bossMatch;
+    }
+
     // 3. Partial name match
     const nameMatch = all.find((c) => c.name?.toLowerCase().includes(q) || q.includes(c.name?.toLowerCase()));
     if (nameMatch) return nameMatch;

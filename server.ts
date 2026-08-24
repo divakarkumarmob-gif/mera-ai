@@ -357,9 +357,39 @@ CONVERSATION STYLE:
         ? "Clear answer first, then 2-3 short supporting points."
         : "Keep replies crisp, punchy, natural. Don't ramble."}
 - ${accurateMode ? "Careful Mode ON: double-check facts/math before speaking." : ""}
-- ${googleSearchMode ? "Google Search enabled: use it for current facts smoothly, don't announce it." : ""}
+- ${googleSearchMode ? "Google Search enabled: use it for current facts and live prices smoothly, don't announce it." : ""}
 - If DK shares an image, describe what you see naturally.
-- Speak numbers/units/equations in words, never raw symbols.
+- Speak numbers/units/equations in words, never raw symbols (e.g. say "paanch sau rupaye" instead of raw symbols).
+
+SHOPPING & E-COMMERCE (AMAZON, FLIPKART, MEESHO):
+- When DK asks about product prices, deals, or comparisons (e.g. 'football sabse sasti kispe mil rahi hai', 'ye item kitne ka aata hai', 'Amazon vs Flipkart vs Meesho'):
+  - Give a clear, practical price comparison across Amazon, Flipkart, and Meesho in Rupees (₹).
+  - Break down: 1) Lowest entry-level price (Meesho/Flipkart budget options, e.g. basic rubber footballs from ₹150–₹250), 2) Standard popular brands & models (e.g. Nivia Storm / Cosco size 5 around ₹350–₹550 on Amazon/Flipkart), 3) Which platform is best for budget vs brand/speed.
+  - If Google Search is ON, retrieve the latest live deal prices directly.
+
+SENDING PRODUCT LINKS VIA WHATSAPP:
+- When DK asks to send or share a product link/details on WhatsApp (e.g. "iska link WhatsApp par bhej do", "Rahul ko link bhejo", "Amazon/Flipkart ka link share karo", "buy link send karo"):
+  1. Recipient Selection:
+     - If DK specifies someone's name (e.g. "Aman ko bhej do", "Mummy ko bhejo"), use that contact name/number in 'send_whatsapp_to_contact'.
+     - If DK does NOT name anyone (or says "mujhe bhej do", "link send karo"), by default send to DK / Boss / Divakar ('DK' or 'Divakar' or 'Boss').
+  2. Message Formatting:
+     - Formulate a clean, ready-to-buy message with the Product Title, Recommended Store (Amazon / Flipkart / Meesho), Best Price, and direct link (e.g. "https://www.amazon.in/s?k=..." or "https://www.flipkart.com/search?q=..." or "https://www.meesho.com/search?q=...").
+  3. Action & Voice Confirmation:
+     - Call 'send_whatsapp_to_contact' immediately.
+NEWS & HEADLINES (TOP 10, POLITICS, LOCAL, WORLD, VIRAL):
+- Tool: 'get_news'.
+- When DK asks for news (e.g. "top 10 news batao", "politics news", "local news batao", "international/world news", "viral news", "aaj ki khabrein"):
+  - Call 'get_news' with the appropriate topic (e.g. 'top 10', 'politics', 'local' or 'Patna local', 'world', 'viral').
+  - Read out the headlines clearly and engagingly in fluent Hindi/Hinglish, numbered 1 to 10 (or top 5 if he asks for a quick summary).
+  - Include the source name (e.g. "NDTV ke mutabik...", "Hindustan Times ke anusar...").
+
+EDUCATION, SCRIPTURES & HISTORY (NCERT, GEETA, RAMAYAN, MAHABHARAT, HISTORY):
+- When DK asks about NCERT / school / college topics (Class 6–12 Science, Maths, Social Science, Physics, Chemistry, Biology):
+  - Break down complex concepts into simple, intuitive explanations with real-world examples.
+- When DK asks about Geeta, Ramayan, Mahabharat:
+  - Explain characters (Karna, Arjun, Bhishma, Krishna, Ram, Hanuman, Ravana), stories, and life lessons. Quote shlokas / dohas with simple Hindi translation when relevant.
+- When DK asks about Indian History (Freedom struggle, 1857 Revolt, Gandhi, Bhagat Singh, Netaji, Mughal Empire, Babur, Akbar, Birbal, Mauryan, Gupta empires):
+  - Narrate history like a vivid, engaging story with accurate facts, key dates, and context.
 
 WHATSAPP — READING MESSAGES:
 - Tool: 'get_whatsapp_messages'.
@@ -717,12 +747,12 @@ HOW TO READ MESSAGES:
         },
         {
           name: "get_nearby_places",
-          description: "Find nearby places of a certain type (restaurant, atm, hospital, pharmacy, cafe, bank, etc.) around a given location.",
+          description: "Find nearby places, shops, sweet shops (mithai), showrooms (car/bike/clothes/electronics), supermarkets, restaurants, hospitals, banks, etc. around a given city or location.",
           parameters: {
             type: "OBJECT",
             properties: {
-              place: { type: "STRING", description: "The reference location, e.g. 'Connaught Place Delhi'" },
-              amenity: { type: "STRING", description: "Type of place, e.g. 'restaurant', 'atm', 'hospital', 'pharmacy', 'cafe', 'bank'" },
+              place: { type: "STRING", description: "The reference location or city, e.g. 'Patna', 'Connaught Place Delhi'" },
+              amenity: { type: "STRING", description: "Type of place or search keyword, e.g. 'mithai', 'sweet shop', 'car showroom', 'restaurant', 'hospital', 'bank', 'supermarket'" },
             },
             required: ["place", "amenity"],
           },
@@ -864,12 +894,13 @@ HOW TO READ MESSAGES:
         // ---------------------------------------------------------------
         {
           name: "get_news",
-          description: "Get latest news headlines, optionally filtered by topic. Use for 'aaj ki news batao', 'X ke bare me latest news batao'.",
+          description: "Get latest live news headlines, top 10 news, politics, local city news, international/world news, or viral/trending news. Filter with topic like 'top 10', 'politics', 'local', 'world', 'viral', 'sports', or a city name (e.g. 'Patna local', 'Delhi').",
           parameters: {
             type: "OBJECT",
             properties: {
-              topic: { type: "STRING", description: "Optional topic/keyword to filter news by" },
+              topic: { type: "STRING", description: "Filter topic or category: 'top 10', 'politics', 'local', 'world', 'viral', 'business', 'tech', or specific city/topic" },
               country: { type: "STRING", description: "2-letter country code, default 'in' for India" },
+              count: { type: "INTEGER", description: "Number of news headlines to fetch (default 10)" },
             },
             required: [],
           },
@@ -940,12 +971,12 @@ HOW TO READ MESSAGES:
         },
         {
           name: "get_directions",
-          description: "Get driving distance and duration between two places.",
+          description: "Get driving distance (km), estimated travel time (hours/mins), and route details between two places/cities (e.g. 'Delhi to Patna').",
           parameters: {
             type: "OBJECT",
             properties: {
-              fromPlace: { type: "STRING", description: "Starting location" },
-              toPlace: { type: "STRING", description: "Destination location" },
+              fromPlace: { type: "STRING", description: "Starting city or location" },
+              toPlace: { type: "STRING", description: "Destination city or location" },
             },
             required: ["fromPlace", "toPlace"],
           },
@@ -1508,9 +1539,13 @@ HOW TO READ MESSAGES:
                     result = { success: false, message: `Translation fail hui: ${e?.message || e}` };
                   }
                 } else if (call.name === "get_news") {
-                  const { topic, country } = call.args || {};
+                  const { topic, country, count } = call.args || {};
                   try {
-                    result = await publicApisService.getNews(topic ? String(topic) : undefined, country ? String(country) : undefined);
+                    result = await publicApisService.getNews(
+                      topic ? String(topic) : undefined,
+                      country ? String(country) : undefined,
+                      typeof count === "number" ? count : 10
+                    );
                   } catch (e: any) {
                     result = { success: false, message: `News fetch fail hui: ${e?.message || e}` };
                   }

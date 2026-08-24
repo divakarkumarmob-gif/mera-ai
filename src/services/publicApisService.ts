@@ -279,27 +279,94 @@ class PublicApisService {
     return { success: true, pincode, count: offices.length, offices };
   }
 
-  // 15. Nearby places — OpenStreetMap Overpass API (free, no key)
-  // Uses Nominatim for geocoding + Overpass for amenity search.
-  public async getNearbyPlaces(place: string, amenity: string): Promise<any> {
-    const geo = await fetchJson(
-      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(place)}&format=json&limit=1`,
-    );
-    const loc = geo?.[0];
-    if (!loc) return { success: false, message: `"${place}" location nahi mili.` };
+  // 15. Nearby places — Nominatim + Overpass + Web Search Fallback (100% Free, No Key Required)
+  // Searches amenities, shops (sweet shops, showrooms, clothes, electronics), tourism, etc.
+  public async getNearbyPlaces(place: string, amenityOrQuery: string): Promise<any> {
+    const headers = {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Accept-Language": "en-US,en;q=0.9",
+    };
 
-    const query = `[out:json][timeout:10];node["amenity"="${amenity}"](around:3000,${loc.lat},${loc.lon});out 8;`;
-    const overpassRes = await fetch("https://overpass-api.de/api/interpreter", {
-      method: "POST",
-      body: query,
-    });
-    const data = await overpassRes.json();
-    const places = (data.elements || []).slice(0, 8).map((el: any) => ({
-      name: el.tags?.name || "Unnamed",
-      lat: el.lat,
-      lon: el.lon,
-    }));
-    return { success: true, near: place, amenity, count: places.length, places };
+    // 1. Try Nominatim Direct Search
+    try {
+      const nomUrl = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(`${amenityOrQuery} in ${place}`)}&format=json&limit=8`;
+      const res = await fetch(nomUrl, { headers });
+      const json = await res.json();
+      if (Array.isArray(json) && json.length > 0) {
+        const places = json.map((x: any) => ({
+          name: x.display_name?.split(",")?.[0] || x.name || "Place",
+          address: x.display_name,
+          type: x.type || x.class || amenityOrQuery,
+          lat: x.lat,
+          lon: x.lon,
+        }));
+        return { success: true, near: place, query: amenityOrQuery, count: places.length, places, source: "osm_nominatim" };
+      }
+    } catch {}
+
+    // 2. Try Overpass API
+    try {
+      const geo = await fetchJson(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(place)}&format=json&limit=1`
+      );
+      const loc = geo?.[0];
+      if (loc && loc.lat && loc.lon) {
+        const clean = amenityOrQuery.toLowerCase().replace(/[^a-zA-Z0-9_]/g, "");
+        const queryBody = `
+          node["amenity"="${clean}"](around:5000,${loc.lat},${loc.lon});
+          node["shop"="${clean}"](around:5000,${loc.lat},${loc.lon});
+          node["amenity"~"${clean}",i](around:5000,${loc.lat},${loc.lon});
+          node["shop"~"${clean}",i](around:5000,${loc.lat},${loc.lon});
+          node["name"~"${clean}",i](around:5000,${loc.lat},${loc.lon});
+        `;
+        const overpassRes = await fetch("https://overpass-api.de/api/interpreter", {
+          method: "POST",
+          body: `[out:json][timeout:10];(${queryBody});out 10;`,
+          headers,
+        });
+        const data = await overpassRes.json();
+        const places = (data.elements || [])
+          .filter((el: any) => el.tags?.name)
+          .slice(0, 8)
+          .map((el: any) => ({
+            name: el.tags?.name,
+            type: el.tags?.amenity || el.tags?.shop || amenityOrQuery,
+            address: [el.tags?.["addr:street"], el.tags?.["addr:city"]].filter(Boolean).join(", ") || undefined,
+            lat: el.lat,
+            lon: el.lon,
+          }));
+
+        if (places.length) {
+          return { success: true, near: place, query: amenityOrQuery, count: places.length, places, source: "osm_overpass" };
+        }
+      }
+    } catch {}
+
+    // 3. Web search fallback for business/store queries
+    try {
+      const q = encodeURIComponent(`${amenityOrQuery} in ${place} address locations`);
+      const ddgRes = await fetch(`https://html.duckduckgo.com/html/?q=${q}`, { headers });
+      const html = await ddgRes.text();
+      const snippets: string[] = [];
+      const regex = /<a class="result__snippet[^>]*>(.*?)<\/a>/g;
+      let match;
+      while ((match = regex.exec(html)) !== null && snippets.length < 4) {
+        const clean = match[1].replace(/<[^>]*>/g, "").trim();
+        if (clean) snippets.push(clean);
+      }
+      if (snippets.length) {
+        return {
+          success: true,
+          near: place,
+          query: amenityOrQuery,
+          count: snippets.length,
+          summary: snippets.join(" | "),
+          source: "web_search_fallback",
+        };
+      }
+    } catch {}
+
+    return { success: false, message: `"${place}" me "${amenityOrQuery}" ke liye koi result nahi mila.` };
   }
 
   // 16. Time zone info — worldtimeapi.org (free, no key)
@@ -503,24 +570,92 @@ class PublicApisService {
   // instead of crashing.
   // ---------------------------------------------------------------------
 
-  // 27. News — NewsData.io
-  public async getNews(topic?: string, country = "in"): Promise<any> {
-    const key = process.env.NEWSDATA_API_KEY;
-    if (!key) return { success: false, message: "NEWSDATA_API_KEY .env me set nahi hai." };
-    const params = new URLSearchParams({ apikey: key, country, language: "en" });
-    if (topic) params.set("q", topic);
+  // 27. News — Google News Live Feed + NewsData.io (100% Free, Top 10, Politics, Local, Viral)
+  public async getNews(topic?: string, country = "in", count = 10): Promise<any> {
+    const requestedCount = Math.min(Math.max(count || 10, 1), 15);
+    const cat = (topic || "").toLowerCase().trim();
+
+    // 1. Google News Live RSS Feed (100% Free, Instant & Uncapped)
     try {
-      const data = await fetchJson(`https://newsdata.io/api/1/latest?${params.toString()}`);
-      const articles = (data.results || []).slice(0, 5).map((a: any) => ({
-        title: a.title,
-        source: a.source_id,
-        link: a.link,
-        pubDate: a.pubDate,
-      }));
-      return { success: true, count: articles.length, articles };
-    } catch (e: any) {
-      return { success: false, message: `News fetch fail hui: ${e?.message || e}` };
+      let rssUrl = "https://news.google.com/rss?hl=en-IN&gl=IN&ceid=IN:en";
+
+      if (cat === "politics" || cat === "rajneeti" || cat === "political") {
+        rssUrl = "https://news.google.com/rss/headlines/section/topic/POLITICS?hl=en-IN&gl=IN&ceid=IN:en";
+      } else if (cat === "world" || cat === "international" || cat === "global") {
+        rssUrl = "https://news.google.com/rss/headlines/section/topic/WORLD?hl=en-IN&gl=IN&ceid=IN:en";
+      } else if (cat === "business" || cat === "finance" || cat === "economy") {
+        rssUrl = "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=en-IN&gl=IN&ceid=IN:en";
+      } else if (cat === "tech" || cat === "technology") {
+        rssUrl = "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=en-IN&gl=IN&ceid=IN:en";
+      } else if (cat === "entertainment" || cat === "viral" || cat === "trending") {
+        rssUrl = "https://news.google.com/rss/headlines/section/topic/ENTERTAINMENT?hl=en-IN&gl=IN&ceid=IN:en";
+      } else if (cat === "sports" || cat === "khel") {
+        rssUrl = "https://news.google.com/rss/headlines/section/topic/SPORTS?hl=en-IN&gl=IN&ceid=IN:en";
+      } else if (topic && topic !== "top 10" && topic !== "top news" && topic !== "latest" && topic !== "india") {
+        // Custom search topic or Local city (e.g. "Patna local", "Delhi", "Bihar", "Crime")
+        rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(topic)}&hl=en-IN&gl=IN&ceid=IN:en`;
+      }
+
+      const res = await fetch(rssUrl, {
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+      });
+      const xml = await res.text();
+      const articles: any[] = [];
+      const itemRegex = /<item>(.*?)<\/item>/gs;
+      let match;
+      while ((match = itemRegex.exec(xml)) !== null && articles.length < requestedCount) {
+        const itemContent = match[1];
+        const rawTitle = itemContent.match(/<title>(.*?)<\/title>/)?.[1]?.replace(/<!\[CDATA\[(.*?)\]\]>/g, "$1") || "";
+        const source = itemContent.match(/<source[^>]*>(.*?)<\/source>/)?.[1]?.replace(/<!\[CDATA\[(.*?)\]\]>/g, "$1") || "News";
+        const pubDate = itemContent.match(/<pubDate>(.*?)<\/pubDate>/)?.[1] || "";
+        if (rawTitle) {
+          const cleanTitle = rawTitle
+            .replace(/&quot;/g, '"')
+            .replace(/&#39;/g, "'")
+            .replace(/&amp;/g, "&")
+            .replace(/&lt;/g, "<")
+            .replace(/&gt;/g, ">");
+          articles.push({
+            title: cleanTitle,
+            source,
+            pubDate,
+          });
+        }
+      }
+
+      if (articles.length) {
+        return {
+          success: true,
+          category: topic || "Top Headlines",
+          count: articles.length,
+          articles,
+          source: "google_news_live",
+        };
+      }
+    } catch {
+      // Fall through to NewsData.io if configured
     }
+
+    // 2. NewsData.io Fallback (if key is set)
+    const key = process.env.NEWSDATA_API_KEY;
+    if (key) {
+      const params = new URLSearchParams({ apikey: key, country, language: "en" });
+      if (topic) params.set("q", topic);
+      try {
+        const data = await fetchJson(`https://newsdata.io/api/1/latest?${params.toString()}`);
+        const articles = (data.results || []).slice(0, requestedCount).map((a: any) => ({
+          title: a.title,
+          source: a.source_id,
+          link: a.link,
+          pubDate: a.pubDate,
+        }));
+        return { success: true, count: articles.length, articles, source: "newsdata" };
+      } catch (e: any) {
+        return { success: false, message: `News fetch fail hui: ${e?.message || e}` };
+      }
+    }
+
+    return { success: false, message: "Latest news fetch nahi ho saki." };
   }
 
   // 28. Cricket scores — CricAPI (cricapi.com)
@@ -647,17 +782,44 @@ class PublicApisService {
     }
   }
 
-  // 34. Maps/directions — OpenRouteService
+  // 34. Maps/directions — OpenRouteService with 100% Free OSRM Fallback
   public async getDirections(fromPlace: string, toPlace: string): Promise<any> {
-    const key = process.env.OPENROUTESERVICE_API_KEY;
-    if (!key) return { success: false, message: "OPENROUTESERVICE_API_KEY .env me set nahi hai." };
+    const geocode = async (place: string): Promise<{ lon: number; lat: number; name?: string } | null> => {
+      // 1. Try Open-Meteo Geocoding
+      try {
+        const gm = await fetchJson(
+          `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(place)}&count=1&language=en&format=json`
+        );
+        const res = gm?.results?.[0];
+        if (res && res.latitude && res.longitude) {
+          return { lon: res.longitude, lat: res.latitude, name: res.name };
+        }
+      } catch {}
 
-    const geocode = async (place: string) => {
-      const data = await fetchJson(
-        `https://api.openrouteservice.org/geocode/search?api_key=${key}&text=${encodeURIComponent(place)}&size=1`
-      );
-      const coords = data?.features?.[0]?.geometry?.coordinates;
-      return coords ? { lon: coords[0], lat: coords[1] } : null;
+      // 2. Try Nominatim Geocoding
+      try {
+        const gn = await fetchJson(
+          `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(place)}&format=json&limit=1`
+        );
+        const res = gn?.[0];
+        if (res && res.lat && res.lon) {
+          return { lon: parseFloat(res.lon), lat: parseFloat(res.lat), name: res.display_name?.split(",")?.[0] || place };
+        }
+      } catch {}
+
+      // 3. Try OpenRouteService Geocoding if key exists
+      const key = process.env.OPENROUTESERVICE_API_KEY;
+      if (key) {
+        try {
+          const data = await fetchJson(
+            `https://api.openrouteservice.org/geocode/search?api_key=${key}&text=${encodeURIComponent(place)}&size=1`
+          );
+          const coords = data?.features?.[0]?.geometry?.coordinates;
+          if (coords) return { lon: coords[0], lat: coords[1], name: place };
+        } catch {}
+      }
+
+      return null;
     };
 
     try {
@@ -665,20 +827,60 @@ class PublicApisService {
       if (!from) return { success: false, message: `"${fromPlace}" location nahi mili.` };
       if (!to) return { success: false, message: `"${toPlace}" location nahi mili.` };
 
-      const routeRes = await fetch(
-        `https://api.openrouteservice.org/v2/directions/driving-car?api_key=${key}&start=${from.lon},${from.lat}&end=${to.lon},${to.lat}`
-      );
-      const routeData = await routeRes.json();
-      const summary = routeData?.features?.[0]?.properties?.summary;
-      if (!summary) return { success: false, message: "Route calculate nahi ho paya." };
+      const key = process.env.OPENROUTESERVICE_API_KEY;
+      if (key) {
+        try {
+          const routeRes = await fetch(
+            `https://api.openrouteservice.org/v2/directions/driving-car?api_key=${key}&start=${from.lon},${from.lat}&end=${to.lon},${to.lat}`
+          );
+          const routeData = await routeRes.json();
+          const summary = routeData?.features?.[0]?.properties?.summary;
+          if (summary) {
+            const distKm = (summary.distance / 1000).toFixed(1);
+            const totalMins = Math.round(summary.duration / 60);
+            const hours = Math.floor(totalMins / 60);
+            const mins = totalMins % 60;
+            const durationFormatted = hours > 0 ? `${hours} hours ${mins} mins` : `${mins} mins`;
 
-      return {
-        success: true,
-        from: fromPlace,
-        to: toPlace,
-        distanceKm: (summary.distance / 1000).toFixed(1),
-        durationMinutes: (summary.duration / 60).toFixed(0),
-      };
+            return {
+              success: true,
+              from: from.name || fromPlace,
+              to: to.name || toPlace,
+              distanceKm: distKm,
+              durationMinutes: totalMins,
+              estimatedTime: durationFormatted,
+              source: "openrouteservice",
+            };
+          }
+        } catch {}
+      }
+
+      // 100% Free OSRM Routing Fallback (No API key needed)
+      const osrmRes = await fetch(
+        `https://router.project-osrm.org/route/v1/driving/${from.lon},${from.lat};${to.lon},${to.lat}?overview=false`,
+        { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" } }
+      );
+      const osrmData = await osrmRes.json();
+      const route = osrmData?.routes?.[0];
+      if (route) {
+        const distKm = (route.distance / 1000).toFixed(1);
+        const totalMins = Math.round(route.duration / 60);
+        const hours = Math.floor(totalMins / 60);
+        const mins = totalMins % 60;
+        const durationFormatted = hours > 0 ? `${hours} hours ${mins} mins` : `${mins} mins`;
+
+        return {
+          success: true,
+          from: from.name || fromPlace,
+          to: to.name || toPlace,
+          distanceKm: distKm,
+          durationMinutes: totalMins,
+          estimatedTime: durationFormatted,
+          source: "osrm_free_fallback",
+        };
+      }
+
+      return { success: false, message: `"${fromPlace}" se "${toPlace}" ka driving route nahi nikal saka.` };
     } catch (e: any) {
       return { success: false, message: `Directions fetch fail hui: ${e?.message || e}` };
     }
