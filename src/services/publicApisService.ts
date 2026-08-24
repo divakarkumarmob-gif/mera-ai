@@ -543,22 +543,82 @@ class PublicApisService {
     }
   }
 
-  // 26. Translation / language detect — LibreTranslate public instance (free, rate-limited)
+  // 26. Translation — 3-layer fallback: MyMemory (free) → Lingva → Google unofficial
   public async translateText(text: string, targetLang: string): Promise<any> {
+    const src = text.trim();
+    if (!src) return { success: false, message: "Text zaroori hai." };
+
+    // Layer 1: MyMemory — free, no key, 5000 chars/day per IP
     try {
-      const res = await fetch("https://libretranslate.de/translate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ q: text, source: "auto", target: targetLang, format: "text" }),
-      });
-      const data = await res.json();
-      if (!data.translatedText) {
-        return { success: false, message: "Translation fail hui — public instance abhi rate-limited ho sakta hai." };
+      const myMemoryRes = await fetch(
+        `https://api.mymemory.translated.net/get?q=${encodeURIComponent(src)}&langpair=auto|${encodeURIComponent(targetLang)}`
+      );
+      if (myMemoryRes.ok) {
+        const data = await myMemoryRes.json();
+        const translated = data?.responseData?.translatedText;
+        const detectedLang = data?.responseData?.detectedLanguage ||
+          data?.matches?.[0]?.source || "auto";
+        if (translated && translated !== src && !translated.toLowerCase().includes("mymemory")) {
+          return {
+            success: true,
+            original: src,
+            translated,
+            targetLang,
+            detectedLang,
+            source: "mymemory",
+          };
+        }
       }
-      return { success: true, original: text, translated: data.translatedText, targetLang };
-    } catch {
-      return { success: false, message: "Translation fail hui — public instance abhi down/rate-limited ho sakta hai." };
-    }
+    } catch { /* fall through */ }
+
+    // Layer 2: Lingva Translate — open-source Google Translate frontend
+    try {
+      const lingvaRes = await fetch(
+        `https://lingva.ml/api/v1/auto/${encodeURIComponent(targetLang)}/${encodeURIComponent(src)}`,
+        { headers: { "User-Agent": "Mozilla/5.0" } }
+      );
+      if (lingvaRes.ok) {
+        const data = await lingvaRes.json();
+        if (data?.translation && data.translation !== src) {
+          return {
+            success: true,
+            original: src,
+            translated: data.translation,
+            targetLang,
+            source: "lingva",
+          };
+        }
+      }
+    } catch { /* fall through */ }
+
+    // Layer 3: Google Translate unofficial (single.translate.google.com)
+    try {
+      const gtUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${encodeURIComponent(targetLang)}&dt=t&q=${encodeURIComponent(src)}`;
+      const gtRes = await fetch(gtUrl, {
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+      });
+      if (gtRes.ok) {
+        const data = await gtRes.json();
+        const parts = (data?.[0] || []) as any[][];
+        const translated = parts.map((p: any[]) => p?.[0] || "").join("");
+        const detectedLang = data?.[2] || "auto";
+        if (translated && translated !== src) {
+          return {
+            success: true,
+            original: src,
+            translated,
+            targetLang,
+            detectedLang,
+            source: "google_unofficial",
+          };
+        }
+      }
+    } catch { /* fall through */ }
+
+    return {
+      success: false,
+      message: "Translation abhi temporarily unavailable hai. Thodi der baad try karein.",
+    };
   }
 
   // ---------------------------------------------------------------------
@@ -753,6 +813,7 @@ class PublicApisService {
     const cleanFilter = String(filter || "").toLowerCase().trim();
     const schedule: any[] = [];
 
+    // Source 1: Cricbuzz upcoming schedule
     try {
       const res = await fetch("https://www.cricbuzz.com/cricket-schedule/upcoming-series/international", {
         headers: {
@@ -761,39 +822,99 @@ class PublicApisService {
       });
       if (res.ok) {
         const html = await res.text();
-        const matchLinks = html.match(/<a[^>]*href="\/live-cricket-scores\/[^"]*"[^>]*>([\s\S]*?)<\/a>/gi) || [];
-        for (const m of matchLinks) {
+        // Match series/schedule cards
+        const blocks = html.match(/class="[^"]*cb-series-itms[^"]*"[\s\S]*?<\/div>/gi) || [];
+        const matchLinks = html.match(/<a[^>]*href="\/live-cricket-scores\/[^"]*"[^>]*>([\s\S]*?)<\/a>/gi) ||
+                          html.match(/<a[^>]*href="\/cricket-series\/[^"]*"[^>]*>([\s\S]*?)<\/a>/gi) || [];
+        for (const m of [...blocks, ...matchLinks]) {
           const text = m.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
           if (
-            text &&
+            text && text.length > 5 &&
             !text.includes("Preview") &&
             !text.includes("opt to") &&
             !text.includes("Trail by") &&
-            !text.includes("won")
+            !text.includes("won") &&
+            !text.includes("Advertisement")
           ) {
             const isIndia = /india/i.test(text);
             if (!cleanFilter || text.toLowerCase().includes(cleanFilter) || (cleanFilter === "india" && isIndia)) {
-              schedule.push({
-                match: text,
-                isIndiaMatch: isIndia,
-              });
+              schedule.push({ match: text.slice(0, 120), isIndiaMatch: isIndia, source: "cricbuzz" });
             }
           }
         }
       }
-    } catch {}
+    } catch { /* fall through */ }
+
+    // Source 2: ESPN Cricinfo RSS feed (always available)
+    if (schedule.length < 3) {
+      try {
+        const espnRes = await fetch("https://www.espncricinfo.com/rss/content/story/feeds/0.xml", {
+          headers: { "User-Agent": "Mozilla/5.0" },
+        });
+        if (espnRes.ok) {
+          const xml = await espnRes.text();
+          const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
+          for (const item of items.slice(0, 25)) {
+            const titleM = item.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/i) || item.match(/<title>(.*?)<\/title>/i);
+            const title = titleM?.[1]?.trim() || "";
+            if (title && (title.toLowerCase().includes("vs") || title.toLowerCase().includes("match") || title.toLowerCase().includes("series") || title.toLowerCase().includes("t20") || title.toLowerCase().includes("odi"))) {
+              const isIndia = /india/i.test(title);
+              if (!cleanFilter || title.toLowerCase().includes(cleanFilter) || (cleanFilter === "india" && isIndia)) {
+                if (!schedule.some(s => s.match === title)) {
+                  schedule.push({ match: title, isIndiaMatch: isIndia, source: "espn_cricinfo" });
+                }
+              }
+            }
+            if (schedule.length >= 15) break;
+          }
+        }
+      } catch { /* fall through */ }
+    }
+
+    // Source 3: ICC Cricket schedule page
+    if (schedule.length < 3) {
+      try {
+        const iccRes = await fetch("https://www.icc-cricket.com/fixtures", {
+          headers: { "User-Agent": "Mozilla/5.0" },
+        });
+        if (iccRes.ok) {
+          const html = await iccRes.text();
+          const matchTexts = html.match(/class="[^"]*fixture-match[^"]*"[\s\S]*?<\/[a-z]+>/gi) || [];
+          for (const block of matchTexts.slice(0, 20)) {
+            const text = block.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+            if (text && text.length > 10) {
+              const isIndia = /india/i.test(text);
+              if (!cleanFilter || text.toLowerCase().includes(cleanFilter) || (cleanFilter === "india" && isIndia)) {
+                schedule.push({ match: text.slice(0, 120), isIndiaMatch: isIndia, source: "icc" });
+              }
+            }
+          }
+        }
+      } catch { /* fall through */ }
+    }
 
     // Deduplicate
     const uniqueSchedule: any[] = [];
     const seen = new Set<string>();
     for (const s of schedule) {
-      if (!seen.has(s.match)) {
-        seen.add(s.match);
+      const key = s.match.toLowerCase().slice(0, 40);
+      if (!seen.has(key)) {
+        seen.add(key);
         uniqueSchedule.push(s);
       }
     }
 
     uniqueSchedule.sort((a, b) => Number(b.isIndiaMatch) - Number(a.isIndiaMatch));
+
+    if (!uniqueSchedule.length) {
+      return {
+        success: true,
+        filter: filter || "all",
+        count: 0,
+        upcomingMatches: [],
+        message: "Abhi koi upcoming match schedule nahi mila. Check karo: https://www.cricbuzz.com/cricket-schedule/upcoming-series/international",
+      };
+    }
 
     return {
       success: true,
@@ -1022,26 +1143,105 @@ class PublicApisService {
     };
   }
 
-  // 29. Sports (general, non-cricket) — TheSportsDB
-  // TheSportsDB gives a shared free test key ("3") for basic endpoints, but
-  // using your own free key (from thesportsdb.com/free_sports_api) gives
-  // higher limits — set SPORTSDB_API_KEY in .env, falls back to test key.
+  // 29. Sports (general, non-cricket) — Multi-source: TheSportsDB + ESPN API + BBC Sport RSS
   public async getSportsEvents(league: string): Promise<any> {
-    const key = process.env.SPORTSDB_API_KEY || "3";
+    const q = String(league || "").trim();
+    const events: any[] = [];
+
+    // Source 1: TheSportsDB (free key or test key "3")
     try {
-      const data = await fetchJson(`https://www.thesportsdb.com/api/v1/json/${key}/searchevents.php?e=${encodeURIComponent(league)}`);
-      const events = (data.event || []).slice(0, 5).map((e: any) => ({
-        name: e.strEvent,
-        date: e.dateEvent,
-        league: e.strLeague,
-        homeScore: e.intHomeScore,
-        awayScore: e.intAwayScore,
-      }));
-      if (!events.length) return { success: false, message: `"${league}" ke liye koi event nahi mila.` };
-      return { success: true, count: events.length, events };
-    } catch (e: any) {
-      return { success: false, message: `Sports data fetch fail hui: ${e?.message || e}` };
+      const key = process.env.SPORTSDB_API_KEY || "3";
+      const data = await fetchJson(
+        `https://www.thesportsdb.com/api/v1/json/${key}/searchevents.php?e=${encodeURIComponent(q)}`,
+        5000
+      );
+      for (const e of (data.event || []).slice(0, 6)) {
+        events.push({
+          name: e.strEvent,
+          date: e.dateEvent,
+          time: e.strTime,
+          league: e.strLeague,
+          homeTeam: e.strHomeTeam,
+          awayTeam: e.strAwayTeam,
+          homeScore: e.intHomeScore ?? "-",
+          awayScore: e.intAwayScore ?? "-",
+          venue: e.strVenue,
+          status: e.strStatus || (e.intHomeScore != null ? "Finished" : "Upcoming"),
+          source: "thesportsdb",
+        });
+      }
+    } catch { /* fall through */ }
+
+    // Source 2: ESPN hidden sports API (no key required)
+    if (events.length < 3) {
+      try {
+        const sportSlug = /football|soccer/i.test(q) ? "soccer"
+          : /basketball|nba/i.test(q) ? "basketball"
+          : /cricket/i.test(q) ? "cricket"
+          : /tennis/i.test(q) ? "tennis"
+          : "soccer";
+        const espnRes = await fetch(
+          `https://site.api.espn.com/apis/site/v2/sports/${sportSlug}/scoreboard`,
+          { headers: { "User-Agent": "Mozilla/5.0" } }
+        );
+        if (espnRes.ok) {
+          const espnData = await espnRes.json();
+          for (const comp of (espnData.events || []).slice(0, 8)) {
+            const competitors = comp.competitions?.[0]?.competitors || [];
+            const home = competitors.find((c: any) => c.homeAway === "home");
+            const away = competitors.find((c: any) => c.homeAway === "away");
+            if (home && away) {
+              events.push({
+                name: comp.name || comp.shortName,
+                date: comp.date ? comp.date.slice(0, 10) : undefined,
+                homeTeam: home.team?.displayName,
+                awayTeam: away.team?.displayName,
+                homeScore: home.score ?? "-",
+                awayScore: away.score ?? "-",
+                status: comp.status?.type?.description || "Scheduled",
+                league: espnData.leagues?.[0]?.name || sportSlug,
+                source: "espn",
+              });
+            }
+          }
+        }
+      } catch { /* fall through */ }
     }
+
+    // Source 3: BBC Sport RSS for headlines/scores
+    if (events.length < 3) {
+      try {
+        const bbcRes = await fetch("https://feeds.bbci.co.uk/sport/rss.xml", {
+          headers: { "User-Agent": "Mozilla/5.0" },
+        });
+        if (bbcRes.ok) {
+          const xml = await bbcRes.text();
+          const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
+          const sportQ = q.toLowerCase();
+          for (const item of items.slice(0, 20)) {
+            const titleM = item.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/i) || item.match(/<title>(.*?)<\/title>/i);
+            const descM = item.match(/<description><!\[CDATA\[(.*?)\]\]><\/description>/i) || item.match(/<description>(.*?)<\/description>/i);
+            const title = titleM?.[1]?.trim() || "";
+            const desc = descM?.[1]?.replace(/<[^>]*>/g, "").trim() || "";
+            if (title && (title.toLowerCase().includes(sportQ) || sportQ.length < 5)) {
+              if (!events.some(e => e.name === title)) {
+                events.push({ name: title, description: desc.slice(0, 120), source: "bbc_sport" });
+              }
+            }
+            if (events.length >= 8) break;
+          }
+        }
+      } catch { /* fall through */ }
+    }
+
+    if (!events.length) {
+      return {
+        success: false,
+        message: `"${q}" ke liye abhi koi live sports data nahi mila. Thoda baad try karein.`,
+      };
+    }
+
+    return { success: true, query: q, count: events.length, events: events.slice(0, 8) };
   }
 
   // 30. Stock market (India-relevant, best-effort via Alpha Vantage global quote)
@@ -1960,55 +2160,50 @@ class PublicApisService {
       }
     }
 
-    // 3. Category-Aware Dynamic Indian Market Augmentation (Multi-Store: Amazon, Flipkart, Meesho)
-    if (pool.length < 10) {
-      const capitalized = q
-        .split(/\s+/)
-        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-        .join(" ");
+    // 3. Live Flipkart Scraper (if Amazon returned fewer than 5 results)
+    if (pool.length < 5 && (platform === "all" || platform === "flipkart")) {
+      try {
+        const fkUrl = `https://www.flipkart.com/search?q=${encodeURIComponent(q)}&sort=popularity`;
+        const fkRes = await fetch(fkUrl, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Accept": "text/html",
+            "Accept-Language": "en-IN,en;q=0.9",
+          },
+        });
+        if (fkRes.ok) {
+          const html = await fkRes.text();
+          // Extract product blocks — Flipkart uses data-id on product containers
+          const blocks = html.split(/class="[^"]*_1AtVbE[^"]*"/).slice(1);
+          for (const b of blocks.slice(0, 20)) {
+            const titleM = b.match(/class="[^"]*_4rR01T[^"]*"[^>]*>([\s\S]*?)<\/a>/i) ||
+                           b.match(/class="[^"]*s1Q9rs[^"]*"[^>]*>([\s\S]*?)<\/a>/i) ||
+                           b.match(/alt="([^"]{10,120})"/i);
+            const priceM = b.match(/class="[^"]*_30jeq3[^"]*"[^>]*>₹([\d,]+)/i) ||
+                           b.match(/₹([\d,]+)/);
+            const title = titleM?.[1]?.replace(/<[^>]*>/g, "").trim() || "";
+            const priceStr = priceM?.[1]?.replace(/,/g, "") || "";
+            const price = parseInt(priceStr, 10);
 
-      let basePrice = minPriceThreshold > 1000 ? minPriceThreshold * 1.3 : 1500;
-      const brandList = /godrej/i.test(clean)
-        ? ["Godrej Edge Pro", "Godrej Smart Choice", "Godrej Eon Vibe", "Godrej Uno"]
-        : /samsung/i.test(clean)
-        ? ["Samsung Crystal", "Samsung EcoBubble", "Samsung Digital Inverter", "Samsung Curval"]
-        : /lg/i.test(clean)
-        ? ["LG Smart Inverter", "LG TurboWash", "LG AI DD", "LG DoorCooling"]
-        : /whirlpool/i.test(clean)
-        ? ["Whirlpool Intellifresh", "Whirlpool Stainwash", "Whirlpool 360 BloomWash", "Whirlpool Protton"]
-        : /ifb/i.test(clean)
-        ? ["IFB Senator Plus", "IFB Executive Plus", "IFB Elena Pro", "IFB Diva Aqua"]
-        : ["Premium Top-Rated", "Smart Inverter Choice", "Value-for-Money Superhit", "High-Efficiency Popular", "Standard Best-Seller"];
-
-      const fallbackDeals = [
-        { title: `${brandList[0] || "Top Brand"} ${capitalized} (Flagship Model)`, price: Math.round(basePrice * 1.5), store: "Amazon", rating: "4.7 ⭐" },
-        { title: `${brandList[1] || "Smart Choice"} ${capitalized} (5 Star Inverter)`, price: Math.round(basePrice * 1.25), store: "Flipkart", rating: "4.6 ⭐" },
-        { title: `${brandList[2] || "Popular Series"} ${capitalized} (Energy Efficient)`, price: Math.round(basePrice * 1.0), store: "Amazon", rating: "4.5 ⭐" },
-        { title: `${brandList[3] || "Value Edition"} ${capitalized} (Best Seller)`, price: Math.round(basePrice * 0.85), store: "Flipkart", rating: "4.4 ⭐" },
-        { title: `${brandList[4] || "Budget Choice"} ${capitalized} (Essential Model)`, price: Math.round(basePrice * 0.7), store: "Meesho", rating: "4.2 ⭐" },
-        { title: `Reliable Performance ${capitalized} (Compact Series)`, price: Math.round(basePrice * 0.6), store: "Meesho", rating: "4.1 ⭐" },
-      ];
-
-      for (const d of fallbackDeals) {
-        if (!pool.some((p) => p.title.toLowerCase() === d.title.toLowerCase())) {
-          const mrp = Math.round(d.price * 1.3);
-          const encoded = encodeURIComponent(d.title);
-          let buyLink = `https://www.google.com/search?q=${encoded}`;
-          if (d.store === "Amazon") buyLink = `https://www.amazon.in/s?k=${encoded}`;
-          else if (d.store === "Flipkart") buyLink = `https://www.flipkart.com/search?q=${encoded}`;
-          else if (d.store === "Meesho") buyLink = `https://www.meesho.com/search?q=${encoded}`;
-
-          pool.push({
-            title: d.title,
-            price: d.price,
-            mrp,
-            discount: `${Math.round(((mrp - d.price) / mrp) * 100)}% off`,
-            rating: d.rating,
-            store: d.store,
-            buyLink,
-          });
+            const isAccessory = /\b(cover|stand|trolley|mat|pipe|descaler|protector)\b/i.test(title);
+            if (title && price && title.length > 8 &&
+                (!isAppliance || (!isAccessory && price >= minPriceThreshold)) &&
+                !pool.some(p => p.title.toLowerCase() === title.toLowerCase())) {
+              const mrp = Math.round(price * 1.2);
+              pool.push({
+                title,
+                price,
+                mrp,
+                discount: `${Math.round(((mrp - price) / mrp) * 100)}% off`,
+                rating: "4.3 ⭐",
+                store: "Flipkart",
+                buyLink: `https://www.flipkart.com/search?q=${encodeURIComponent(title)}`,
+              });
+            }
+            if (pool.length >= 15) break;
+          }
         }
-      }
+      } catch { /* fall through */ }
     }
 
     // Filter by platform if user requested (e.g. 'meesho', 'flipkart', 'amazon')
@@ -2024,6 +2219,20 @@ class PublicApisService {
       pool.sort((a, b) => b.price - a.price);
     } else if (sortBy === "low_to_high") {
       pool.sort((a, b) => a.price - b.price);
+    }
+
+    // If both scrapers failed and no static catalog match — honest response
+    if (pool.length === 0) {
+      return {
+        success: false,
+        product: q,
+        message: `Boss, "${q}" ke liye abhi live products fetch nahi ho sake (scraping blocked ho sakta hai). Direct check karo:`,
+        searchLinks: {
+          amazon: `https://www.amazon.in/s?k=${encodeURIComponent(q)}`,
+          flipkart: `https://www.flipkart.com/search?q=${encodeURIComponent(q)}`,
+          meesho: `https://www.meesho.com/search?q=${encodeURIComponent(q)}`,
+        },
+      };
     }
 
     const totalItems = pool.length;
@@ -2057,7 +2266,7 @@ class PublicApisService {
       count: results.length,
       totalResults: totalItems,
       products: results,
-      message: `"${q}" ke liye ${results.length} genuine products (Page ${page}/${totalPages}, ${sortBy.replace(/_/g, " ")}) mil gaye hain.`,
+      message: `"${q}" ke liye ${results.length} products mili hain (Page ${page}/${totalPages}, ${sortBy.replace(/_/g, " ")}).`,
     };
   }
 
@@ -2648,26 +2857,18 @@ class PublicApisService {
       }
     }
 
-    // 3. Fallback candidates if no famous match found
+    // 3. Unknown person — honest response with real Instagram search link
     if (candidates.length === 0) {
-      const sanitized = clean.replace(/[^a-z0-9_]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "");
-      const baseName = raw.split(/\s+/).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
-      const variations = [
-        { u: sanitized, n: `${baseName} (Official Profile)` },
-        { u: `${sanitized}_official`, n: `${baseName} Official` },
-        { u: `the_${sanitized}`, n: `The Real ${baseName}` },
-        { u: `${sanitized}_original`, n: `${baseName} Original` },
-        { u: `${sanitized}_star`, n: `${baseName} Creator` },
-      ];
-      for (const v of variations) {
-        candidates.push({
-          rank: candidates.length + 1,
-          username: v.u,
-          fullName: v.n,
-          profileUrl: `https://www.instagram.com/${v.u}/`,
-          isVerified: false,
-        });
-      }
+      return {
+        success: true,
+        query: raw,
+        count: 0,
+        profiles: [],
+        notFound: true,
+        instagramSearchUrl: `https://www.instagram.com/web/search/topsearch/?query=${encodeURIComponent(raw)}`,
+        instagramDirectUrl: `https://www.instagram.com/explore/search/keyword/?q=${encodeURIComponent(raw)}`,
+        message: `Boss, "${raw}" naam ka koi verified/famous profile mujhe abhi nahi mila. Instagram par direct search karo: https://www.instagram.com/explore/search/keyword/?q=${encodeURIComponent(raw)}`,
+      };
     }
 
     return {
@@ -2941,41 +3142,79 @@ class PublicApisService {
     };
   }
 
-  // 51. Spotify & Apple Music Song/Artist Finder
+  // 51. Music Search — Deezer API (free, no key) + iTunes fallback
   public async searchMusic(songOrArtist: string): Promise<any> {
     const q = songOrArtist.trim();
     if (!q) return { success: false, message: "Song ya artist ka naam zaroori hai." };
 
-    try {
-      const res = await fetch(
-        `https://itunes.apple.com/search?term=${encodeURIComponent(q)}&media=music&limit=3`
-      );
-      const json = await res.json();
-      const tracks = (json.results || []).map((t: any) => ({
-        trackName: t.trackName,
-        artistName: t.artistName,
-        collectionName: t.collectionName,
-        releaseDate: t.releaseDate ? t.releaseDate.slice(0, 10) : undefined,
-        previewUrl: t.previewUrl,
-        spotifyUrl: `https://open.spotify.com/search/${encodeURIComponent(t.trackName + " " + t.artistName)}`,
-      }));
+    const tracks: any[] = [];
 
-      if (tracks.length) {
-        return {
-          success: true,
-          query: q,
-          count: tracks.length,
-          tracks,
-          spotifySearchUrl: `https://open.spotify.com/search/${encodeURIComponent(q)}`,
-        };
+    // Source 1: Deezer API — free, no key, full 30s previews + album art
+    try {
+      const deezerRes = await fetch(
+        `https://api.deezer.com/search?q=${encodeURIComponent(q)}&limit=5`,
+        { headers: { "User-Agent": "Mozilla/5.0" } }
+      );
+      if (deezerRes.ok) {
+        const data = await deezerRes.json();
+        for (const t of (data.data || []).slice(0, 5)) {
+          tracks.push({
+            trackName: t.title,
+            artistName: t.artist?.name,
+            albumName: t.album?.title,
+            albumArt: t.album?.cover_medium,
+            previewUrl: t.preview, // Always a real 30-sec MP3 URL from Deezer
+            deezerUrl: t.link,
+            spotifyUrl: `https://open.spotify.com/search/${encodeURIComponent(t.title + " " + t.artist?.name)}`,
+            source: "deezer",
+          });
+        }
       }
-    } catch {}
+    } catch { /* fall through */ }
+
+    // Source 2: iTunes Search API — fallback
+    if (tracks.length < 3) {
+      try {
+        const res = await fetch(
+          `https://itunes.apple.com/search?term=${encodeURIComponent(q)}&media=music&limit=5`
+        );
+        if (res.ok) {
+          const json = await res.json();
+          for (const t of (json.results || []).slice(0, 5)) {
+            if (!tracks.some(tr => tr.trackName?.toLowerCase() === t.trackName?.toLowerCase())) {
+              tracks.push({
+                trackName: t.trackName,
+                artistName: t.artistName,
+                albumName: t.collectionName,
+                albumArt: t.artworkUrl100,
+                releaseDate: t.releaseDate ? t.releaseDate.slice(0, 10) : undefined,
+                previewUrl: t.previewUrl,
+                spotifyUrl: `https://open.spotify.com/search/${encodeURIComponent(t.trackName + " " + t.artistName)}`,
+                source: "itunes",
+              });
+            }
+          }
+        }
+      } catch { /* fall through */ }
+    }
+
+    if (tracks.length) {
+      return {
+        success: true,
+        query: q,
+        count: tracks.length,
+        tracks,
+        spotifySearchUrl: `https://open.spotify.com/search/${encodeURIComponent(q)}`,
+        youtubeMusicUrl: `https://music.youtube.com/search?q=${encodeURIComponent(q)}`,
+      };
+    }
 
     return {
       success: true,
       query: q,
       spotifySearchUrl: `https://open.spotify.com/search/${encodeURIComponent(q)}`,
-      message: `"${q}" ke liye Spotify link available hai.`,
+      youtubeMusicUrl: `https://music.youtube.com/search?q=${encodeURIComponent(q)}`,
+      message: `"${q}" ke liye Spotify aur YouTube Music links available hain.`,
     };
   }
 
@@ -2983,20 +3222,27 @@ class PublicApisService {
   public async playMusic(songOrArtist: string): Promise<any> {
     const res = await this.searchMusic(songOrArtist);
     if (res.success && res.tracks && res.tracks.length > 0) {
-      const topTrack = res.tracks[0];
+      // Prefer Deezer (always has preview) over iTunes (sometimes null)
+      const deezerTrack = res.tracks.find((t: any) => t.source === "deezer" && t.previewUrl);
+      const topTrack = deezerTrack || res.tracks.find((t: any) => t.previewUrl) || res.tracks[0];
       return {
         success: true,
         action: "play",
         trackName: topTrack.trackName,
         artistName: topTrack.artistName,
+        albumName: topTrack.albumName,
+        albumArt: topTrack.albumArt,
         audioUrl: topTrack.previewUrl,
+        deezerUrl: topTrack.deezerUrl,
         spotifyUrl: topTrack.spotifyUrl,
-        message: `"${topTrack.trackName}" by ${topTrack.artistName} play kiya ja raha hai.`,
+        source: topTrack.source,
+        message: `"${topTrack.trackName}" by ${topTrack.artistName} play ho raha hai Boss!`,
       };
     }
     return {
       success: false,
-      message: `"${songOrArtist}" ke liye koi playable track nahi mila.`,
+      spotifySearchUrl: `https://open.spotify.com/search/${encodeURIComponent(songOrArtist)}`,
+      message: `"${songOrArtist}" ke liye playable track nahi mila. Spotify par search karo.`,
     };
   }
 
@@ -3125,21 +3371,124 @@ class PublicApisService {
 
   // 56. Daily Commodity Rates (Gold, Silver, Petrol, Diesel, LPG)
   public async getDailyCommodityRates(commodity: string, city = "Patna"): Promise<any> {
+    const clean = String(commodity || "").toLowerCase();
+    const cityLower = String(city || "patna").toLowerCase();
+
+    // ── Gold & Silver: scrape goodreturns.in (real-time, updated every 10 min) ──
+    let goldData: any = null;
+    if (!clean || /gold|silver|sona|chandi|metal|bullion/i.test(clean)) {
+      try {
+        const grRes = await fetch("https://www.goodreturns.in/gold-rates-in-india.html", {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "text/html",
+          },
+        });
+        if (grRes.ok) {
+          const html = await grRes.text();
+          // Extract 24K gold price
+          const g24m = html.match(/22\s*Carat\s*Gold.*?₹\s*([0-9,]+)/i) ||
+                       html.match(/gold.*?24.*?₹\s*([0-9,]+)/i) ||
+                       html.match(/₹\s*([0-9,]{5,7})\s*\/?\s*10\s*gram/i);
+          const g22m = html.match(/22\s*carat.*?₹\s*([0-9,]+)/i);
+          const silvM = html.match(/silver.*?₹\s*([0-9,]+)/i);
+          if (g24m || g22m) {
+            goldData = {
+              gold24k: g24m ? `₹${g24m[1]} per 10 grams (24K, Live)` : null,
+              gold22k: g22m ? `₹${g22m[1]} per 10 grams (22K, Live)` : null,
+              silver: silvM ? `₹${silvM[1]} per kg (Live)` : null,
+              source: "goodreturns.in (live)",
+            };
+          }
+        }
+      } catch { /* fall through */ }
+
+      // Fallback: iexcloud metals API (free tier) for XAU spot price in USD → convert
+      if (!goldData) {
+        try {
+          const xauRes = await fetch("https://query1.finance.yahoo.com/v8/finance/chart/GC=F?interval=1d&range=1d", {
+            headers: { "User-Agent": "Mozilla/5.0" },
+          });
+          if (xauRes.ok) {
+            const xauData = await xauRes.json();
+            const usdPerOz = xauData?.chart?.result?.[0]?.meta?.regularMarketPrice;
+            if (usdPerOz) {
+              // 1 troy oz ≈ 31.1g, USD→INR approx 83.5
+              const inrPer10g = Math.round((usdPerOz / 31.1) * 10 * 83.5);
+              goldData = {
+                gold24k: `₹${inrPer10g.toLocaleString("en-IN")} per 10 grams (24K, Yahoo Finance spot)`,
+                source: "yahoo_finance_spot",
+              };
+            }
+          }
+        } catch { /* fall through */ }
+      }
+    }
+
+    // ── Petrol & Diesel: scrape goodreturns.in city-specific page ──
+    let fuelData: any = null;
+    if (!clean || /petrol|diesel|fuel|tel|gasoline/i.test(clean)) {
+      try {
+        const citySlug = cityLower.includes("delhi") ? "delhi"
+          : cityLower.includes("mumbai") ? "mumbai"
+          : cityLower.includes("kolkata") ? "kolkata"
+          : cityLower.includes("chennai") ? "chennai"
+          : cityLower.includes("bangalore") || cityLower.includes("bengaluru") ? "bangalore"
+          : cityLower.includes("hyderabad") ? "hyderabad"
+          : cityLower.includes("patna") ? "patna"
+          : cityLower.includes("lucknow") ? "lucknow"
+          : "patna";
+        const fuelRes = await fetch(
+          `https://www.goodreturns.in/petrol-price-in-${citySlug}.html`,
+          { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" } }
+        );
+        if (fuelRes.ok) {
+          const html = await fuelRes.text();
+          const petM = html.match(/Petrol.*?₹\s*([0-9]+(?:\.[0-9]+)?)/i) ||
+                       html.match(/([0-9]+\.[0-9]+).*?litre.*?petrol/i);
+          const dieM = html.match(/Diesel.*?₹\s*([0-9]+(?:\.[0-9]+)?)/i) ||
+                       html.match(/([0-9]+\.[0-9]+).*?litre.*?diesel/i);
+          if (petM || dieM) {
+            fuelData = {
+              petrol: petM ? `₹${petM[1]} per litre (${city}, Live)` : null,
+              diesel: dieM ? `₹${dieM[1]} per litre (${city}, Live)` : null,
+              source: "goodreturns.in (live)",
+            };
+          }
+        }
+      } catch { /* fall through */ }
+    }
+
+    // If both scrapers failed, return honest message
+    if (!goldData && !fuelData) {
+      return {
+        success: false,
+        message: `Abhi commodity rates live fetch nahi ho saki. Goodreturns.in ya MCX.in par manually check karein.`,
+        manualLinks: {
+          gold: "https://www.goodreturns.in/gold-rates-in-india.html",
+          petrol: `https://www.goodreturns.in/petrol-price-in-${cityLower.replace(/\s+/g, "-")}.html`,
+          mcx: "https://www.mcxindia.com/market-data/live-market",
+        },
+      };
+    }
+
     return {
       success: true,
       city,
-      commodity,
-      rates: {
-        gold24k: "₹72,800 - ₹74,500 per 10 grams (99.9% Pure)",
-        gold22k: "₹66,800 - ₹68,200 per 10 grams (Jewellery standard)",
-        silver: "₹88,500 - ₹91,200 per kg",
-        petrolPatna: "₹105.48 / Litre",
-        dieselPatna: "₹92.27 / Litre",
-        petrolDelhi: "₹94.72 / Litre",
-        dieselDelhi: "₹87.62 / Litre",
-        lpgDomestic14kg: "₹850 - ₹900 per cylinder (approx with subsidy)",
-      },
-      note: "Live market rates fluctuate daily based on international bullion and MCX/OMC prices.",
+      commodity: commodity || "all",
+      ...(goldData ? {
+        gold24k: goldData.gold24k,
+        gold22k: goldData.gold22k,
+        silver: goldData.silver,
+        metalSource: goldData.source,
+      } : {}),
+      ...(fuelData ? {
+        petrol: fuelData.petrol,
+        diesel: fuelData.diesel,
+        lpg14kg: "Book via Indane/HP/Bharat Gas app (price varies by subsidy)",
+        fuelSource: fuelData.source,
+      } : {}),
+      note: "Prices are live market rates. MCX/OMC rates may differ slightly.",
     };
   }
 
@@ -3309,6 +3658,267 @@ class PublicApisService {
       abhiBusUrl,
       message: `${from} se ${to} ke liye RedBus aur AbhiBus ke direct booking links ready hain.`,
     };
+  }
+
+  // ─── WIFI TOOLS ──────────────────────────────────────────────────────────────
+
+  // 60. Scan Nearby WiFi Networks (Windows: netsh wlan show networks)
+  public async scanWifiNetworks(): Promise<any> {
+    const { exec } = await import("child_process");
+    const { promisify } = await import("util");
+    const execAsync = promisify(exec);
+
+    try {
+      const { stdout } = await execAsync("netsh wlan show networks mode=bssid", { timeout: 10000 });
+
+      const networks: any[] = [];
+      const blocks = stdout.split(/\nSSID\s+\d+\s*:/g).slice(1);
+
+      for (const block of blocks) {
+        const lines = block.split("\n").map((l) => l.trim());
+        const ssid = lines[0]?.trim();
+        const authLine = lines.find((l) => /Authentication/i.test(l));
+        const signalLine = lines.find((l) => /Signal/i.test(l));
+        const bandLine = lines.find((l) => /Radio type/i.test(l));
+        const channelLine = lines.find((l) => /Channel/i.test(l));
+        const bssidLine = lines.find((l) => /BSSID/i.test(l));
+
+        if (!ssid) continue;
+
+        const auth = authLine ? authLine.split(":").slice(1).join(":").trim() : "Unknown";
+        const signal = signalLine ? signalLine.split(":").slice(1).join(":").trim() : "Unknown";
+        const band = bandLine ? bandLine.split(":").slice(1).join(":").trim() : "Unknown";
+        const channel = channelLine ? channelLine.split(":").slice(1).join(":").trim() : "Unknown";
+        const bssid = bssidLine ? bssidLine.split(":").slice(1).join(":").trim() : "";
+
+        const signalNum = parseInt(signal.replace("%", ""), 10);
+        const bars = signalNum >= 80 ? "████ (Excellent)" : signalNum >= 60 ? "███░ (Good)" : signalNum >= 40 ? "██░░ (Fair)" : "█░░░ (Weak)";
+        const hasPassword = !/(Open|None)/i.test(auth);
+
+        networks.push({
+          ssid,
+          signal: `${signal} ${bars}`,
+          signalPercent: signalNum || 0,
+          security: auth,
+          hasPassword,
+          band,
+          channel,
+          bssid,
+        });
+      }
+
+      // Sort by signal strength
+      networks.sort((a, b) => b.signalPercent - a.signalPercent);
+
+      if (networks.length === 0) {
+        return {
+          success: false,
+          message: "Koi WiFi network nahi mila. WiFi adapter on hai na boss? Ya paas me koi router hai?",
+        };
+      }
+
+      return {
+        success: true,
+        count: networks.length,
+        networks: networks.slice(0, 15), // Top 15
+        message: `${networks.length} WiFi networks mile hain paas mein!`,
+      };
+    } catch (e: any) {
+      return {
+        success: false,
+        message: `WiFi scan fail hua: ${e?.message || e}. WiFi adapter check karo boss.`,
+      };
+    }
+  }
+
+  // 61. Get Current WiFi Connection Status
+  public async getCurrentWifiStatus(): Promise<any> {
+    const { exec } = await import("child_process");
+    const { promisify } = await import("util");
+    const execAsync = promisify(exec);
+
+    try {
+      const { stdout } = await execAsync("netsh wlan show interfaces", { timeout: 8000 });
+
+      const ssidMatch = stdout.match(/\bSSID\s*:\s+(.+)/i);
+      const stateMatch = stdout.match(/\bState\s*:\s+(.+)/i);
+      const signalMatch = stdout.match(/\bSignal\s*:\s+(.+)/i);
+      const bssidMatch = stdout.match(/\bBSSID\s*:\s+([0-9a-f:]+)/i);
+      const rxMatch = stdout.match(/\bReceive\s+rate\s*[:\(]+\s*([\d.]+)/i);
+      const txMatch = stdout.match(/\bTransmit\s+rate\s*[:\(]+\s*([\d.]+)/i);
+      const adapterMatch = stdout.match(/\bName\s*:\s+(.+)/i);
+
+      const ssid = ssidMatch?.[1]?.trim();
+      const state = stateMatch?.[1]?.trim();
+      const signal = signalMatch?.[1]?.trim();
+      const bssid = bssidMatch?.[1]?.trim();
+      const rxRate = rxMatch?.[1]?.trim();
+      const txRate = txMatch?.[1]?.trim();
+      const adapter = adapterMatch?.[1]?.trim();
+
+      const isConnected = /connected/i.test(state || "");
+
+      if (!isConnected) {
+        return {
+          success: true,
+          isConnected: false,
+          message: "Boss, abhi kisi WiFi se connected nahi hain. 'WiFi scan karo' bol sakte ho!",
+        };
+      }
+
+      return {
+        success: true,
+        isConnected: true,
+        ssid,
+        signal,
+        bssid,
+        downloadSpeed: rxRate ? `${rxRate} Mbps` : undefined,
+        uploadSpeed: txRate ? `${txRate} Mbps` : undefined,
+        adapter,
+        message: `Boss, abhi "${ssid}" WiFi se connected hain! Signal: ${signal}.`,
+      };
+    } catch (e: any) {
+      return {
+        success: false,
+        message: `WiFi status check fail hua: ${e?.message || e}`,
+      };
+    }
+  }
+
+  // 62. Connect to WiFi Network (Windows: netsh wlan connect / add profile)
+  public async connectToWifi(ssid: string, password?: string): Promise<any> {
+    const { exec } = await import("child_process");
+    const { promisify } = await import("util");
+    const { writeFile, unlink } = await import("fs/promises");
+    const { tmpdir } = await import("os");
+    const { join } = await import("path");
+    const execAsync = promisify(exec);
+
+    if (!ssid) return { success: false, message: "SSID zaroori hai boss, kaunse WiFi se connect karna hai?" };
+
+    try {
+      // 1. Try connecting to a saved profile first
+      try {
+        const { stdout: connectOut } = await execAsync(
+          `netsh wlan connect name="${ssid}" ssid="${ssid}"`,
+          { timeout: 8000 }
+        );
+        if (/Connection request was completed/i.test(connectOut) || /successfully/i.test(connectOut)) {
+          await new Promise((r) => setTimeout(r, 2000));
+          return {
+            success: true,
+            ssid,
+            message: `Boss, "${ssid}" WiFi se connect ho gaye hain! ✅ (Saved profile se)`,
+            method: "saved_profile",
+          };
+        }
+      } catch {}
+
+      // 2. If password provided, create a profile XML and connect
+      if (password) {
+        const authType = "WPA2PSK";
+        const encryptType = "AES";
+        const profileXml = `<?xml version="1.0"?>
+<WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1">
+  <name>${ssid}</name>
+  <SSIDConfig>
+    <SSID>
+      <name>${ssid}</name>
+    </SSID>
+  </SSIDConfig>
+  <connectionType>ESS</connectionType>
+  <connectionMode>auto</connectionMode>
+  <MSM>
+    <security>
+      <authEncryption>
+        <authentication>${authType}</authentication>
+        <encryption>${encryptType}</encryption>
+        <useOneX>false</useOneX>
+      </authEncryption>
+      <sharedKey>
+        <keyType>passPhrase</keyType>
+        <protected>false</protected>
+        <keyMaterial>${password}</keyMaterial>
+      </sharedKey>
+    </security>
+  </MSM>
+</WLANProfile>`;
+
+        const profilePath = join(tmpdir(), `friday_wifi_${Date.now()}.xml`);
+        await writeFile(profilePath, profileXml, "utf8");
+
+        try {
+          await execAsync(`netsh wlan add profile filename="${profilePath}"`, { timeout: 8000 });
+          const { stdout: connectOut2 } = await execAsync(
+            `netsh wlan connect name="${ssid}" ssid="${ssid}"`,
+            { timeout: 8000 }
+          );
+          await unlink(profilePath).catch(() => {});
+
+          await new Promise((r) => setTimeout(r, 2500));
+
+          if (/Connection request was completed/i.test(connectOut2) || /successfully/i.test(connectOut2)) {
+            return {
+              success: true,
+              ssid,
+              message: `Boss, "${ssid}" WiFi se connect ho gaye hain! ✅ Password sahi tha!`,
+              method: "new_profile_with_password",
+            };
+          }
+          // Check actual connection state
+          const { stdout: statusOut } = await execAsync("netsh wlan show interfaces", { timeout: 5000 });
+          if (statusOut.toLowerCase().includes(ssid.toLowerCase())) {
+            return {
+              success: true,
+              ssid,
+              message: `Boss, "${ssid}" se connect ho gaye hain! ✅`,
+              method: "verified_connected",
+            };
+          }
+        } catch (profileErr: any) {
+          await unlink(profilePath).catch(() => {});
+          return {
+            success: false,
+            ssid,
+            message: `"${ssid}" se connect nahi ho paya boss. Password galat lag raha hai ya network out of range hai.`,
+            error: profileErr?.message,
+          };
+        }
+      }
+
+      return {
+        success: false,
+        ssid,
+        needsPassword: true,
+        message: `"${ssid}" mein password laga hai boss! Password batao, main connect kar deta hoon.`,
+      };
+    } catch (e: any) {
+      return {
+        success: false,
+        ssid,
+        message: `"${ssid}" se connect karne mein problem aayi: ${e?.message || e}`,
+      };
+    }
+  }
+
+  // 63. Disconnect from Current WiFi
+  public async disconnectWifi(): Promise<any> {
+    const { exec } = await import("child_process");
+    const { promisify } = await import("util");
+    const execAsync = promisify(exec);
+
+    try {
+      await execAsync("netsh wlan disconnect", { timeout: 8000 });
+      return {
+        success: true,
+        message: "Boss, WiFi disconnect kar diya! Ab koi WiFi se connected nahi hain.",
+      };
+    } catch (e: any) {
+      return {
+        success: false,
+        message: `WiFi disconnect fail hua: ${e?.message || e}`,
+      };
+    }
   }
 }
 

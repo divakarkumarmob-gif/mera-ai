@@ -462,11 +462,27 @@ DAILY LIFE ESSENTIALS (MEDICINE, GOLD/PETROL, EMERGENCY, CHALLAN, BILLS, SCHEMES
 - 'get_medicine_and_generic_info': Explain medicine uses, precautions, and suggest 70% cheaper Jan Aushadhi generic alternative salts.
 - 'get_daily_commodity_rates': Gold (22K/24K), Silver, Petrol, Diesel, and LPG cylinder rates in Indian cities.
 - 'get_emergency_helplines': Instant emergency SOS numbers (112, 100, 102, 101, 1930 Cyber, 1091 Women, 139 Railways).
-- 'get_vehicle_and_challan_services': Vehicle RC, DL renewal, PUCC, and e-Challan check & pay links.
 - 'get_utility_and_bill_services': Indane/Bharat/HP Gas cylinder WhatsApp booking numbers, electricity bill payment links, Fastag recharge.
 - 'get_govt_scheme_info': Ayushman Bharat (₹5 Lakh free health card), PM Kisan (₹6000/yr), PM Awas, Sukanya Samriddhi Yojana details & links.
 - 'track_expense_entry' & 'get_expense_summary': Log daily expenses by voice and calculate daily/monthly totals.
 - 'get_bus_travel_info': Intercity bus booking links (RedBus, AbhiBus) and state transport routes.
+
+WIFI NETWORK MANAGER (Windows System):
+- Tools: 'scan_wifi_networks', 'get_wifi_status', 'connect_to_wifi', 'disconnect_wifi'.
+- When DK says "WiFi scan karo", "aas paas ke WiFi dikhao", "available networks batao", "kaun kaun se WiFi hain":
+  1. Call 'scan_wifi_networks' to get all nearby networks sorted by signal strength.
+  2. List them clearly: "Boss, [X] WiFi networks mile hain:
+     1. 📶 [SSID] — Signal: [X]% — 🔒 Password: Haan/Nahi
+     2. ..."
+  3. Ask: "Kisse connect karna hai boss?"
+- When DK says "[name] se connect karo", "[SSID] se lagao":
+  1. Call 'connect_to_wifi' with ssid. If it needs a password, say: "Boss, [SSID] mein password laga hai, password batao."
+  2. When DK gives password, call 'connect_to_wifi' again with ssid AND password.
+  3. On success: "Boss, [SSID] se connect ho gaye hain! ✅"
+- When DK says "WiFi status kya hai", "abhi kaunse WiFi se connected hain":
+  - Call 'get_wifi_status'.
+- When DK says "WiFi disconnect karo", "WiFi tod do", "WiFi hatao":
+  - Call 'disconnect_wifi'.
 
 NEWS & HEADLINES (TOP 10, POLITICS, LOCAL, WORLD, VIRAL):
 - Tool: 'get_news'.
@@ -1523,6 +1539,33 @@ HOW TO READ MESSAGES:
             required: ["fromCity", "toCity"],
           },
         },
+        {
+          name: "scan_wifi_networks",
+          description: "Scan and list all nearby WiFi networks (SSIDs, signal strength, security type, password required or not). Use when DK asks to see available WiFi, nearby hotspots, or wants to connect to a new network.",
+          parameters: { type: "OBJECT", properties: {}, required: [] },
+        },
+        {
+          name: "get_wifi_status",
+          description: "Get the current WiFi connection status — which network is connected, signal strength, speed, and adapter info.",
+          parameters: { type: "OBJECT", properties: {}, required: [] },
+        },
+        {
+          name: "connect_to_wifi",
+          description: "Connect to a specific WiFi network by SSID. Optionally provide the password if the network is secured. Use this when DK asks to connect to a WiFi network by name.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              ssid: { type: "STRING", description: "The WiFi network name (SSID) to connect to" },
+              password: { type: "STRING", description: "WiFi password, if the network requires one" },
+            },
+            required: ["ssid"],
+          },
+        },
+        {
+          name: "disconnect_wifi",
+          description: "Disconnect from the current WiFi network.",
+          parameters: { type: "OBJECT", properties: {}, required: [] },
+        },
       ];
 
       return await ai.live.connect({
@@ -1534,8 +1577,8 @@ HOW TO READ MESSAGES:
             for (const part of parts) {
               if (part.inlineData?.data) {
                 hasAudio = true;
-                clientWs.send(JSON.stringify({ type: "speaking" }));
-                clientWs.send(JSON.stringify({ audio: part.inlineData.data }));
+                safeSend(JSON.stringify({ type: "speaking" }));
+                safeSend(JSON.stringify({ audio: part.inlineData.data }));
               }
             }
 
@@ -1549,20 +1592,20 @@ HOW TO READ MESSAGES:
               !message.serverContent?.turnComplete;
 
             if (isThinkingFrame) {
-              clientWs.send(JSON.stringify({ type: "thinking" }));
+              safeSend(JSON.stringify({ type: "thinking" }));
             }
             if (transcript) {
-              clientWs.send(JSON.stringify({ text: transcript }));
+              safeSend(JSON.stringify({ text: transcript }));
               outputTranscriptBuffer += transcript;
             }
             if (inputTranscript) {
               inputTranscriptBuffer += inputTranscript;
             }
             if (message.serverContent?.interrupted) {
-              clientWs.send(JSON.stringify({ interrupted: true }));
+              safeSend(JSON.stringify({ interrupted: true }));
             }
             if (message.serverContent?.turnComplete) {
-              clientWs.send(JSON.stringify({ turnComplete: true }));
+              safeSend(JSON.stringify({ turnComplete: true }));
               if (inputTranscriptBuffer.trim()) {
                 // Fire-and-forget: don't block the realtime audio/transcript
                 // pipeline on a Firestore write, but do log failures.
@@ -2321,6 +2364,31 @@ HOW TO READ MESSAGES:
                   } catch (e: any) {
                     result = { success: false, message: `Bus info lookup fail hui: ${e?.message || e}` };
                   }
+                } else if (call.name === "scan_wifi_networks") {
+                  try {
+                    result = await publicApisService.scanWifiNetworks();
+                  } catch (e: any) {
+                    result = { success: false, message: `WiFi scan fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_wifi_status") {
+                  try {
+                    result = await publicApisService.getCurrentWifiStatus();
+                  } catch (e: any) {
+                    result = { success: false, message: `WiFi status check fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "connect_to_wifi") {
+                  const { ssid, password } = call.args || {};
+                  try {
+                    result = await publicApisService.connectToWifi(String(ssid || ""), password ? String(password) : undefined);
+                  } catch (e: any) {
+                    result = { success: false, message: `WiFi connect fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "disconnect_wifi") {
+                  try {
+                    result = await publicApisService.disconnectWifi();
+                  } catch (e: any) {
+                    result = { success: false, message: `WiFi disconnect fail hua: ${e?.message || e}` };
+                  }
                 }
 
                 functionResponses.push({
@@ -2402,6 +2470,50 @@ HOW TO READ MESSAGES:
       }
     };
 
+    // ── Safe send: guard against sending on a closed/closing WebSocket ──────
+    const safeSend = (payload: string) => {
+      try {
+        if (clientWs.readyState === 1 /* OPEN */) {
+          clientWs.send(payload);
+        }
+      } catch (e: any) {
+        // Silently ignore broken-pipe / wsarecv errors on closed sockets
+        if (!/ECONNRESET|EPIPE|closed|not opened/i.test(e?.message || "")) {
+          console.error("[Server] safeSend error:", e?.message);
+        }
+      }
+    };
+
+    // ── Auto-reconnect: re-create session if Gemini drops mid-conversation ─
+    let sessionDropped = false;
+    let lastVoice = "Aoede";
+    let lastThinkingLevel = "high";
+    let lastAccurateMode = false;
+    let lastAnswerLength: string | undefined;
+    let lastGoogleSearchMode = false;
+
+    const autoReconnect = async () => {
+      if (sessionDropped || clientWs.readyState !== 1) return;
+      sessionDropped = true;
+      console.warn("[Server] Gemini Live session dropped — attempting auto-reconnect...");
+      safeSend(JSON.stringify({ type: "session_reconnecting" }));
+      await new Promise(r => setTimeout(r, 1500));
+      try {
+        const newSession = await createSession(
+          lastVoice, lastThinkingLevel, lastAccurateMode,
+          lastAnswerLength, lastGoogleSearchMode
+        );
+        currentSession = newSession;
+        sessionDropped = false;
+        safeSend(JSON.stringify({ type: "session_reconnected" }));
+        console.log("[Server] ✅ Auto-reconnect successful.");
+      } catch (err) {
+        console.error("[Server] Auto-reconnect failed:", err);
+        currentSession = undefined;
+        safeSend(JSON.stringify({ error: "session_reconnect_failed", message: "Boss, connection dobara nahi ban saki. Page refresh karo." }));
+      }
+    };
+
     clientWs.on("message", async (data) => {
       let parsedData: any;
       try {
@@ -2411,6 +2523,13 @@ HOW TO READ MESSAGES:
       }
 
       if (parsedData.type === "init") {
+        // Track params for auto-reconnect
+        lastVoice = parsedData.voice || "Aoede";
+        lastThinkingLevel = parsedData.thinkingLevel || "high";
+        lastAccurateMode = !!parsedData.accurateMode;
+        lastAnswerLength = parsedData.answerLength;
+        lastGoogleSearchMode = !!parsedData.googleSearchMode;
+
         try {
           if (currentSession) await currentSession.close();
           const myToken = ++currentSessionToken;
@@ -2433,17 +2552,18 @@ HOW TO READ MESSAGES:
           }
 
           currentSession = newSession;
-          clientWs.send(JSON.stringify({ type: "init_ack" }));
+          sessionDropped = false;
+          safeSend(JSON.stringify({ type: "init_ack" }));
 
           if (pendingImages.length > 0) {
             const queued = [...pendingImages];
             pendingImages = [];
             for (const imgMsg of queued) await processImageInput(imgMsg);
           }
-        } catch (err) {
+        } catch (err: any) {
           console.error("Failed to create Gemini Live session:", err);
           currentSession = undefined;
-          clientWs.send(JSON.stringify({ error: "session_init_failed" }));
+          safeSend(JSON.stringify({ error: "session_init_failed", message: err?.message || String(err) }));
         }
         return;
       }
@@ -2453,48 +2573,63 @@ HOW TO READ MESSAGES:
           pendingImages.push(parsedData);
           return;
         }
-        clientWs.send(JSON.stringify({ error: "session_not_initialized" }));
+        // If session is gone but client is still connected, try reconnect
+        if (!sessionDropped) {
+          autoReconnect();
+        }
         return;
       }
 
-      if (parsedData.audio) {
-        currentSession.sendRealtimeInput({
-          audio: { data: parsedData.audio, mimeType: "audio/pcm;rate=16000" },
-        });
-      } else if (parsedData.type === "audio_stream_end") {
-        // Client-side voice gate closed (user stopped talking). Tell Gemini
-        // explicitly so its server-side VAD flushes the buffered audio and
-        // finalizes the turn immediately, instead of waiting indefinitely
-        // for more audio that will never come until the mic re-opens.
-        try {
-          currentSession.sendRealtimeInput({ audioStreamEnd: true });
-        } catch (e) {
-          console.error("[Server] Failed to send audioStreamEnd:", e);
-        }
-      } else if (parsedData.image) {
-        await processImageInput(parsedData);
-      } else if (parsedData.type === "text_input" && parsedData.text) {
-        // Fire-and-forget: don't delay sending the user's message to Gemini
-        // while we wait for the Firestore write to finish.
-        saveMessage("user", parsedData.text).catch((e) =>
-          console.error("[Server] Failed to save text_input message:", e)
-        );
-        memoryEngine.recordMessage(sessionId, "user", parsedData.text);
-        currentSession.sendClientContent({
-          turns: [{ role: "user", parts: [{ text: parsedData.text }] }],
-          turnComplete: true,
-        });
-      } else if (parsedData.type === "trigger_reply") {
-        try {
+      try {
+        if (parsedData.audio) {
+          currentSession.sendRealtimeInput({
+            audio: { data: parsedData.audio, mimeType: "audio/pcm;rate=16000" },
+          });
+        } else if (parsedData.type === "audio_stream_end") {
+          // Client-side voice gate closed (user stopped talking). Tell Gemini
+          // explicitly so its server-side VAD flushes the buffered audio and
+          // finalizes the turn immediately, instead of waiting indefinitely
+          // for more audio that will never come until the mic re-opens.
+          try {
+            currentSession.sendRealtimeInput({ audioStreamEnd: true });
+          } catch (e) {
+            console.error("[Server] Failed to send audioStreamEnd:", e);
+          }
+        } else if (parsedData.image) {
+          await processImageInput(parsedData);
+        } else if (parsedData.type === "text_input" && parsedData.text) {
+          // Fire-and-forget: don't delay sending the user's message to Gemini
+          // while we wait for the Firestore write to finish.
+          saveMessage("user", parsedData.text).catch((e) =>
+            console.error("[Server] Failed to save text_input message:", e)
+          );
+          memoryEngine.recordMessage(sessionId, "user", parsedData.text);
           currentSession.sendClientContent({
-            turns: [{ role: "user", parts: [{ text: "Jawab do, please reply now to what I just said." }] }],
+            turns: [{ role: "user", parts: [{ text: parsedData.text }] }],
             turnComplete: true,
           });
-        } catch (e) {
-          console.error("Failed to trigger reply:", e);
+        } else if (parsedData.type === "trigger_reply") {
+          try {
+            currentSession.sendClientContent({
+              turns: [{ role: "user", parts: [{ text: "Jawab do, please reply now to what I just said." }] }],
+              turnComplete: true,
+            });
+          } catch (e) {
+            console.error("Failed to trigger reply:", e);
+          }
+        } else if (parsedData.interrupt) {
+          safeSend(JSON.stringify({ interrupted: true }));
         }
-      } else if (parsedData.interrupt) {
-        clientWs.send(JSON.stringify({ interrupted: true }));
+      } catch (streamErr: any) {
+        const msg = streamErr?.message || String(streamErr);
+        // Detect connection-forcibly-closed (wsarecv) or stream errors
+        if (/wsarecv|stream reading|forcibly closed|ECONNRESET|EPIPE|closed/i.test(msg)) {
+          console.warn("[Server] ⚠️ Gemini stream dropped mid-message:", msg);
+          currentSession = undefined;
+          autoReconnect();
+        } else {
+          console.error("[Server] Message handling error:", streamErr);
+        }
       }
     });
 
@@ -2503,10 +2638,20 @@ HOW TO READ MESSAGES:
         Promise.resolve(currentSession.close()).catch((e: any) =>
           console.error("[Server] Error closing Gemini Live session on client disconnect:", e)
         );
+        currentSession = undefined;
       }
-      // Bug Fix 3: Reset thinking flag on disconnect so mic is never stuck muted
-      try { clientWs.send(JSON.stringify({ interrupted: true })); } catch {}
+      // Reset thinking flag on disconnect so mic is never stuck muted
+      safeSend(JSON.stringify({ interrupted: true }));
       memoryEngine.finalizeSession(sessionId, ai);
+    });
+
+    clientWs.on("error", (wsErr: any) => {
+      const msg = wsErr?.message || String(wsErr);
+      if (/wsarecv|stream reading|forcibly closed|ECONNRESET|EPIPE/i.test(msg)) {
+        console.warn("[Server] 📡 Client WebSocket closed forcibly (network drop):", msg);
+      } else {
+        console.error("[Server] WebSocket error:", wsErr);
+      }
     });
   });
 

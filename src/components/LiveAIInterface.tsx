@@ -714,6 +714,26 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         pendingImagePayloadsRef.current = [];
                         queued.forEach(img => sendImageToWebSocket(img));
                     }
+                } else if (msg.type === 'session_reconnecting') {
+                    // Server is auto-reconnecting the Gemini session
+                    isInitializedRef.current = false;
+                    isAiThinkingRef.current = false;
+                    aiTurnActiveRef.current = false;
+                    clearTimeout((window as any).__thinkingTimeout);
+                    resetTypewriter();
+                    setStatus("⚡ AI reconnecting...");
+                } else if (msg.type === 'session_reconnected') {
+                    // Server successfully rebuilt the Gemini session
+                    isInitializedRef.current = true;
+                    isAiThinkingRef.current = false;
+                    aiTurnActiveRef.current = false;
+                    turnCompletePendingRef.current = false;
+                    setStatus("Listening...");
+                } else if (msg.error === 'session_reconnect_failed') {
+                    setStatus("Connection lost. Please refresh the page.");
+                    setIsRecording(false);
+                    isAiThinkingRef.current = false;
+                    aiTurnActiveRef.current = false;
                 } else if (msg.interrupted) {
                     isAiSpeaking.current = false;
                     isAiThinkingRef.current = false;
@@ -779,15 +799,33 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         socket.onclose = () => {
             isInitializedRef.current = false;
             isConnectingRef.current = false;
+            // If we were actively recording/listening when connection dropped,
+            // show a reconnecting message instead of just going Idle
+            const wasActive = isRecording || isAiSpeaking.current || aiTurnActiveRef.current;
             setIsRecording(false);
-            setStatus("Idle");
+            isAiThinkingRef.current = false;
+            aiTurnActiveRef.current = false;
+            clearTimeout((window as any).__thinkingTimeout);
+            if (wasActive) {
+                setStatus("⚡ Reconnecting...");
+            } else {
+                setStatus("Idle");
+            }
             stream?.getTracks().forEach(track => track.stop());
         };
 
         socket.onerror = (error) => {
             console.error("WebSocket error", error);
             isConnectingRef.current = false;
-            setStatus("Error: Connection Failed");
+            // Don't say "Connection Failed" immediately — server may auto-reconnect
+            setStatus("⚡ Connection issue, retrying...");
+            // Give server 4s to auto-reconnect before showing hard error
+            setTimeout(() => {
+                if (!isInitializedRef.current && isRecording) {
+                    setStatus("Error: Connection lost. Refresh if needed.");
+                    setIsRecording(false);
+                }
+            }, 4000);
             stream?.getTracks().forEach(track => track.stop());
         };
     };
