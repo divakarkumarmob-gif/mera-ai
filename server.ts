@@ -450,9 +450,19 @@ async function startServer() {
     const ownerPhone = (process.env.OWNER_WHATSAPP_NUMBER || "").replace(/\D/g, "");
     const senderDigits = (msg.from || "").replace(/\D/g, "");
     if (ownerPhone && senderDigits === ownerPhone) {
-      codeAgentService.handleWhatsAppApprovalReply(msg.text).catch((e) =>
-        console.error("[Server] Failed to handle Cloud WhatsApp approval reply:", e)
-      );
+      // 1. Check if DK is updating the Voice PIN
+      voiceBiometricsService.handleWhatsAppVoicePinMessage(msg.text, msg.name)
+        .then(async (pinRes) => {
+          if (pinRes.handled && pinRes.replyText) {
+            await whatsappCloudService.sendMessage(msg.from, pinRes.replyText);
+          } else {
+            // 2. Otherwise check for coding agent approval
+            codeAgentService.handleWhatsAppApprovalReply(msg.text).catch((e) =>
+              console.error("[Server] Failed to handle Cloud WhatsApp approval reply:", e)
+            );
+          }
+        })
+        .catch((e) => console.error("[Server] Voice PIN Cloud handler error:", e));
     }
   });
 

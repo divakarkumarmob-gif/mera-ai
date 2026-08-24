@@ -474,16 +474,27 @@ class WhatsAppBotService {
 
           let consumedByDailyUpdate = false;
           if (isFromOwner) {
-            // Messages from DK's own paired number never get an auto-reply —
-            // check instead whether this is DK answering a forwarded question.
-            // Awaited (not fire-and-forget) so the messageCallback below can
-            // tell the caller whether this message was already handled here,
-            // before something else (e.g. the coding-agent approval listener
-            // in server.ts) also tries to interpret the same "yes"/"ok" reply.
+            // 1. Check if DK is setting/updating the Voice PIN (e.g. "voice pin - 123456", "voice pin: 620455")
             try {
-              consumedByDailyUpdate = await this.tryForwardOwnerReplyToPendingSender(text);
-            } catch (e) {
-              console.error("[WhatsAppBot] Failed to process owner reply for forwarding:", e);
+              const { voiceBiometricsService } = await import("./voiceBiometricsService");
+              const pinRes = await voiceBiometricsService.handleWhatsAppVoicePinMessage(text, senderName);
+              if (pinRes.handled && pinRes.replyText) {
+                consumedByDailyUpdate = true;
+                if (this.sock && this.isConnected) {
+                  await this.sendHumanLikeMessage(replyJid, pinRes.replyText);
+                }
+              }
+            } catch (pinErr) {
+              console.error("[WhatsAppBot] Failed to process Voice PIN message:", pinErr);
+            }
+
+            // 2. Check whether this is DK answering a forwarded question
+            if (!consumedByDailyUpdate) {
+              try {
+                consumedByDailyUpdate = await this.tryForwardOwnerReplyToPendingSender(text);
+              } catch (e) {
+                console.error("[WhatsAppBot] Failed to process owner reply for forwarding:", e);
+              }
             }
           } else if (!isGroup && this.autoReplyEnabled && this.sock && this.isConnected) {
             // ── Smart AI Auto-Reply for 1-on-1 Personal Chats ──────────────────

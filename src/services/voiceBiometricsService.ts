@@ -15,20 +15,95 @@ const DEFAULT_PIN = "620455";
 const MAX_PROFILES = 2;
 
 class VoiceBiometricsService {
+  private cachedPin: string | null = null;
+
   private getGenAI(): GoogleGenAI | null {
     const key = process.env.GEMINI_API_KEY;
     if (!key) return null;
     return new GoogleGenAI({ apiKey: key });
   }
 
-  public getMasterPin(): string {
-    return process.env.VOICE_AUTH_PIN || DEFAULT_PIN;
+  /**
+   * Fetches the current active PIN from Firestore (doc: systemSecurity/voicePin).
+   * Falls back to env or default 620455 if not set yet.
+   */
+  public async getActivePin(): Promise<string> {
+    try {
+      const doc = await db.collection("systemSecurity").doc("voicePin").get();
+      if (doc.exists && doc.data()?.pin) {
+        const pin = String(doc.data()?.pin).trim();
+        this.cachedPin = pin;
+        return pin;
+      }
+    } catch (e) {
+      console.warn("[VoiceBiometrics] Failed to fetch voicePin from Firestore:", e);
+    }
+    return this.cachedPin || process.env.VOICE_AUTH_PIN || DEFAULT_PIN;
   }
 
-  public verifyPin(pin: string): boolean {
+  /**
+   * Updates the single active PIN in Firestore, overwriting any previous PIN.
+   */
+  public async updateVoicePin(newPin: string, senderName: string = "Boss (DK)"): Promise<{ success: boolean; pin: string; message: string }> {
+    const cleanPin = String(newPin || "").trim().replace(/\D/g, "");
+    if (!cleanPin || cleanPin.length < 4) {
+      return {
+        success: false,
+        pin: "",
+        message: "PIN kam se kam 4-6 digits ka hona chahiye.",
+      };
+    }
+
+    try {
+      await db.collection("systemSecurity").doc("voicePin").set({
+        pin: cleanPin,
+        updatedAt: Date.now(),
+        updatedBy: senderName,
+      });
+      this.cachedPin = cleanPin;
+      console.log(`[VoiceBiometrics] Updated active voice PIN to [${cleanPin}] by ${senderName}`);
+
+      return {
+        success: true,
+        pin: cleanPin,
+        message: `Boss, aapka naya Voice PIN [${cleanPin}] save ho gaya hai! Purana PIN replace ho gaya. Ab aap is naye PIN se voice enroll ya delete kar sakte hain. ✅`,
+      };
+    } catch (e: any) {
+      console.error("[VoiceBiometrics] Failed to save PIN to Firestore:", e);
+      return {
+        success: false,
+        pin: "",
+        message: `PIN save karne me error: ${e?.message || e}`,
+      };
+    }
+  }
+
+  /**
+   * Checks if an incoming WhatsApp message from Boss is a Voice PIN update command.
+   * e.g. "voice pin - 123456", "voice pin 620455", "voice pin: 987654"
+   */
+  public async handleWhatsAppVoicePinMessage(text: string, senderName: string): Promise<{ handled: boolean; replyText?: string }> {
+    const pattern = /(?:voice\s*pin|voice\s*password|security\s*pin|auth\s*pin|new\s*pin)[\s\:\-\=]+([0-9]{4,8})/i;
+    const match = text.match(pattern);
+
+    if (match && match[1]) {
+      const pin = match[1];
+      const result = await this.updateVoicePin(pin, senderName);
+      return {
+        handled: true,
+        replyText: result.message,
+      };
+    }
+    return { handled: false };
+  }
+
+  /**
+   * Verifies the provided PIN against the latest Firestore PIN (or fallback).
+   */
+  public async verifyPin(pin: string): Promise<boolean> {
     const normalizedInput = String(pin || "").trim().replace(/\D/g, "");
-    const master = this.getMasterPin().trim();
-    return normalizedInput === master;
+    const active = (await this.getActivePin()).trim();
+    return normalizedInput === active;
   }
 
   /**
@@ -46,7 +121,7 @@ class VoiceBiometricsService {
 
   /**
    * Enrolls a new Boss Voice Profile into Firestore.
-   * Requires master PIN (620455) and enforces max 2 profiles.
+   * Requires dynamic PIN from Firestore and enforces max 2 profiles.
    */
   public async enrollVoice(
     pin: string,
@@ -54,7 +129,8 @@ class VoiceBiometricsService {
     audioBase64?: string,
     spokenPhrase?: string
   ): Promise<{ success: boolean; profileId?: string; message: string; count?: number }> {
-    if (!this.verifyPin(pin)) {
+    const isPinValid = await this.verifyPin(pin);
+    if (!isPinValid) {
       return {
         success: false,
         message: "Sorry bhai, password galat hai! Voice recognition setup nahi ho sakta.",
@@ -135,7 +211,8 @@ Extract key vocal characteristics:
     pin: string,
     profileId?: string
   ): Promise<{ success: boolean; message: string }> {
-    if (!this.verifyPin(pin)) {
+    const isPinValid = await this.verifyPin(pin);
+    if (!isPinValid) {
       return {
         success: false,
         message: "Sorry bhai, password galat hai! Voice profile delete nahi kiya ja sakta.",
