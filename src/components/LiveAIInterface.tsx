@@ -628,7 +628,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 } catch (err) {
                     console.error("Error accessing audio", err);
                     setStatus("Error: Mic Access Failed");
-                } finally {
+                } font-bold {
                     isConnectingRef.current = false;
                 }
             }
@@ -974,7 +974,12 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     )}
                 </AnimatePresence>
 
-                <div className="flex-1 flex flex-col items-center justify-center gap-8 overflow-hidden">
+                <div className="flex-1 flex flex-col items-center justify-center gap-6 overflow-hidden">
+                    <div className="text-center">
+                        <span className="text-2xl md:text-3xl font-extrabold bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent tracking-wide">
+                            Welcome
+                        </span>
+                    </div>
                     <AgentFace status={status} volume={volume} size={160} colorIndex={colorIndex} />
                     <p className="text-slate-300 text-sm font-medium">{status}</p>
 
