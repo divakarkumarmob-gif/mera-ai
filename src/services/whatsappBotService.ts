@@ -516,9 +516,7 @@ class WhatsAppBotService {
       if (dailyUpdateService.isAffirmative(text)) {
         await dailyUpdateService.markAskedDK(pending.id);
         if (this.sock) {
-          await this.sock.sendMessage(replyJid, {
-            text: "Theek hai, main boss se pooch ke aapko jaldi batati hoon 👍",
-          });
+          await this.sendHumanLikeMessage(replyJid, "Theek hai, main boss se pooch ke aapko jaldi batati hoon 👍");
         }
         return;
       }
@@ -530,7 +528,7 @@ class WhatsAppBotService {
     const factualAnswer = await dailyUpdateService.answerFromTodayUpdate(text);
     if (factualAnswer) {
       if (this.sock) {
-        await this.sock.sendMessage(replyJid, { text: factualAnswer });
+        await this.sendHumanLikeMessage(replyJid, factualAnswer);
         console.log(`[WhatsAppBot] Answered ${senderName} from today's update: "${factualAnswer}"`);
       }
       return;
@@ -542,9 +540,10 @@ class WhatsAppBotService {
     if (looksLikeQuestion) {
       await dailyUpdateService.createPendingQuestion({ senderPhone, senderName, replyJid, question: text });
       if (this.sock) {
-        await this.sock.sendMessage(replyJid, {
-          text: "Iske baare mein mujhe pata nahi, boss ne mujhe kuch nahi bataya hai. Chahe to main unse pooch loon?",
-        });
+        await this.sendHumanLikeMessage(
+          replyJid,
+          "Iske baare mein mujhe pata nahi, boss ne mujhe kuch nahi bataya hai. Chahe to main unse pooch loon?"
+        );
       }
       return;
     }
@@ -576,7 +575,7 @@ class WhatsAppBotService {
       this.limitNoticeSentToday.set(senderKey, today);
       if (this.sock) {
         try {
-          await this.sock.sendMessage(replyJid, { text: LIMIT_REACHED_GENERIC_REPLY(senderName, isUnknownContact) });
+          await this.sendHumanLikeMessage(replyJid, LIMIT_REACHED_GENERIC_REPLY(senderName, isUnknownContact));
         } catch (e) {
           console.error(`[WhatsAppBot] Failed to send limit-reached notice to ${senderPhone}:`, e);
         }
@@ -589,13 +588,13 @@ class WhatsAppBotService {
       try {
         if (this.sock && this.isConnected) {
           const aiReply = await this.generateSmartAutoReply(senderName, senderPhone, text, isUnknownContact);
-          await this.sock.sendMessage(replyJid, { text: aiReply });
+          await this.sendHumanLikeMessage(replyJid, aiReply);
           console.log(`[WhatsAppBot] Smart AI Reply sent to ${senderName} (+${senderPhone}): "${aiReply}"`);
         }
       } catch (replyErr) {
         console.error(`[WhatsAppBot] Failed to send AI auto-reply to ${senderPhone}:`, replyErr);
       }
-    }, 1500);
+    }, 1200);
   }
 
   /**
@@ -603,9 +602,6 @@ class WhatsAppBotService {
    * "Name- <reply>" format (or is just a plain reply while exactly one
    * question is awaiting him) and forward the answer back to that original
    * sender, closing out the pending question.
-   * Returns true if this message WAS a forwarded answer (i.e. consumed here),
-   * so callers know not to also try interpreting it as something else (e.g.
-   * a coding-agent plan approval).
    */
   private async tryForwardOwnerReplyToPendingSender(text: string): Promise<boolean> {
     const awaiting = await dailyUpdateService.getQuestionsAwaitingDK();
@@ -621,20 +617,17 @@ class WhatsAppBotService {
       replyText = match[2].trim();
       target = awaiting.find((q) => q.senderName.toLowerCase().includes(namePart));
     } else if (awaiting.length === 1) {
-      // Only one question pending — a plain reply (or a native WhatsApp
-      // swipe-reply, which Baileys delivers as plain text here) is
-      // unambiguous.
       target = awaiting[0];
       replyText = text.trim();
     } else {
-      return false; // multiple pending, no name prefix — can't disambiguate safely
+      return false;
     }
 
     if (!target || !replyText) return false;
 
     try {
       if (this.sock) {
-        await this.sock.sendMessage(target.replyJid, { text: replyText });
+        await this.sendHumanLikeMessage(target.replyJid, replyText);
         console.log(`[WhatsAppBot] Forwarded DK's answer to ${target.senderName}: "${replyText}"`);
       }
       await dailyUpdateService.markAnswered(target.id);
@@ -963,6 +956,48 @@ YOUR RULES FOR GENERATING THE WHATSAPP REPLY:
     await this.initSocket();
   }
 
+  /**
+   * Simulates real human behavior before sending a message:
+   * 1. Sends 'composing' (typing...) presence update to WhatsApp
+   * 2. Waits realistic human reading/typing duration based on message length
+   * 3. Sends 'paused' presence update
+   * 4. Sends the actual message
+   * This avoids WhatsApp anti-spam automated bot detection heuristics.
+   */
+  private async sendHumanLikeMessage(jid: string, text: string): Promise<any> {
+    if (!this.sock) return null;
+
+    const trimmed = text.trim();
+    const wordCount = trimmed.split(/\s+/).length;
+
+    // Realistic human typing calculation:
+    // Base "reading/thinking" time: 600ms - 1200ms
+    // Typing time: ~120ms - 180ms per word
+    // Plus random jitter to prevent static interval patterns
+    const baseDelay = 600 + Math.floor(Math.random() * 600);
+    const typingDelay = Math.min(Math.max(wordCount * 140, 800), 3800);
+    const jitter = Math.floor(Math.random() * 400) - 200;
+    const totalTypingTime = Math.min(Math.max(baseDelay + typingDelay + jitter, 1200), 4500);
+
+    try {
+      // 1. Show 'typing...' status on recipient's WhatsApp
+      await this.sock.sendPresenceUpdate('composing', jid);
+    } catch { /* non-critical */ }
+
+    // 2. Wait realistic human typing duration
+    await new Promise((resolve) => setTimeout(resolve, totalTypingTime));
+
+    try {
+      // 3. Stop typing status
+      await this.sock.sendPresenceUpdate('paused', jid);
+      // Brief human finger tap delay (150ms - 300ms)
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    } catch { /* non-critical */ }
+
+    // 4. Send the message
+    return await this.sock.sendMessage(jid, { text: trimmed });
+  }
+
   public async sendMessage(toPhone: string, text: string): Promise<{ success: boolean; message: string }> {
     let cleanPhone = toPhone.replace(/[\s\-\(\)\+]/g, "").trim();
     if (cleanPhone.length === 10) cleanPhone = `91${cleanPhone}`;
@@ -993,7 +1028,6 @@ YOUR RULES FOR GENERATING THE WHATSAPP REPLY:
       const jid = `${cleanPhone}@s.whatsapp.net`;
 
       // Verify the number actually exists on WhatsApp before attempting send.
-      // Prevents false "success" when the JID is malformed or unregistered.
       let exists = true;
       try {
         const [result] = await this.sock.onWhatsApp(jid);
@@ -1008,11 +1042,8 @@ YOUR RULES FOR GENERATING THE WHATSAPP REPLY:
         };
       }
 
-      // sendMessage resolves once Baileys hands the message to its send
-      // queue — it does NOT guarantee server-side delivery. We treat the
-      // returned message key as the real signal: no key/id means Baileys
-      // itself considers the send incomplete, even without throwing.
-      const sendResult = await this.sock.sendMessage(jid, { text: text.trim() });
+      // Human-like sending with live 'typing...' indicator & natural delay
+      const sendResult = await this.sendHumanLikeMessage(jid, text);
 
       if (!sendResult?.key?.id) {
         console.error("[WhatsAppBot] sendMessage returned without a message key — likely a silent failure.", sendResult);
@@ -1022,12 +1053,10 @@ YOUR RULES FOR GENERATING THE WHATSAPP REPLY:
         };
       }
 
-      console.log(`[WhatsAppBot] Message successfully sent to ${cleanPhone}: "${text}" (id: ${sendResult.key.id})`);
+      console.log(`[WhatsAppBot] Message successfully sent to ${cleanPhone} (with human typing simulation): "${text}" (id: ${sendResult.key.id})`);
       return { success: true, message: `Message delivered to +${cleanPhone} from Friday Assistant!` };
     } catch (err: any) {
       console.error("[WhatsAppBot] Error sending message:", err);
-      // Any send failure could mean the socket is dead despite isConnected
-      // still being true — reset it so the next attempt gets a fresh session.
       this.isConnected = false;
       setTimeout(() => this.initSocket(), 500);
       return { success: false, message: `Failed to send WhatsApp message: ${err?.message || err}` };
