@@ -22,6 +22,7 @@ import { codeAgentService } from "./src/services/codeAgentService";
 import { publicApisService } from "./src/services/publicApisService";
 import { saveMessage, getHistory, clearHistory } from "./src/services/historyService";
 import { visionMemoryService } from "./src/services/visionMemoryService";
+import { voiceBiometricsService } from "./src/services/voiceBiometricsService";
 
 const PORT = Number(process.env.PORT) || 3000;
 const isProduction = process.env.NODE_ENV === "production";
@@ -231,6 +232,42 @@ async function startServer() {
     res.json(result);
   });
 
+  // ── Boss Voice Biometrics & Recognition Endpoints ─────────────────────────
+  app.get("/api/voice-biometrics/status", async (_req, res) => {
+    try {
+      const profiles = await voiceBiometricsService.getProfiles();
+      res.json({
+        ok: true,
+        profiles,
+        count: profiles.length,
+        maxProfiles: 2,
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "failed_to_fetch_profiles" });
+    }
+  });
+
+  app.post("/api/voice-biometrics/enroll", async (req, res) => {
+    const { pin, name, audioBase64, spokenPhrase } = req.body || {};
+    if (!pin) return res.status(400).json({ error: "pin_required", message: "Password / PIN zaroori hai." });
+    try {
+      const result = await voiceBiometricsService.enrollVoice(pin, name, audioBase64, spokenPhrase);
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "enrollment_failed" });
+    }
+  });
+
+  app.post("/api/voice-biometrics/delete", async (req, res) => {
+    const { pin, profileId } = req.body || {};
+    if (!pin) return res.status(400).json({ error: "pin_required", message: "Password / PIN zaroori hai." });
+    try {
+      const result = await voiceBiometricsService.deleteProfile(pin, profileId);
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "delete_failed" });
+    }
+  });
 
   app.get("/api/code-agent/requests", async (_req, res) => {
     try {
@@ -631,6 +668,29 @@ LIVE CODING AGENT PERMISSION & VOICE COMMIT TO MAIN (SEAMLESS NON-INTERRUPTING F
 - When DK says "Nahi", "Roko", "Deny karo":
   1. Call 'deny_code_agent_request'.
   2. Confirm: "Boss, Coding Agent ka task cancel kar diya gaya hai."
+
+BOSS VOICE BIOMETRIC RECOGNITION & SENSITIVE QUERY PROTECTION:
+- Tools: 'setup_boss_voice_recognition', 'delete_boss_voice_recognition'.
+- Master Passcode/PIN: '620455' (Strictly required for setup and delete actions).
+- Maximum Profiles Allowed: 2 profiles.
+- ENROLLMENT FLOW (When DK says "voice recognise karo", "meri voice save karo", "voice setup karo", "voice pehchano"):
+  1. If PIN is not provided in DK's speech:
+     - Ask warmly: "Boss ready hoon! Voice recognition setup karne ke liye apna 6-digit password batayein, aur phir calibration phrase boliye: 'Friday main tumhara boss Divakar hoon, meri aawaz pehchano'."
+  2. When DK provides the PIN (e.g. "620455") or speaks the phrase:
+     - Call 'setup_boss_voice_recognition' with pin="620455", name="Boss (Divakar)".
+     - Confirm warmly: "Boss, aapki voice profile Firestore memory me successfully save ho gayi hai! Ab main aapki aawaz hamesha pehchan lungi."
+  3. If PIN is wrong:
+     - Reply: "Sorry bhai, galat password hai! Voice recognition setup nahi ho sakta."
+- DELETION FLOW (When DK says "voice delete karo", "boss voice profile hatao"):
+  1. If PIN is not provided, ask: "Boss, voice profile delete karne ke liye password (PIN) confirm kijiye."
+  2. When PIN is given:
+     - Call 'delete_boss_voice_recognition' with pin="620455".
+     - Confirm: "Boss, voice profile delete kar diya gaya hai."
+  3. If wrong PIN: "Sorry bhai, galat password hai! Voice delete nahi ho sakta."
+- SENSITIVE COMMAND VERIFICATION:
+  * When a sensitive request is made (e.g. asking for personal secrets, modifying private data, deleting memories, code rollbacks):
+    If the speaker's voice does NOT match Boss:
+    Strictly refuse: "I can't help with that bro, aapki aawaz mere boss se nahi mili. Kuch aur poochiye."
 
 WHATSAPP VISION AI & LONG-TERM PERSON RECOGNITION MEMORY:
 - Tools: 'get_whatsapp_photo_or_doc_info', 'save_person_visual_memory', 'identify_person_in_whatsapp_photo'.
@@ -1750,6 +1810,31 @@ HOW TO READ MESSAGES:
               },
             },
             required: ["settingName"],
+          },
+        },
+        {
+          name: "setup_boss_voice_recognition",
+          description: "Set up and enroll Boss's voice biometric profile. Requires 6-digit PIN (620455). Enforces max 2 profiles limit. Call when DK says 'voice recognise karo', 'meri aawaz save karo', 'voice setup karo', 'voice pehchano'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              pin: { type: "STRING", description: "6-digit authorization PIN (620455)" },
+              name: { type: "STRING", description: "Profile Name (default 'Boss (Divakar)')" },
+              spokenPhrase: { type: "STRING", description: "Calibration phrase spoken during enrollment" },
+            },
+            required: ["pin"],
+          },
+        },
+        {
+          name: "delete_boss_voice_recognition",
+          description: "Delete an enrolled Boss voice profile from memory. Requires 6-digit PIN (620455). Call when DK says 'voice delete karo', 'boss voice profile hatao'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              pin: { type: "STRING", description: "6-digit authorization PIN (620455)" },
+              profileId: { type: "STRING", description: "Optional specific profile ID to delete" },
+            },
+            required: ["pin"],
           },
         },
         {
@@ -2926,6 +3011,37 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                     };
                   } catch (e: any) {
                     result = { success: false, message: `Toggle fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "setup_boss_voice_recognition") {
+                  const { pin, name, spokenPhrase } = call.args || {};
+                  try {
+                    const enrollRes = await voiceBiometricsService.enrollVoice(
+                      String(pin || ""),
+                      name ? String(name) : "Boss (Divakar)",
+                      undefined,
+                      spokenPhrase ? String(spokenPhrase) : undefined
+                    );
+                    result = {
+                      success: enrollRes.success,
+                      message: enrollRes.message,
+                      count: enrollRes.count,
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `Voice recognition setup fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "delete_boss_voice_recognition") {
+                  const { pin, profileId } = call.args || {};
+                  try {
+                    const delRes = await voiceBiometricsService.deleteProfile(
+                      String(pin || ""),
+                      profileId ? String(profileId) : undefined
+                    );
+                    result = {
+                      success: delRes.success,
+                      message: delRes.message,
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `Voice profile delete fail hua: ${e?.message || e}` };
                   }
                 } else if (call.name === "get_linkedin_insights") {
                   const { query } = call.args || {};
