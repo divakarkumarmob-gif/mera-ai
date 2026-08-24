@@ -26,6 +26,101 @@ function extractError(e: any): string {
 }
 const APPROVE_WORDS = new Set(["yes", "ok", "okay", "haan", "yep", "yeah", "y"]);
 
+// Helper: robust JSON extractor that handles markdown blocks, trailing commas, unescaped text
+function cleanAndParsePlanJSON(raw: string): CodeAgentPlan {
+  const trimmed = raw.trim();
+  let jsonStr = trimmed;
+
+  // 1. Strip markdown code fences if present (```json ... ``` or ``` ... ```)
+  const fenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fenceMatch) {
+    jsonStr = fenceMatch[1].trim();
+  }
+
+  // 2. Extract outermost JSON object { ... }
+  const firstBrace = jsonStr.indexOf("{");
+  const lastBrace = jsonStr.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    jsonStr = jsonStr.slice(firstBrace, lastBrace + 1);
+  }
+
+  // 3. Clean up trailing commas before } or ]
+  jsonStr = jsonStr.replace(/,(\s*[}\]])/g, "$1");
+
+  try {
+    const parsed = JSON.parse(jsonStr);
+    return {
+      diagnosis: String(parsed.diagnosis || ""),
+      summary: String(parsed.summary || "Proposing codebase changes according to instruction."),
+      files: Array.isArray(parsed.files)
+        ? parsed.files.map((f: any) => ({
+            path: String(f.path || ""),
+            action: f.action === "create" ? "create" : "modify",
+            changeSummary: String(f.changeSummary || f.summary || "Update file implementation"),
+          }))
+        : [],
+    };
+  } catch (parseErr) {
+    console.warn("[CodeAgent] Direct JSON.parse failed, attempting fallback regex parsing...", parseErr);
+
+    // Fallback: Regex extraction if JSON had unescaped quotes or formatting quirks
+    const diagMatch = raw.match(/"diagnosis"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/i);
+    const sumMatch = raw.match(/"summary"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/i);
+    const files: FilePlanItem[] = [];
+
+    const fileMatches = raw.matchAll(
+      /\{\s*"path"\s*:\s*"([^"]+)"\s*,\s*"action"\s*:\s*"(modify|create)"\s*,\s*"changeSummary"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"\s*\}/gi
+    );
+    for (const fm of fileMatches) {
+      files.push({
+        path: fm[1],
+        action: fm[2] === "create" ? "create" : "modify",
+        changeSummary: fm[3],
+      });
+    }
+
+    if (files.length > 0 || sumMatch) {
+      return {
+        diagnosis: diagMatch ? diagMatch[1].replace(/\\"/g, '"') : "",
+        summary: sumMatch ? sumMatch[1].replace(/\\"/g, '"') : "Update codebase files.",
+        files,
+      };
+    }
+
+    throw new Error(`Invalid plan format: ${parseErr}`);
+  }
+}
+
+// Helper: extracts code content from model response (JSON, code fences, or raw code)
+function cleanAndExtractFileContent(raw: string): string {
+  const trimmed = raw.trim();
+
+  // Try 1: Parse { "content": "..." }
+  try {
+    let jsonStr = trimmed;
+    const fenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    if (fenceMatch) jsonStr = fenceMatch[1].trim();
+    const firstBrace = jsonStr.indexOf("{");
+    const lastBrace = jsonStr.lastIndexOf("}");
+    if (firstBrace !== -1 && lastBrace !== -1) {
+      jsonStr = jsonStr.slice(firstBrace, lastBrace + 1);
+    }
+    const parsed = JSON.parse(jsonStr);
+    if (typeof parsed.content === "string" && parsed.content.trim()) {
+      return parsed.content;
+    }
+  } catch { /* fall through */ }
+
+  // Try 2: Extract from code fences ```ts ... ``` or ``` ... ```
+  const codeFenceMatch = trimmed.match(/```(?:[a-zA-Z0-9_-]+)?\s*([\s\S]*?)\s*```/);
+  if (codeFenceMatch && codeFenceMatch[1]?.trim()) {
+    return codeFenceMatch[1];
+  }
+
+  // Try 3: Return raw text directly if it looks like source code
+  return trimmed;
+}
+
 export type RequestStatus =
   | "analyzing"
   | "pending_approval"
@@ -237,14 +332,13 @@ Rules:
 
     let plan: CodeAgentPlan;
     try {
-      const parsed = JSON.parse(planRaw);
-      plan = {
-        diagnosis: parsed.diagnosis || "",
-        summary: parsed.summary || "",
-        files: Array.isArray(parsed.files) ? parsed.files : [],
-      };
-    } catch (e) {
-      await this.markFailed(id, "Failed to parse the plan returned by the model.", "parse_error");
+      plan = cleanAndParsePlanJSON(planRaw);
+      if (!plan.files || plan.files.length === 0) {
+        throw new Error("Model returned plan with 0 files to change.");
+      }
+    } catch (e: any) {
+      console.error("[CodeAgent] Plan parsing error:", e, "Raw plan was:", planRaw);
+      await this.markFailed(id, `Failed to parse plan: ${e?.message || e}`, "parse_error");
       return;
     }
 
@@ -348,7 +442,7 @@ Rules:
       );
 
       const original = fileItem.action === "modify" ? await githubService.getFileContent(fileItem.path) : "";
-      const genPrompt = `You are DK's AI coding agent. Generate the COMPLETE new content for this file, applying the planned change. Return ONLY a JSON object: { "content": "...full file content..." } — no markdown fences, no explanation.
+      const genPrompt = `You are DK's AI coding agent. Generate the COMPLETE new content for this file, applying the planned change. Return the full raw file content without truncation.
 
 Instruction: "${request.instruction}"
 Overall plan summary: ${request.plan.summary}
@@ -358,13 +452,8 @@ ${original ? `Current content:\n${original}` : "This is a new file."}`;
 
       const raw = await callModel(genPrompt, id, this);
       if (!raw) throw new Error(`Failed to generate content for ${fileItem.path}`);
-      let content: string;
-      try {
-        content = JSON.parse(raw).content;
-      } catch {
-        throw new Error(`Failed to parse generated content for ${fileItem.path}`);
-      }
-      if (typeof content !== "string" || !content.trim()) {
+      const content = cleanAndExtractFileContent(raw);
+      if (!content || !content.trim()) {
         throw new Error(`Empty content generated for ${fileItem.path}`);
       }
       changes.push({ path: fileItem.path, content });
