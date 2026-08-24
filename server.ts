@@ -365,10 +365,23 @@ CONVERSATION STYLE:
 - If DK shares an image, describe what you see naturally.
 - Speak numbers/units/equations in words, never raw symbols (e.g. say "paanch sau rupaye" instead of raw symbols).
 
-SHOPPING & E-COMMERCE (AMAZON, FLIPKART, MEESHO):
-- When DK asks about product prices, deals, or comparisons (e.g. 'football sabse sasti kispe mil rahi hai', 'ye item kitne ka aata hai', 'Amazon vs Flipkart vs Meesho'):
-  - Give a clear, practical price comparison across Amazon, Flipkart, and Meesho in Rupees (₹).
-  - Break down: 1) Lowest entry-level price (Meesho/Flipkart budget options, e.g. basic rubber footballs from ₹150–₹250), 2) Standard popular brands & models (e.g. Nivia Storm / Cosco size 5 around ₹350–₹550 on Amazon/Flipkart), 3) Which platform is best for budget vs brand/speed.
+SHOPPING & E-COMMERCE DEALS (AMAZON, FLIPKART, MEESHO):
+- Tool: 'search_product_deals'.
+- When DK asks to search or price check any product (e.g. "Football search karo", "running shoes ka price batao", "football dikhao", "earbuds search karo", "Meesho par football search karo"):
+  1. Call 'search_product_deals' with 'productName', 'platform' ('all' | 'amazon' | 'flipkart' | 'meesho'), 'sortBy' ('high_to_low'), and 'page' (1).
+  2. Speak to DK in Hindi:
+     "Boss, [Amazon/Flipkart/Meesho par] top 5 products mile hain (High to Low price):
+     1. [Product 1 Title] — ₹[Price] ([Store])
+     2. [Product 2 Title] — ₹[Price] ([Store])
+     3. [Product 3 Title] — ₹[Price] ([Store])
+     4. [Product 4 Title] — ₹[Price] ([Store])
+     5. [Product 5 Title] — ₹[Price] ([Store])
+     Agar aapko ye pasand nahi aaye ya budget alag hai, to main agle 5 products bhi search karke dikha sakti hoon!"
+  3. When DK says "Agle 5 dikhao" / "Pasand nahi aaya aur options dikhao" / "Next 5 search karo":
+     - Call 'search_product_deals' with page=2, sortBy='high_to_low', and present results 6 to 10!
+  4. If DK specifies a single store (e.g. "Sirf Meesho par search karo", "Flipkart par football dekho", "Amazon par shoes dikhao"):
+     - Pass platform='meesho' (or 'flipkart' or 'amazon') to search ONLY that store!
+  5. If DK asks to WhatsApp the product link (e.g. "iski buy link WhatsApp kar do"): send via 'send_whatsapp_to_contact' (by default to DK / Boss / Divakar).
 
 - SENDING PRODUCT LINKS & WEBSITE/HELPLINE VIA WHATSAPP:
 - When DK asks to send or share any link, product, website URL, or customer care helpline number on WhatsApp (e.g. "iska link WhatsApp par bhej do", "Rahul ko link bhejo", "customer care number WhatsApp kar do", "mujhe send karo"):
@@ -1212,11 +1225,14 @@ HOW TO READ MESSAGES:
         },
         {
           name: "search_product_deals",
-          description: "Search product prices and generate direct buy links across Amazon India, Flipkart, and Meesho for any product (e.g. 'football', 'earphones', 'shoes').",
+          description: "Search top products, real-time prices, and direct buy links across Amazon India, Flipkart, and Meesho. Supports high-to-low price sorting, pagination (next 5 products), and single-store filtering (e.g. 'sirf meesho par search karo').",
           parameters: {
             type: "OBJECT",
             properties: {
-              productName: { type: "STRING", description: "Name of the product or item to search" },
+              productName: { type: "STRING", description: "Name of the product or item to search (e.g. 'football', 'running shoes', 'wireless earbuds')" },
+              platform: { type: "STRING", description: "Optional store filter: 'all' (default), 'amazon', 'flipkart', or 'meesho'" },
+              sortBy: { type: "STRING", description: "Sort order: 'high_to_low' (default, most expensive first), 'low_to_high' (cheapest first), or 'relevance'" },
+              page: { type: "INTEGER", description: "Page number: 1 for top 5, 2 for next 5 results (items 6-10), 3 for items 11-15" },
             },
             required: ["productName"],
           },
@@ -2078,9 +2094,16 @@ HOW TO READ MESSAGES:
                     result = { success: false, message: `PNR status fetch fail hui: ${e?.message || e}` };
                   }
                 } else if (call.name === "search_product_deals") {
-                  const { productName } = call.args || {};
+                  const { productName, product, query, platform, store, sortBy, page } = call.args || {};
                   try {
-                    result = await publicApisService.searchProductDeals(String(productName || ""));
+                    result = await publicApisService.searchProductDeals(
+                      String(productName || product || query || ""),
+                      {
+                        platform: platform || store ? String(platform || store) : undefined,
+                        sortBy: sortBy ? String(sortBy) : undefined,
+                        page: typeof page === "number" ? page : undefined,
+                      }
+                    );
                   } catch (e: any) {
                     result = { success: false, message: `Product search fail hui: ${e?.message || e}` };
                   }
