@@ -52,6 +52,13 @@ export interface GeneratedFileChange {
   content: string;
 }
 
+export interface CodeAgentLog {
+  timestamp: number;
+  level: "info" | "warn" | "error" | "success";
+  message: string;
+  stage?: string;
+}
+
 export interface CodeAgentRequest {
   id: string;
   instruction: string;
@@ -67,14 +74,16 @@ export interface CodeAgentRequest {
   commitSha?: string;
   pushedToMain?: boolean;
   error?: string;
+  logs?: CodeAgentLog[];
 }
 
 const requestsCol = () => db.collection("codeAgentRequests");
 
-async function callModel(prompt: string): Promise<string | null> {
+async function callModel(prompt: string, id?: string, service?: CodeAgentService): Promise<string | null> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     console.error("[CodeAgent] GEMINI_API_KEY not set.");
+    if (id && service) await service.addLog(id, "GEMINI_API_KEY not configured in environment.", "error", "ai_model");
     return null;
   }
   const ai = new GoogleGenAI({ apiKey });
@@ -82,6 +91,7 @@ async function callModel(prompt: string): Promise<string | null> {
   for (let i = 0; i < MODEL_CHAIN.length; i++) {
     const model = MODEL_CHAIN[i];
     console.log(`[CodeAgent] Trying model ${i + 1}/${MODEL_CHAIN.length}: ${model}`);
+    if (id && service) await service.addLog(id, `Connecting to AI model (${i + 1}/${MODEL_CHAIN.length}): ${model}...`, "info", "ai_model");
     try {
       const response = await ai.models.generateContent({
         model,
@@ -90,15 +100,17 @@ async function callModel(prompt: string): Promise<string | null> {
       const text = response.text;
       if (text && text.trim()) {
         console.log(`[CodeAgent] ✅ Success with ${model}`);
+        if (id && service) await service.addLog(id, `AI model response received successfully from ${model}.`, "success", "ai_model");
         return text;
       }
       console.warn(`[CodeAgent] ${model} returned empty response, trying next...`);
+      if (id && service) await service.addLog(id, `${model} returned empty response, trying next model in chain...`, "warn", "ai_model");
     } catch (e: any) {
       const errMsg = extractError(e);
       const is503 = errMsg.includes("503") || errMsg.includes("UNAVAILABLE") || errMsg.includes("high demand");
       console.error(`[CodeAgent] ❌ ${model} failed: ${errMsg}`);
+      if (id && service) await service.addLog(id, `Model ${model} failed: ${errMsg}`, "warn", "ai_model");
       if (i < MODEL_CHAIN.length - 1) {
-        // Wait 2s before next attempt to let transient 503 spikes clear
         const delayMs = is503 ? 2000 : 500;
         console.log(`[CodeAgent] Waiting ${delayMs}ms before trying next model...`);
         await new Promise((r) => setTimeout(r, delayMs));
@@ -106,26 +118,78 @@ async function callModel(prompt: string): Promise<string | null> {
     }
   }
   console.error("[CodeAgent] ❌ All models in the fallback chain failed.");
+  if (id && service) await service.addLog(id, "All AI models in fallback chain failed.", "error", "ai_model");
   return null;
 }
 
 class CodeAgentService {
+  /** Appends a structured log event to the request document */
+  public async addLog(id: string, message: string, level: "info" | "warn" | "error" | "success" = "info", stage?: string) {
+    try {
+      const docRef = requestsCol().doc(id);
+      const doc = await docRef.get();
+      if (!doc.exists) return;
+      const currentLogs: CodeAgentLog[] = (doc.data() as CodeAgentRequest).logs || [];
+      const newLog: CodeAgentLog = {
+        timestamp: Date.now(),
+        level,
+        message,
+        stage: stage || "general",
+      };
+      await docRef.set({ logs: [...currentLogs.slice(-40), newLog], updatedAt: Date.now() }, { merge: true });
+    } catch (e) {
+      console.warn("[CodeAgent] Failed to write log:", e);
+    }
+  }
+
   /** Kicks off a new request: creates the Firestore doc, then analyzes in the background. */
   public async createRequest(instruction: string): Promise<string> {
     const id = `req_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const initialLog: CodeAgentLog = {
+      timestamp: Date.now(),
+      level: "info",
+      message: `Request created for task: "${instruction}"`,
+      stage: "init",
+    };
     const request: CodeAgentRequest = {
       id,
       instruction,
       status: "analyzing",
       createdAt: Date.now(),
       updatedAt: Date.now(),
+      logs: [initialLog],
     };
     await requestsCol().doc(id).set(request);
     this.analyzeAndPlan(id, instruction).catch((e) => {
       console.error(`[CodeAgent] Analysis failed for request ${id}:`, e);
-      this.markFailed(id, e?.message || String(e));
+      this.markFailed(id, e?.message || String(e), "analysis_phase");
     });
     return id;
+  }
+
+  /** Retries a failed or stalled request from scratch */
+  public async retry(id: string): Promise<CodeAgentRequest> {
+    const doc = await requestsCol().doc(id).get();
+    if (!doc.exists) throw new Error("Request not found");
+    const request = doc.data() as CodeAgentRequest;
+
+    await this.addLog(id, "🔄 Retry initiated by user. Restarting codebase analysis...", "info", "retry");
+    await requestsCol().doc(id).set(
+      {
+        status: "analyzing",
+        error: null,
+        updatedAt: Date.now(),
+      },
+      { merge: true }
+    );
+
+    this.analyzeAndPlan(id, request.instruction).catch((e) => {
+      console.error(`[CodeAgent] Retry analysis failed for request ${id}:`, e);
+      this.markFailed(id, e?.message || String(e), "retry_phase");
+    });
+
+    const updated = await this.getRequest(id);
+    return updated!;
   }
 
   /** Stage 1: analyze and generate a plan. */
@@ -134,10 +198,13 @@ class CodeAgentService {
     if (!doc.exists) return;
     const request = doc.data() as CodeAgentRequest;
 
+    await this.addLog(id, "Scanning GitHub repository tree for candidate code files...", "info", "repo_scan");
     const allFiles = await githubService.listRepoFiles();
     const candidateFiles = allFiles
       .filter((p) => /\.(ts|tsx|js|jsx|json|html|css|md)$/i.test(p))
       .slice(0, 80);
+
+    await this.addLog(id, `Identified ${candidateFiles.length} candidate files in repository. Generating architecture plan...`, "info", "planning");
 
     const planPrompt = `You are an expert software engineer reviewing a codebase.
 Instruction: "${instruction}"
@@ -162,9 +229,9 @@ Rules:
 - Be honest in "diagnosis" — distinguish confirmed vs likely vs "not enough information" if applicable, don't pretend certainty you don't have.
 - Don't invent facts not supported by the code you were shown.`;
 
-    const planRaw = await callModel(planPrompt);
+    const planRaw = await callModel(planPrompt, id, this);
     if (!planRaw) {
-      await this.markFailed(id, "Model call failed while generating the plan.");
+      await this.markFailed(id, "Model call failed while generating the plan.", "model_error");
       return;
     }
 
@@ -177,9 +244,16 @@ Rules:
         files: Array.isArray(parsed.files) ? parsed.files : [],
       };
     } catch (e) {
-      await this.markFailed(id, "Failed to parse the plan returned by the model.");
+      await this.markFailed(id, "Failed to parse the plan returned by the model.", "parse_error");
       return;
     }
+
+    await this.addLog(
+      id,
+      `Plan generated successfully: ${plan.files.length} files planned for change (${plan.summary})`,
+      "success",
+      "plan_ready"
+    );
 
     await requestsCol().doc(id).set(
       { plan, status: "pending_approval", updatedAt: Date.now() },
@@ -202,12 +276,14 @@ Rules:
       `Approve karne ke liye "yes" ya "ok" reply karo. Kuch aur likha to deny ho jayega.`;
     try {
       await whatsappBotService.sendMessage(ownerPhone, text);
+      await this.addLog(id, "Notification sent to owner's WhatsApp.", "info", "whatsapp_notice");
     } catch (e) {
       console.error("[CodeAgent] Failed to notify owner on WhatsApp:", e);
     }
   }
 
-  private async markFailed(id: string, error: string) {
+  private async markFailed(id: string, error: string, stage?: string) {
+    await this.addLog(id, `❌ Task failed: ${error}`, "error", stage || "failed");
     await requestsCol().doc(id).set({ status: "failed", error, updatedAt: Date.now() }, { merge: true });
   }
 
@@ -228,14 +304,16 @@ Rules:
   }
 
   public async approve(id: string) {
+    await this.addLog(id, "User approved plan. Starting code generation and git operations...", "info", "approved");
     await requestsCol().doc(id).set({ status: "approved", updatedAt: Date.now() }, { merge: true });
     this.applyChanges(id).catch((e) => {
       console.error(`[CodeAgent] Applying changes failed for request ${id}:`, e);
-      this.markFailed(id, e?.message || String(e));
+      this.markFailed(id, e?.message || String(e), "apply_phase");
     });
   }
 
   public async deny(id: string) {
+    await this.addLog(id, "Plan denied by user.", "warn", "denied");
     await requestsCol().doc(id).set({ status: "denied", updatedAt: Date.now() }, { merge: true });
   }
 
@@ -260,7 +338,15 @@ Rules:
 
     const changes: { path: string; content: string }[] = [];
 
-    for (const fileItem of request.plan.files) {
+    for (let i = 0; i < request.plan.files.length; i++) {
+      const fileItem = request.plan.files[i];
+      await this.addLog(
+        id,
+        `[${i + 1}/${request.plan.files.length}] Generating code for: ${fileItem.path} (${fileItem.action})...`,
+        "info",
+        "code_gen"
+      );
+
       const original = fileItem.action === "modify" ? await githubService.getFileContent(fileItem.path) : "";
       const genPrompt = `You are DK's AI coding agent. Generate the COMPLETE new content for this file, applying the planned change. Return ONLY a JSON object: { "content": "...full file content..." } — no markdown fences, no explanation.
 
@@ -270,7 +356,7 @@ This file: ${fileItem.path}
 Change needed: ${fileItem.changeSummary}
 ${original ? `Current content:\n${original}` : "This is a new file."}`;
 
-      const raw = await callModel(genPrompt);
+      const raw = await callModel(genPrompt, id, this);
       if (!raw) throw new Error(`Failed to generate content for ${fileItem.path}`);
       let content: string;
       try {
@@ -282,9 +368,12 @@ ${original ? `Current content:\n${original}` : "This is a new file."}`;
         throw new Error(`Empty content generated for ${fileItem.path}`);
       }
       changes.push({ path: fileItem.path, content });
+      await this.addLog(id, `Generated complete code for: ${fileItem.path}`, "success", "code_gen");
     }
 
     const branchName = `friday-agent/${id}`;
+    await this.addLog(id, `Creating GitHub branch "${branchName}" and pushing Pull Request...`, "info", "git_pr");
+
     const { branchUrl, prUrl, prNumber } = await githubService.commitChangesAsPR(
       branchName,
       changes,
@@ -292,6 +381,8 @@ ${original ? `Current content:\n${original}` : "This is a new file."}`;
       `Friday Coding Agent: ${request.instruction}`.slice(0, 200),
       `${request.plan.summary}\n\nRequested via Friday coding agent. Review before merging.`
     );
+
+    await this.addLog(id, `Pull Request created successfully: ${prUrl}`, "success", "completed");
 
     await requestsCol().doc(id).set(
       {

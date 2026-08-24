@@ -279,6 +279,15 @@ async function startServer() {
     }
   });
 
+  app.post("/api/code-agent/requests/:id/retry", async (req, res) => {
+    try {
+      const updated = await codeAgentService.retry(req.params.id);
+      res.json({ ok: true, request: updated });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "failed_to_retry" });
+    }
+  });
+
   const distPath = path.resolve("dist");
 
   let vite: any;
@@ -516,9 +525,17 @@ SOCIAL & MEDIA TOOLS (YOUTUBE, REDDIT, SPOTIFY MUSIC, LINKEDIN, TELEGRAM/DISCORD
 - 'stop_music': STOP / PAUSE the currently playing music immediately. CRITICAL: Whenever DK says 'stop', 'gana band karo', 'mujhe achha nahi laga', 'band karo gana', 'gana nahi sunna mujhe', 'music roko', 'chup ho jao' — CALL 'stop_music' IMMEDIATELY and resume talking warmly.
 - 'send_music_on_whatsapp': Send the YouTube link of any song to DK's WhatsApp via Cloud API. If Cloud API fails, Friday will inform DK and ask if Baileys should be enabled as backup.
 - 'toggle_baileys_system': Turn Baileys WhatsApp system ON or OFF. Call when DK says 'Baileys on karo', 'Baileys off karo', 'purana WhatsApp system on karo', 'Baileys band karo'. After toggling say: 'Boss, Baileys system [on/off] kar diya. Ab [Cloud API primary rahega / Baileys bhi backup me active hai].'.
+- 'dispatch_bug_to_code_agent': Delegate a bug, broken service, or error to Friday Coding Agent to automatically fix the codebase.
 - 'get_linkedin_insights': Company pages, hiring, job openings, and professional skill trends.
 - 'get_community_links': Find Telegram and Discord channel links for study groups, deals, gaming, and tech.
 - 'get_pinterest_ideas': Visual room decor, desk setups, fashion, and aesthetic photography ideas.
+
+SELF-HEALING & AUTOMATIC BUG DELEGATION TO CODING AGENT:
+- When ANY tool, API, service, or feature fails or throws an error (e.g. YouTube link failed, WhatsApp failed, scraper blocked, or DK says "ye feature kaam nahi kar raha hai", "ye kharab hai", "error aa gaya"):
+  1. Tell DK clearly and politely: "Boss, [service name] me problem aa rahi hai ([simple explanation of error]). Kya main isko theek karne ke liye Coding Agent ke paas bhej doon?"
+  2. When DK says "haan", "bhej do", "theek karwa do", "fix karo", "solve kar do", or when he directly asks you to fix the bug:
+     - Call 'dispatch_bug_to_code_agent' with 'problemTitle', 'serviceName', 'errorDetails', and 'instruction'.
+     - Confirm to DK: "Boss, error details aur logs ke saath problem Coding Agent ko bhej di hai! Jaise hi agent code change plan banayega, aap dashboard me check karke approve kar dena."
 
 DAILY LIFE ESSENTIALS (MEDICINE, GOLD/PETROL, EMERGENCY, CHALLAN, BILLS, SCHEMES, EXPENSES, BUS):
 - 'get_medicine_and_generic_info': Explain medicine uses, precautions, and suggest 70% cheaper Jan Aushadhi generic alternative salts.
@@ -1488,6 +1505,20 @@ HOW TO READ MESSAGES:
           },
         },
         {
+          name: "dispatch_bug_to_code_agent",
+          description: "Send a bug report, broken service, error logs, or feature fix instruction directly to the Friday Coding Agent to automatically diagnose, write the fix, and create a Pull Request / commit. Call this whenever DK asks or approves fixing a broken service or feature.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              problemTitle: { type: "STRING", description: "Short title of the problem or broken service (e.g. 'Fix YouTube scraper timeout', 'Instagram scraper returning empty results')" },
+              serviceName: { type: "STRING", description: "Name of the service, file, or tool that failed" },
+              errorDetails: { type: "STRING", description: "The exact error message, logs, or diagnostic details" },
+              instruction: { type: "STRING", description: "Detailed instruction for the coding agent explaining what to investigate and fix" },
+            },
+            required: ["instruction"],
+          },
+        },
+        {
           name: "get_linkedin_insights",
           description: "Get LinkedIn company hub page and job opening search links for any company or skill.",
           parameters: {
@@ -2453,6 +2484,31 @@ HOW TO READ MESSAGES:
                     console.log(`[Server] toggle_baileys_system called: action=${act}, baileysEnabled=${baileysEnabled}`);
                   } catch (e: any) {
                     result = { success: false, message: `Baileys toggle fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "dispatch_bug_to_code_agent") {
+                  const { problemTitle, serviceName, errorDetails, instruction } = call.args || {};
+                  try {
+                    const fullInstruction = `[Bug Fix / Self-Healing Request]
+Title: ${problemTitle || "Fix broken service"}
+Component/Service: ${serviceName || "Unknown"}
+Error Details/Logs: ${errorDetails || "Service reported failure"}
+
+Detailed Instruction:
+${instruction}
+
+Please review the codebase, diagnose the root cause, fix the issue with proper error handling/fallbacks, and propose the changes.`;
+
+                    const reqId = await codeAgentService.createRequest(fullInstruction);
+                    if (errorDetails) {
+                      await codeAgentService.addLog(reqId, `Bug Report Context: ${errorDetails}`, "warn", "bug_report");
+                    }
+                    result = {
+                      success: true,
+                      requestId: reqId,
+                      message: `Boss, issue Coding Agent ko bhej diya gaya hai (Task ID: ${reqId}). Agent codebase scan karke solution plan banayega.`,
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `Coding Agent ko task bhejne me error: ${e?.message || e}` };
                   }
                 } else if (call.name === "get_linkedin_insights") {
                   const { query } = call.args || {};
