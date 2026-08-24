@@ -444,14 +444,16 @@ class PublicApisService {
   }
 
   // 24. Public holidays — Nager.Date (free, no key)
-  public async getPublicHolidays(countryCode: string, year?: number): Promise<any> {
+  // Defaults to India ("IN") if DK doesn't specify a country.
+  public async getPublicHolidays(countryCode?: string, year?: number): Promise<any> {
     const yr = year || new Date().getFullYear();
+    const code = (countryCode || "IN").toUpperCase();
     try {
-      const data = await fetchJson(`https://date.nager.at/api/v3/PublicHolidays/${yr}/${countryCode.toUpperCase()}`);
+      const data = await fetchJson(`https://date.nager.at/api/v3/PublicHolidays/${yr}/${code}`);
       const holidays = (data || []).slice(0, 15).map((h: any) => ({ date: h.date, name: h.localName }));
-      return { success: true, countryCode: countryCode.toUpperCase(), year: yr, count: holidays.length, holidays };
+      return { success: true, countryCode: code, year: yr, count: holidays.length, holidays };
     } catch {
-      return { success: false, message: `"${countryCode}" ke liye holiday list nahi mili — is source me coverage sabhi countries ke liye nahi hai.` };
+      return { success: false, message: `"${code}" ke liye holiday list nahi mili — is source me coverage sabhi countries ke liye nahi hai.` };
     }
   }
 
@@ -522,12 +524,16 @@ class PublicApisService {
   }
 
   // 28. Cricket scores — CricAPI (cricapi.com)
+  // India matches are surfaced first since DK is India-based.
   public async getCricketScores(): Promise<any> {
     const key = process.env.CRICAPI_KEY;
     if (!key) return { success: false, message: "CRICAPI_KEY .env me set nahi hai." };
     try {
       const data = await fetchJson(`https://api.cricapi.com/v1/currentMatches?apikey=${key}&offset=0`);
-      const matches = (data.data || []).slice(0, 5).map((m: any) => ({
+      const allMatches = data.data || [];
+      const isIndiaMatch = (m: any) => (m.teams || []).some((t: string) => t.toLowerCase().includes("india"));
+      const sorted = [...allMatches].sort((a, b) => Number(isIndiaMatch(b)) - Number(isIndiaMatch(a)));
+      const matches = sorted.slice(0, 5).map((m: any) => ({
         name: m.name,
         status: m.status,
         teams: m.teams,
