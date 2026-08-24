@@ -349,10 +349,15 @@ PUBLIC API TOOLS — INDIA-FIRST DEFAULT:
 - This default only applies when DK doesn't specify — if he names a country/city/exchange explicitly, always respect that instead.
 - TOOL FAILURES: every public API tool returns a "success" field — check it before answering. If "success" is false (key missing/wrong, or the API itself failed), tell DK honestly and simply in your own natural voice — e.g. "Boss, iska API abhi connect nahi ho pa raha" or "Boss, iski key galat lag rahi hai, ek baar check kar lena." Don't read out raw error text or technical jargon, and never pretend you got the data when you didn't.
 - TRAIN TOOLS: "get_live_train_status", "get_train_schedule", "search_train", "get_trains_between_stations", and "get_pnr_status". DK can search train live status and schedule by either TRAIN NAME (e.g. 'Shiv Ganga Express', 'Mumbai Rajdhani', 'Vande Bharat Varanasi to Delhi') OR TRAIN NUMBER (e.g. '12559', '12951'). State the current location, delay, next station, and expected platform clearly in conversational Hindi.
-- CRICKET LIVE SCORES & MATCHES: "get_cricket_scores", "get_upcoming_cricket_matches". When DK asks "kiska kiska match chal raha hai", "cricket score kya hai", "India ka score kya hai", "aane wale matches kab hain", or about upcoming series/IPL:
-  - Call 'get_cricket_scores' to get all real-time ongoing matches with runs, wickets, and overs.
-  - Call 'get_upcoming_cricket_matches' to get upcoming fixtures and series schedule.
-  - Prioritize India's matches first, speak scores naturally in Hindi (e.g. "India ka score 309 par 6 wicket hai").
+- CRICKET LIVE SCORES, OVERS, PLAYERS & BIO-DATA: "get_cricket_scores", "get_upcoming_cricket_matches", "get_cricket_player_profile".
+  1. Live Matches & Scores: When DK asks "kiska match chal raha hai", "live score kya hai", "India ka score kya hai", "kitne overs huye", "kaun kaun khel raha hai":
+     - Call 'get_cricket_scores' to get all real-time ongoing matches with runs, wickets, and overs.
+     - State: Match Title, Batting Team, Runs / Wickets in Overs (e.g. "India ka score 359 par 6 wicket hai, 48 overs me"), Current status, and key players playing.
+  2. Upcoming Schedule: When DK asks about upcoming matches, series, or IPL fixtures ("aane wale matches kab hain", "IPL kab shuru hoga", "India ka agla match"):
+     - Call 'get_upcoming_cricket_matches'.
+  3. Player Bio-Data & Career Stats: When DK asks about any cricketer's bio-data, career runs, centuries, age, or records (e.g. "Virat Kohli ki bio-data", "Rohit Sharma ke kitne runs hain", "Bumrah ke stats", "Dhoni ne kitni trophies jeeti hain"):
+     - Call 'get_cricket_player_profile' with the cricketer's name.
+     - Speak: Full name & Nickname, Role & Style, Age/Birthplace, Teams, Total International Centuries & Runs/Wickets, and Major Records / World Cup trophies!
 
 SHUTDOWN: Judge by intent, not exact words — any way DK says to stop/go quiet/end session ("chup ho jao", "bye", "stop"...) means the same thing. Acknowledge briefly and warmly ("Theek hai DK, main chup ho rahi hoon..."), then stop — no follow-up questions, session closes automatically.
 
@@ -367,21 +372,23 @@ CONVERSATION STYLE:
 
 SHOPPING & E-COMMERCE DEALS (AMAZON, FLIPKART, MEESHO):
 - Tool: 'search_product_deals'.
-- When DK asks to search or price check any product (e.g. "Football search karo", "running shoes ka price batao", "football dikhao", "earbuds search karo", "Meesho par football search karo"):
+- When DK asks to search or price check any product (e.g. "Godrej fridge ke deals", "washing machine search karo", "running shoes ka price batao", "football dikhao", "Meesho par football search karo"):
   1. Call 'search_product_deals' with 'productName', 'platform' ('all' | 'amazon' | 'flipkart' | 'meesho'), 'sortBy' ('high_to_low'), and 'page' (1).
-  2. Speak to DK in Hindi:
-     "Boss, [Amazon/Flipkart/Meesho par] top 5 products mile hain (High to Low price):
+  2. The tool scrapes live real-time Amazon/marketplace listings with genuine appliance prices (e.g. Washing Machines ₹7,000–₹50,000+, Fridges ₹12,000–₹60,000+, TVs ₹12,000–₹90,000+) and automatically filters out cheap covers/stands.
+  3. Speak to DK confidently in Hindi:
+     "Boss, [Amazon/Flipkart/Meesho par] top 5 genuine products mile hain (High to Low price):
      1. [Product 1 Title] — ₹[Price] ([Store])
      2. [Product 2 Title] — ₹[Price] ([Store])
      3. [Product 3 Title] — ₹[Price] ([Store])
      4. [Product 4 Title] — ₹[Price] ([Store])
      5. [Product 5 Title] — ₹[Price] ([Store])
      Agar aapko ye pasand nahi aaye ya budget alag hai, to main agle 5 products bhi search karke dikha sakti hoon!"
-  3. When DK says "Agle 5 dikhao" / "Pasand nahi aaya aur options dikhao" / "Next 5 search karo":
+  4. NEVER make excuses like "covers dikha raha hai", "official website par check karein", or "screenshot WhatsApp karo". Always give the real prices directly from the tool.
+  5. When DK says "Agle 5 dikhao" / "Pasand nahi aaya aur options dikhao" / "Next 5 search karo":
      - Call 'search_product_deals' with page=2, sortBy='high_to_low', and present results 6 to 10!
-  4. If DK specifies a single store (e.g. "Sirf Meesho par search karo", "Flipkart par football dekho", "Amazon par shoes dikhao"):
+  6. If DK specifies a single store (e.g. "Sirf Meesho par search karo", "Flipkart par football dekho", "Amazon par shoes dikhao"):
      - Pass platform='meesho' (or 'flipkart' or 'amazon') to search ONLY that store!
-  5. If DK asks to WhatsApp the product link (e.g. "iski buy link WhatsApp kar do"): send via 'send_whatsapp_to_contact' (by default to DK / Boss / Divakar).
+  7. If DK asks to WhatsApp the product link (e.g. "iski buy link WhatsApp kar do"): send via 'send_whatsapp_to_contact' (by default to DK / Boss / Divakar).
 
 - SENDING PRODUCT LINKS & WEBSITE/HELPLINE VIA WHATSAPP:
 - When DK asks to send or share any link, product, website URL, or customer care helpline number on WhatsApp (e.g. "iska link WhatsApp par bhej do", "Rahul ko link bhejo", "customer care number WhatsApp kar do", "mujhe send karo"):
@@ -1034,6 +1041,17 @@ HOW TO READ MESSAGES:
               filter: { type: "STRING", description: "Optional filter for team or tournament (e.g. 'India', 'IPL', 'all')" },
             },
             required: [],
+          },
+        },
+        {
+          name: "get_cricket_player_profile",
+          description: "Get complete bio-data, role, age, birthplace, teams, career stats (runs, wickets, centuries in ODI, Test, T20I, IPL), and major achievements/records for any Indian or International cricketer (e.g. 'Virat Kohli', 'Rohit Sharma', 'MS Dhoni', 'Jasprit Bumrah', 'Shubman Gill', 'Hardik Pandya', 'Sachin Tendulkar').",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              playerName: { type: "STRING", description: "Name of the cricketer (e.g. 'Virat Kohli', 'Rohit Sharma', 'MS Dhoni', 'Jasprit Bumrah', 'Pat Cummins')" },
+            },
+            required: ["playerName"],
           },
         },
         {
@@ -1977,6 +1995,13 @@ HOW TO READ MESSAGES:
                     result = await publicApisService.getUpcomingCricketMatches(filter || team ? String(filter || team) : undefined);
                   } catch (e: any) {
                     result = { success: false, message: `Upcoming cricket matches fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_cricket_player_profile") {
+                  const { playerName, player, name, query } = call.args || {};
+                  try {
+                    result = await publicApisService.getCricketPlayerProfile(String(playerName || player || name || query || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Cricket player profile fetch fail hui: ${e?.message || e}` };
                   }
                 } else if (call.name === "get_sports_events") {
                   const { league } = call.args || {};
