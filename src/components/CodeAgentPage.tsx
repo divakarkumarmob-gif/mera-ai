@@ -375,6 +375,23 @@ export default function CodeAgentPage({ onClose }: { onClose: () => void }) {
                         </div>
 
                         <div className="flex items-center gap-2">
+                            {/* Autonomous Codebase Clean Action */}
+                            <button
+                                onClick={async () => {
+                                    try {
+                                        await fetch(getApiUrl('/api/code-agent/clean'), { method: 'POST' });
+                                        await load();
+                                    } catch (e) {
+                                        console.error('Failed to start cleanup:', e);
+                                    }
+                                }}
+                                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25 text-xs font-semibold transition-all active:scale-95"
+                                title="Run autonomous codebase cleanup (remove dead code & optimize imports)"
+                            >
+                                <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                                <span className="hidden sm:inline">Clean</span>
+                            </button>
+
                             {/* 1-Click Rollback Header Action */}
                             <button
                                 onClick={handleRollback}

@@ -509,6 +509,11 @@ Return ONLY the complete updated source code.`;
         await this.addLog(id, `[self_healing] Auto-repaired corrupted syntax tokens in ${fileItem.path}`, "warn", "self_healing");
       }
 
+      // Security & Secret Leak Scanner (Power 1)
+      if (/['"](?:AIza[0-9A-Za-z-_]{35}|sk-[a-zA-Z0-9]{32,}|ghp_[a-zA-Z0-9]{36}|EAAB[a-zA-Z0-9_-]{50,})['"]/i.test(content)) {
+        await this.addLog(id, `[security] ⚠️ Detected potential hardcoded API key in ${fileItem.path}. Please verify .env usage.`, "warn", "security");
+      }
+
       // Basic brace balance verification
       const openBraces = (content.match(/\{/g) || []).length;
       const closeBraces = (content.match(/\}/g) || []).length;
@@ -628,6 +633,49 @@ ${original ? `Current Code:\n${original}` : "New File"}`;
     const result = await githubService.rollbackLastCommit();
     console.log(`[CodeAgent] Rollback executed: ${result.message}`);
     return result;
+  }
+
+  /**
+   * Codebase Explorer & Voice Search (Power 2): Explains where a feature or logic is implemented.
+   */
+  public async searchAndExplainCodebase(query: string): Promise<{ answer: string; relatedFiles: string[] }> {
+    try {
+      const allFiles = await githubService.listRepoFiles();
+      const codeFiles = allFiles.filter((p) => /\.(ts|tsx|js|jsx)$/i.test(p)).slice(0, 70);
+
+      const prompt = `You are DK's expert Codebase Guide. The user is asking about the codebase: "${query}".
+Repository files:
+${JSON.stringify(codeFiles, null, 2)}
+
+Provide a concise, direct answer in friendly conversational Hindi/Hinglish:
+1. Exact file path(s) where this logic/feature lives.
+2. The key functions/components involved.
+3. A 2-sentence summary of how it works.`;
+
+      const response = await callModel(prompt);
+      return {
+        answer: response || "Codebase logic search complete.",
+        relatedFiles: codeFiles.slice(0, 5),
+      };
+    } catch (e: any) {
+      return {
+        answer: `Codebase search error: ${e?.message || e}`,
+        relatedFiles: [],
+      };
+    }
+  }
+
+  /**
+   * Autonomous Code Health & Cleanup Mode (Power 4):
+   * Cleans unused imports, dead comments, and formats codebase.
+   */
+  public async runCodebaseCleanup(): Promise<{ success: boolean; taskId: string; summary: string }> {
+    const taskId = await this.createRequest("Run full codebase health cleanup: optimize imports, remove dead debugging debris, ensure clean formatting and syntax safety.");
+    return {
+      success: true,
+      taskId,
+      summary: "Autonomous codebase cleanup task created and initiated.",
+    };
   }
 
   /**

@@ -325,6 +325,15 @@ async function startServer() {
     }
   });
 
+  app.post("/api/code-agent/clean", async (req, res) => {
+    try {
+      const result = await codeAgentService.runCodebaseCleanup();
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "failed_to_clean" });
+    }
+  });
+
   const distPath = path.resolve("dist");
 
   let vite: any;
@@ -1622,6 +1631,26 @@ HOW TO READ MESSAGES:
           },
         },
         {
+          name: "search_and_explain_codebase",
+          description: "Explore the codebase, search for functions/features, and explain where logic lives. Call when DK asks 'WhatsApp reply kis file me hai?', 'background sync ka code kahan hai?', 'explain the auth architecture'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              query: { type: "STRING", description: "The feature, function, or concept to search for in the codebase" },
+            },
+            required: ["query"],
+          },
+        },
+        {
+          name: "clean_project_codebase",
+          description: "Run autonomous codebase cleanup to remove unused imports, dead comments, and format code. Call when DK says 'codebase clean karo', 'dead code hatao', 'unused imports clean karo'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+            required: [],
+          },
+        },
+        {
           name: "get_linkedin_insights",
           description: "Get LinkedIn company hub page and job opening search links for any company or skill.",
           parameters: {
@@ -2676,6 +2705,30 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                     }
                   } catch (e: any) {
                     result = { success: false, message: `Deny fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "search_and_explain_codebase") {
+                  const { query } = call.args || {};
+                  try {
+                    const searchRes = await codeAgentService.searchAndExplainCodebase(String(query || ""));
+                    result = {
+                      success: true,
+                      explanation: searchRes.answer,
+                      relatedFiles: searchRes.relatedFiles,
+                      message: searchRes.answer,
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `Codebase search fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "clean_project_codebase") {
+                  try {
+                    const cleanRes = await codeAgentService.runCodebaseCleanup();
+                    result = {
+                      success: true,
+                      taskId: cleanRes.taskId,
+                      message: `Boss, codebase cleanup ka task Coding Agent ko de diya gaya hai (Task ID: ${cleanRes.taskId}). Unused imports aur debris clean ho rahe hain.`,
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `Cleanup task start karne me error: ${e?.message || e}` };
                   }
                 } else if (call.name === "get_linkedin_insights") {
                   const { query } = call.args || {};
