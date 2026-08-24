@@ -349,6 +349,10 @@ PUBLIC API TOOLS — INDIA-FIRST DEFAULT:
 - This default only applies when DK doesn't specify — if he names a country/city/exchange explicitly, always respect that instead.
 - TOOL FAILURES: every public API tool returns a "success" field — check it before answering. If "success" is false (key missing/wrong, or the API itself failed), tell DK honestly and simply in your own natural voice — e.g. "Boss, iska API abhi connect nahi ho pa raha" or "Boss, iski key galat lag rahi hai, ek baar check kar lena." Don't read out raw error text or technical jargon, and never pretend you got the data when you didn't.
 - TRAIN TOOLS: "get_live_train_status", "get_train_schedule", "search_train", "get_trains_between_stations", and "get_pnr_status". DK can search train live status and schedule by either TRAIN NAME (e.g. 'Shiv Ganga Express', 'Mumbai Rajdhani', 'Vande Bharat Varanasi to Delhi') OR TRAIN NUMBER (e.g. '12559', '12951'). State the current location, delay, next station, and expected platform clearly in conversational Hindi.
+- CRICKET LIVE SCORES & MATCHES: "get_cricket_scores", "get_upcoming_cricket_matches". When DK asks "kiska kiska match chal raha hai", "cricket score kya hai", "India ka score kya hai", "aane wale matches kab hain", or about upcoming series/IPL:
+  - Call 'get_cricket_scores' to get all real-time ongoing matches with runs, wickets, and overs.
+  - Call 'get_upcoming_cricket_matches' to get upcoming fixtures and series schedule.
+  - Prioritize India's matches first, speak scores naturally in Hindi (e.g. "India ka score 309 par 6 wicket hai").
 
 SHUTDOWN: Judge by intent, not exact words — any way DK says to stop/go quiet/end session ("chup ho jao", "bye", "stop"...) means the same thing. Acknowledge briefly and warmly ("Theek hai DK, main chup ho rahi hoon..."), then stop — no follow-up questions, session closes automatically.
 
@@ -384,19 +388,44 @@ WEBSITE INFO & CUSTOMER CARE HELPLINES:
   - Explain clearly what the portal does and speak the customer care number.
   - Offer or automatically WhatsApp the details if requested.
 
-INSTAGRAM PROFILE, REELS & ID SEARCH:
+INSTAGRAM PROFILE, REELS & ID SEARCH (TWO-STEP SEARCH & DIRECT LOOKUP):
 - Tools: 'get_instagram_user_info', 'search_instagram_user'.
-- When DK asks about an Instagram account or wants to search an ID (e.g. "Instagram par iska username check karo", "Virat Kohli ki ID kya hai", "Instagram ID search karo", "is user ke kitne followers hain", "latest reel/post kya hai"):
-  - Call 'get_instagram_user_info' with username, or 'search_instagram_user' to search by person name / keyword.
-  - State: Username, Full Name, Total Followers (in natural words like "27 crore followers" or "15 lakh followers"), Following count, Total Posts, Bio, and Verified Blue Tick status.
-  - If requested or relevant, mention their Latest Reels / Posts: caption summary, likes, views, and comments.
-  - If DK asks to send the profile link or post link to WhatsApp (e.g. "iski profile link WhatsApp kar do"): send via 'send_whatsapp_to_contact' (by default to DK / Boss / Divakar).
+- WORKFLOW 1: GENERAL NAME / KEYWORD SEARCH (e.g. "chotu name se insta par search karo", "Instagram par Aman search karo"):
+  1. Call 'search_instagram_user' with the query name (e.g. 'chotu').
+  2. Speak to DK warmly in Hindi:
+     "Boss, Instagram par top 5 profiles ye hain:
+     1. @handle1 (Full Name 1)
+     2. @handle2 (Full Name 2)
+     3. @handle3 (Full Name 3)
+     4. @handle4 (Full Name 4)
+     5. @handle5 (Full Name 5)
+     Aap inme se kiska check karna chahenge?"
+  3. When DK follows up (e.g. "3rd wale ke check karo", "2nd profile dekho"):
+     - Call 'get_instagram_user_info' with that selected handle.
+     - Confirm the username once and speak: Username, Full Name, Total Followers, Following, Total Posts, Verified Blue Tick status, and Bio.
+- WORKFLOW 2: DIRECT USERNAME / KNOWN CELEBRITY (e.g. "Instagram par @virat.kohli check karo", "beingsalmankhan ka profile batao"):
+  1. Directly call 'get_instagram_user_info' with that username / celebrity name.
+  2. Confirm the username once (e.g. "Boss, @virat.kohli ka account fetch kar liya hai:") and speak:
+     - Username & Full Name
+     - Total Followers (in natural Hindi e.g. "27.2 Crore followers" ya "15 Lakh followers")
+     - Following count & Total Posts
+     - Verified Blue Tick status
+     - Bio / Profile summary
+- If DK asks to WhatsApp the profile link or post link (e.g. "iski profile link WhatsApp kar do"): send via 'send_whatsapp_to_contact' (by default to DK / Boss / Divakar).
 
-X (TWITTER) POSTS, TWEETS & TRENDS:
-- Tool: 'get_x_twitter_info'.
-- When DK asks about X / Twitter (e.g. "X par Elon Musk ne kya tweet kiya", "Twitter par aaj kya trend kar raha hai", "Twitter par iska kya opinion hai", "is tweet ka reply kya hai"):
-  - Call 'get_x_twitter_info' with the username or topic.
-  - Use live real-time search to narrate the latest tweet/statement, viral replies, and public sentiment in simple conversational Hindi.
+LOCATION-FIRST CONTEXT & MAP AWARENESS:
+- Tool: 'get_location_overview', 'get_nearby_places', 'get_directions', 'get_weather', 'get_air_quality'.
+- Whenever DK mentions his current location (e.g. "Main abhi Connaught Place Delhi me hoon", "meri location Lucknow hai", "main Patna me hoon", "main yahan hoon"):
+  1. Call 'get_location_overview' with his place name to get exact area, coordinates, weather, AQI, and Google Maps link.
+  2. Give a map-like spatial overview: Current weather, temperature, Air Quality (AQI), key local landmarks / transit spots, and confirm location set.
+  3. Save his location in memory so you remember where he is.
+  4. FOR ALL SUBSEQUENT QUESTIONS (e.g. "aas paas kya accha hai", "yahan ka mausam", "yahan se rasta", "local news"), AUTOMATICALLY USE THIS LOCATION as the default without asking him again!
+
+X (TWITTER) PROFILES, TWEETS & TRENDS:
+- Tools: 'get_x_twitter_info', 'search_x_twitter'.
+- When DK asks about X / Twitter (e.g. "X par Elon Musk ne kya tweet kiya", "Virat Kohli ka latest tweet", "Twitter par aaj kya trend kar raha hai", "Twitter ID search karo"):
+  - Call 'get_x_twitter_info' or 'search_x_twitter'.
+  - State: Username, Full Name, Total Followers (in natural words like "24 crore followers"), Following count, Total Tweets, Blue Tick Verified status, and latest 2-4 tweets with likes and retweets.
   - If DK asks to WhatsApp the tweet or profile link, send via 'send_whatsapp_to_contact' (by default to DK / Boss / Divakar).
 
 SOCIAL & MEDIA TOOLS (YOUTUBE, REDDIT, SPOTIFY MUSIC, LINKEDIN, TELEGRAM/DISCORD, PINTEREST):
@@ -974,10 +1003,23 @@ HOW TO READ MESSAGES:
         },
         {
           name: "get_cricket_scores",
-          description: "Get current/live cricket match scores.",
+          description: "Get real-time live cricket match scores, ongoing matches, current wickets/runs/overs, and match status. Surfaces India matches first.",
           parameters: {
             type: "OBJECT",
-            properties: {},
+            properties: {
+              team: { type: "STRING", description: "Optional specific team name or match filter (e.g. 'India', 'Sri Lanka', 'Australia')" },
+            },
+            required: [],
+          },
+        },
+        {
+          name: "get_upcoming_cricket_matches",
+          description: "Get upcoming cricket fixtures, future series schedule, tournament dates, and upcoming match details (e.g. India tour, IPL, World Cup).",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              filter: { type: "STRING", description: "Optional filter for team or tournament (e.g. 'India', 'IPL', 'all')" },
+            },
             required: [],
           },
         },
@@ -1226,13 +1268,35 @@ HOW TO READ MESSAGES:
         },
         {
           name: "get_x_twitter_info",
-          description: "Get X (Twitter) profile link, latest discussions, tweets, and trending topics for any username or search topic.",
+          description: "Get X (Twitter) profile details, follower counts, verified blue tick, bio, and latest live tweets with likes and retweets for any username or search topic.",
           parameters: {
             type: "OBJECT",
             properties: {
-              usernameOrTopic: { type: "STRING", description: "The X (Twitter) username (e.g. 'elonmusk') or search topic/trend" },
+              usernameOrTopic: { type: "STRING", description: "The X (Twitter) username (e.g. 'elonmusk', 'narendramodi', 'imVkohli') or topic" },
             },
             required: ["usernameOrTopic"],
+          },
+        },
+        {
+          name: "search_x_twitter",
+          description: "Search for X (Twitter) accounts, user handles, or trending topics by person name or keywords (e.g. 'Elon Musk', 'Virat Kohli', 'AI').",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              query: { type: "STRING", description: "Person name, handle, or topic to search on X (Twitter)" },
+            },
+            required: ["query"],
+          },
+        },
+        {
+          name: "get_location_overview",
+          description: "Get a comprehensive map-like location briefing for DK's current or requested place: exact address, coordinates, current weather, temperature, Air Quality Index (AQI), and direct Google Maps link. Use whenever DK mentions his location or asks about a place.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              place: { type: "STRING", description: "City, area, colony, or landmark (e.g. 'Connaught Place Delhi', 'Lucknow', 'Patna', 'Bandra Mumbai')" },
+            },
+            required: ["place"],
           },
         },
         {
@@ -1885,10 +1949,18 @@ HOW TO READ MESSAGES:
                     result = { success: false, message: `News fetch fail hui: ${e?.message || e}` };
                   }
                 } else if (call.name === "get_cricket_scores") {
+                  const { team, query } = call.args || {};
                   try {
-                    result = await publicApisService.getCricketScores();
+                    result = await publicApisService.getCricketScores(team || query ? String(team || query) : undefined);
                   } catch (e: any) {
                     result = { success: false, message: `Cricket scores fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_upcoming_cricket_matches") {
+                  const { filter, team } = call.args || {};
+                  try {
+                    result = await publicApisService.getUpcomingCricketMatches(filter || team ? String(filter || team) : undefined);
+                  } catch (e: any) {
+                    result = { success: false, message: `Upcoming cricket matches fetch fail hui: ${e?.message || e}` };
                   }
                 } else if (call.name === "get_sports_events") {
                   const { league } = call.args || {};
@@ -2044,11 +2116,25 @@ HOW TO READ MESSAGES:
                     result = { success: false, message: `Instagram search fail hui: ${e?.message || e}` };
                   }
                 } else if (call.name === "get_x_twitter_info") {
-                  const { usernameOrTopic } = call.args || {};
+                  const { usernameOrTopic, username, topic, query } = call.args || {};
                   try {
-                    result = await publicApisService.getXTwitterInfo(String(usernameOrTopic || ""));
+                    result = await publicApisService.getXTwitterInfo(String(usernameOrTopic || username || topic || query || ""));
                   } catch (e: any) {
                     result = { success: false, message: `X (Twitter) info fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "search_x_twitter") {
+                  const { query, username, topic } = call.args || {};
+                  try {
+                    result = await publicApisService.searchXTwitter(String(query || username || topic || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `X (Twitter) search fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_location_overview") {
+                  const { place, location, city } = call.args || {};
+                  try {
+                    result = await publicApisService.getLocationOverview(String(place || location || city || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Location overview fetch fail hui: ${e?.message || e}` };
                   }
                 } else if (call.name === "search_youtube") {
                   const { query } = call.args || {};
