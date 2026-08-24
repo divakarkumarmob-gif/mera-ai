@@ -1,6 +1,7 @@
 import * as BaileysModule from "@whiskeysockets/baileys";
 import pino from "pino";
 import QRCode from "qrcode";
+import https from "https";
 import { GoogleGenAI } from "@google/genai";
 import { useFirestoreAuthState } from "./whatsappAuthState";
 import { db } from "./firebaseAdmin";
@@ -58,6 +59,70 @@ function LIMIT_REACHED_GENERIC_REPLY(senderName: string, isUnknownContact: boole
   return `${greeting}Boss abhi available nahi hain, unke aane ke baad main unhe aapke baare mein bata dunga, phir jo bhi wo reply denge main jaldi hi aapko bata dunga. Tab tak apna dhyan rakhiye 👍`;
 }
 
+/**
+ * Executes a secure HTTPS request to deliver standard messages via Meta's WhatsApp Cloud API.
+ * Uses native Node.js 'https' to remain fully dependency-free and robust.
+ */
+function sendMetaCloudApiMessage(
+  phoneId: string,
+  accessToken: string,
+  toPhone: string,
+  text: string
+): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  return new Promise((resolve) => {
+    const version = process.env.WHATSAPP_CLOUD_API_VERSION || "v21.0";
+    const postData = JSON.stringify({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: toPhone,
+      type: "text",
+      text: { preview_url: false, body: text },
+    });
+
+    const options = {
+      hostname: "graph.facebook.com",
+      port: 443,
+      path: `/${version}/${phoneId}/messages`,
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(postData),
+      },
+    };
+
+    const req = https.request(options, (res) => {
+      let data = "";
+      res.on("data", (chunk) => {
+        data += chunk;
+      });
+      res.on("end", () => {
+        try {
+          const parsed = JSON.parse(data);
+          if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+            const messageId = parsed?.messages?.[0]?.id;
+            resolve({ success: true, messageId });
+          } else {
+            resolve({
+              success: false,
+              error: parsed?.error?.message || `HTTP Status ${res.statusCode}: ${data}`,
+            });
+          }
+        } catch (e: any) {
+          resolve({ success: false, error: `Failed to parse response: ${e.message}. Data: ${data}` });
+        }
+      });
+    });
+
+    req.on("error", (e) => {
+      resolve({ success: false, error: e.message });
+    });
+
+    req.write(postData);
+    req.end();
+  });
+}
+
 class WhatsAppBotService {
   private sock: WASocket | null = null;
   private isConnected = false;
@@ -81,7 +146,7 @@ class WhatsAppBotService {
   private limitNoticeSentToday: Map<string, string> = new Map(); // senderKey -> IST date string, so the generic "limit reached" notice only goes out once per day
 
   constructor() {
-    // Restore last-known phone from Firestore so dashboard shows 'linked' even after restart
+    // Restore last-known phone from Firestore so dashboard shows 'already linked' across restarts
     this.restorePhoneFromFirestore().then(() => {
       this.initSocket().catch((err) => {
         console.log("[WhatsAppBot] Init standby:", err?.message || err);
@@ -1035,6 +1100,31 @@ YOUR RULES FOR GENERATING THE WHATSAPP REPLY:
     let cleanPhone = toPhone.replace(/[\s\-\(\)\+]/g, "").trim();
     if (cleanPhone.length === 10) cleanPhone = `91${cleanPhone}`;
 
+    // 1. Primary Route: Try Meta's standard WhatsApp Cloud API REST endpoints first (if credentials are provided)
+    const cloudAccessToken = process.env.WHATSAPP_CLOUD_API_ACCESS_TOKEN || process.env.WHATSAPP_ACCESS_TOKEN;
+    const cloudPhoneId = process.env.WHATSAPP_CLOUD_API_PHONE_NUMBER_ID || process.env.WHATSAPP_PHONE_NUMBER_ID;
+
+    if (cloudAccessToken && cloudPhoneId) {
+      console.log(`[WhatsAppBot] Attempting delivery via primary Meta WhatsApp Cloud API for +${cleanPhone}...`);
+      const cloudResult = await sendMetaCloudApiMessage(cloudPhoneId, cloudAccessToken, cleanPhone, text);
+      if (cloudResult.success) {
+        return {
+          success: true,
+          message: `Message delivered to +${cleanPhone} via Meta Cloud API! (ID: ${cloudResult.messageId || "N/A"})`,
+        };
+      } else {
+        console.warn(`[WhatsAppBot] Primary Meta Cloud API delivery failed: ${cloudResult.error}. checking Baileys socket fallback...`);
+        // If Cloud API failed but Baileys is NOT connected, return the Cloud API error.
+        if (!this.isConnected || !this.sock) {
+          return {
+            success: false,
+            message: `Meta Cloud API delivery failed: ${cloudResult.error}. Dedicated WhatsApp bot is also not connected.`,
+          };
+        }
+      }
+    }
+
+    // 2. Fallback Route: Deliver via Baileys socket connection (dedicated bot)
     if (!this.isConnected || !this.sock) {
       return {
         success: false,
@@ -1089,7 +1179,7 @@ YOUR RULES FOR GENERATING THE WHATSAPP REPLY:
       console.log(`[WhatsAppBot] Message successfully sent to ${cleanPhone} (with human typing simulation): "${text}" (id: ${sendResult.key.id})`);
       return { success: true, message: `Message delivered to +${cleanPhone} from Friday Assistant!` };
     } catch (err: any) {
-      console.error("[WhatsAppBot] Error sending message:", err);
+      console.error("[WhatsAppBot] Error sending message via Baileys fallback:", err);
       this.isConnected = false;
       setTimeout(() => this.initSocket(), 500);
       return { success: false, message: `Failed to send WhatsApp message: ${err?.message || err}` };
