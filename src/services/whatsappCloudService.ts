@@ -105,9 +105,12 @@ class WhatsAppCloudService {
         return { success: true, message: `Message sent to ${phone}` };
       }
 
-      const errMsg = data?.error?.message || (typeof data === "string" ? data : JSON.stringify(data));
-      console.error(`[WhatsApp Cloud] Send failed:`, errMsg, data);
-      return { success: false, message: errMsg };
+      const errObj = data?.error;
+      const errCode = errObj?.code;
+      const errSubcode = errObj?.error_subcode;
+      const errMsg = errObj?.message || (typeof data === "string" ? data : JSON.stringify(data));
+      console.error(`[WhatsApp Cloud] Send failed (code=${errCode}, subcode=${errSubcode}):`, errMsg);
+      return { success: false, message: `[Meta Error ${errCode || 'Unknown'}]: ${errMsg}` };
 
     } catch (e: any) {
       console.error("[WhatsApp Cloud] Network error:", e?.message);
