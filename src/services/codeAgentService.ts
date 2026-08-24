@@ -411,6 +411,19 @@ Rules:
     await requestsCol().doc(id).set({ status: "denied", updatedAt: Date.now() }, { merge: true });
   }
 
+  /** Stops and cancels an in-progress coding agent task */
+  public async stop(id: string) {
+    await this.addLog(id, "⏹️ Task stopped and cancelled by user.", "warn", "stopped");
+    await requestsCol().doc(id).set(
+      {
+        status: "denied",
+        error: "Task was manually stopped by user.",
+        updatedAt: Date.now(),
+      },
+      { merge: true }
+    );
+  }
+
   public async handleWhatsAppApprovalReply(text: string): Promise<boolean> {
     const pending = await this.getPendingRequest();
     if (!pending) return false;

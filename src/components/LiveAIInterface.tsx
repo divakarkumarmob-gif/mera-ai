@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { X, Mic, Plus, Loader2, Settings, ChevronDown, Captions, MessageSquare, Square, Code2 } from 'lucide-react';
+import { X, Mic, Plus, Loader2, Settings, ChevronDown, Captions, MessageSquare, Square, Code2, Terminal } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import AgentFace from './AgentFace';
 import ChatHistoryModal from './ChatHistoryModal';
@@ -908,8 +908,11 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         <button onClick={() => setShowChatHistory(true)} className="text-white">
                             <MessageSquare className="h-6 w-6" />
                         </button>
-                        <button onClick={() => setShowCodeAgent(true)} className="text-white" title="Coding Agent">
+                        <button onClick={() => setShowCodeAgent(true)} className="text-white hover:text-cyan-400 transition-colors" title="Coding Agent & Diagnostics Logs">
                             <Code2 className="h-6 w-6" />
+                        </button>
+                        <button onClick={() => setShowCodeAgent(true)} className="text-cyan-400 hover:text-cyan-300 transition-colors" title="Execution Logs & Diagnostics">
+                            <Terminal className="h-5 w-5" />
                         </button>
                         <button onClick={() => setShowSettings(!showSettings)} className="text-white">
                             <Settings className="h-6 w-6" />

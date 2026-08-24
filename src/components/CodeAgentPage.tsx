@@ -16,7 +16,8 @@ import {
     Info,
     CheckCircle2,
     Clock,
-    FileText
+    ArrowLeft,
+    Square
 } from 'lucide-react';
 import { getApiUrl } from '@/utils/api';
 
@@ -57,7 +58,7 @@ const STATUS_LABEL: Record<CodeAgentRequest['status'], string> = {
     analyzing: 'Analyzing repo...',
     pending_approval: 'Waiting for your approval',
     approved: 'Approved — applying...',
-    denied: 'Denied',
+    denied: 'Denied / Cancelled',
     applying: 'Writing changes...',
     completed: 'PR ready / Completed',
     failed: 'Failed',
@@ -129,19 +130,31 @@ export default function CodeAgentPage({ onClose }: { onClose: () => void }) {
         if (e) e.stopPropagation();
         setRetryingId(id);
         try {
-            const res = await fetch(getApiUrl(`/api/code-agent/requests/${id}/retry`), {
+            await fetch(getApiUrl(`/api/code-agent/requests/${id}/retry`), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
             });
-            const data = await res.json();
-            if (data.request) {
-                setViewingLogReq(data.request);
-            }
             await load();
         } catch (err) {
             console.error('Failed to retry request:', err);
         } finally {
             setRetryingId(null);
+        }
+    };
+
+    const handleStop = async (id: string, e?: React.MouseEvent) => {
+        if (e) e.stopPropagation();
+        setActingOn(`${id}_stop`);
+        try {
+            await fetch(getApiUrl(`/api/code-agent/requests/${id}/stop`), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+            });
+            await load();
+        } catch (err) {
+            console.error('Failed to stop request:', err);
+        } finally {
+            setActingOn(null);
         }
     };
 
@@ -250,6 +263,19 @@ export default function CodeAgentPage({ onClose }: { onClose: () => void }) {
                                                 {STATUS_LABEL[r.status]}
                                             </span>
 
+                                            {/* Stop Button (if task is active/running) */}
+                                            {(r.status === 'analyzing' || r.status === 'applying' || r.status === 'pending_approval') && (
+                                                <button
+                                                    onClick={(e) => handleStop(r.id, e)}
+                                                    disabled={actingOn === `${r.id}_stop`}
+                                                    title="Stop / Cancel this task"
+                                                    className="p-1.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/25 transition-colors flex items-center gap-1 text-[11px] font-medium"
+                                                >
+                                                    <Square className="w-3.5 h-3.5 text-red-400 fill-red-400/20" />
+                                                    <span className="text-[10px]">Stop</span>
+                                                </button>
+                                            )}
+
                                             {/* Anticlockwise Retry Button (especially on Failed or anytime) */}
                                             <button
                                                 onClick={(e) => handleRetry(r.id, e)}
@@ -346,7 +372,7 @@ export default function CodeAgentPage({ onClose }: { onClose: () => void }) {
                                             </>
                                         )}
 
-                                        {/* Applying State Spinner */}
+                                        {/* Applying State Spinner & Stop */}
                                         {r.status === 'applying' && (
                                             <div className="flex items-center gap-2 text-xs text-cyan-300 bg-cyan-500/10 px-3 py-1.5 rounded-xl border border-cyan-500/20">
                                                 <Loader2 className="w-3.5 h-3.5 animate-spin" /> Writing code & pushing to GitHub...
@@ -413,28 +439,54 @@ export default function CodeAgentPage({ onClose }: { onClose: () => void }) {
                     {viewingLogReq && (
                         <div className="absolute inset-0 bg-[#070b19]/95 backdrop-blur-lg z-50 flex flex-col p-5 animate-in fade-in zoom-in-95 duration-150">
                             {/* Modal Header */}
-                            <div className="flex items-center justify-between pb-3 border-b border-white/10">
-                                <div className="flex items-center gap-2.5">
-                                    <div className="p-2 rounded-xl bg-cyan-500/20 border border-cyan-500/40 text-cyan-400">
-                                        <Terminal className="w-4 h-4" />
-                                    </div>
-                                    <div>
-                                        <h3 className="text-white font-bold text-sm">Agent Execution Log & Diagnostics</h3>
-                                        <p className="text-[11px] text-slate-400 font-mono truncate max-w-sm">{viewingLogReq.instruction}</p>
+                            <div className="flex items-center justify-between pb-3 border-b border-white/10 gap-3">
+                                <div className="flex items-center gap-2 min-w-0">
+                                    {/* Prominent Back Button to Return to Tasks List */}
+                                    <button
+                                        onClick={() => setViewingLogReq(null)}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-slate-200 hover:text-white text-xs font-semibold transition-all shrink-0 active:scale-95"
+                                        title="Back to previous Tasks page"
+                                    >
+                                        <ArrowLeft className="w-4 h-4 text-cyan-400" />
+                                        <span>Back to Tasks</span>
+                                    </button>
+
+                                    <div className="min-w-0">
+                                        <h3 className="text-white font-bold text-sm leading-tight">Execution Log & Diagnostics</h3>
+                                        <p className="text-[11px] text-slate-400 font-mono truncate">{viewingLogReq.instruction}</p>
                                     </div>
                                 </div>
-                                <div className="flex items-center gap-2">
+
+                                <div className="flex items-center gap-2 shrink-0">
+                                    {/* Stop Task Button (when task is active) */}
+                                    {(viewingLogReq.status === 'analyzing' || viewingLogReq.status === 'applying' || viewingLogReq.status === 'pending_approval') && (
+                                        <button
+                                            onClick={(e) => handleStop(viewingLogReq.id, e)}
+                                            disabled={actingOn === `${viewingLogReq.id}_stop`}
+                                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-red-500/20 border border-red-500/40 text-red-300 hover:bg-red-500/30 text-xs font-semibold transition-colors"
+                                            title="Stop / Cancel this running task"
+                                        >
+                                            <Square className="w-3.5 h-3.5 fill-red-400/20" />
+                                            <span>Stop</span>
+                                        </button>
+                                    )}
+
+                                    {/* Retry Button */}
                                     <button
                                         onClick={(e) => handleRetry(viewingLogReq.id, e)}
                                         disabled={retryingId === viewingLogReq.id}
                                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 text-xs font-semibold hover:bg-cyan-500/30 transition-colors"
+                                        title="Rerun this task from scratch"
                                     >
                                         <RotateCcw className={`w-3.5 h-3.5 ${retryingId === viewingLogReq.id ? 'animate-spin' : ''}`} />
-                                        Rerun / Retry
+                                        <span>Retry</span>
                                     </button>
+
+                                    {/* Close Log Button */}
                                     <button
                                         onClick={() => setViewingLogReq(null)}
                                         className="p-1.5 rounded-xl bg-white/5 border border-white/10 text-slate-400 hover:text-white"
+                                        title="Close Log View"
                                     >
                                         <X className="w-4 h-4" />
                                     </button>

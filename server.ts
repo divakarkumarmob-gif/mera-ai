@@ -288,6 +288,15 @@ async function startServer() {
     }
   });
 
+  app.post("/api/code-agent/requests/:id/stop", async (req, res) => {
+    try {
+      await codeAgentService.stop(req.params.id);
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "failed_to_stop" });
+    }
+  });
+
   const distPath = path.resolve("dist");
 
   let vite: any;
