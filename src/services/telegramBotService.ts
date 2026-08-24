@@ -245,31 +245,76 @@ class TelegramBotService {
   }
 
   /**
-   * Generates a conversational AI reply using a multi-tier Gemini model fallback chain.
+   * Sends chat action (e.g. 'typing...') to make interactions feel human and lively.
    */
-  private async generateSmartAiReply(senderName: string, messageText: string): Promise<string> {
+  public async sendChatAction(chatId: number | string, action: string = "typing"): Promise<void> {
+    try {
+      await this.callApi("sendChatAction", { chat_id: chatId, action });
+    } catch {
+      // ignore
+    }
+  }
+
+  /**
+   * Sends a message with realistic 'typing...' presence and natural typing duration.
+   */
+  public async sendHumanLikeMessage(
+    chatId: number | string,
+    text: string,
+    replyMarkup?: any
+  ): Promise<{ success: boolean; messageId?: number; error?: string }> {
+    await this.sendChatAction(chatId, "typing");
+    const delayMs = Math.min(3000, Math.max(1200, text.length * 30));
+    await new Promise((r) => setTimeout(r, delayMs));
+    return this.sendMessage(chatId, text, replyMarkup);
+  }
+
+  /**
+   * Generates a conversational AI reply using a multi-tier Gemini model fallback chain.
+   * Matches WhatsApp auto-reply behavior: identifies as DK's AI, explains DK is busy, takes notes.
+   */
+  private async generateSmartAiReply(senderName: string, messageText: string, isOwner: boolean = false): Promise<string> {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      return "Haanji! Friday active hai. Bataiye kya help karoon?";
+      return `Haanji ${senderName} ji! Main Friday hoon — DK Boss (Divakar Kumar) ka AI assistant. Boss abhi busy hain, jaise hi aayenge main unko aapka message bol dungi 👍`;
+    }
+
+    // 1. Try factual answer from today's daily update first (if not owner)
+    if (!isOwner) {
+      try {
+        const updateAnswer = await dailyUpdateService.answerFromTodayUpdate(messageText);
+        if (updateAnswer) {
+          return `${senderName} ji, ${updateAnswer}`;
+        }
+      } catch (e) {
+        // continue
+      }
     }
 
     const ai = new GoogleGenAI({ apiKey });
-    const prompt = `YOU ARE FRIDAY: DK's (Divakar Kumar) ultra-intelligent, witty, loyal, human-like AI companion.
+    const prompt = `YOU ARE FRIDAY: DK's (Divakar Kumar) ultra-intelligent, loyal, warm, human-like AI companion.
 
 CHAT CONTEXT:
 Sender: "${senderName}"
-Message: "${messageText}"
+Is Sender Boss (DK)?: ${isOwner ? "YES (Talk directly to Boss with affection/respect)" : "NO (This is someone messaging DK/Friday on Telegram)"}
+Message Received: "${messageText}"
 
-INSTRUCTIONS:
+INSTRUCTIONS FOR WHEN SENDER IS SOMEONE ELSE (NOT DK):
 1. IDENTITY & CREATOR:
-   - If they ask who you are, your name, or whose bot this is:
-     Reply: "Main Friday hoon — DK Boss (Divakar Kumar) ka personal AI assistant! DK abhi occupied hain. Aap bataiye, aapko kya kaam hai?"
-2. PRIVACY & SECURITY GUARD:
-   - If they ask for confidential private details (DK's personal passwords, bank/money, confidential secrets):
-     Strictly refuse: "Yeh personal jaankari main share nahi kar sakti. Iska jawab sirf DK boss hi de sakte hain."
-3. STYLE & TONE:
-   - Natural Hindi/Hinglish (mix of Hindi and English).
-   - Crisp, polite, and warmly intelligent (1-3 short sentences).
+   - If they ask who you are, your name, who made you, or whose bot/number this is:
+     Reply: "Haanji! Main Friday hoon — DK Boss (Divakar Kumar) ka personal AI assistant. DK abhi thode busy hain. Aap bataiye, aapko kya kaam hai ya kya janna hai?"
+2. STATUS & BOSS BUSY:
+   - For general messages, greetings, or inquiries:
+     Politely clarify that DK is currently busy/occupied, but you are taking notes and will pass their message to DK as soon as he is free.
+3. PASSING MESSAGES:
+   - If they leave a message, ask a question, or ask for a callback:
+     Assure them: "Maine aapka message note kar liya hai, jaise hi DK aayenge main unko bol dungi aur wo reply kar denge."
+4. PRIVACY GUARD (STRICT):
+   - Never disclose confidential private details (DK's personal passwords, bank/financial info, private residence, secrets).
+   - Politely refuse: "Yeh personal jaankari main share nahi kar sakti. Iska jawab sirf DK boss hi de sakte hain."
+5. TONE & STYLE:
+   - Fluent, natural Hindi/Hinglish (mix of Hindi and English).
+   - Warm, respectful, crisp (1-3 short sentences).
    - Return ONLY the exact text to send on Telegram without markdown headers.`;
 
     const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T> =>
@@ -297,7 +342,7 @@ INSTRUCTIONS:
       }
     }
 
-    return `Haanji ${senderName}! Main Friday hoon. DK boss abhi busy hain, jaise hi wo aayenge main aapka message unko bata dungi 👍`;
+    return `Haanji ${senderName} ji! Main Friday hoon — DK Boss abhi busy hain, jaise hi wo aayenge main aapka message unko bata dungi 👍`;
   }
 
   /**
@@ -475,9 +520,11 @@ Bataiye Boss, aaj kya help karoon?`;
       }
     }
 
-    // 9. General Smart AI Conversational Reply via Multi-Tier Fallback Chain
-    const replyText = await this.generateSmartAiReply(senderName, text);
-    await this.sendMessage(chatId, replyText);
+    // 9. General Smart AI Conversational Reply via Multi-Tier Fallback Chain (with Typing presence)
+    const ownerChatId = process.env.TELEGRAM_OWNER_CHAT_ID;
+    const isOwner = !!ownerChatId && String(chatId) === String(ownerChatId);
+    const replyText = await this.generateSmartAiReply(senderName, text, isOwner);
+    await this.sendHumanLikeMessage(chatId, replyText);
   }
 
   /**
