@@ -157,16 +157,46 @@ class WhatsAppCloudService {
       if (!value?.messages?.length) return;
 
       for (const msg of value.messages) {
-        if (msg.type !== "text") continue;
+        const isText = msg.type === "text";
+        const isMedia = msg.type === "image" || msg.type === "document";
 
         const from = msg.from;
-        const text = msg.text?.body || "";
+        const text = isText ? (msg.text?.body || "") : (msg.image?.caption || msg.document?.caption || `[${msg.type}]`);
         const messageId = msg.id;
         const timestamp = parseInt(msg.timestamp, 10) * 1000;
 
         const contacts = value?.contacts || [];
         const contact = contacts.find((c: any) => c.wa_id === from);
         const name = contact?.profile?.name || from;
+
+        // Vision AI: Download Cloud media if image/document
+        if (isMedia && this.token) {
+          const mediaId = msg.image?.id || msg.document?.id;
+          const mimeType = msg.image?.mime_type || msg.document?.mime_type || "image/jpeg";
+          const caption = msg.image?.caption || msg.document?.caption || "";
+
+          if (mediaId) {
+            (async () => {
+              try {
+                const metaRes = await fetch(`https://graph.facebook.com/v19.0/${mediaId}`, {
+                  headers: { Authorization: `Bearer ${this.token}` },
+                });
+                const metaData = await metaRes.json();
+                if (metaData?.url) {
+                  const fileRes = await fetch(metaData.url, {
+                    headers: { Authorization: `Bearer ${this.token}` },
+                  });
+                  const arrayBuffer = await fileRes.arrayBuffer();
+                  const buffer = Buffer.from(arrayBuffer);
+                  const { visionMemoryService } = await import("./visionMemoryService");
+                  await visionMemoryService.processIncomingMedia(buffer, mimeType, name, caption);
+                }
+              } catch (mediaErr) {
+                console.warn("[WhatsApp Cloud] Failed to process incoming media for Vision:", mediaErr);
+              }
+            })();
+          }
+        }
 
         const cloudMsg: CloudMessage = { from, name, text, messageId, timestamp };
         console.log(`[WhatsApp Cloud] Incoming from ${name} (${from}): ${text.slice(0, 80)}`);

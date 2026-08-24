@@ -21,6 +21,7 @@ import { dailyUpdateService, resolveRelativeDateIST } from "./src/services/daily
 import { codeAgentService } from "./src/services/codeAgentService";
 import { publicApisService } from "./src/services/publicApisService";
 import { saveMessage, getHistory, clearHistory } from "./src/services/historyService";
+import { visionMemoryService } from "./src/services/visionMemoryService";
 
 const PORT = Number(process.env.PORT) || 3000;
 const isProduction = process.env.NODE_ENV === "production";
@@ -608,6 +609,20 @@ LIVE CODING AGENT PERMISSION & VOICE COMMIT TO MAIN (SEAMLESS NON-INTERRUPTING F
 - When DK says "Nahi", "Roko", "Deny karo":
   1. Call 'deny_code_agent_request'.
   2. Confirm: "Boss, Coding Agent ka task cancel kar diya gaya hai."
+
+WHATSAPP VISION AI & LONG-TERM PERSON RECOGNITION MEMORY:
+- Tools: 'get_whatsapp_photo_or_doc_info', 'save_person_visual_memory', 'identify_person_in_whatsapp_photo'.
+- When DK sends a photo or document on WhatsApp and interacts with you:
+  1. Photo / Document Analysis (When DK says "Photo me kya hai?", "PDF me kya likha hai?", "WhatsApp pe jo photo bheji hai dekho", "Document ka summary batao"):
+     - Call 'get_whatsapp_photo_or_doc_info'.
+     - Explain the scene, OCR extracted text, objects, people, or amounts clearly to DK in warm conversational Hindi/Hinglish.
+  2. Person Identity Tagging (When DK says "Iska naam Rahul hai yaad rakhna", "Ye photo Rahul ki hai save kar lo", "Ye mere dost Rahul hain", "Inka naam save karo"):
+     - Call 'save_person_visual_memory' with name="Rahul", relation="Dost / Contact", and any notes mentioned.
+     - Confirm warmly: "Boss, [Name] ka photo aur visual face profile Firestore memory me permanently save kar liya hai! Ab aap mahino baad bhi unki photo bhejenge to main pehchan lungi."
+  3. Facial Recognition (When DK says "Pehchano ye photo me kaun hai?", "Photo me kaun hai dekho", "Ye photo kiski hai?", "Pehchano kaun hai ye"):
+     - Call 'identify_person_in_whatsapp_photo'.
+     - If recognized: "Boss, ye [Person Name] hain! [Details/notes]."
+     - If not recognized: "Boss, ye photo meri memory ke kisi saved person se match nahi hui. Agar aap inka naam batayein to main save kar lungi."
 
 DAILY LIFE ESSENTIALS (MEDICINE, GOLD/PETROL, EMERGENCY, CHALLAN, BILLS, SCHEMES, EXPENSES, BUS):
 - 'get_medicine_and_generic_info': Explain medicine uses, precautions, and suggest 70% cheaper Jan Aushadhi generic alternative salts.
@@ -1644,6 +1659,39 @@ HOW TO READ MESSAGES:
         {
           name: "clean_project_codebase",
           description: "Run autonomous codebase cleanup to remove unused imports, dead comments, and format code. Call when DK says 'codebase clean karo', 'dead code hatao', 'unused imports clean karo'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+            required: [],
+          },
+        },
+        {
+          name: "get_whatsapp_photo_or_doc_info",
+          description: "Analyze and explain what is inside the latest Photo, Image, or Document (PDF) received on WhatsApp (visual scene, people, objects, OCR text, key numbers). Call when DK says 'Photo me kya hai?', 'PDF me kya likha hai?', 'WhatsApp pe jo photo bheja hai dekho'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              query: { type: "STRING", description: "Optional specific question about the photo or document" },
+            },
+            required: [],
+          },
+        },
+        {
+          name: "save_person_visual_memory",
+          description: "Save a person's photo, name, and visual biometric face traits into Firestore permanent memory so Friday can recognize them anytime in the future. Call when DK says 'Iska naam Rahul hai yaad rakhna', 'Ye photo Rahul ki hai save kar lo', 'Inka naam Rahul hai'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              name: { type: "STRING", description: "Person's name (e.g. 'Rahul', 'Amit', 'Priya')" },
+              relation: { type: "STRING", description: "Relationship or context (e.g. 'Friend', 'Brother', 'Colleague', 'College Friend')" },
+              notes: { type: "STRING", description: "Any additional notes or details about the person" },
+            },
+            required: ["name"],
+          },
+        },
+        {
+          name: "identify_person_in_whatsapp_photo",
+          description: "Identify and recognize who is in the photo by comparing facial features against saved person profiles in Firestore memory. Call when DK says 'Pehchano ye photo me kaun hai?', 'Photo me kaun hai dekho', 'Pehchano kaun hai ye'.",
           parameters: {
             type: "OBJECT",
             properties: {},
@@ -2729,6 +2777,50 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                     };
                   } catch (e: any) {
                     result = { success: false, message: `Cleanup task start karne me error: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_whatsapp_photo_or_doc_info") {
+                  const { query } = call.args || {};
+                  try {
+                    const mediaRes = await visionMemoryService.getLatestMediaInfo(query ? String(query) : undefined);
+                    result = {
+                      success: mediaRes.hasMedia,
+                      analysis: mediaRes.analysis,
+                      sender: mediaRes.sender,
+                      caption: mediaRes.caption,
+                      timeAgo: mediaRes.timeAgo,
+                      message: mediaRes.analysis,
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `WhatsApp photo/doc analyze karne me error: ${e?.message || e}` };
+                  }
+                } else if (call.name === "save_person_visual_memory") {
+                  const { name, relation, notes } = call.args || {};
+                  try {
+                    const saveRes = await visionMemoryService.savePersonMemory(
+                      String(name || "Contact"),
+                      relation ? String(relation) : undefined,
+                      notes ? String(notes) : undefined
+                    );
+                    result = {
+                      success: true,
+                      personId: saveRes.personId,
+                      message: saveRes.summary,
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `Person memory save karne me error: ${e?.message || e}` };
+                  }
+                } else if (call.name === "identify_person_in_whatsapp_photo") {
+                  try {
+                    const idRes = await visionMemoryService.identifyPersonInPhoto();
+                    result = {
+                      success: idRes.identified,
+                      personName: idRes.personName,
+                      relation: idRes.relation,
+                      explanation: idRes.explanation,
+                      message: idRes.explanation,
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `Person identify karne me error: ${e?.message || e}` };
                   }
                 } else if (call.name === "get_linkedin_insights") {
                   const { query } = call.args || {};

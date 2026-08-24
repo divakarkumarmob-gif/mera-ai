@@ -6,6 +6,7 @@ import { useFirestoreAuthState } from "./whatsappAuthState";
 import { db } from "./firebaseAdmin";
 import { contactsService } from "./contactsService";
 import { dailyUpdateService } from "./dailyUpdateService";
+import { visionMemoryService } from "./visionMemoryService";
 
 // Resolve Baileys exports safely across CJS/ESM bundling
 const baileys: any = BaileysModule;
@@ -447,6 +448,26 @@ class WhatsAppBotService {
 
           // Persist to Firestore
           this.saveToFirestore(incoming).catch(() => {});
+
+          // Vision AI: Download and process incoming Photos and Documents
+          if (msg.message?.imageMessage || msg.message?.documentMessage) {
+            try {
+              const downloadFn = baileys.downloadMediaMessage || baileys.default?.downloadMediaMessage;
+              if (downloadFn) {
+                downloadFn(msg, "buffer", {}, { reuploadRequest: this.sock?.updateMediaMessage })
+                  .then((buffer: Buffer) => {
+                    const mimeType = msg.message?.imageMessage?.mimetype || msg.message?.documentMessage?.mimetype || "image/jpeg";
+                    const caption = msg.message?.imageMessage?.caption || msg.message?.documentMessage?.caption || "";
+                    visionMemoryService.processIncomingMedia(buffer, mimeType, senderName, caption).catch((err) =>
+                      console.warn("[WhatsAppBot] Vision processing error:", err)
+                    );
+                  })
+                  .catch((err: any) => console.warn("[WhatsAppBot] Media download error:", err));
+              }
+            } catch (mediaErr) {
+              console.warn("[WhatsAppBot] Failed to initiate media download:", mediaErr);
+            }
+          }
 
           const ownerPhone = (process.env.OWNER_WHATSAPP_NUMBER || "").replace(/\D/g, "");
           const isFromOwner = !isGroup && !!ownerPhone && senderPhone === ownerPhone;
