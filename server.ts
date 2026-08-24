@@ -397,6 +397,28 @@ async function startServer() {
     }
   });
 
+  // Also push incoming Meta WhatsApp Cloud API messages to connected clients
+  whatsappCloudService.setMessageCallback((msg) => {
+    const payload = JSON.stringify({
+      type: "whatsapp_incoming",
+      sender: msg.name,
+      text: msg.text,
+      time: new Date(msg.timestamp).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" }),
+      isGroup: false,
+    });
+    for (const client of connectedClients) {
+      if (client.readyState === client.OPEN) client.send(payload);
+    }
+
+    const ownerPhone = (process.env.OWNER_WHATSAPP_NUMBER || "").replace(/\D/g, "");
+    const senderDigits = (msg.from || "").replace(/\D/g, "");
+    if (ownerPhone && senderDigits === ownerPhone) {
+      codeAgentService.handleWhatsAppApprovalReply(msg.text).catch((e) =>
+        console.error("[Server] Failed to handle Cloud WhatsApp approval reply:", e)
+      );
+    }
+  });
+
   wss.on("connection", (clientWs) => {
     connectedClients.add(clientWs);
     clientWs.on("close", () => connectedClients.delete(clientWs));
