@@ -375,6 +375,7 @@ INSTRUCTIONS:
 
 Main aapke saare kaam yahan Telegram par bhi handle kar sakti hoon:
 • 💬 *AI Smart Chat:* Mujhse koi bhi sawal poochiye
+• 🆔 *Get Chat ID:* _"send chat id"_ ya _"/id"_
 • 📷 *Vision AI:* Photo ya PDF bhejiye — OCR aur Face Recognition
 • 🎵 *Music Finder:* _"Gana chalao Arijit Singh"_
 • 🤖 *Coding Agent:* Code plans review & approve
@@ -383,6 +384,13 @@ Main aapke saare kaam yahan Telegram par bhi handle kar sakti hoon:
 
 Bataiye Boss, aaj kya help karoon?`;
       await this.sendMessage(chatId, welcome);
+      return;
+    }
+
+    // 2.1 Handle "send chat id" / "my chat id" / "/id" request
+    if (/^(send\s*chat\s*id|chat\s*id|my\s*chat\s*id|my\s*id|send\s*id|\/id|\/chatid|mera\s*chat\s*id)/i.test(text)) {
+      const idReply = `🆔 *Aapka Telegram Chat ID hai:*\n\`${chatId}\`\n\n📌 *Details:*\n• Name: *${senderName}*\n• Username: *${from.username ? `@${from.username}` : "Not set"}*\n\n_(Aap is Chat ID ko copy karke apne .env me \`TELEGRAM_OWNER_CHAT_ID=${chatId}\` set kar sakte hain)_ ✨`;
+      await this.sendMessage(chatId, idReply);
       return;
     }
 
