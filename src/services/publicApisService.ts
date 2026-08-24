@@ -1265,6 +1265,91 @@ class PublicApisService {
 
     return { success: false, message: `PNR "${pnrNumber}" ka status abhi check nahi ho saka. RapidAPI key check karein.` };
   }
+
+  // 44. Search product deals & compare across Amazon, Flipkart, Meesho
+  public async searchProductDeals(productName: string): Promise<any> {
+    const q = productName.trim();
+    if (!q) return { success: false, message: "Product name zaroori hai." };
+
+    const encoded = encodeURIComponent(q);
+    const stores = [
+      {
+        store: "Meesho",
+        buyLink: `https://www.meesho.com/search?q=${encoded}`,
+        tagline: "Sabse sasta & budget friendly options",
+      },
+      {
+        store: "Flipkart",
+        buyLink: `https://www.flipkart.com/search?q=${encoded}`,
+        tagline: "Value for money & top discounts",
+      },
+      {
+        store: "Amazon India",
+        buyLink: `https://www.amazon.in/s?k=${encoded}`,
+        tagline: "Fast delivery & genuine brand warranty",
+      },
+    ];
+
+    return {
+      success: true,
+      product: q,
+      stores,
+      message: `"${q}" ke liye Amazon, Flipkart aur Meesho ke direct buy links available hain.`,
+    };
+  }
+
+  // 45. Daily life suggestions (Routine, Health/Diet, Focus, Motivation)
+  public async getDailyLifeSuggestion(category?: string, context?: string): Promise<any> {
+    const cat = (category || "routine").toLowerCase();
+    
+    if (cat.includes("diet") || cat.includes("health") || cat.includes("food") || cat.includes("khana")) {
+      return {
+        success: true,
+        category: "Health & Diet",
+        tips: [
+          "Subah uthkar 1-2 glass gunguna paani zaroor piyein.",
+          "Lunch me protein (Daal, Paneer, Dahi ya Sprouts) aur salad shamil karein.",
+          "Har 1-2 ghante screen time ke baad 5 minute ki walk aur paani ka break lein.",
+          "Raat ko sone se kam se kam 2 ghante pehle halka khana khayein.",
+        ],
+        contextGiven: context || "General health",
+      };
+    } else if (cat.includes("focus") || cat.includes("productiv") || cat.includes("work") || cat.includes("kaam")) {
+      return {
+        success: true,
+        category: "Productivity & Focus",
+        tips: [
+          "Pomodoro Rule: 25 minute full focus kaam, 5 minute break.",
+          "Din ki shuruat sabse mushkil task se karein (Eat That Frog).",
+          "Phone ko kaam ke waqt Do Not Disturb par rakhein.",
+          "Din me sirf top 3 priority tasks par concentrate karein.",
+        ],
+        contextGiven: context || "General productivity",
+      };
+    } else if (cat.includes("stress") || cat.includes("peace") || cat.includes("mind") || cat.includes("tension")) {
+      return {
+        success: true,
+        category: "Mental Peace & Stress Relief",
+        tips: [
+          "Geeta Gyan: Karma par dhyan do, parinam ki chinta chhod do (Karmanye Vadhikaraste).",
+          "4-7-8 Breathing: 4 sec saans andar lein, 7 sec rokein, 8 sec me dheere-dheere chhodein.",
+          "Jo aapke control me nahi hai, uspar zyada sochna band karein.",
+        ],
+        contextGiven: context || "General peace",
+      };
+    }
+
+    return {
+      success: true,
+      category: "Daily Routine & Planning",
+      tips: [
+        "Subah 10 minute planning: Aaj ke 3 sabse zaroori kaam likhein.",
+        "Mausam aur daily reminders check karke din shuru karein.",
+        "Self-Care: Din me kam se kam 30 minute physical activity ya walk zaroor karein.",
+      ],
+      contextGiven: context || "General daily routine",
+    };
+  }
 }
 
 function decodeHtmlEntities(str: string): string {

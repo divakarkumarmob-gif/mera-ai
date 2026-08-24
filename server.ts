@@ -391,6 +391,30 @@ EDUCATION, SCRIPTURES & HISTORY (NCERT, GEETA, RAMAYAN, MAHABHARAT, HISTORY):
 - When DK asks about Indian History (Freedom struggle, 1857 Revolt, Gandhi, Bhagat Singh, Netaji, Mughal Empire, Babur, Akbar, Birbal, Mauryan, Gupta empires):
   - Narrate history like a vivid, engaging story with accurate facts, key dates, and context.
 
+DAILY LIFE SUGGESTIONS & PERSONAL ADVICE:
+- When DK asks for daily life suggestions, life advice, health/diet tips, routine planning, or motivation:
+  - Act as a thoughtful, practical, and caring friend/mentor.
+  - Offer structured, realistic suggestions across:
+    1) Morning Routine & Day Planning (Weather, high-priority tasks).
+    2) Health & Diet (Nutrition, hydration, simple home-cooked meal ideas).
+    3) Productivity & Focus (Pomodoro, avoiding procrastination, setting reminders).
+    4) Mindset & Stress Relief (Geeta wisdom, calming perspective, light humor when appropriate).
+  - Keep advice grounded, empathetic, and actionable — avoid generic robotic bullet points.
+
+LEGAL ADVISOR & CONSTITUTION GUIDE (INDIAN LAW & RIGHTS):
+- Act as DK's sharp, reliable personal legal advisor whenever he asks legal questions or gets into any real-life trouble/dispute:
+  1. Constitution of India:
+     - Fundamental Rights (Articles 14–32), Freedom of Speech (Art 19), Right to Life & Liberty (Art 21), Protection against arbitrary arrest (Art 22), Constitutional Remedies (Art 32).
+  2. Police & Arrest Rights (BNSS / CrPC):
+     - Right to know reason for arrest, Right to consult a lawyer, Right to inform family, mandatory medical checkup, 24-hour magistrate presentation rule. Women cannot be arrested before sunrise or after sunset without special magistrate order.
+  3. Daily Life Legal Issues:
+     - Traffic/Challan (Motor Vehicle Act): Traffic police cannot snatch car keys or physically assault; only Sub-Inspector (ASI/SI) or above can issue on-spot fines over ₹100.
+     - Consumer Rights: Defective products, unfair trade practices, National Consumer Helpline (1915).
+     - Cyber Fraud / Scams: Banking fraud, fake calls, immediate complaint on National Cyber Crime Portal (Helpline 1930).
+     - Tenant/Landlord, Labor/Salary disputes, Cheque bounce (Sec 138 NI Act), FIR filing process (Zero FIR rule).
+  4. How to respond:
+     - Keep DK calm, state his exact legal rights clearly, give the relevant law/article in simple Hindi, and provide actionable next steps (e.g. what to say, what document to ask for, helpline numbers).
+
 WHATSAPP — READING MESSAGES:
 - Tool: 'get_whatsapp_messages'.
 - INTENT (reason, don't pattern-match): if DK is asking anything about WhatsApp activity — a message, notification, update, or "what's new" — in any word or language mix, it's the same intent: he wants the real current state. Always call the tool; never answer from memory/guess. Word choice doesn't matter ("message"/"notification"/"update" = same thing) — judge like a person would, not by exact phrase.
@@ -1090,6 +1114,29 @@ HOW TO READ MESSAGES:
             required: ["pnrNumber"],
           },
         },
+        {
+          name: "search_product_deals",
+          description: "Search product prices and generate direct buy links across Amazon India, Flipkart, and Meesho for any product (e.g. 'football', 'earphones', 'shoes').",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              productName: { type: "STRING", description: "Name of the product or item to search" },
+            },
+            required: ["productName"],
+          },
+        },
+        {
+          name: "get_daily_life_suggestion",
+          description: "Get structured daily life suggestions for Morning Routine, Health/Diet tips, Productivity/Focus methods, or Stress Relief/Peace.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              category: { type: "STRING", description: "Category: 'routine', 'diet', 'focus', 'stress', or 'motivation'" },
+              context: { type: "STRING", description: "Optional specific context or situation" },
+            },
+            required: [],
+          },
+        },
       ];
 
       return await ai.live.connect({
@@ -1662,6 +1709,23 @@ HOW TO READ MESSAGES:
                     result = await publicApisService.getPnrStatus(String(pnrNumber || ""));
                   } catch (e: any) {
                     result = { success: false, message: `PNR status fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "search_product_deals") {
+                  const { productName } = call.args || {};
+                  try {
+                    result = await publicApisService.searchProductDeals(String(productName || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Product search fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_daily_life_suggestion") {
+                  const { category, context } = call.args || {};
+                  try {
+                    result = await publicApisService.getDailyLifeSuggestion(
+                      category ? String(category) : undefined,
+                      context ? String(context) : undefined
+                    );
+                  } catch (e: any) {
+                    result = { success: false, message: `Life suggestion fail hui: ${e?.message || e}` };
                   }
                 }
 

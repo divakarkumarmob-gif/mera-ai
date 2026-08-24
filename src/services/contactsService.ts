@@ -54,8 +54,7 @@ class ContactsService {
     const queryLast10 = cleanDigits.slice(-10);
 
     // Fetch all contacts to perform search
-    const allSnap = await contactsCollection().get();
-    const all = allSnap.docs.map((d) => this.stripInternal(d.data()));
+    const all = await this.getAllContacts();
 
     // 1. Phone matching — always compare by last 10 digits on both sides,
     // regardless of country code / leading zero / formatting differences.
@@ -112,17 +111,25 @@ class ContactsService {
   }
 
   public async deleteContact(nameOrPhone: string): Promise<{ deleted: boolean; name?: string; phone?: string }> {
-    const contact = await this.findContact(nameOrPhone);
-    if (!contact || contact.id === "temp") {
+    try {
+      const contact = await this.findContact(nameOrPhone);
+      if (!contact || contact.id === "temp") {
+        return { deleted: false };
+      }
+      await contactsCollection().doc(contact.id).delete();
+      return { deleted: true, name: contact.name, phone: contact.phone };
+    } catch {
       return { deleted: false };
     }
-    await contactsCollection().doc(contact.id).delete();
-    return { deleted: true, name: contact.name, phone: contact.phone };
   }
 
   public async getAllContacts(): Promise<ContactEntry[]> {
-    const snap = await contactsCollection().orderBy("timestamp", "desc").get();
-    return snap.docs.map((d) => this.stripInternal(d.data()));
+    try {
+      const snap = await contactsCollection().orderBy("timestamp", "desc").get();
+      return snap.docs.map((d) => this.stripInternal(d.data()));
+    } catch {
+      return [];
+    }
   }
 
   public async compileContactsForPrompt(): Promise<string> {
@@ -140,3 +147,4 @@ class ContactsService {
 }
 
 export const contactsService = new ContactsService();
+
