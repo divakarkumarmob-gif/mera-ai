@@ -370,6 +370,30 @@ async function startServer() {
     }
   });
 
+  app.post("/api/cyber/threat-model", async (req, res) => {
+    try {
+      const { component } = req.body || {};
+      const result = await cyberSecurityService.runThreatModeling(component ? String(component) : undefined);
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "threat_modeling_failed" });
+    }
+  });
+
+  app.post("/api/cyber/wifi-audit", (req, res) => {
+    try {
+      const { protocol, hasWps, passwordLength } = req.body || {};
+      const result = cyberSecurityService.auditWifiSecurityConfig(
+        String(protocol || "WPA2-PSK"),
+        Boolean(hasWps),
+        Number(passwordLength || 8)
+      );
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "wifi_audit_failed" });
+    }
+  });
+
   app.get("/api/code-agent/requests", async (_req, res) => {
     try {
       res.json({ requests: await codeAgentService.getRequests() });
