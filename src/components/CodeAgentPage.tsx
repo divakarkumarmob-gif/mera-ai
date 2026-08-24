@@ -81,25 +81,22 @@ export default function CodeAgentPage({ onClose }: { onClose: () => void }) {
     const [submitting, setSubmitting] = useState(false);
     const [actingOn, setActingOn] = useState<string | null>(null);
     const [retryingId, setRetryingId] = useState<string | null>(null);
-    const [viewingLogReq, setViewingLogReq] = useState<CodeAgentRequest | null>(null);
+    const [selectedLogReqId, setSelectedLogReqId] = useState<string | null>(null);
+
+    // Derived active log request - cleanly updates on every poll, never gets stuck in closures
+    const viewingLogReq = requests.find((r) => r.id === selectedLogReqId) || null;
 
     const load = useCallback(async () => {
         try {
             const res = await fetch(getApiUrl('/api/code-agent/requests'));
             const data = await res.json();
-            const list: CodeAgentRequest[] = data.requests || [];
-            setRequests(list);
-            // Update currently opened log view if present
-            if (viewingLogReq) {
-                const found = list.find((item) => item.id === viewingLogReq.id);
-                if (found) setViewingLogReq(found);
-            }
+            setRequests(data.requests || []);
         } catch (e) {
             console.error('Failed to load code agent requests:', e);
         } finally {
             setLoading(false);
         }
-    }, [viewingLogReq]);
+    }, []);
 
     useEffect(() => {
         load();
@@ -292,7 +289,7 @@ export default function CodeAgentPage({ onClose }: { onClose: () => void }) {
 
                                             {/* Log Icon Button */}
                                             <button
-                                                onClick={() => setViewingLogReq(r)}
+                                                onClick={() => setSelectedLogReqId(r.id)}
                                                 title="View Execution Steps & Live Diagnostics Log"
                                                 className="p-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/25 transition-colors flex items-center gap-1 text-[11px] font-medium"
                                             >
@@ -443,7 +440,7 @@ export default function CodeAgentPage({ onClose }: { onClose: () => void }) {
                                 <div className="flex items-center gap-2 min-w-0">
                                     {/* Prominent Back Button to Return to Tasks List */}
                                     <button
-                                        onClick={() => setViewingLogReq(null)}
+                                        onClick={() => setSelectedLogReqId(null)}
                                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-slate-200 hover:text-white text-xs font-semibold transition-all shrink-0 active:scale-95"
                                         title="Back to previous Tasks page"
                                     >
@@ -484,7 +481,7 @@ export default function CodeAgentPage({ onClose }: { onClose: () => void }) {
 
                                     {/* Close Log Button */}
                                     <button
-                                        onClick={() => setViewingLogReq(null)}
+                                        onClick={() => setSelectedLogReqId(null)}
                                         className="p-1.5 rounded-xl bg-white/5 border border-white/10 text-slate-400 hover:text-white"
                                         title="Close Log View"
                                     >

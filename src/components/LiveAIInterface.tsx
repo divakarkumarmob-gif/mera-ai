@@ -628,7 +628,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 } catch (err) {
                     console.error("Error accessing audio", err);
                     setStatus("Error: Mic Access Failed");
-                } font-bold {
+                } finally {
                     isConnectingRef.current = false;
                 }
             }
