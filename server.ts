@@ -342,6 +342,12 @@ IMMEDIATE ANSWER TRIGGER: When DK asks for your response now, in any phrasing ("
 
 WAKE UP: On session start or any greeting ("Hello/Hey/Hi Friday" or similar), greet warmly and SHORT (one sentence), e.g. "Haan boss, main sun rahi hoon! Bataiye kaise help karoon?"
 
+PUBLIC API TOOLS — INDIA-FIRST DEFAULT:
+- DK is based in India. For any tool where a country/place isn't explicitly stated by DK, default to India context — e.g. "cricket score batao" → assume India's match/team first (if multiple matches are live, mention India's match first, then others briefly if asked). "News batao" → Indian news (the news tool already defaults to India). "Holiday list batao" → Indian holidays unless another country is named.
+- For "get_stock_price": if DK doesn't specify an exchange, assume he means an Indian stock and append ".BSE" to the symbol (e.g. "Reliance ka price batao" → symbol "RELIANCE.BSE"). Only use a plain/US symbol if DK names a foreign company or exchange explicitly.
+- For "get_country_info", "get_directions", "get_weather" etc. — if DK just says a city name with no country, assume it's an Indian city unless the name is unambiguous elsewhere (e.g. "Paris" stays Paris, France).
+- This default only applies when DK doesn't specify — if he names a country/city/exchange explicitly, always respect that instead.
+
 SHUTDOWN: Judge by intent, not exact words — any way DK says to stop/go quiet/end session ("chup ho jao", "bye", "stop"...) means the same thing. Acknowledge briefly and warmly ("Theek hai DK, main chup ho rahi hoon..."), then stop — no follow-up questions, session closes automatically.
 
 CONVERSATION STYLE:
@@ -818,14 +824,14 @@ HOW TO READ MESSAGES:
         },
         {
           name: "get_public_holidays",
-          description: "Get the list of public holidays for a country in a given year.",
+          description: "Get the list of public holidays for a country in a given year. Defaults to India if no country is specified.",
           parameters: {
             type: "OBJECT",
             properties: {
-              countryCode: { type: "STRING", description: "2-letter ISO country code, e.g. 'US', 'GB', 'IN'" },
+              countryCode: { type: "STRING", description: "2-letter ISO country code, e.g. 'US', 'GB', 'IN'. Defaults to 'IN' if not given." },
               year: { type: "NUMBER", description: "Year, defaults to current year if not given" },
             },
-            required: ["countryCode"],
+            required: [],
           },
         },
         {
@@ -1430,7 +1436,7 @@ HOW TO READ MESSAGES:
                 } else if (call.name === "get_public_holidays") {
                   const { countryCode, year } = call.args || {};
                   try {
-                    result = await publicApisService.getPublicHolidays(String(countryCode || ""), year ? Number(year) : undefined);
+                    result = await publicApisService.getPublicHolidays(countryCode ? String(countryCode) : undefined, year ? Number(year) : undefined);
                   } catch (e: any) {
                     result = { success: false, message: `Holiday list fetch fail hui: ${e?.message || e}` };
                   }
