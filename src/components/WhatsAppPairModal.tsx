@@ -24,10 +24,14 @@ export default function WhatsAppPairModal({ isOpen, onClose }: WhatsAppPairModal
         try {
             const res = await fetch(getApiUrl('/api/whatsapp/status'));
             const data = await res.json();
-            setIsConnected(!!data.isConnected);
-            if (data.dedicatedPhone) setActivePhone(data.dedicatedPhone);
-            if (data.qrCodeDataUrl) setQrCodeDataUrl(data.qrCodeDataUrl);
-            if (data.pairingCode && !pairingCode) setPairingCode(data.pairingCode);
+            const connected = !!(data.isConnected || data.baileys?.isConnected || data.cloud?.configured);
+            setIsConnected(connected);
+            const phone = data.dedicatedPhone || data.baileys?.dedicatedPhone || (data.cloud?.configured ? data.cloud?.fromNumber : null);
+            if (phone) setActivePhone(phone);
+            const qr = data.qrCodeDataUrl || data.baileys?.qrCodeDataUrl;
+            if (qr) setQrCodeDataUrl(qr);
+            const code = data.pairingCode || data.baileys?.pairingCode;
+            if (code && !pairingCode) setPairingCode(code);
         } catch {}
     };
 

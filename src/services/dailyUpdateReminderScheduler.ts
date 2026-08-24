@@ -1,4 +1,4 @@
-import { whatsappBotService } from "./whatsappBotService";
+import { sendWhatsAppUnified } from "./whatsappService";
 import { dailyUpdateService, todayIST } from "./dailyUpdateService";
 
 // ---------------------------------------------------------------------------
@@ -40,17 +40,11 @@ class DailyUpdateReminderScheduler {
         return;
       }
 
-      const status = whatsappBotService.getStatus();
-      if (!status.isConnected) {
-        console.warn("[DailyUpdateReminder] WhatsApp bot not connected — skipping this cycle.");
-        return;
-      }
-
-      const sendRes = await whatsappBotService.sendMessage(ownerPhone, "Boss, aaj ka update kya hai? 😊");
+      const sendRes = await sendWhatsAppUnified(ownerPhone, "Boss, aaj ka update kya hai? 😊");
       if (sendRes.success) {
-        console.log(`[DailyUpdateReminder] Sent reminder for ${todayIST()}.`);
+        console.log(`[DailyUpdateReminder] Sent reminder for ${todayIST()} via ${sendRes.via || "WhatsApp"}.`);
       } else {
-        console.error(`[DailyUpdateReminder] Failed to send reminder: ${sendRes.message}`);
+        console.warn(`[DailyUpdateReminder] Skipped/failed to send reminder: ${sendRes.message}`);
       }
     } catch (e) {
       console.error("[DailyUpdateReminder] Error during check:", e);

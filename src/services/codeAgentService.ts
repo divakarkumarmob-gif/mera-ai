@@ -1,7 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { db } from "./firebaseAdmin";
 import { githubService } from "./githubService";
-import { whatsappBotService } from "./whatsappBotService";
+import { sendWhatsAppUnified } from "./whatsappService";
 
 // ---------------------------------------------------------------------------
 // Coding agent: DK gives an instruction (voice or dashboard) → agent analyzes
@@ -13,7 +13,7 @@ import { whatsappBotService } from "./whatsappBotService";
 // Firestore layout: codeAgentRequests/{id}
 // ---------------------------------------------------------------------------
 
-const MODEL_CHAIN = ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite"];
+const MODEL_CHAIN = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"];
 
 // Helper: extract a readable error message from anything the SDK throws
 function extractError(e: any): string {
@@ -371,8 +371,12 @@ Rules:
       `Files:\n${fileLines}\n\n` +
       `Approve karne ke liye "yes" ya "ok" reply karo. Kuch aur likha to deny ho jayega.`;
     try {
-      await whatsappBotService.sendMessage(ownerPhone, text);
-      await this.addLog(id, "Notification sent to owner's WhatsApp.", "info", "whatsapp_notice");
+      const res = await sendWhatsAppUnified(ownerPhone, text);
+      if (res.success) {
+        await this.addLog(id, `Notification sent to owner's WhatsApp (${res.via || "WhatsApp"}).`, "info", "whatsapp_notice");
+      } else {
+        await this.addLog(id, `WhatsApp notification skipped/failed: ${res.message}`, "warn", "whatsapp_notice");
+      }
     } catch (e) {
       console.error("[CodeAgent] Failed to notify owner on WhatsApp:", e);
     }
@@ -557,8 +561,7 @@ Return ONLY the complete updated source code.`;
 
     const ownerPhone = process.env.OWNER_WHATSAPP_NUMBER;
     if (ownerPhone) {
-      await whatsappBotService
-        .sendMessage(ownerPhone, `✅ Changes ready for review:\n${prUrl}\n\nClick "Push to main origin" in Dashboard to commit directly.`)
+      await sendWhatsAppUnified(ownerPhone, `✅ Changes ready for review:\n${prUrl}\n\nClick "Push to main origin" in Dashboard to commit directly.`)
         .catch((e) => console.error("[CodeAgent] Failed to send completion WhatsApp message:", e));
     }
   }
@@ -720,8 +723,7 @@ Provide a concise, direct answer in friendly conversational Hindi/Hinglish:
 
     const ownerPhone = process.env.OWNER_WHATSAPP_NUMBER;
     if (ownerPhone) {
-      await whatsappBotService
-        .sendMessage(ownerPhone, `🚀 Successfully committed changes directly to origin/${baseBranch}:\n${commitUrl}`)
+      await sendWhatsAppUnified(ownerPhone, `🚀 Successfully committed changes directly to origin/${baseBranch}:\n${commitUrl}`)
         .catch((e) => console.error("[CodeAgent] Failed to send pushToMain WhatsApp message:", e));
     }
 

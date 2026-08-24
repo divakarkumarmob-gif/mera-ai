@@ -144,10 +144,10 @@ class MemoryEngine {
    * session's memory — only gives up if EVERY model fails.
    */
   private static readonly EXTRACTION_MODEL_CHAIN = [
-    "gemini-3.7-flash",
     "gemini-3.6-flash",
     "gemini-3.5-flash",
     "gemini-3.5-flash-lite",
+    "gemini-2.5-flash",
   ];
 
   private async runExtraction(

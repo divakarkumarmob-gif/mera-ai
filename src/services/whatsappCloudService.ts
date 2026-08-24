@@ -42,6 +42,7 @@ class WhatsAppCloudService {
   }
 
   public getStatus(): { configured: boolean; phoneId: string; fromNumber: string } {
+    this.reload();
     return {
       configured: this.isConfigured,
       phoneId: this.phoneId,
@@ -53,8 +54,18 @@ class WhatsAppCloudService {
     this.messageCallback = cb;
   }
 
+  /** Normalizes a phone number to WhatsApp international standard (e.g. 919876543210) */
+  private normalizePhone(toPhone: string): string {
+    let clean = toPhone.replace(/[\s\-\(\)\+]/g, "").trim();
+    if (clean.length === 10) {
+      clean = `91${clean}`;
+    }
+    return clean;
+  }
+
   // ── Send a text message via Cloud API ──────────────────────────────────────
   public async sendMessage(toPhone: string, text: string): Promise<{ success: boolean; message: string }> {
+    this.reload();
     if (!this.isConfigured) {
       return {
         success: false,
@@ -62,8 +73,8 @@ class WhatsAppCloudService {
       };
     }
 
-    // Normalize phone number — remove spaces, dashes, +
-    const phone = toPhone.replace(/[\s\-\(\)\+]/g, "");
+    // Normalize phone number — remove spaces, dashes, +, prefix 91 if 10-digit
+    const phone = this.normalizePhone(toPhone);
 
     try {
       const res = await fetch(
@@ -91,8 +102,8 @@ class WhatsAppCloudService {
         return { success: true, message: `Message sent to ${phone}` };
       }
 
-      const errMsg = data?.error?.message || JSON.stringify(data);
-      console.error(`[WhatsApp Cloud] Send failed:`, errMsg);
+      const errMsg = data?.error?.message || (typeof data === "string" ? data : JSON.stringify(data));
+      console.error(`[WhatsApp Cloud] Send failed:`, errMsg, data);
       return { success: false, message: errMsg };
 
     } catch (e: any) {
@@ -107,10 +118,11 @@ class WhatsAppCloudService {
     templateName: string = "hello_world",
     langCode: string = "en_US"
   ): Promise<{ success: boolean; message: string }> {
+    this.reload();
     if (!this.isConfigured) {
       return { success: false, message: "Cloud API not configured." };
     }
-    const phone = toPhone.replace(/[\s\-\(\)\+]/g, "");
+    const phone = this.normalizePhone(toPhone);
     try {
       const res = await fetch(
         `https://graph.facebook.com/v19.0/${this.phoneId}/messages`,

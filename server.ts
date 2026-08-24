@@ -17,6 +17,7 @@ import { dailyUpdateReminderScheduler } from "./src/services/dailyUpdateReminder
 import { contactsService } from "./src/services/contactsService";
 import { whatsappBotService } from "./src/services/whatsappBotService";
 import { whatsappCloudService } from "./src/services/whatsappCloudService";
+import { sendWhatsAppUnified } from "./src/services/whatsappService";
 import { dailyUpdateService, resolveRelativeDateIST } from "./src/services/dailyUpdateService";
 import { codeAgentService } from "./src/services/codeAgentService";
 import { publicApisService } from "./src/services/publicApisService";
@@ -178,9 +179,15 @@ async function startServer() {
   });
 
   app.get("/api/whatsapp/status", (_req, res) => {
+    const baileysStatus = whatsappBotService.getStatus();
+    const cloudStatus = whatsappCloudService.getStatus();
     res.json({
-      baileys: whatsappBotService.getStatus(),
-      cloud: whatsappCloudService.getStatus(),
+      isConnected: baileysStatus.isConnected || cloudStatus.configured,
+      dedicatedPhone: baileysStatus.dedicatedPhone || (cloudStatus.configured ? cloudStatus.fromNumber : null),
+      qrCodeDataUrl: baileysStatus.qrCodeDataUrl,
+      pairingCode: baileysStatus.pairingCode,
+      baileys: baileysStatus,
+      cloud: cloudStatus,
       baileysEnabled,
     });
   });
@@ -2426,12 +2433,13 @@ HOW TO READ MESSAGES:
                   const contact = await contactsService.findContact(contactNameOrPhone);
                   const targetPhone = contact ? contact.phone : contactNameOrPhone.replace(/[\s\-\(\)\+]/g, "");
 
-                  // Single WhatsApp path: the dedicated Baileys bot (linked via
-                  // QR code or 8-digit pairing code in the WhatsApp Pair modal).
-                  const sendRes = await whatsappBotService.sendMessage(targetPhone, messageText);
+                  // Primary: WhatsApp Cloud API (official, ban-safe).
+                  // Fallback: Dedicated Baileys bot if linked.
+                  const sendRes = await sendWhatsAppUnified(targetPhone, messageText);
 
                   result = {
                     success: sendRes.success,
+                    via: sendRes.via,
                     message: sendRes.success
                       ? `Message successfully delivered to ${contact?.name || targetPhone}: "${messageText}"`
                       : `Delivery failed: ${sendRes.message}`,

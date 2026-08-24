@@ -1,5 +1,5 @@
 import { toolsEngine, ReminderItem } from "./toolsEngine";
-import { whatsappBotService } from "./whatsappBotService";
+import { sendWhatsAppUnified } from "./whatsappService";
 
 // ---------------------------------------------------------------------------
 // Reminder scheduler — the missing piece from Bug #8.
@@ -67,18 +67,15 @@ class ReminderScheduler {
       console.error("[ReminderScheduler] Failed to notify connected clients:", e);
     }
 
-    // 2. Send via WhatsApp to the owner's number, if configured and connected.
+    // 2. Send via WhatsApp to the owner's number, if configured.
     const ownerPhone = process.env.OWNER_WHATSAPP_NUMBER;
     if (ownerPhone) {
-      const status = whatsappBotService.getStatus();
-      if (status.isConnected) {
-        const message = `⏰ Reminder: ${reminder.title}${reminder.timeString ? ` (${reminder.timeString})` : ""}`;
-        const sendRes = await whatsappBotService.sendMessage(ownerPhone, message);
-        if (!sendRes.success) {
-          console.error(`[ReminderScheduler] Failed to deliver reminder via WhatsApp: ${sendRes.message}`);
-        }
+      const message = `⏰ Reminder: ${reminder.title}${reminder.timeString ? ` (${reminder.timeString})` : ""}`;
+      const sendRes = await sendWhatsAppUnified(ownerPhone, message);
+      if (sendRes.success) {
+        console.log(`[ReminderScheduler] Reminder delivered via ${sendRes.via || "WhatsApp"}`);
       } else {
-        console.warn("[ReminderScheduler] WhatsApp bot not connected — reminder will only reach an open app, if any.");
+        console.warn(`[ReminderScheduler] WhatsApp delivery skipped/failed: ${sendRes.message}`);
       }
     } else {
       console.warn(
