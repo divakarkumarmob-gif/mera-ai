@@ -16,6 +16,7 @@ import { reminderScheduler } from "./src/services/reminderScheduler";
 import { dailyUpdateReminderScheduler } from "./src/services/dailyUpdateReminderScheduler";
 import { contactsService } from "./src/services/contactsService";
 import { whatsappBotService } from "./src/services/whatsappBotService";
+import { whatsappCloudService } from "./src/services/whatsappCloudService";
 import { dailyUpdateService, resolveRelativeDateIST } from "./src/services/dailyUpdateService";
 import { codeAgentService } from "./src/services/codeAgentService";
 import { publicApisService } from "./src/services/publicApisService";
@@ -27,6 +28,10 @@ const isProduction = process.env.NODE_ENV === "production";
 if (!process.env.GEMINI_API_KEY) {
   console.warn("WARNING: GEMINI_API_KEY is not set. The AI agent will not work until you set it.");
 }
+
+// ── Global Baileys (unofficial WA) toggle ────────────────────────────────────
+// OFF by default — Cloud API is primary. Boss must explicitly enable Baileys.
+let baileysEnabled: boolean = false;
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "placeholder-gemini-key" });
 
@@ -168,8 +173,63 @@ async function startServer() {
   });
 
   app.get("/api/whatsapp/status", (_req, res) => {
-    res.json(whatsappBotService.getStatus());
+    res.json({
+      baileys: whatsappBotService.getStatus(),
+      cloud: whatsappCloudService.getStatus(),
+      baileysEnabled,
+    });
   });
+
+  // ── Baileys toggle endpoint (for UI toggle + internal use) ────────────────
+  app.post("/api/whatsapp/baileys/toggle", (req, res) => {
+    const { enabled } = req.body;
+    if (typeof enabled === "boolean") {
+      baileysEnabled = enabled;
+    } else {
+      baileysEnabled = !baileysEnabled; // flip if no value given
+    }
+    console.log(`[Server] Baileys system ${baileysEnabled ? 'ENABLED' : 'DISABLED'} via API`);
+    res.json({ ok: true, baileysEnabled });
+  });
+
+  app.get("/api/whatsapp/baileys/status", (_req, res) => {
+    res.json({ baileysEnabled });
+  });
+
+  // ── WhatsApp Cloud API Webhook (Meta official) ────────────────────────────
+  // GET: Meta verifies the webhook URL by sending hub.challenge
+  app.get("/api/whatsapp/cloud/webhook", (req, res) => {
+    const mode = req.query["hub.mode"] as string;
+    const challenge = req.query["hub.challenge"] as string;
+    const verifyToken = req.query["hub.verify_token"] as string;
+    const result = whatsappCloudService.verifyWebhook(mode, challenge, verifyToken);
+    if (result !== null) {
+      res.status(200).send(result);
+    } else {
+      console.warn("[Server] WhatsApp Cloud webhook verify failed — wrong token?");
+      res.status(403).send("Forbidden");
+    }
+  });
+
+  // POST: Meta sends incoming messages here
+  app.post("/api/whatsapp/cloud/webhook", express.json(), (req, res) => {
+    res.sendStatus(200); // Always ACK immediately
+    whatsappCloudService.handleWebhook(req.body);
+  });
+
+  // Cloud API status
+  app.get("/api/whatsapp/cloud/status", (_req, res) => {
+    res.json(whatsappCloudService.getStatus());
+  });
+
+  // Send test message via Cloud API
+  app.post("/api/whatsapp/cloud/send", async (req, res) => {
+    const { phone, message } = req.body;
+    if (!phone || !message) return res.status(400).json({ error: "phone and message required" });
+    const result = await whatsappCloudService.sendMessage(phone, message);
+    res.json(result);
+  });
+
 
   app.get("/api/code-agent/requests", async (_req, res) => {
     try {
@@ -454,6 +514,8 @@ SOCIAL & MEDIA TOOLS (YOUTUBE, REDDIT, SPOTIFY MUSIC, LINKEDIN, TELEGRAM/DISCORD
 - 'search_music': Lookup songs, singer/artist, album, preview, and generate direct Spotify play links. Send Spotify link to WhatsApp if asked.
 - 'play_music': Play / stream any song or music directly in the application. Call when DK says 'gana chalao', 'music play karo', 'Arijit Singh ka gana sunao'.
 - 'stop_music': STOP / PAUSE the currently playing music immediately. CRITICAL: Whenever DK says 'stop', 'gana band karo', 'mujhe achha nahi laga', 'band karo gana', 'gana nahi sunna mujhe', 'music roko', 'chup ho jao' — CALL 'stop_music' IMMEDIATELY and resume talking warmly.
+- 'send_music_on_whatsapp': Send the YouTube link of any song to DK's WhatsApp via Cloud API. If Cloud API fails, Friday will inform DK and ask if Baileys should be enabled as backup.
+- 'toggle_baileys_system': Turn Baileys WhatsApp system ON or OFF. Call when DK says 'Baileys on karo', 'Baileys off karo', 'purana WhatsApp system on karo', 'Baileys band karo'. After toggling say: 'Boss, Baileys system [on/off] kar diya. Ab [Cloud API primary rahega / Baileys bhi backup me active hai].'.
 - 'get_linkedin_insights': Company pages, hiring, job openings, and professional skill trends.
 - 'get_community_links': Find Telegram and Discord channel links for study groups, deals, gaming, and tech.
 - 'get_pinterest_ideas': Visual room decor, desk setups, fashion, and aesthetic photography ideas.
@@ -1403,6 +1465,29 @@ HOW TO READ MESSAGES:
           },
         },
         {
+          name: "send_music_on_whatsapp",
+          description: "Find the real YouTube video link for a song and send it to DK's WhatsApp via Cloud API. If Cloud API fails and Baileys is disabled, inform DK and offer to enable Baileys as backup.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              songName: { type: "STRING", description: "Song name or artist name to find on YouTube (e.g. 'Kesariya Arijit Singh', 'Tum Hi Ho', 'Shape of You Ed Sheeran')" },
+              targetPhone: { type: "STRING", description: "Optional: phone number or contact name to send to. If not provided, sends to DK's own WhatsApp number." },
+            },
+            required: ["songName"],
+          },
+        },
+        {
+          name: "toggle_baileys_system",
+          description: "Turn the Baileys (unofficial WhatsApp) system ON or OFF. Primary WhatsApp is Cloud API. Baileys is backup only. Call when DK says 'Baileys on/off karo', 'purana WhatsApp on karo', 'Baileys band karo', 'backup WhatsApp on karo'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              action: { type: "STRING", description: "'on' to enable Baileys, 'off' to disable Baileys, 'status' to check current state" },
+            },
+            required: ["action"],
+          },
+        },
+        {
           name: "get_linkedin_insights",
           description: "Get LinkedIn company hub page and job opening search links for any company or skill.",
           parameters: {
@@ -2267,9 +2352,107 @@ HOW TO READ MESSAGES:
                 } else if (call.name === "stop_music") {
                   try {
                     result = await publicApisService.stopMusic();
-                    clientWs.send(JSON.stringify({ type: 'stop_music' }));
+                    safeSend(JSON.stringify({ type: 'stop_music' }));
                   } catch (e: any) {
                     result = { success: false, message: `Music stop fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "send_music_on_whatsapp") {
+                  const { songName, targetPhone } = call.args || {};
+                  try {
+                    // Step 1: Get real YouTube link
+                    const ytResult = await publicApisService.getYouTubeMusicLink(String(songName || ""));
+                    const ytLink = ytResult?.youtubeShortUrl || ytResult?.youtubeUrl;
+                    const songTitle = ytResult?.title || String(songName || "");
+
+                    if (!ytLink) {
+                      result = { success: false, message: `Boss, "${songName}" ka YouTube link nahi mila.` };
+                    } else {
+                      // Step 2: Resolve target phone
+                      let sendToPhone = process.env.OWNER_WHATSAPP_NUMBER || "";
+                      if (targetPhone && String(targetPhone).trim()) {
+                        const contact = await contactsService.findContact(String(targetPhone));
+                        sendToPhone = contact ? contact.phone : String(targetPhone).replace(/[\s\-\(\)\+]/g, "");
+                      }
+
+                      if (!sendToPhone) {
+                        result = {
+                          success: false,
+                          message: `Boss, OWNER_WHATSAPP_NUMBER .env mein set nahi hai.`,
+                          youtubeLink: ytLink, songTitle,
+                        };
+                      } else {
+                        const waMsg = `\uD83C\uDFB5 *${songTitle}*\n\n${ytLink}\n\n_Friday se bheja gaya_ \u2728`;
+
+                        // ── Primary: WhatsApp Cloud API (official, ban-safe) ────────
+                        const cloudRes = await whatsappCloudService.sendMessage(sendToPhone, waMsg);
+
+                        if (cloudRes.success) {
+                          result = {
+                            success: true,
+                            via: "cloud_api",
+                            message: `Boss, "${songTitle}" ka YouTube link aapke WhatsApp par bhej diya! \uD83C\uDFB5`,
+                            youtubeLink: ytLink, songTitle, sentTo: sendToPhone,
+                          };
+                        } else {
+                          // ── Cloud API failed ──────────────────────────────
+                          if (baileysEnabled) {
+                            // ── Fallback: Baileys (only if boss has enabled it) ─
+                            console.warn("[Server] Cloud API failed, falling back to Baileys...");
+                            const baileysRes = await whatsappBotService.sendMessage(sendToPhone, waMsg);
+                            if (baileysRes.success) {
+                              result = {
+                                success: true,
+                                via: "baileys_fallback",
+                                message: `Boss, Cloud API se nahi gaya tha, Baileys se bhej diya "${songTitle}" ka link! \uD83C\uDFB5`,
+                                youtubeLink: ytLink, songTitle, sentTo: sendToPhone,
+                              };
+                            } else {
+                              result = {
+                                success: false,
+                                message: `Boss, Cloud API aur Baileys dono se message nahi gaya. Cloud: ${cloudRes.message} | Baileys: ${baileysRes.message}`,
+                                youtubeLink: ytLink, songTitle,
+                              };
+                            }
+                          } else {
+                            // Baileys OFF — honest message, offer to enable
+                            result = {
+                              success: false,
+                              cloudError: cloudRes.message,
+                              youtubeLink: ytLink,
+                              songTitle,
+                              baileysEnabled: false,
+                              message: `Boss, Cloud API se message nahi gaya (${cloudRes.message}). Baileys system abhi OFF hai. Kya Baileys on karun backup ke liye? Bolo "Baileys on karo".`,
+                            };
+                          }
+                        }
+                      }
+                    }
+                  } catch (e: any) {
+                    result = { success: false, message: `Music WhatsApp send fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "toggle_baileys_system") {
+                  const { action } = call.args || {};
+                  try {
+                    const act = String(action || "").toLowerCase().trim();
+                    if (act === "on") {
+                      baileysEnabled = true;
+                    } else if (act === "off") {
+                      baileysEnabled = false;
+                    }
+                    // "status" just returns current state without changing
+                    const stateLabel = baileysEnabled ? "ON (active as fallback)" : "OFF";
+                    result = {
+                      success: true,
+                      action: act,
+                      baileysEnabled,
+                      message: baileysEnabled
+                        ? `Boss, Baileys system ON kar diya. Ab agar Cloud API fail ho to Baileys backup pe kaam karega.`
+                        : `Boss, Baileys system OFF kar diya. Sirf Cloud API (official Meta) use hogi. Safer hai.`,
+                      currentState: stateLabel,
+                    };
+                    console.log(`[Server] toggle_baileys_system called: action=${act}, baileysEnabled=${baileysEnabled}`);
+                  } catch (e: any) {
+                    result = { success: false, message: `Baileys toggle fail hua: ${e?.message || e}` };
                   }
                 } else if (call.name === "get_linkedin_insights") {
                   const { query } = call.args || {};

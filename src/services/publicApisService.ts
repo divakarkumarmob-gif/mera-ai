@@ -3142,6 +3142,96 @@ class PublicApisService {
     };
   }
 
+  // 50b. Get real YouTube video link for a song (scrape YouTube search)
+  public async getYouTubeMusicLink(songOrArtist: string): Promise<any> {
+    const q = String(songOrArtist || "").trim();
+    if (!q) return { success: false, message: "Song name zaroori hai." };
+
+    // Strategy 1: YouTube search page HTML → extract first video ID
+    try {
+      const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(q + " song")}`;
+      const res = await fetch(searchUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+          "Accept-Language": "en-IN,en;q=0.9",
+          "Accept": "text/html",
+        },
+      });
+
+      if (res.ok) {
+        const html = await res.text();
+
+        // YouTube embeds all search results in a JSON blob called ytInitialData
+        const jsonMatch = html.match(/var ytInitialData = ({[\s\S]*?});<\/script>/);
+        if (jsonMatch) {
+          const ytData = JSON.parse(jsonMatch[1]);
+          const contents = ytData?.contents?.twoColumnSearchResultsRenderer?.primaryContents
+            ?.sectionListRenderer?.contents?.[0]?.itemSectionRenderer?.contents || [];
+
+          for (const item of contents) {
+            const video = item?.videoRenderer;
+            if (video && video.videoId) {
+              const videoId = video.videoId;
+              const title = video.title?.runs?.[0]?.text || q;
+              const channel = video.ownerText?.runs?.[0]?.text || "Unknown";
+              const duration = video.lengthText?.simpleText || "";
+              const views = video.viewCountText?.simpleText || "";
+
+              return {
+                success: true,
+                query: q,
+                videoId,
+                title,
+                channel,
+                duration,
+                views,
+                youtubeUrl: `https://www.youtube.com/watch?v=${videoId}`,
+                youtubeMusicUrl: `https://music.youtube.com/watch?v=${videoId}`,
+                youtubeShortUrl: `https://youtu.be/${videoId}`,
+                thumbnailUrl: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
+                source: "youtube_search",
+              };
+            }
+          }
+        }
+
+        // Fallback regex if JSON parse didn't work
+        const videoIdMatch = html.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
+        const titleMatch = html.match(/"title":{"runs":\[{"text":"([^"]+)"/);
+        if (videoIdMatch) {
+          const videoId = videoIdMatch[1];
+          return {
+            success: true,
+            query: q,
+            videoId,
+            title: titleMatch?.[1] || q,
+            youtubeUrl: `https://www.youtube.com/watch?v=${videoId}`,
+            youtubeMusicUrl: `https://music.youtube.com/watch?v=${videoId}`,
+            youtubeShortUrl: `https://youtu.be/${videoId}`,
+            thumbnailUrl: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
+            source: "youtube_regex",
+          };
+        }
+      }
+    } catch { /* fall through */ }
+
+    // Strategy 2: YouTube oEmbed API with a search link (always works)
+    try {
+      const searchPageUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(q + " official audio")}`;
+      return {
+        success: true,
+        query: q,
+        youtubeUrl: searchPageUrl,
+        youtubeMusicUrl: `https://music.youtube.com/search?q=${encodeURIComponent(q)}`,
+        youtubeShortUrl: searchPageUrl,
+        source: "youtube_search_fallback",
+        message: `"${q}" ka YouTube search link ready hai.`,
+      };
+    } catch { /* fall through */ }
+
+    return { success: false, message: `"${q}" ka YouTube link nahi mila.` };
+  }
+
   // 51. Music Search — Deezer API (free, no key) + iTunes fallback
   public async searchMusic(songOrArtist: string): Promise<any> {
     const q = songOrArtist.trim();

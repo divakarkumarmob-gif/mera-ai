@@ -15,6 +15,52 @@ interface LiveAIInterfaceProps {
 const VOICES = ['Aoede', 'Charon', 'Fenrir', 'Kore', 'Puck'];
 const THINKING_LEVELS = ['low', 'medium', 'high'];
 
+// ── Baileys Backup WhatsApp Toggle (inline mini-component) ────────────────────
+function BaileysToggle() {
+    const [enabled, setEnabled] = useState(false);
+    const [loading, setLoading] = useState(false);
+
+    useEffect(() => {
+        fetch('/api/whatsapp/baileys/status')
+            .then(r => r.json())
+            .then(d => setEnabled(!!d.baileysEnabled))
+            .catch(() => {});
+    }, []);
+
+    const toggle = async () => {
+        setLoading(true);
+        try {
+            const res = await fetch('/api/whatsapp/baileys/toggle', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled: !enabled }),
+            });
+            const data = await res.json();
+            setEnabled(!!data.baileysEnabled);
+        } catch { /* ignore */ }
+        setLoading(false);
+    };
+
+    return (
+        <div className="flex items-center justify-between">
+            <div>
+                <span className="text-white text-sm block">Baileys Backup WhatsApp</span>
+                <span className={`text-xs font-medium ${enabled ? 'text-amber-400' : 'text-slate-400'}`}>
+                    {enabled ? '⚡ Backup Active — Baileys fallback ON' : '🛡️ Cloud API Only (Safe)'}
+                </span>
+            </div>
+            <button
+                onClick={toggle}
+                disabled={loading}
+                className={`w-12 h-7 rounded-full transition-colors relative ${enabled ? 'bg-amber-500' : 'bg-slate-700'} ${loading ? 'opacity-50' : ''}`}
+            >
+                <span className={`absolute top-1 w-5 h-5 rounded-full bg-white transition-transform ${enabled ? 'translate-x-6' : 'translate-x-1'}`} />
+            </button>
+        </div>
+    );
+}
+
+
 function pcmToBase64(pcm: Float32Array): string {
     if (!pcm || pcm.length === 0) return "";
     const buffer = new Int16Array(pcm.length);
@@ -1195,6 +1241,9 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                                     <span className={`absolute top-1 w-5 h-5 rounded-full bg-white transition-transform ${wakeWordActive ? 'translate-x-6' : 'translate-x-1'}`} />
                                 </button>
                             </div>
+
+                            {/* Baileys Backup WhatsApp Toggle */}
+                            <BaileysToggle />
                         </div>
                     </motion.div>
                 )}
