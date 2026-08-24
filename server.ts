@@ -297,6 +297,34 @@ async function startServer() {
     }
   });
 
+  app.get("/api/code-agent/requests/:id/diff", async (req, res) => {
+    try {
+      const changes = await codeAgentService.generateDiffPreview(req.params.id);
+      res.json({ ok: true, changes });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "failed_to_generate_diff" });
+    }
+  });
+
+  app.post("/api/code-agent/requests/:id/refine", async (req, res) => {
+    const { additionalInstruction } = req.body || {};
+    try {
+      const updated = await codeAgentService.refinePlan(req.params.id, String(additionalInstruction || ""));
+      res.json({ ok: true, request: updated });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "failed_to_refine_plan" });
+    }
+  });
+
+  app.post("/api/code-agent/rollback", async (req, res) => {
+    try {
+      const result = await codeAgentService.rollback();
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "failed_to_rollback" });
+    }
+  });
+
   const distPath = path.resolve("dist");
 
   let vite: any;
@@ -1535,6 +1563,15 @@ HOW TO READ MESSAGES:
           },
         },
         {
+          name: "rollback_last_code_change",
+          description: "1-Click Undo / Rollback the latest commit made to the repository. Call when DK says 'aakhri code change rollback karo', 'purana code wapas lao', 'last commit undo karo', 'revert changes'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+            required: [],
+          },
+        },
+        {
           name: "get_linkedin_insights",
           description: "Get LinkedIn company hub page and job opening search links for any company or skill.",
           parameters: {
@@ -2525,6 +2562,17 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                     };
                   } catch (e: any) {
                     result = { success: false, message: `Coding Agent ko task bhejne me error: ${e?.message || e}` };
+                  }
+                } else if (call.name === "rollback_last_code_change") {
+                  try {
+                    const rollbackRes = await codeAgentService.rollback();
+                    result = {
+                      success: true,
+                      message: `Boss, aakhri code change rollback kar diya gaya hai! Origin repo wapas stable commit par reset ho gaya hai.`,
+                      details: rollbackRes.message,
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `Rollback fail hua: ${e?.message || e}` };
                   }
                 } else if (call.name === "get_linkedin_insights") {
                   const { query } = call.args || {};

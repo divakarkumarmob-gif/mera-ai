@@ -269,6 +269,31 @@ class GitHubService {
   }
 
   /**
+   * Reverts the base branch to its parent commit (1-click rollback)
+   */
+  public async rollbackLastCommit(): Promise<{ previousSha: string; newHeadSha: string; message: string }> {
+    const { owner, name, baseBranch } = getConfig();
+    const baseRef = await ghFetch(`/repos/${owner}/${name}/git/ref/heads/${encodeURIComponent(baseBranch)}`);
+    const currentSha = baseRef.object.sha;
+    const currentCommit = await ghFetch(`/repos/${owner}/${name}/git/commits/${currentSha}`);
+    if (!currentCommit.parents || currentCommit.parents.length === 0) {
+      throw new Error("Cannot rollback: No parent commit found.");
+    }
+    const parentSha = currentCommit.parents[0].sha;
+
+    await ghFetch(`/repos/${owner}/${name}/git/refs/heads/${encodeURIComponent(baseBranch)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ sha: parentSha, force: true }),
+    });
+
+    return {
+      previousSha: currentSha,
+      newHeadSha: parentSha,
+      message: `Rollback successful: Reset ${baseBranch} to parent commit ${parentSha.slice(0, 7)}`,
+    };
+  }
+
+  /**
    * Merges an existing Pull Request into the base branch if open.
    */
   public async mergePR(prNumber: number, commitMessage?: string): Promise<{ merged: boolean; sha: string; message: string }> {

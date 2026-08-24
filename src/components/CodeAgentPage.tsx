@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
     X,
@@ -17,7 +17,13 @@ import {
     CheckCircle2,
     Clock,
     ArrowLeft,
-    Square
+    Square,
+    Eye,
+    Undo2,
+    Sparkles,
+    FileCode,
+    Copy,
+    Send
 } from 'lucide-react';
 import { getApiUrl } from '@/utils/api';
 
@@ -33,6 +39,13 @@ interface CodeAgentPlan {
     files: FilePlanItem[];
 }
 
+export interface GeneratedFileChange {
+    path: string;
+    action: 'modify' | 'create';
+    originalContent?: string;
+    content: string;
+}
+
 export interface CodeAgentLog {
     timestamp: number;
     level: 'info' | 'warn' | 'error' | 'success';
@@ -46,6 +59,7 @@ interface CodeAgentRequest {
     status: 'analyzing' | 'pending_approval' | 'approved' | 'denied' | 'applying' | 'completed' | 'failed';
     createdAt: number;
     plan?: CodeAgentPlan;
+    generatedChanges?: GeneratedFileChange[];
     branchUrl?: string;
     prUrl?: string;
     commitUrl?: string;
@@ -74,6 +88,51 @@ const STATUS_COLOR: Record<CodeAgentRequest['status'], string> = {
     failed: 'text-red-300 bg-red-500/15 border-red-500/30',
 };
 
+// ── Line Diff Computations ──────────────────────────────────────────────────
+interface DiffLine {
+    type: 'add' | 'del' | 'same';
+    oldLineNo?: number;
+    newLineNo?: number;
+    content: string;
+}
+
+function computeSimpleDiff(oldText: string = '', newText: string = ''): { lines: DiffLine[]; additions: number; deletions: number } {
+    const oldLines = oldText ? oldText.split('\n') : [];
+    const newLines = newText ? newText.split('\n') : [];
+    const lines: DiffLine[] = [];
+    let additions = 0;
+    let deletions = 0;
+
+    let i = 0;
+    let j = 0;
+    let oldNum = 1;
+    let newNum = 1;
+
+    while (i < oldLines.length || j < newLines.length) {
+        if (i < oldLines.length && j < newLines.length && oldLines[i] === newLines[j]) {
+            lines.push({ type: 'same', oldLineNo: oldNum++, newLineNo: newNum++, content: oldLines[i] });
+            i++;
+            j++;
+        } else {
+            if (i < oldLines.length && (!newLines.includes(oldLines[i]) || newLines.indexOf(oldLines[i]) > j + 4)) {
+                lines.push({ type: 'del', oldLineNo: oldNum++, content: oldLines[i] });
+                deletions++;
+                i++;
+            } else if (j < newLines.length) {
+                lines.push({ type: 'add', newLineNo: newNum++, content: newLines[j] });
+                additions++;
+                j++;
+            } else if (i < oldLines.length) {
+                lines.push({ type: 'del', oldLineNo: oldNum++, content: oldLines[i] });
+                deletions++;
+                i++;
+            }
+        }
+    }
+
+    return { lines, additions, deletions };
+}
+
 export default function CodeAgentPage({ onClose }: { onClose: () => void }) {
     const [requests, setRequests] = useState<CodeAgentRequest[]>([]);
     const [loading, setLoading] = useState(true);
@@ -83,6 +142,21 @@ export default function CodeAgentPage({ onClose }: { onClose: () => void }) {
     const [retryingId, setRetryingId] = useState<string | null>(null);
     const [selectedLogReqId, setSelectedLogReqId] = useState<string | null>(null);
 
+    // Visual Diff Preview State
+    const [viewingDiffReq, setViewingDiffReq] = useState<CodeAgentRequest | null>(null);
+    const [activeDiffFileIdx, setActiveDiffFileIdx] = useState<number>(0);
+    const [loadingDiff, setLoadingDiff] = useState<boolean>(false);
+    const [copiedFile, setCopiedFile] = useState<boolean>(false);
+
+    // Multi-turn Plan Refinement State
+    const [refiningReqId, setRefiningReqId] = useState<string | null>(null);
+    const [refineText, setRefineText] = useState<string>('');
+    const [isRefining, setIsRefining] = useState<boolean>(false);
+
+    // 1-Click Rollback State
+    const [isRollingBack, setIsRollingBack] = useState<boolean>(false);
+    const [rollbackMsg, setRollbackMsg] = useState<string | null>(null);
+
     // Derived active log request - cleanly updates on every poll, never gets stuck in closures
     const viewingLogReq = requests.find((r) => r.id === selectedLogReqId) || null;
 
@@ -90,17 +164,25 @@ export default function CodeAgentPage({ onClose }: { onClose: () => void }) {
         try {
             const res = await fetch(getApiUrl('/api/code-agent/requests'));
             const data = await res.json();
-            setRequests(data.requests || []);
+            const list: CodeAgentRequest[] = data.requests || [];
+            setRequests(list);
+
+            // Keep viewingDiffReq synced with live data
+            if (viewingDiffReq) {
+                const found = list.find((item) => item.id === viewingDiffReq.id);
+                if (found && found.generatedChanges) {
+                    setViewingDiffReq(found);
+                }
+            }
         } catch (e) {
             console.error('Failed to load code agent requests:', e);
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [viewingDiffReq]);
 
     useEffect(() => {
         load();
-        // Poll every 3s for background status & live logs
         const interval = setInterval(load, 3000);
         return () => clearInterval(interval);
     }, [load]);
@@ -159,6 +241,9 @@ export default function CodeAgentPage({ onClose }: { onClose: () => void }) {
         setActingOn(id);
         try {
             await fetch(getApiUrl(`/api/code-agent/requests/${id}/${action}`), { method: 'POST' });
+            if (viewingDiffReq && viewingDiffReq.id === id && action === 'deny') {
+                setViewingDiffReq(null);
+            }
             await load();
         } catch (e) {
             console.error(`Failed to ${action} request:`, e);
@@ -170,18 +255,95 @@ export default function CodeAgentPage({ onClose }: { onClose: () => void }) {
     const pushToMain = async (id: string) => {
         setActingOn(`${id}_push`);
         try {
-            const res = await fetch(getApiUrl(`/api/code-agent/requests/${id}/push-to-main`), { method: 'POST' });
-            const data = await res.json();
-            if (!res.ok || data.error) {
-                alert(`Push failed: ${data.error || 'Unknown error'}`);
-            }
+            await fetch(getApiUrl(`/api/code-agent/requests/${id}/push-to-main`), { method: 'POST' });
             await load();
-        } catch (e: any) {
+        } catch (e) {
             console.error('Failed to push to main origin:', e);
-            alert(`Push failed: ${e?.message || e}`);
         } finally {
             setActingOn(null);
         }
+    };
+
+    // ── Feature 2: View Changes / Visual Diff Viewer ────────────────────────
+    const handleOpenDiff = async (r: CodeAgentRequest, e?: React.MouseEvent) => {
+        if (e) e.stopPropagation();
+        setViewingDiffReq(r);
+        setActiveDiffFileIdx(0);
+
+        if (!r.generatedChanges || r.generatedChanges.length === 0) {
+            setLoadingDiff(true);
+            try {
+                const res = await fetch(getApiUrl(`/api/code-agent/requests/${r.id}/diff`));
+                const data = await res.json();
+                if (data.changes) {
+                    setViewingDiffReq({ ...r, generatedChanges: data.changes });
+                }
+                await load();
+            } catch (err) {
+                console.error('Failed to fetch diff:', err);
+            } finally {
+                setLoadingDiff(false);
+            }
+        }
+    };
+
+    // ── Feature 3: 1-Click Rollback ─────────────────────────────────────────
+    const handleRollback = async () => {
+        if (!window.confirm('Are you sure you want to rollback the last commit on origin/main?')) return;
+        setIsRollingBack(true);
+        setRollbackMsg(null);
+        try {
+            const res = await fetch(getApiUrl('/api/code-agent/rollback'), { method: 'POST' });
+            const data = await res.json();
+            if (data.ok) {
+                setRollbackMsg(`✅ ${data.message || 'Rollback successful!'}`);
+            } else {
+                setRollbackMsg(`❌ Rollback failed: ${data.error || 'Unknown error'}`);
+            }
+            await load();
+        } catch (err: any) {
+            setRollbackMsg(`❌ Rollback error: ${err?.message || err}`);
+        } finally {
+            setIsRollingBack(false);
+            setTimeout(() => setRollbackMsg(null), 5000);
+        }
+    };
+
+    // ── Feature 4: Multi-Turn Plan Refinement ────────────────────────────────
+    const handleRefinePlan = async (id: string) => {
+        if (!refineText.trim() || isRefining) return;
+        setIsRefining(true);
+        try {
+            await fetch(getApiUrl(`/api/code-agent/requests/${id}/refine`), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ additionalInstruction: refineText.trim() }),
+            });
+            setRefineText('');
+            setRefiningReqId(null);
+            await load();
+        } catch (err) {
+            console.error('Failed to refine plan:', err);
+        } finally {
+            setIsRefining(false);
+        }
+    };
+
+    // Active file diff calculation for modal
+    const activeFileDiff = useMemo(() => {
+        if (!viewingDiffReq?.generatedChanges || viewingDiffReq.generatedChanges.length === 0) return null;
+        const currentFile = viewingDiffReq.generatedChanges[activeDiffFileIdx] || viewingDiffReq.generatedChanges[0];
+        if (!currentFile) return null;
+        return {
+            file: currentFile,
+            ...computeSimpleDiff(currentFile.originalContent || '', currentFile.content || ''),
+        };
+    }, [viewingDiffReq, activeDiffFileIdx]);
+
+    const handleCopyContent = (text: string) => {
+        navigator.clipboard.writeText(text);
+        setCopiedFile(true);
+        setTimeout(() => setCopiedFile(false), 2000);
     };
 
     return (
@@ -190,34 +352,56 @@ export default function CodeAgentPage({ onClose }: { onClose: () => void }) {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="fixed inset-0 bg-black/80 backdrop-blur-md z-[3000] flex items-end sm:items-center justify-center p-4"
+                className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-3 sm:p-6"
                 onClick={onClose}
             >
                 <motion.div
                     initial={{ y: 40, opacity: 0 }}
                     animate={{ y: 0, opacity: 1 }}
                     exit={{ y: 40, opacity: 0 }}
-                    className="relative bg-[#0a0f24] border border-cyan-500/30 rounded-3xl w-full max-w-xl h-[85vh] flex flex-col overflow-hidden shadow-[0_0_50px_rgba(6,182,212,0.25)]"
+                    className="relative bg-[#0a0f24] border border-cyan-500/30 rounded-3xl w-full max-w-2xl h-[88vh] flex flex-col overflow-hidden shadow-[0_0_50px_rgba(6,182,212,0.25)]"
                     onClick={(e) => e.stopPropagation()}
                 >
                     {/* Header */}
-                    <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 bg-slate-900/50">
+                    <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/10 bg-slate-900/60">
                         <div className="flex items-center gap-2.5">
                             <div className="w-8 h-8 rounded-xl bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-400">
                                 <Code2 className="w-5 h-5" />
                             </div>
                             <div>
                                 <h2 className="text-white font-bold text-base leading-tight">Friday Coding Agent</h2>
-                                <p className="text-[11px] text-slate-400">AI codebase assistant with diagnostics, live logs & retry</p>
+                                <p className="text-[11px] text-slate-400">Autonomous codebase assistant & self-healing engine</p>
                             </div>
                         </div>
-                        <button
-                            onClick={onClose}
-                            className="p-1.5 rounded-xl bg-white/5 border border-white/10 text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
-                        >
-                            <X className="w-5 h-5" />
-                        </button>
+
+                        <div className="flex items-center gap-2">
+                            {/* 1-Click Rollback Header Action */}
+                            <button
+                                onClick={handleRollback}
+                                disabled={isRollingBack}
+                                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-purple-500/15 border border-purple-500/30 text-purple-300 hover:bg-purple-500/25 text-xs font-semibold transition-all active:scale-95 disabled:opacity-50"
+                                title="Rollback / Undo latest commit on origin/main"
+                            >
+                                {isRollingBack ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Undo2 className="w-3.5 h-3.5" />}
+                                <span>Rollback</span>
+                            </button>
+
+                            <button
+                                onClick={onClose}
+                                className="p-1.5 rounded-xl bg-white/5 border border-white/10 text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
                     </div>
+
+                    {/* Rollback notification banner if fired */}
+                    {rollbackMsg && (
+                        <div className="px-5 py-2 text-xs font-medium bg-purple-500/20 border-b border-purple-500/30 text-purple-200 flex items-center gap-2 animate-in fade-in">
+                            <Info className="w-4 h-4 text-purple-300 shrink-0" />
+                            <span>{rollbackMsg}</span>
+                        </div>
+                    )}
 
                     {/* Input box */}
                     <div className="px-5 py-3 border-b border-white/10 flex gap-2 bg-slate-950/40">
@@ -225,13 +409,13 @@ export default function CodeAgentPage({ onClose }: { onClose: () => void }) {
                             value={instruction}
                             onChange={(e) => setInstruction(e.target.value)}
                             onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
-                            placeholder="e.g. Add dark mode toggle or fix WhatsApp timeout bug"
-                            className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder:text-slate-500 outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30"
+                            placeholder="e.g. Add dark mode toggle or fix YouTube audio stream timeout"
+                            className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white placeholder:text-slate-500 outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30"
                         />
                         <button
                             onClick={handleSubmit}
                             disabled={submitting || !instruction.trim()}
-                            className="px-5 py-2.5 rounded-xl bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 text-sm font-semibold disabled:opacity-40 hover:bg-cyan-500/30 active:scale-95 transition-all flex items-center gap-1.5"
+                            className="px-4 py-2 rounded-xl bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 text-sm font-semibold disabled:opacity-40 hover:bg-cyan-500/30 active:scale-95 transition-all flex items-center gap-1.5"
                         >
                             {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Send'}
                         </button>
@@ -273,7 +457,7 @@ export default function CodeAgentPage({ onClose }: { onClose: () => void }) {
                                                 </button>
                                             )}
 
-                                            {/* Anticlockwise Retry Button (especially on Failed or anytime) */}
+                                            {/* Anticlockwise Retry Button */}
                                             <button
                                                 onClick={(e) => handleRetry(r.id, e)}
                                                 disabled={retryingId === r.id}
@@ -309,7 +493,17 @@ export default function CodeAgentPage({ onClose }: { onClose: () => void }) {
                                             )}
                                             <p className="text-slate-300 leading-relaxed">{r.plan.summary}</p>
                                             <div className="space-y-1.5 pt-1">
-                                                <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Affected Files:</p>
+                                                <div className="flex items-center justify-between">
+                                                    <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Affected Files:</p>
+                                                    {/* FEATURE 2: VIEW CHANGES BUTTON */}
+                                                    <button
+                                                        onClick={(e) => handleOpenDiff(r, e)}
+                                                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-cyan-500/20 border border-cyan-500/40 text-cyan-200 hover:bg-cyan-500/30 text-[11px] font-bold transition-all shadow-[0_0_10px_rgba(6,182,212,0.2)]"
+                                                    >
+                                                        <Eye className="w-3.5 h-3.5 text-cyan-400" />
+                                                        <span>View Changes (Diff)</span>
+                                                    </button>
+                                                </div>
                                                 <ul className="space-y-1 pl-1">
                                                     {r.plan.files.map((f) => (
                                                         <li key={f.path} className="text-slate-300 text-xs flex items-start gap-1.5">
@@ -322,6 +516,51 @@ export default function CodeAgentPage({ onClose }: { onClose: () => void }) {
                                                     ))}
                                                 </ul>
                                             </div>
+                                        </div>
+                                    )}
+
+                                    {/* Multi-Turn Plan Refine Accordion (Feature 4) */}
+                                    {r.status === 'pending_approval' && (
+                                        <div className="pt-1">
+                                            {refiningReqId === r.id ? (
+                                                <div className="bg-slate-900/70 border border-purple-500/30 p-3 rounded-xl space-y-2 animate-in fade-in">
+                                                    <div className="flex items-center justify-between">
+                                                        <span className="text-xs font-semibold text-purple-300 flex items-center gap-1.5">
+                                                            <Sparkles className="w-3.5 h-3.5 text-purple-400" /> Refine Plan / Add Instruction
+                                                        </span>
+                                                        <button
+                                                            onClick={() => setRefiningReqId(null)}
+                                                            className="text-slate-400 hover:text-white text-[11px]"
+                                                        >
+                                                            Cancel
+                                                        </button>
+                                                    </div>
+                                                    <div className="flex gap-2">
+                                                        <input
+                                                            value={refineText}
+                                                            onChange={(e) => setRefineText(e.target.value)}
+                                                            onKeyDown={(e) => e.key === 'Enter' && handleRefinePlan(r.id)}
+                                                            placeholder="e.g. Button ka color purple karo aur corner rounded rakho..."
+                                                            className="flex-1 bg-black/40 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white placeholder:text-slate-500 outline-none focus:border-purple-500/50"
+                                                        />
+                                                        <button
+                                                            onClick={() => handleRefinePlan(r.id)}
+                                                            disabled={isRefining || !refineText.trim()}
+                                                            className="px-3 py-1.5 rounded-lg bg-purple-500/25 border border-purple-500/40 text-purple-200 text-xs font-semibold hover:bg-purple-500/35 disabled:opacity-40 flex items-center gap-1"
+                                                        >
+                                                            {isRefining ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                                                            Update
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <button
+                                                    onClick={() => setRefiningReqId(r.id)}
+                                                    className="inline-flex items-center gap-1 text-[11px] text-purple-300 hover:text-purple-200 underline underline-offset-2"
+                                                >
+                                                    <Sparkles className="w-3 h-3" /> Plan me thoda aur change karna hai? (Refine)
+                                                </button>
+                                            )}
                                         </div>
                                     )}
 
@@ -431,6 +670,133 @@ export default function CodeAgentPage({ onClose }: { onClose: () => void }) {
                             ))
                         )}
                     </div>
+
+                    {/* FEATURE 2: VISUAL CODE DIFF VIEWER MODAL */}
+                    {viewingDiffReq && (
+                        <div className="absolute inset-0 bg-[#070b19]/98 backdrop-blur-xl z-50 flex flex-col p-4 sm:p-5 animate-in fade-in zoom-in-95 duration-150">
+                            {/* Diff Viewer Header */}
+                            <div className="flex items-center justify-between pb-3 border-b border-white/10 gap-3">
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                    <button
+                                        onClick={() => setViewingDiffReq(null)}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-slate-200 hover:text-white text-xs font-semibold transition-all shrink-0 active:scale-95"
+                                    >
+                                        <ArrowLeft className="w-4 h-4 text-cyan-400" />
+                                        <span>Back</span>
+                                    </button>
+                                    <div className="min-w-0">
+                                        <h3 className="text-white font-bold text-sm flex items-center gap-2">
+                                            <span>Visual Code Diff</span>
+                                            {activeFileDiff && (
+                                                <span className="text-[11px] font-mono font-normal text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                                                    +{activeFileDiff.additions} / -{activeFileDiff.deletions} lines
+                                                </span>
+                                            )}
+                                        </h3>
+                                        <p className="text-[11px] text-slate-400 font-mono truncate">{viewingDiffReq.instruction}</p>
+                                    </div>
+                                </div>
+
+                                <div className="flex items-center gap-2 shrink-0">
+                                    {activeFileDiff && (
+                                        <button
+                                            onClick={() => handleCopyContent(activeFileDiff.file.content)}
+                                            className="p-1.5 rounded-xl bg-white/5 border border-white/10 text-slate-400 hover:text-white text-xs flex items-center gap-1"
+                                            title="Copy full new file content"
+                                        >
+                                            {copiedFile ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                                            <span className="text-[10px] hidden sm:inline">{copiedFile ? 'Copied' : 'Copy'}</span>
+                                        </button>
+                                    )}
+
+                                    {/* Direct Approve from Diff View */}
+                                    {viewingDiffReq.status === 'pending_approval' && (
+                                        <button
+                                            onClick={() => act(viewingDiffReq.id, 'approve')}
+                                            disabled={actingOn === viewingDiffReq.id}
+                                            className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-semibold hover:bg-emerald-500/30 transition-colors shadow-[0_0_15px_rgba(16,185,129,0.2)]"
+                                        >
+                                            {actingOn === viewingDiffReq.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                                            Approve & Apply
+                                        </button>
+                                    )}
+
+                                    <button
+                                        onClick={() => setViewingDiffReq(null)}
+                                        className="p-1.5 rounded-xl bg-white/5 border border-white/10 text-slate-400 hover:text-white"
+                                    >
+                                        <X className="w-4 h-4" />
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* File Switcher Tabs */}
+                            {viewingDiffReq.generatedChanges && viewingDiffReq.generatedChanges.length > 0 && (
+                                <div className="flex gap-2 py-2 overflow-x-auto border-b border-white/10">
+                                    {viewingDiffReq.generatedChanges.map((file, idx) => (
+                                        <button
+                                            key={file.path}
+                                            onClick={() => setActiveDiffFileIdx(idx)}
+                                            className={`px-3 py-1.5 rounded-xl text-xs font-mono flex items-center gap-1.5 shrink-0 transition-all ${
+                                                activeDiffFileIdx === idx
+                                                    ? 'bg-cyan-500/20 border border-cyan-500/50 text-cyan-200 font-bold'
+                                                    : 'bg-white/5 border border-white/10 text-slate-400 hover:text-slate-200'
+                                            }`}
+                                        >
+                                            <FileCode className="w-3.5 h-3.5 text-cyan-400" />
+                                            <span>{file.path.split('/').pop()}</span>
+                                            <span className="text-[10px] text-slate-500">({file.path})</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+
+                            {/* Diff Code Container */}
+                            <div className="flex-1 bg-black/60 border border-white/10 rounded-2xl mt-3 overflow-hidden flex flex-col font-mono text-xs">
+                                {loadingDiff ? (
+                                    <div className="flex-1 flex flex-col items-center justify-center text-slate-400 gap-2">
+                                        <Loader2 className="w-6 h-6 animate-spin text-cyan-400" />
+                                        <p>Generating visual diff preview...</p>
+                                    </div>
+                                ) : !activeFileDiff ? (
+                                    <div className="flex-1 flex flex-col items-center justify-center text-slate-500 gap-2">
+                                        <FileCode className="w-8 h-8 text-slate-600" />
+                                        <p>No preview generated yet. Click approve to apply changes.</p>
+                                    </div>
+                                ) : (
+                                    <div className="flex-1 overflow-y-auto p-2 sm:p-3 space-y-0.5 select-text">
+                                        {activeFileDiff.lines.map((line, lIdx) => {
+                                            const isAdd = line.type === 'add';
+                                            const isDel = line.type === 'del';
+
+                                            return (
+                                                <div
+                                                    key={lIdx}
+                                                    className={`flex items-start gap-2 py-0.5 px-2 rounded ${
+                                                        isAdd
+                                                            ? 'bg-emerald-500/15 text-emerald-200 border-l-2 border-emerald-400'
+                                                            : isDel
+                                                            ? 'bg-red-500/15 text-red-300 border-l-2 border-red-400 opacity-80'
+                                                            : 'text-slate-300 hover:bg-white/5'
+                                                    }`}
+                                                >
+                                                    <span className="text-[10px] text-slate-600 select-none w-8 text-right shrink-0">
+                                                        {isDel ? line.oldLineNo : isAdd ? line.newLineNo : line.newLineNo}
+                                                    </span>
+                                                    <span className="text-[11px] font-bold select-none w-3 text-center shrink-0">
+                                                        {isAdd ? '+' : isDel ? '-' : ' '}
+                                                    </span>
+                                                    <pre className="flex-1 whitespace-pre-wrap break-all font-mono leading-tight">
+                                                        {line.content || ' '}
+                                                    </pre>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
 
                     {/* Live Execution Logs & Diagnostics Modal */}
                     {viewingLogReq && (
@@ -567,5 +933,3 @@ export default function CodeAgentPage({ onClose }: { onClose: () => void }) {
         </AnimatePresence>
     );
 }
-
-

@@ -144,7 +144,9 @@ export interface CodeAgentPlan {
 
 export interface GeneratedFileChange {
   path: string;
-  content: string;
+  action: "modify" | "create";
+  originalContent?: string;
+  content: string; // new updated content
 }
 
 export interface CodeAgentLog {
@@ -443,7 +445,7 @@ Rules:
 
     await requestsCol().doc(id).set({ status: "applying", updatedAt: Date.now() }, { merge: true });
 
-    const changes: { path: string; content: string }[] = [];
+    const changes: GeneratedFileChange[] = [];
 
     for (let i = 0; i < request.plan.files.length; i++) {
       const fileItem = request.plan.files[i];
@@ -485,6 +487,7 @@ Return ONLY the complete updated source code.`;
       if (/\}\s*(font-|text-|bg-|p-|m-|flex-|grid-|rounded-)[a-zA-Z0-9_-]+\s*\{/i.test(content)) {
         console.warn(`[CodeAgent] Detected corrupted CSS class token in code structure for ${fileItem.path}. Auto-repairing...`);
         content = content.replace(/\}\s*(font-|text-|bg-|p-|m-|flex-|grid-|rounded-)[a-zA-Z0-9_-]+\s*\{/gi, '} finally {');
+        await this.addLog(id, `[self_healing] Auto-repaired corrupted syntax tokens in ${fileItem.path}`, "warn", "self_healing");
       }
 
       // Basic brace balance verification
@@ -494,7 +497,12 @@ Return ONLY the complete updated source code.`;
         console.warn(`[CodeAgent] Warning: Potential brace imbalance in ${fileItem.path} (open: ${openBraces}, close: ${closeBraces})`);
       }
 
-      changes.push({ path: fileItem.path, content });
+      changes.push({
+        path: fileItem.path,
+        action: fileItem.action,
+        originalContent: original,
+        content,
+      });
       await this.addLog(id, `Generated complete & validated code for: ${fileItem.path}`, "success", "code_gen");
     }
 
@@ -503,7 +511,7 @@ Return ONLY the complete updated source code.`;
 
     const { branchUrl, prUrl, prNumber } = await githubService.commitChangesAsPR(
       branchName,
-      changes,
+      changes.map((c) => ({ path: c.path, content: c.content })),
       `Friday Coding Agent: ${request.instruction}`.slice(0, 200),
       `Friday Coding Agent: ${request.instruction}`.slice(0, 200),
       `${request.plan.summary}\n\nRequested via Friday coding agent. Review before merging.`
@@ -532,6 +540,78 @@ Return ONLY the complete updated source code.`;
   }
 
   /**
+   * Previews code changes (generates before & after files) for Visual Diff Viewer before approving.
+   */
+  public async generateDiffPreview(id: string): Promise<GeneratedFileChange[]> {
+    const request = await this.getRequest(id);
+    if (!request || !request.plan) throw new Error("Request or plan not found");
+
+    if (request.generatedChanges && request.generatedChanges.length > 0) {
+      return request.generatedChanges;
+    }
+
+    const changes: GeneratedFileChange[] = [];
+    for (const fileItem of request.plan.files) {
+      const original = fileItem.action === "modify" ? await githubService.getFileContent(fileItem.path) : "";
+      const genPrompt = `You are DK's elite AI Software Engineer. Generate the COMPLETE updated file content for this file to fulfill the instruction.
+Instruction: "${request.instruction}"
+Plan: ${request.plan.summary}
+File: ${fileItem.path} (${fileItem.action})
+${original ? `Current Code:\n${original}` : "New File"}`;
+
+      const raw = await callModel(genPrompt, id, this);
+      const content = cleanAndExtractFileContent(raw || original);
+      changes.push({
+        path: fileItem.path,
+        action: fileItem.action,
+        originalContent: original,
+        content,
+      });
+    }
+
+    await requestsCol().doc(id).set({ generatedChanges: changes, updatedAt: Date.now() }, { merge: true });
+    return changes;
+  }
+
+  /**
+   * Refines an existing plan with additional instructions without starting from scratch.
+   */
+  public async refinePlan(id: string, additionalInstruction: string): Promise<CodeAgentRequest> {
+    const request = await this.getRequest(id);
+    if (!request) throw new Error("Request not found");
+
+    const updatedInstruction = `${request.instruction} [Follow-up Refinement: ${additionalInstruction}]`;
+    await this.addLog(id, `Refining plan with follow-up: "${additionalInstruction}"...`, "info", "planning");
+
+    await requestsCol().doc(id).set(
+      {
+        instruction: updatedInstruction,
+        status: "analyzing",
+        error: null,
+        updatedAt: Date.now(),
+      },
+      { merge: true }
+    );
+
+    // Re-run background analysis with refinement
+    this.analyzeAndPlan(id, updatedInstruction).catch(async (e) => {
+      console.error("[CodeAgent] Refinement error:", e);
+      await this.addLog(id, `Refinement failed: ${e?.message || e}`, "error", "planning");
+    });
+
+    return (await this.getRequest(id))!;
+  }
+
+  /**
+   * 1-Click Rollback: Reverts the latest commit on the repository base branch.
+   */
+  public async rollback(): Promise<{ message: string }> {
+    const result = await githubService.rollbackLastCommit();
+    console.log(`[CodeAgent] Rollback executed: ${result.message}`);
+    return result;
+  }
+
+  /**
    * Commits the changes directly to the repository's origin base/main branch.
    */
   public async pushToMain(id: string): Promise<{ commitUrl: string; commitSha: string; baseBranch: string }> {
@@ -544,32 +624,11 @@ Return ONLY the complete updated source code.`;
       if (!request.plan || !request.plan.files.length) {
         throw new Error("No changes available to push");
       }
-      // Generate if not cached
-      changes = [];
-      for (const fileItem of request.plan.files) {
-        const original = fileItem.action === "modify" ? await githubService.getFileContent(fileItem.path) : "";
-        const genPrompt = `You are DK's AI coding agent. Generate the COMPLETE new content for this file, applying the planned change. Return ONLY a JSON object: { "content": "...full file content..." } — no markdown fences, no explanation.
-
-Instruction: "${request.instruction}"
-Overall plan summary: ${request.plan.summary}
-This file: ${fileItem.path}
-Change needed: ${fileItem.changeSummary}
-${original ? `Current content:\n${original}` : "This is a new file."}`;
-
-        const raw = await callModel(genPrompt);
-        if (!raw) throw new Error(`Failed to generate content for ${fileItem.path}`);
-        let content: string;
-        try {
-          content = JSON.parse(raw).content;
-        } catch {
-          throw new Error(`Failed to parse generated content for ${fileItem.path}`);
-        }
-        changes.push({ path: fileItem.path, content });
-      }
+      changes = await this.generateDiffPreview(id);
     }
 
     const { commitSha, commitUrl, baseBranch } = await githubService.commitChangesToBase(
-      changes,
+      changes.map((c) => ({ path: c.path, content: c.content })),
       `Friday Coding Agent: ${request.instruction}`.slice(0, 200)
     );
 
