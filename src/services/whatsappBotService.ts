@@ -155,6 +155,16 @@ class WhatsAppBotService {
     this.messageCallback = cb;
   }
 
+  /** Add an incoming message (e.g. from WhatsApp Cloud API) to RAM cache */
+  public recordIncomingMessage(msg: IncomingMessage) {
+    if (!this.messageCache.some((m) => m.id === msg.id)) {
+      this.messageCache.unshift(msg);
+      if (this.messageCache.length > 500) {
+        this.messageCache = this.messageCache.slice(0, 500);
+      }
+    }
+  }
+
   /**
    * Get WhatsApp messages with optional filters.
    * - messageType: 'personal' | 'group' | 'all'
@@ -191,9 +201,12 @@ class WhatsAppBotService {
       // Historical → Firestore (persistent across restarts)
       messages = await this.fetchFromFirestore(startTs, endTs);
     } else {
-      // Recent → RAM cache (fast, last 48 hours)
+      // Recent → RAM cache (fast, last 48 hours) + Firestore fallback
       const cutoff = Date.now() - 48 * 60 * 60 * 1000;
       messages = this.messageCache.filter((m) => m.timestamp >= cutoff);
+      if (messages.length === 0) {
+        messages = await this.fetchFromFirestore(cutoff, Date.now());
+      }
     }
 
     const type = params.messageType || "all";
@@ -271,10 +284,17 @@ class WhatsAppBotService {
         .get();
       return snap.docs.map((d) => d.data() as IncomingMessage);
     } catch (e) {
-      console.error("[WhatsAppBot] Failed to fetch from Firestore:", e);
-      return this.messageCache.filter(
-        (m) => m.timestamp >= startTs && m.timestamp <= endTs
-      );
+      try {
+        const snap = await inboxCol().orderBy("timestamp", "desc").limit(50).get();
+        return snap.docs
+          .map((d) => d.data() as IncomingMessage)
+          .filter((m) => m.timestamp >= startTs && m.timestamp <= endTs);
+      } catch (err2) {
+        console.error("[WhatsAppBot] Failed to fetch from Firestore:", err2);
+        return this.messageCache.filter(
+          (m) => m.timestamp >= startTs && m.timestamp <= endTs
+        );
+      }
     }
   }
 
@@ -449,18 +469,44 @@ class WhatsAppBotService {
           // Persist to Firestore
           this.saveToFirestore(incoming).catch(() => {});
 
-          // Vision AI: Download and process incoming Photos and Documents
-          if (msg.message?.imageMessage || msg.message?.documentMessage) {
+          // Vision AI: Download and process incoming Photos, Videos, Audio, and Documents
+          const hasMedia = !!(
+            msg.message?.imageMessage ||
+            msg.message?.documentMessage ||
+            msg.message?.videoMessage ||
+            msg.message?.audioMessage
+          );
+
+          if (hasMedia) {
             try {
               const downloadFn = baileys.downloadMediaMessage || baileys.default?.downloadMediaMessage;
               if (downloadFn) {
                 downloadFn(msg, "buffer", {}, { reuploadRequest: this.sock?.updateMediaMessage })
-                  .then((buffer: Buffer) => {
-                    const mimeType = msg.message?.imageMessage?.mimetype || msg.message?.documentMessage?.mimetype || "image/jpeg";
-                    const caption = msg.message?.imageMessage?.caption || msg.message?.documentMessage?.caption || "";
-                    visionMemoryService.processIncomingMedia(buffer, mimeType, senderName, caption).catch((err) =>
-                      console.warn("[WhatsAppBot] Vision processing error:", err)
+                  .then(async (buffer: Buffer) => {
+                    const mimeType =
+                      msg.message?.imageMessage?.mimetype ||
+                      msg.message?.documentMessage?.mimetype ||
+                      msg.message?.videoMessage?.mimetype ||
+                      msg.message?.audioMessage?.mimetype ||
+                      (msg.message?.videoMessage ? "video/mp4" : msg.message?.audioMessage ? "audio/ogg" : msg.message?.documentMessage ? "application/pdf" : "image/jpeg");
+                    const caption =
+                      msg.message?.imageMessage?.caption ||
+                      msg.message?.documentMessage?.caption ||
+                      msg.message?.videoMessage?.caption ||
+                      "";
+                    const fileName = msg.message?.documentMessage?.fileName;
+                    const { visionMemoryService } = await import("./visionMemoryService");
+                    const analyzed = await visionMemoryService.processIncomingMedia(
+                      buffer,
+                      mimeType,
+                      senderName,
+                      caption,
+                      fileName
                     );
+                    if (analyzed.shortSummary) {
+                      incoming.text = `${incoming.text} | AI Summary: ${analyzed.shortSummary}`;
+                      this.saveToFirestore(incoming).catch(() => {});
+                    }
                   })
                   .catch((err: any) => console.warn("[WhatsAppBot] Media download error:", err));
               }
@@ -777,8 +823,7 @@ class WhatsAppBotService {
     relation?: string
   ): Promise<string> {
     const fallbackText = () => {
-      const greeting = !isUnknownContact ? `Haanji ${senderName} ji, ` : "";
-      return `${greeting}Boss (DK) abhi busy hain, jaise hi wo aayenge main unko aapka message bol dunga, jaldi hi wo reply denge.`;
+      return `Boss 🧑‍🦱 abhi busy hain, unke aate hi unko bataunga aapka msg aaya hai, reply jaldi milega 😊😶‍🌫️`;
     };
 
     const apiKey = process.env.GEMINI_API_KEY;

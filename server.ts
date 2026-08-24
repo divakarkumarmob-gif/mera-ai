@@ -1178,6 +1178,17 @@ HOW TO READ MESSAGES:
           },
         },
         {
+          name: "get_whatsapp_latest_media",
+          description: "Inspect and describe what is inside the latest photo, PDF, document, video, or voice message received on WhatsApp. Use whenever DK asks 'photo me kya hai?', 'PDF/document me kya likha hai?', 'video me kya tha?', 'latest WhatsApp media check karo'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              query: { type: "STRING", description: "Optional specific question about the media, e.g. 'amount kitna hai', 'kiska photo hai', 'document ka title kya hai'" },
+            },
+            required: [],
+          },
+        },
+        {
           name: "set_whatsapp_reply_limit",
           description: "Change how many automatic WhatsApp replies Friday is allowed to send a specific contact per day (resets every day). Use when DK says things like 'Priya ka reply limit 15 kar do', 'Rahul ka limit ghata ke 3 kar do', or asks to increase/decrease/change how many auto-replies someone can get per day. Default is 10 per day per contact if never set.",
           parameters: {
@@ -2464,6 +2475,13 @@ HOW TO READ MESSAGES:
                   const note = await toolsEngine.addNote(title, content);
                   result = { success: true, message: `Note "${title}" saved to DK's notebook.` };
                   clientWs.send(JSON.stringify({ type: "note_saved", note }));
+                } else if (call.name === "get_whatsapp_latest_media") {
+                  const { query } = call.args || {};
+                  try {
+                    result = await visionMemoryService.getLatestMediaInfo(query ? String(query) : undefined);
+                  } catch (e: any) {
+                    result = { hasMedia: false, analysis: `Media fetch error: ${e?.message || e}` };
+                  }
                 } else if (call.name === "get_whatsapp_messages") {
                   const { messageType, senderName, groupName, dateFilter, limit } = call.args || {};
                   try {

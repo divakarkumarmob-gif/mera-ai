@@ -11,6 +11,8 @@
 //   WHATSAPP_FROM_NUMBER=<Your WhatsApp Business number with country code>
 // ---------------------------------------------------------------------------
 
+import { db } from "./firebaseAdmin";
+
 export interface CloudMessage {
   from: string;       // Sender phone (with country code, no +)
   name: string;       // Sender display name
@@ -28,6 +30,7 @@ class WhatsAppCloudService {
   private fromNumber: string = "";
   private messageCallback: MessageCallback | null = null;
   private isConfigured = false;
+  private lastAutoReplyAt = new Map<string, number>();
 
   constructor() {
     this.reload();
@@ -170,10 +173,14 @@ class WhatsAppCloudService {
 
       for (const msg of value.messages) {
         const isText = msg.type === "text";
-        const isMedia = msg.type === "image" || msg.type === "document";
+        const isImage = msg.type === "image";
+        const isDoc = msg.type === "document";
+        const isVideo = msg.type === "video";
+        const isAudio = msg.type === "audio" || msg.type === "voice";
+        const isMedia = isImage || isDoc || isVideo || isAudio;
 
         const from = msg.from;
-        const text = isText ? (msg.text?.body || "") : (msg.image?.caption || msg.document?.caption || `[${msg.type}]`);
+        let text = isText ? (msg.text?.body || "") : `[${msg.type}]`;
         const messageId = msg.id;
         const timestamp = parseInt(msg.timestamp, 10) * 1000;
 
@@ -181,34 +188,128 @@ class WhatsAppCloudService {
         const contact = contacts.find((c: any) => c.wa_id === from);
         const name = contact?.profile?.name || from;
 
-        // Vision AI: Download Cloud media if image/document
-        if (isMedia && this.token) {
-          const mediaId = msg.image?.id || msg.document?.id;
-          const mimeType = msg.image?.mime_type || msg.document?.mime_type || "image/jpeg";
-          const caption = msg.image?.caption || msg.document?.caption || "";
+        const docFileName = msg.document?.filename;
+        const mediaCaption = isImage
+          ? msg.image?.caption
+          : isDoc
+          ? msg.document?.caption
+          : isVideo
+          ? msg.video?.caption
+          : undefined;
 
-          if (mediaId) {
-            (async () => {
-              try {
-                const metaRes = await fetch(`https://graph.facebook.com/v19.0/${mediaId}`, {
-                  headers: { Authorization: `Bearer ${this.token}` },
-                });
-                const metaData = await metaRes.json();
-                if (metaData?.url) {
-                  const fileRes = await fetch(metaData.url, {
+        // Async processor for media downloading, multimodal AI analysis, inbox saving & auto-reply
+        (async () => {
+          try {
+            const { contactsService } = await import("./contactsService");
+            const { whatsappBotService } = await import("./whatsappBotService");
+            const { visionMemoryService } = await import("./visionMemoryService");
+
+            const foundContact = await contactsService.findContact(from);
+            const senderName = foundContact ? foundContact.name : name || from;
+            const isUnknownContact = !foundContact;
+            const dateStr = new Date(timestamp).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+
+            let mediaAnalysisSummary = "";
+            let mediaCategory: "image" | "video" | "document" | "audio" | null = null;
+
+            // 1. Download and analyze media if present
+            if (isMedia && this.token) {
+              const mediaId = msg.image?.id || msg.document?.id || msg.video?.id || msg.audio?.id;
+              const mimeType = msg.image?.mime_type || msg.document?.mime_type || msg.video?.mime_type || msg.audio?.mime_type || (isVideo ? "video/mp4" : isAudio ? "audio/ogg" : isDoc ? "application/pdf" : "image/jpeg");
+
+              if (mediaId) {
+                try {
+                  const metaRes = await fetch(`https://graph.facebook.com/v19.0/${mediaId}`, {
                     headers: { Authorization: `Bearer ${this.token}` },
                   });
-                  const arrayBuffer = await fileRes.arrayBuffer();
-                  const buffer = Buffer.from(arrayBuffer);
-                  const { visionMemoryService } = await import("./visionMemoryService");
-                  await visionMemoryService.processIncomingMedia(buffer, mimeType, name, caption);
+                  const metaData = await metaRes.json();
+                  if (metaData?.url) {
+                    const fileRes = await fetch(metaData.url, {
+                      headers: { Authorization: `Bearer ${this.token}` },
+                    });
+                    const arrayBuffer = await fileRes.arrayBuffer();
+                    const buffer = Buffer.from(arrayBuffer);
+                    const analyzed = await visionMemoryService.processIncomingMedia(
+                      buffer,
+                      mimeType,
+                      senderName,
+                      mediaCaption,
+                      docFileName
+                    );
+                    mediaAnalysisSummary = analyzed.shortSummary || analyzed.analysis;
+                    mediaCategory = analyzed.mediaCategory;
+                  }
+                } catch (mediaErr) {
+                  console.warn("[WhatsApp Cloud] Failed to process incoming media for Vision:", mediaErr);
                 }
-              } catch (mediaErr) {
-                console.warn("[WhatsApp Cloud] Failed to process incoming media for Vision:", mediaErr);
               }
-            })();
+            }
+
+            // Construct rich message text
+            if (isMedia) {
+              if (isDoc) {
+                text = docFileName
+                  ? `[PDF/Document: ${docFileName}${mediaCaption ? ` - "${mediaCaption}"` : ""}${mediaAnalysisSummary ? ` | AI Summary: ${mediaAnalysisSummary}` : ""}]`
+                  : `[Document/PDF${mediaAnalysisSummary ? ` | AI Summary: ${mediaAnalysisSummary}` : ""}]`;
+              } else if (isImage) {
+                text = `[Photo${mediaCaption ? ` "${mediaCaption}"` : ""}${mediaAnalysisSummary ? ` | Details: ${mediaAnalysisSummary}` : ""}]`;
+              } else if (isVideo) {
+                text = `[Video${mediaCaption ? ` "${mediaCaption}"` : ""}${mediaAnalysisSummary ? ` | Details: ${mediaAnalysisSummary}` : ""}]`;
+              } else if (isAudio) {
+                text = `[Voice Message${mediaAnalysisSummary ? ` | Transcript: ${mediaAnalysisSummary}` : ""}]`;
+              }
+            }
+
+            const incomingRecord = {
+              id: messageId,
+              senderPhone: from,
+              senderName,
+              senderDisplayName: name || from,
+              replyJid: `${from}@s.whatsapp.net`,
+              groupId: null,
+              groupName: null,
+              isGroup: false,
+              isUnknownContact,
+              text,
+              timestamp,
+              dateStr,
+              isRead: false,
+            };
+
+            // Save to Firestore inbox
+            await db.collection("whatsapp_inbox").doc(messageId).set(incomingRecord, { merge: true });
+            // Add to in-memory cache
+            whatsappBotService.recordIncomingMessage(incomingRecord);
+
+            // 2. Intelligent Auto-Reply if sender is not the owner
+            const ownerPhone = (process.env.OWNER_WHATSAPP_NUMBER || "").replace(/\D/g, "");
+            const fromDigits = from.replace(/\D/g, "");
+            if (!ownerPhone || fromDigits !== ownerPhone) {
+              const now = Date.now();
+              const lastSent = this.lastAutoReplyAt.get(from) || 0;
+              // 15s debounce per sender
+              if (now - lastSent > 15000) {
+                this.lastAutoReplyAt.set(from, now);
+
+                let replyText = "Boss 🧑‍🦱 abhi busy hain, unke aate hi unko bataunga aapka msg aaya hai, reply jaldi milega 😊😶‍🌫️";
+                if (isDoc) {
+                  replyText = `Boss 🧑‍🦱 abhi busy hain, maine aapka document/PDF (${docFileName || "file"}) receive kar liya hai. Jaise hi boss aayenge main unko bataungi, reply jaldi milega 😊😶‍🌫️`;
+                } else if (isImage) {
+                  replyText = `Boss 🧑‍🦱 abhi busy hain, maine aapki photo receive kar li hai. Jaise hi boss aayenge main unko bataungi, reply jaldi milega 😊😶‍🌫️`;
+                } else if (isVideo) {
+                  replyText = `Boss 🧑‍🦱 abhi busy hain, maine aapka video receive kar liya hai. Jaise hi boss aayenge main unko bataungi, reply jaldi milega 😊😶‍🌫️`;
+                } else if (isAudio) {
+                  replyText = `Boss 🧑‍🦱 abhi busy hain, maine aapka voice message note kar liya hai. Jaise hi boss aayenge main unko bataungi, reply jaldi milega 😊😶‍🌫️`;
+                }
+
+                console.log(`[WhatsApp Cloud] Sending auto-reply to ${from}: "${replyText}"`);
+                await this.sendMessage(from, replyText);
+              }
+            }
+          } catch (persistErr) {
+            console.error("[WhatsApp Cloud] Failed to persist incoming message or auto-reply:", persistErr);
           }
-        }
+        })();
 
         const cloudMsg: CloudMessage = { from, name, text, messageId, timestamp };
         console.log(`[WhatsApp Cloud] Incoming from ${name} (${from}): ${text.slice(0, 80)}`);

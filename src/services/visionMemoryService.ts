@@ -42,35 +42,68 @@ class VisionMemoryService {
   }
 
   /**
-   * Processes and stores an incoming WhatsApp photo, image, or document (PDF).
+   * Processes and stores an incoming WhatsApp photo, image, video, PDF, document, or audio.
    */
   public async processIncomingMedia(
     buffer: Buffer,
     mimeType: string,
     sender: string,
-    caption?: string
-  ): Promise<{ analysis: string; ocrText?: string }> {
+    caption?: string,
+    fileName?: string
+  ): Promise<{ analysis: string; ocrText?: string; mediaCategory: "image" | "video" | "document" | "audio"; shortSummary: string }> {
     const ai = this.getGenAI();
-    let analysis = "Image received.";
+    let analysis = "Media received.";
     let ocrText = "";
+    let shortSummary = "";
+
+    const lowerMime = (mimeType || "").toLowerCase();
+    const isDoc = lowerMime.includes("pdf") || lowerMime.includes("document") || lowerMime.includes("text") || lowerMime.includes("sheet") || lowerMime.includes("presentation") || lowerMime.includes("msword");
+    const isVideo = lowerMime.includes("video");
+    const isAudio = lowerMime.includes("audio") || lowerMime.includes("ogg");
+    const isImage = !isDoc && !isVideo && !isAudio;
+
+    const mediaCategory: "image" | "video" | "document" | "audio" = isDoc ? "document" : isVideo ? "video" : isAudio ? "audio" : "image";
 
     try {
       if (ai) {
         const base64Data = buffer.toString("base64");
-        const isDoc = mimeType.includes("pdf") || mimeType.includes("document");
 
-        const prompt = isDoc
-          ? `You are Friday AI. Analyze this document in detail:
-1. Document Type & Title
-2. Full Text / Key Points (OCR)
-3. Important numbers, dates, amounts, or names
-4. A concise 3-sentence summary in conversational Hindi/Hinglish.`
-          : `You are Friday AI. Analyze this photo/image in rich detail:
-1. What is in this photo (people, objects, scene, setting, emotions)?
-2. If there are people, describe their physical appearance (approx age, gender, hair, clothing, distinct traits) for future identification.
-3. If there is text, extract all readable text (OCR).
-4. Provide a friendly, conversational 3-sentence summary in Hindi/Hinglish for Boss (DK).
+        let prompt = "";
+        if (isDoc) {
+          prompt = `You are Friday AI, DK's elite assistant. Analyze this received PDF/Document (${fileName || "document"}) thoroughly:
+1. Document Type & Title:
+2. Full Text / Key Content (OCR):
+3. Key Financials, Dates, Names, Terms, or Action Items:
+4. Short 2-sentence conversational summary in Hindi/Hinglish for Boss DK:
 ${caption ? `User caption: "${caption}"` : ""}`;
+        } else if (isVideo) {
+          prompt = `You are Friday AI. Analyze this received video:
+1. Visual contents & key actions happening in the video:
+2. People, objects, or text visible on screen:
+3. Audio/Dialogue summary if present:
+4. Short 2-sentence summary in Hindi/Hinglish for Boss DK:
+${caption ? `User caption: "${caption}"` : ""}`;
+        } else if (isAudio) {
+          prompt = `You are Friday AI. Transcribe and analyze this voice note / audio:
+1. Exact transcription of what was said:
+2. Tone, intent, and context:
+3. Short 2-sentence summary in Hindi/Hinglish for Boss DK:`;
+        } else {
+          prompt = `You are Friday AI. Analyze this photo/image in rich detail:
+1. What is in this photo (people, objects, scene, setting, emotions)?
+2. If there are people, describe their physical appearance (approx age, gender, hair, clothing, distinct traits) for identification.
+3. If there is text in the image, extract all readable text (OCR).
+4. Short 2-sentence summary in Hindi/Hinglish for Boss DK:
+${caption ? `User caption: "${caption}"` : ""}`;
+        }
+
+        const normalizedMime = isDoc
+          ? (lowerMime.includes("pdf") ? "application/pdf" : "application/pdf")
+          : isVideo
+          ? "video/mp4"
+          : isAudio
+          ? (lowerMime.includes("ogg") ? "audio/ogg" : "audio/mp3")
+          : (lowerMime.includes("png") ? "image/png" : lowerMime.includes("webp") ? "image/webp" : "image/jpeg");
 
         const response = await ai.models.generateContent({
           model: "gemini-2.5-flash",
@@ -81,7 +114,7 @@ ${caption ? `User caption: "${caption}"` : ""}`;
                 { text: prompt },
                 {
                   inlineData: {
-                    mimeType: mimeType || "image/jpeg",
+                    mimeType: normalizedMime,
                     data: base64Data,
                   },
                 },
@@ -90,14 +123,19 @@ ${caption ? `User caption: "${caption}"` : ""}`;
           ],
         });
 
-        analysis = response.text || "Photo received and analyzed.";
+        analysis = response.text || "Media received and analyzed.";
         if (isDoc || analysis.toLowerCase().includes("text:") || analysis.toLowerCase().includes("ocr")) {
           ocrText = analysis;
         }
+
+        // Extract first 2-3 lines as short summary
+        const lines = analysis.split("\n").filter((l) => l.trim().length > 0);
+        shortSummary = lines.slice(0, 3).join(" ").slice(0, 180);
       }
     } catch (e: any) {
-      console.error("[VisionMemoryService] Vision analysis error:", e);
-      analysis = `Photo received from ${sender} (Analysis error: ${e?.message || e})`;
+      console.error("[VisionMemoryService] Media analysis error:", e);
+      analysis = `${mediaCategory} received from ${sender} (Analysis error: ${e?.message || e})`;
+      shortSummary = `${mediaCategory} received from ${sender}`;
     }
 
     // Cache latest media in memory
@@ -105,7 +143,7 @@ ${caption ? `User caption: "${caption}"` : ""}`;
       buffer,
       mimeType,
       sender,
-      caption,
+      caption: caption || fileName,
       analysis,
       ocrText,
       timestamp: Date.now(),
@@ -120,9 +158,11 @@ ${caption ? `User caption: "${caption}"` : ""}`;
         id: mediaId,
         sender,
         mimeType,
-        caption: caption || "",
+        mediaCategory,
+        caption: caption || fileName || "",
         analysis,
         ocrText: ocrText || "",
+        shortSummary,
         timestamp: Date.now(),
         photoBase64: thumbBase64,
       });
@@ -130,7 +170,7 @@ ${caption ? `User caption: "${caption}"` : ""}`;
       console.warn("[VisionMemoryService] Failed to archive media in Firestore:", e);
     }
 
-    return { analysis, ocrText };
+    return { analysis, ocrText, mediaCategory, shortSummary };
   }
 
   /**
