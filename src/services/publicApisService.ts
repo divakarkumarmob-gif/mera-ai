@@ -836,86 +836,232 @@ class PublicApisService {
     return { code: station.code, name: station.name };
   }
 
+  // Helper: Free Indian Railway provider fallback (No API key required)
+  private async getFreeTrainData(trainNumber: string): Promise<any> {
+    try {
+      const res = await fetch(`https://rappid.in/apis/train.php?train_no=${encodeURIComponent(trainNumber)}`, {
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (!data || !data.success || !Array.isArray(data.data) || !data.data.length) return null;
+      return data;
+    } catch {
+      return null;
+    }
+  }
+
   // 40. Trains between two stations
   public async getTrainsBetweenStations(fromPlace: string, toPlace: string): Promise<any> {
     const headers = this.rapidApiHeaders();
-    if (!headers) return { success: false, message: "RAPIDAPI_KEY .env me set nahi hai." };
-
-    try {
-      const [from, to] = await Promise.all([this.findStationCode(fromPlace), this.findStationCode(toPlace)]);
-      if (!from) return { success: false, message: `"${fromPlace}" station nahi mila.` };
-      if (!to) return { success: false, message: `"${toPlace}" station nahi mila.` };
-
-      const res = await fetch(
-        `https://irctc1.p.rapidapi.com/api/v1/trainBetweenStations?fromStationCode=${from.code}&toStationCode=${to.code}`,
-        { headers }
-      );
-      const data = await res.json();
-      const trains = (data?.data || []).slice(0, 8).map((t: any) => ({
-        trainNumber: t.train_number,
-        trainName: t.train_name,
-        departureTime: t.from_std,
-        arrivalTime: t.to_std,
-        duration: t.duration,
-      }));
-      if (!trains.length) return { success: false, message: `"${from.name}" se "${to.name}" ke beech koi train nahi mili.` };
-      return { success: true, from: from.name, to: to.name, count: trains.length, trains };
-    } catch (e: any) {
-      return { success: false, message: `Train list fetch fail hui: ${e?.message || e}` };
+    if (headers) {
+      try {
+        const [from, to] = await Promise.all([this.findStationCode(fromPlace), this.findStationCode(toPlace)]);
+        if (from && to) {
+          const res = await fetch(
+            `https://irctc1.p.rapidapi.com/api/v1/trainBetweenStations?fromStationCode=${from.code}&toStationCode=${to.code}`,
+            { headers }
+          );
+          const data = await res.json();
+          const trains = (data?.data || []).slice(0, 8).map((t: any) => ({
+            trainNumber: t.train_number,
+            trainName: t.train_name,
+            departureTime: t.from_std,
+            arrivalTime: t.to_std,
+            duration: t.duration,
+          }));
+          if (trains.length) {
+            return { success: true, from: from.name, to: to.name, count: trains.length, trains };
+          }
+        }
+      } catch {
+        // Fall through to free search fallback
+      }
     }
+
+    // Fallback search
+    try {
+      const q = encodeURIComponent(`trains between ${fromPlace} and ${toPlace}`);
+      const res = await fetch(`https://html.duckduckgo.com/html/?q=${q}`, {
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+      });
+      const html = await res.text();
+      const snippets: string[] = [];
+      const regex = /<a class="result__snippet[^>]*>(.*?)<\/a>/g;
+      let match;
+      while ((match = regex.exec(html)) !== null && snippets.length < 3) {
+        const clean = match[1].replace(/<[^>]*>/g, "").trim();
+        if (clean) snippets.push(clean);
+      }
+      if (snippets.length) {
+        return {
+          success: true,
+          from: fromPlace,
+          to: toPlace,
+          summary: snippets.join(" | "),
+          source: "web_fallback",
+        };
+      }
+    } catch {
+      // Ignore fallback errors
+    }
+
+    return { success: false, message: `"${fromPlace}" se "${toPlace}" ke beech train list nahi mil saki.` };
   }
 
   // 41. Train schedule by train number
   public async getTrainSchedule(trainNumber: string): Promise<any> {
     const headers = this.rapidApiHeaders();
-    if (!headers) return { success: false, message: "RAPIDAPI_KEY .env me set nahi hai." };
-    try {
-      const res = await fetch(
-        `https://irctc1.p.rapidapi.com/api/v1/getTrainSchedule?trainNo=${encodeURIComponent(trainNumber)}`,
-        { headers }
-      );
-      const data = await res.json();
-      const t = data?.data;
-      if (!t) return { success: false, message: `Train number "${trainNumber}" ka schedule nahi mila.` };
-      const stops = (t.route || []).slice(0, 10).map((s: any) => ({
-        station: s.station_name,
-        arrival: s.arrival_time,
-        departure: s.departure_time,
-        day: s.day_count,
-      }));
-      return { success: true, trainNumber, trainName: t.train_name, stops };
-    } catch (e: any) {
-      return { success: false, message: `Train schedule fetch fail hui: ${e?.message || e}` };
+    if (headers) {
+      try {
+        const res = await fetch(
+          `https://irctc1.p.rapidapi.com/api/v1/getTrainSchedule?trainNo=${encodeURIComponent(trainNumber)}`,
+          { headers }
+        );
+        const data = await res.json();
+        const t = data?.data;
+        if (t && t.route && t.route.length) {
+          const stops = (t.route || []).slice(0, 15).map((s: any) => ({
+            station: s.station_name,
+            arrival: s.arrival_time,
+            departure: s.departure_time,
+            platform: s.platform_number || s.platform_num || s.platform || "Not specified",
+            day: s.day_count,
+          }));
+          return { success: true, trainNumber, trainName: t.train_name, stops, source: "rapidapi" };
+        }
+      } catch {
+        // Fall through to free fallback
+      }
     }
-  }
 
-  // 42. PNR status
-  public async getPnrStatus(pnrNumber: string): Promise<any> {
-    const headers = this.rapidApiHeaders();
-    if (!headers) return { success: false, message: "RAPIDAPI_KEY .env me set nahi hai." };
-    try {
-      const res = await fetch(
-        `https://irctc1.p.rapidapi.com/api/v1/checkPNRStatus?pnrNumber=${encodeURIComponent(pnrNumber)}`,
-        { headers }
-      );
-      const data = await res.json();
-      const d = data?.data;
-      if (!d) return { success: false, message: `PNR "${pnrNumber}" ka status nahi mila.` };
+    // Free fallback (No API key needed)
+    const freeData = await this.getFreeTrainData(trainNumber);
+    if (freeData) {
+      const stops = freeData.data.slice(0, 15).map((s: any) => ({
+        station: s.station_name,
+        timing: s.timing,
+        delay: s.delay || "On Time",
+        platform: s.platform || "Not specified",
+        halt: s.halt || "-",
+        distance: s.distance || "-",
+      }));
       return {
         success: true,
-        pnrNumber,
-        trainName: d.trainName,
-        trainNumber: d.trainNumber,
-        dateOfJourney: d.dateOfJourney,
-        chartStatus: d.chartStatus,
-        passengers: (d.passengerList || []).map((p: any) => ({
-          currentStatus: p.currentStatus,
-          bookingStatus: p.bookingStatus,
-        })),
+        trainNumber,
+        trainName: freeData.train_name || `Train ${trainNumber}`,
+        updatedTime: freeData.updated_time,
+        stops,
+        source: "free_fallback",
       };
-    } catch (e: any) {
-      return { success: false, message: `PNR status fetch fail hui: ${e?.message || e}` };
     }
+
+    return { success: false, message: `Train number "${trainNumber}" ka schedule nahi mila.` };
+  }
+
+  // 42. Live train running status (Location, delay, expected platform)
+  public async getLiveTrainStatus(trainNumber: string, startDay: number = 0): Promise<any> {
+    const headers = this.rapidApiHeaders();
+    if (headers) {
+      try {
+        const res = await fetch(
+          `https://irctc1.p.rapidapi.com/api/v1/liveTrainStatus?trainNo=${encodeURIComponent(trainNumber)}&startDay=${startDay}`,
+          { headers }
+        );
+        const data = await res.json();
+        const d = data?.data;
+        if (d && (d.train_name || d.upcoming_stations || d.current_station_name)) {
+          const upcoming = (d.upcoming_stations || d.station_list || []).slice(0, 5).map((s: any) => ({
+            station: s.station_name,
+            expectedArrival: s.eta || s.arrival_time,
+            expectedDeparture: s.etd || s.departure_time,
+            platform: s.platform_number || s.platform_num || s.platform || "TBD",
+            delayInArrival: s.delay_in_arrival || 0,
+            delayInDeparture: s.delay_in_departure || 0,
+          }));
+
+          const currentOrLast = d.current_station_name || d.last_stop || d.status_as_of || "On track";
+
+          return {
+            success: true,
+            trainNumber,
+            trainName: d.train_name,
+            currentLocation: currentOrLast,
+            statusSummary: d.status_as_of || d.status || d.headline || "Running",
+            delayMinutes: d.delay || (upcoming.length ? upcoming[0].delayInArrival : 0),
+            nextStop: upcoming[0]?.station || "N/A",
+            expectedPlatform: upcoming[0]?.platform || "TBD",
+            upcomingStations: upcoming,
+            source: "rapidapi",
+          };
+        }
+      } catch {
+        // Fall through to free fallback
+      }
+    }
+
+    // Free fallback (No API key needed)
+    const freeData = await this.getFreeTrainData(trainNumber);
+    if (freeData) {
+      const stations = freeData.data || [];
+      const currentStation = stations.find((s: any) => s.is_current_station) || stations[0];
+      const upcoming = stations.slice(0, 6).map((s: any) => ({
+        station: s.station_name,
+        timing: s.timing,
+        platform: s.platform || "TBD",
+        delay: s.delay || "On Time",
+        halt: s.halt,
+      }));
+
+      return {
+        success: true,
+        trainNumber,
+        trainName: freeData.train_name,
+        statusSummary: freeData.message || freeData.updated_time || "Live status retrieved",
+        currentLocation: currentStation?.station_name || "En route",
+        expectedPlatform: currentStation?.platform || upcoming[0]?.platform || "TBD",
+        delay: currentStation?.delay || upcoming[0]?.delay || "On Time",
+        upcomingStations: upcoming,
+        updatedTime: freeData.updated_time,
+        source: "free_fallback",
+      };
+    }
+
+    return { success: false, message: `Train number "${trainNumber}" ka live status nahi mila.` };
+  }
+
+  // 43. PNR status
+  public async getPnrStatus(pnrNumber: string): Promise<any> {
+    const headers = this.rapidApiHeaders();
+    if (headers) {
+      try {
+        const res = await fetch(
+          `https://irctc1.p.rapidapi.com/api/v1/checkPNRStatus?pnrNumber=${encodeURIComponent(pnrNumber)}`,
+          { headers }
+        );
+        const data = await res.json();
+        const d = data?.data;
+        if (d && d.passengerList) {
+          return {
+            success: true,
+            pnrNumber,
+            trainName: d.trainName,
+            trainNumber: d.trainNumber,
+            dateOfJourney: d.dateOfJourney,
+            chartStatus: d.chartStatus,
+            passengers: (d.passengerList || []).map((p: any) => ({
+              currentStatus: p.currentStatus,
+              bookingStatus: p.bookingStatus,
+            })),
+            source: "rapidapi",
+          };
+        }
+      } catch {
+        // Fall through to fallback message
+      }
+    }
+
+    return { success: false, message: `PNR "${pnrNumber}" ka status abhi check nahi ho saka. RapidAPI key check karein.` };
   }
 }
 

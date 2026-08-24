@@ -348,7 +348,7 @@ PUBLIC API TOOLS — INDIA-FIRST DEFAULT:
 - For "get_country_info", "get_directions", "get_weather" etc. — if DK just says a city name with no country, assume it's an Indian city unless the name is unambiguous elsewhere (e.g. "Paris" stays Paris, France).
 - This default only applies when DK doesn't specify — if he names a country/city/exchange explicitly, always respect that instead.
 - TOOL FAILURES: every public API tool returns a "success" field — check it before answering. If "success" is false (key missing/wrong, or the API itself failed), tell DK honestly and simply in your own natural voice — e.g. "Boss, iska API abhi connect nahi ho pa raha" or "Boss, iski key galat lag rahi hai, ek baar check kar lena." Don't read out raw error text or technical jargon, and never pretend you got the data when you didn't.
-- TRAIN TOOLS QUOTA: "get_trains_between_stations", "get_train_schedule", and "get_pnr_status" run on a very limited free quota (~50 calls/month total). Only call these when DK explicitly asks about trains/PNR — never speculatively, never to double-check, never as part of a broader multi-tool answer.
+- TRAIN TOOLS QUOTA: "get_trains_between_stations", "get_train_schedule", "get_live_train_status", and "get_pnr_status" run on a very limited free quota (~50 calls/month total). Only call these when DK explicitly asks about trains/PNR — never speculatively, never to double-check, never as part of a broader multi-tool answer.
 
 SHUTDOWN: Judge by intent, not exact words — any way DK says to stop/go quiet/end session ("chup ho jao", "bye", "stop"...) means the same thing. Acknowledge briefly and warmly ("Theek hai DK, main chup ho rahi hoon..."), then stop — no follow-up questions, session closes automatically.
 
@@ -1027,11 +1027,23 @@ HOW TO READ MESSAGES:
         },
         {
           name: "get_train_schedule",
-          description: "Get the full stop-by-stop schedule/route for a specific train number. Free quota is very limited, so only call this when DK explicitly asks.",
+          description: "Get the full stop-by-stop schedule/route for a specific train number with platform info. Free quota is very limited, so only call this when DK explicitly asks.",
           parameters: {
             type: "OBJECT",
             properties: {
               trainNumber: { type: "STRING", description: "The train number, e.g. '12951'" },
+            },
+            required: ["trainNumber"],
+          },
+        },
+        {
+          name: "get_live_train_status",
+          description: "Get real-time live running status, current location, delay, next station, and expected platform number for a running train. Use when DK asks live status, kahan tak pahunchi, late hai ya nahi, ya platform number kya hai.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              trainNumber: { type: "STRING", description: "The train number, e.g. '12951'" },
+              startDay: { type: "INTEGER", description: "Journey start day: 0 for today (default), 1 for yesterday, 2 for 2 days ago" },
             },
             required: ["trainNumber"],
           },
@@ -1598,6 +1610,16 @@ HOW TO READ MESSAGES:
                     result = await publicApisService.getTrainSchedule(String(trainNumber || ""));
                   } catch (e: any) {
                     result = { success: false, message: `Train schedule fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_live_train_status") {
+                  const { trainNumber, startDay } = call.args || {};
+                  try {
+                    result = await publicApisService.getLiveTrainStatus(
+                      String(trainNumber || ""),
+                      typeof startDay === "number" ? startDay : 0
+                    );
+                  } catch (e: any) {
+                    result = { success: false, message: `Live train status fetch fail hui: ${e?.message || e}` };
                   }
                 } else if (call.name === "get_pnr_status") {
                   const { pnrNumber } = call.args || {};
