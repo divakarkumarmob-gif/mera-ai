@@ -408,6 +408,25 @@ Rules:
     });
   }
 
+  /**
+   * Approves the plan, writes code, and immediately pushes & commits directly to the main origin branch.
+   */
+  public async approveAndPushDirectlyToMain(id: string): Promise<void> {
+    await this.addLog(id, "Direct Commit to Main requested via Live Voice by Boss.", "info", "approved_main");
+    await requestsCol().doc(id).set({ status: "applying", updatedAt: Date.now() }, { merge: true });
+
+    (async () => {
+      try {
+        await this.generateDiffPreview(id);
+        const result = await this.pushToMain(id);
+        await this.addLog(id, `Successfully committed directly to main origin: ${result.commitUrl}`, "success", "completed");
+      } catch (err: any) {
+        console.error(`[CodeAgent] Direct push to main failed for ${id}:`, err);
+        await this.markFailed(id, err?.message || String(err), "push_to_main");
+      }
+    })();
+  }
+
   public async deny(id: string) {
     await this.addLog(id, "Plan denied by user.", "warn", "denied");
     await requestsCol().doc(id).set({ status: "denied", updatedAt: Date.now() }, { merge: true });

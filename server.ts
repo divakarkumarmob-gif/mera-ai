@@ -581,6 +581,21 @@ SELF-HEALING & AUTOMATIC BUG DELEGATION TO CODING AGENT:
      - Tell DK clearly: "Boss, [service name] me problem aa rahi hai ([error summary]). Kya main isko theek karne ke liye Coding Agent ke paas bhej doon?"
      - When DK says "haan", "bhej do", "theek karwa do", "fix karo": call 'dispatch_bug_to_code_agent' and confirm: "Boss, kaam Coding Agent ko de diya gaya hai!"
 
+LIVE CODING AGENT PERMISSION & VOICE COMMIT TO MAIN:
+- Tools: 'get_pending_code_agent_request', 'approve_and_commit_code_agent', 'deny_code_agent_request'.
+- When the Coding Agent is waiting for approval or permission:
+  1. In conversation, inform DK naturally:
+     "Boss, Coding Agent permission maang raha hai ki [plan summary / affected files] edit kare ya nahi."
+  2. When DK gives voice commands like:
+     - "Coding agent ko bolo ki code main branch me commit kar do"
+     - "Haan approve kar do aur main branch me daal do"
+     - "Commit to main kar do"
+     * IMMEDIATELY call 'approve_and_commit_code_agent'
+     * Say directly to DK: "Boss, Coding Agent ko command de di hai! Code ko main origin branch me commit aur push kiya ja raha hai."
+  3. When DK says "Nahi", "Roko", "Deny karo":
+     * Call 'deny_code_agent_request'
+     * Confirm: "Boss, Coding Agent ka task cancel kar diya gaya hai."
+
 DAILY LIFE ESSENTIALS (MEDICINE, GOLD/PETROL, EMERGENCY, CHALLAN, BILLS, SCHEMES, EXPENSES, BUS):
 - 'get_medicine_and_generic_info': Explain medicine uses, precautions, and suggest 70% cheaper Jan Aushadhi generic alternative salts.
 - 'get_daily_commodity_rates': Gold (22K/24K), Silver, Petrol, Diesel, and LPG cylinder rates in Indian cities.
@@ -1568,6 +1583,37 @@ HOW TO READ MESSAGES:
           parameters: {
             type: "OBJECT",
             properties: {},
+            required: [],
+          },
+        },
+        {
+          name: "get_pending_code_agent_request",
+          description: "Check if the Friday Coding Agent has prepared a plan and is currently waiting for DK's approval or permission to edit files.",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+            required: [],
+          },
+        },
+        {
+          name: "approve_and_commit_code_agent",
+          description: "Approve the pending Coding Agent plan and commit/push the changes directly to the main origin branch. Call when DK says 'Coding agent ko bolo ki code main branch me commit kar do', 'Approve kar do', 'Main me push kar do', 'Code commit karo'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              requestId: { type: "STRING", description: "Optional: Request ID to approve. If not provided, approves the latest pending request." },
+            },
+            required: [],
+          },
+        },
+        {
+          name: "deny_code_agent_request",
+          description: "Deny or cancel the pending Coding Agent request. Call when DK says 'Nahi mat karo', 'Deny kar do', 'Coding agent roko', 'Cancel kar do'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              requestId: { type: "STRING", description: "Optional: Request ID to deny. If not provided, denies the latest pending request." },
+            },
             required: [],
           },
         },
@@ -2573,6 +2619,59 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                     };
                   } catch (e: any) {
                     result = { success: false, message: `Rollback fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_pending_code_agent_request") {
+                  try {
+                    const pending = await codeAgentService.getPendingRequest();
+                    if (!pending) {
+                      result = { hasPending: false, message: "Abhi koi coding agent task permission ke liye wait nahi kar raha hai boss." };
+                    } else {
+                      const filesList = pending.plan?.files?.map((f: any) => `${f.path} (${f.action})`).join(", ") || "Files";
+                      result = {
+                        hasPending: true,
+                        requestId: pending.id,
+                        instruction: pending.instruction,
+                        summary: pending.plan?.summary,
+                        affectedFiles: filesList,
+                        message: `Boss, Coding Agent permission maang raha hai: "${pending.instruction}". Plan: ${pending.plan?.summary}. Affected files: ${filesList}.`,
+                      };
+                    }
+                  } catch (e: any) {
+                    result = { success: false, message: `Pending request check karne me error: ${e?.message || e}` };
+                  }
+                } else if (call.name === "approve_and_commit_code_agent") {
+                  const { requestId } = call.args || {};
+                  try {
+                    const targetId = requestId || (await codeAgentService.getPendingRequest())?.id;
+                    if (!targetId) {
+                      result = { success: false, message: "Boss, koi pending coding request nahi mili jise approve kiya ja sake." };
+                    } else {
+                      await codeAgentService.approveAndPushDirectlyToMain(targetId);
+                      result = {
+                        success: true,
+                        requestId: targetId,
+                        message: `Boss, Coding Agent ko command de di hai! Code ko compile aur direct main origin branch me commit & push kiya ja raha hai.`,
+                      };
+                    }
+                  } catch (e: any) {
+                    result = { success: false, message: `Approve and commit fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "deny_code_agent_request") {
+                  const { requestId } = call.args || {};
+                  try {
+                    const targetId = requestId || (await codeAgentService.getPendingRequest())?.id;
+                    if (!targetId) {
+                      result = { success: false, message: "Boss, koi pending coding request nahi mili jise deny kiya ja sake." };
+                    } else {
+                      await codeAgentService.deny(targetId);
+                      result = {
+                        success: true,
+                        requestId: targetId,
+                        message: `Boss, Coding Agent task ko deny aur cancel kar diya gaya hai.`,
+                      };
+                    }
+                  } catch (e: any) {
+                    result = { success: false, message: `Deny fail hua: ${e?.message || e}` };
                   }
                 } else if (call.name === "get_linkedin_insights") {
                   const { query } = call.args || {};
