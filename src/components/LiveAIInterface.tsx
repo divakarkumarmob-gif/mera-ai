@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { X, Mic, Plus, Loader2, Settings, ChevronDown, Captions, MessageSquare, Square, Code2, Terminal, Shield, Trash2, Key, Check, AlertCircle, Send, Instagram } from 'lucide-react';
+import { X, Mic, Plus, Loader2, Settings, ChevronDown, Captions, MessageSquare, Square, Code2, Terminal, Shield, ShieldCheck, Trash2, Key, Check, AlertCircle, Send, Instagram } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import AgentFace from './AgentFace';
 import ChatHistoryModal from './ChatHistoryModal';
@@ -450,6 +450,40 @@ function InstagramBotCard() {
                     </span>
                 </div>
             )}
+        </div>
+    );
+}
+
+// ── Cyber Security & OSINT Recon Suite Card ──────────────────────────────────
+function CyberSecurityCard() {
+    return (
+        <div className="pt-3 border-t border-white/10">
+            <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                    <span className="text-white font-bold text-sm">Cyber Defense & OSINT Suite</span>
+                </div>
+                <span className="text-[10px] font-black tracking-wider px-2 py-0.5 rounded-full uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-[0_0_8px_rgba(16,185,129,0.3)]">
+                    Active Armed
+                </span>
+            </div>
+            <p className="text-xs text-slate-400 mb-2.5">
+                Ethical hacker recon tools: Phishing link inspector, data breach leak hunter, website security audits, and IP intelligence.
+            </p>
+            <div className="grid grid-cols-2 gap-1.5 text-[11px]">
+                <div className="p-2 rounded-xl bg-slate-900/80 border border-white/5 text-slate-300 flex items-center gap-1.5">
+                    <span>🔍</span> <span>Link Phish Scan</span>
+                </div>
+                <div className="p-2 rounded-xl bg-slate-900/80 border border-white/5 text-slate-300 flex items-center gap-1.5">
+                    <span>🕵️</span> <span>Data Breach Check</span>
+                </div>
+                <div className="p-2 rounded-xl bg-slate-900/80 border border-white/5 text-slate-300 flex items-center gap-1.5">
+                    <span>🌐</span> <span>Domain SSL Audit</span>
+                </div>
+                <div className="p-2 rounded-xl bg-slate-900/80 border border-white/5 text-slate-300 flex items-center gap-1.5">
+                    <span>📍</span> <span>IP Trace & Recon</span>
+                </div>
+            </div>
         </div>
     );
 }
@@ -1679,6 +1713,9 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
 
                             {/* Friday Instagram Direct Bot Card */}
                             <InstagramBotCard />
+
+                            {/* Friday Cyber Security & OSINT Suite Card */}
+                            <CyberSecurityCard />
                         </div>
                     </motion.div>
                 )}

@@ -25,6 +25,7 @@ import { visionMemoryService } from "./src/services/visionMemoryService";
 import { voiceBiometricsService } from "./src/services/voiceBiometricsService";
 import { telegramBotService } from "./src/services/telegramBotService";
 import { instagramBotService } from "./src/services/instagramBotService";
+import { cyberSecurityService } from "./src/services/cyberSecurityService";
 
 const PORT = Number(process.env.PORT) || 3000;
 const isProduction = process.env.NODE_ENV === "production";
@@ -313,6 +314,60 @@ async function startServer() {
     if (!recipient || !message) return res.status(400).json({ error: "recipient_and_message_required" });
     const result = await instagramBotService.sendMessageToTarget(recipient, message);
     res.json(result);
+  });
+
+  // ── Friday Cyber Security & OSINT Recon Endpoints ─────────────────────────
+  app.post("/api/cyber/scan-url", async (req, res) => {
+    const { url } = req.body || {};
+    if (!url) return res.status(400).json({ error: "url_required" });
+    try {
+      const result = await cyberSecurityService.scanUrlSafety(String(url));
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "scan_failed" });
+    }
+  });
+
+  app.post("/api/cyber/breach-check", async (req, res) => {
+    const { query } = req.body || {};
+    if (!query) return res.status(400).json({ error: "query_required" });
+    try {
+      const result = await cyberSecurityService.checkDataBreach(String(query));
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "breach_check_failed" });
+    }
+  });
+
+  app.post("/api/cyber/audit-domain", async (req, res) => {
+    const { domain } = req.body || {};
+    if (!domain) return res.status(400).json({ error: "domain_required" });
+    try {
+      const result = await cyberSecurityService.auditWebsiteSecurity(String(domain));
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "audit_failed" });
+    }
+  });
+
+  app.post("/api/cyber/ip-lookup", async (req, res) => {
+    const { ip } = req.body || {};
+    if (!ip) return res.status(400).json({ error: "ip_required" });
+    try {
+      const result = await cyberSecurityService.lookupIpIntelligence(String(ip));
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "ip_lookup_failed" });
+    }
+  });
+
+  app.get("/api/cyber/code-audit", async (_req, res) => {
+    try {
+      const result = await cyberSecurityService.scanCodeSecurityAudit();
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "code_audit_failed" });
+    }
   });
 
   app.get("/api/code-agent/requests", async (_req, res) => {
@@ -711,6 +766,25 @@ X (TWITTER) PROFILES, TWEETS & TRENDS:
   - Call 'get_x_twitter_info' or 'search_x_twitter'.
   - State: Username, Full Name, Total Followers (in natural words like "24 crore followers"), Following count, Total Tweets, Blue Tick Verified status, and latest 2-4 tweets with likes and retweets.
   - If DK asks to WhatsApp the tweet or profile link, send via 'send_whatsapp_to_contact' (by default to DK / Boss / Divakar).
+
+FRIDAY ETHICAL CYBER DEFENSE & OSINT RECON SUITE:
+- Tools: 'scan_link_safety', 'check_email_data_breach', 'audit_website_security', 'lookup_ip_intelligence', 'run_code_security_audit'.
+- When DK asks about cybersecurity, links, data leaks, IP traces, or domain recon:
+  1. Phishing & Link Safety (When DK asks "ye link safe hai kya", "link scan karo", "phishing check karo"):
+     - Call 'scan_link_safety' with the URL.
+     - State: Safety Status (Safe/Dangerous), Risk Score (0-100), Protocol (HTTPS/Insecure HTTP), Redirect destination, and any threats detected.
+  2. Email & Data Breach Check (When DK asks "mera email leak hua hai kya", "data breach check karo", "check if email is pwned"):
+     - Call 'check_email_data_breach' with the email or username.
+     - State whether compromised, list of known breach names, compromised data types (passwords, phone numbers), and safety recommendations (change password / 2FA).
+  3. Website & Domain Security Recon (When DK asks "is website ka security audit karo", "domain headers check karo"):
+     - Call 'audit_website_security' with the domain.
+     - State: Overall Security Grade (A+ to F), Score, HTTPS status, missing security headers (HSTS, CSP, X-Frame), SPF/DMARC email security, and server stack.
+  4. IP Geolocation & Threat Recon (When DK asks "is IP ka location/ISP batao", "trace this IP/domain"):
+     - Call 'lookup_ip_intelligence' with the IP or domain name.
+     - State: Country, City, Region, ISP provider, Organization, ASN, and Cloud/Hosting status.
+  5. Codebase Vulnerability & Secret Leak Audit (When DK says "code ka security audit karo", "vulnerability scan karo"):
+     - Call 'run_code_security_audit'.
+     - State: Scanned files count, Overall Security Health Score, Critical exposed secrets count, and remediation steps.
 
 SOCIAL & MEDIA TOOLS (YOUTUBE, REDDIT, SPOTIFY MUSIC, LINKEDIN, TELEGRAM/DISCORD, PINTEREST):
 - 'search_youtube': Search YouTube videos, channels (@handle), trending topics. Send direct link to WhatsApp if requested.
@@ -1960,6 +2034,59 @@ HOW TO READ MESSAGES:
               message: { type: "STRING", description: "The message text to send in Instagram DM" },
             },
             required: ["recipient", "message"],
+          },
+        },
+        {
+          name: "scan_link_safety",
+          description: "Scan any URL/link for phishing, malware, cross-domain redirect risks, and SSL security. Call when DK says 'ye link safe hai kya', 'link scan karo', 'phishing check karo'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              url: { type: "STRING", description: "The URL or link to inspect" },
+            },
+            required: ["url"],
+          },
+        },
+        {
+          name: "check_email_data_breach",
+          description: "Check if an email address or username has been exposed in major known public data breaches / dark web leaks. Call when DK says 'mera email leak to nahi hua', 'data breach check karo', 'email leak check'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              emailOrUsername: { type: "STRING", description: "Email address or username to check" },
+            },
+            required: ["emailOrUsername"],
+          },
+        },
+        {
+          name: "audit_website_security",
+          description: "Perform comprehensive security audit on any domain/website: HTTP security headers (HSTS, CSP, X-Frame), DNS SPF/DMARC email security, SSL status, and overall security grade (A+ to F). Call when DK says 'website security check karo', 'domain audit karo'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              domain: { type: "STRING", description: "The domain name to audit (e.g. 'google.com', 'example.in')" },
+            },
+            required: ["domain"],
+          },
+        },
+        {
+          name: "lookup_ip_intelligence",
+          description: "Lookup IP address or domain geolocation, ISP organization, ASN, coordinates, and hosting/cloud infrastructure threat intelligence. Call when DK says 'IP trace karo', 'is IP ka location batao'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              ipOrDomain: { type: "STRING", description: "IP address or domain to lookup" },
+            },
+            required: ["ipOrDomain"],
+          },
+        },
+        {
+          name: "run_code_security_audit",
+          description: "Run Static Application Security Testing (SAST) on the project codebase to detect exposed hardcoded API keys, secrets, and insecure code patterns. Call when DK says 'code ka security audit karo', 'vulnerability scan karo'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+            required: [],
           },
         },
         {
@@ -3213,6 +3340,83 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                     };
                   } catch (e: any) {
                     result = { success: false, message: `Instagram DM send fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "scan_link_safety") {
+                  const { url } = call.args || {};
+                  try {
+                    const scanRes = await cyberSecurityService.scanUrlSafety(String(url || ""));
+                    result = {
+                      success: true,
+                      isSafe: scanRes.isSafe,
+                      riskScore: scanRes.riskScore,
+                      riskLevel: scanRes.riskLevel,
+                      threats: scanRes.threatsDetected,
+                      message: scanRes.explanation,
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `URL scan fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "check_email_data_breach") {
+                  const { emailOrUsername } = call.args || {};
+                  try {
+                    const breachRes = await cyberSecurityService.checkDataBreach(String(emailOrUsername || ""));
+                    result = {
+                      success: true,
+                      isCompromised: breachRes.isCompromised,
+                      breachCount: breachRes.breachCount,
+                      breaches: breachRes.breaches,
+                      message: breachRes.recommendation,
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `Breach check fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "audit_website_security") {
+                  const { domain } = call.args || {};
+                  try {
+                    const auditRes = await cyberSecurityService.auditWebsiteSecurity(String(domain || ""));
+                    result = {
+                      success: true,
+                      grade: auditRes.grade,
+                      score: auditRes.score,
+                      httpsEnforced: auditRes.httpsEnforced,
+                      serverTechnology: auditRes.serverTechnology,
+                      vulnerabilities: auditRes.vulnerabilities,
+                      message: auditRes.summary,
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `Website audit fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "lookup_ip_intelligence") {
+                  const { ipOrDomain } = call.args || {};
+                  try {
+                    const ipRes = await cyberSecurityService.lookupIpIntelligence(String(ipOrDomain || ""));
+                    result = {
+                      success: true,
+                      ip: ipRes.ip,
+                      country: ipRes.country,
+                      city: ipRes.city,
+                      isp: ipRes.isp,
+                      asn: ipRes.asn,
+                      isHosting: ipRes.isHostingOrCloud,
+                      message: ipRes.summary,
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `IP intelligence lookup fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "run_code_security_audit") {
+                  try {
+                    const codeRes = await cyberSecurityService.scanCodeSecurityAudit();
+                    result = {
+                      success: true,
+                      healthScore: codeRes.overallScore,
+                      scannedFiles: codeRes.scannedFilesCount,
+                      criticalIssues: codeRes.criticalIssuesCount,
+                      warnings: codeRes.warningCount,
+                      findings: codeRes.findings,
+                      message: codeRes.summary,
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `Code audit fail hua: ${e?.message || e}` };
                   }
                 } else if (call.name === "get_linkedin_insights") {
                   const { query } = call.args || {};
