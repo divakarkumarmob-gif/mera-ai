@@ -6,6 +6,7 @@ import { voiceBiometricsService } from "./voiceBiometricsService";
 import { codeAgentService } from "./codeAgentService";
 import { dailyUpdateService } from "./dailyUpdateService";
 import { publicApisService } from "./publicApisService";
+import { voiceBridgeService, VoiceBridgeService } from "./voiceBridgeService";
 
 export interface TelegramStatus {
   isConfigured: boolean;
@@ -123,6 +124,67 @@ class TelegramBotService {
       return { success: true, messageId: result.message_id };
     } catch (e: any) {
       console.error(`[TelegramBot] Send failed to ${chatId}:`, e?.message);
+      return { success: false, error: e?.message || String(e) };
+    }
+  }
+
+  /**
+   * Sends a real Voice Note (.ogg / .mp3) to a Telegram chat.
+   */
+  public async sendVoice(
+    chatId: number | string,
+    audioBuffer: Buffer,
+    caption?: string
+  ): Promise<{ success: boolean; messageId?: number; error?: string }> {
+    if (!this.token) return { success: false, error: "TELEGRAM_BOT_TOKEN is not configured." };
+    try {
+      const url = `https://api.telegram.org/bot${this.token}/sendVoice`;
+      const formData = new FormData();
+      formData.append("chat_id", String(chatId));
+      const blob = new Blob([audioBuffer], { type: "audio/mpeg" });
+      formData.append("voice", blob, "voice.mp3");
+      if (caption) formData.append("caption", caption);
+
+      const res = await fetch(url, { method: "POST", body: formData });
+      const json = await res.json();
+      if (!json.ok) {
+        throw new Error(json.description || "sendVoice API failed");
+      }
+      return { success: true, messageId: json.result.message_id };
+    } catch (e: any) {
+      console.error(`[TelegramBot] sendVoice failed to ${chatId}:`, e?.message);
+      return { success: false, error: e?.message || String(e) };
+    }
+  }
+
+  /**
+   * Sends an Audio file (.mp3) to a Telegram chat.
+   */
+  public async sendAudio(
+    chatId: number | string,
+    audioBuffer: Buffer,
+    title: string = "Voice Note",
+    caption?: string
+  ): Promise<{ success: boolean; messageId?: number; error?: string }> {
+    if (!this.token) return { success: false, error: "TELEGRAM_BOT_TOKEN is not configured." };
+    try {
+      const url = `https://api.telegram.org/bot${this.token}/sendAudio`;
+      const formData = new FormData();
+      formData.append("chat_id", String(chatId));
+      const blob = new Blob([audioBuffer], { type: "audio/mpeg" });
+      formData.append("audio", blob, `${title}.mp3`);
+      formData.append("title", title);
+      formData.append("performer", "Friday AI");
+      if (caption) formData.append("caption", caption);
+
+      const res = await fetch(url, { method: "POST", body: formData });
+      const json = await res.json();
+      if (!json.ok) {
+        throw new Error(json.description || "sendAudio API failed");
+      }
+      return { success: true, messageId: json.result.message_id };
+    } catch (e: any) {
+      console.error(`[TelegramBot] sendAudio failed to ${chatId}:`, e?.message);
       return { success: false, error: e?.message || String(e) };
     }
   }
@@ -414,22 +476,122 @@ INSTRUCTIONS FOR WHEN SENDER IS SOMEONE ELSE (NOT DK):
       });
     }
 
-    // 2. Handle /start and /help command
-    if (text === "/start" || text === "/help") {
+    // 2. Handle /start, "start bot", and greeting commands
+    if (
+      text === "/start" ||
+      text === "/help" ||
+      /^(\/start@|start\s*bot|hi\s*friday|hello\s*friday)/i.test(text)
+    ) {
+      const isGroup = msg.chat?.type === "group" || msg.chat?.type === "supergroup";
+      if (isGroup) {
+        const welcomeGroup = `👋 *Namaste! Main Friday hoon — DK Boss (Divakar Kumar) ka AI Assistant.* 🚀⚡\n\nKripya neeche se option choose karein:`;
+        await this.sendMessage(chatId, welcomeGroup, {
+          inline_keyboard: [
+            [
+              { text: "💬 Personal Chat", callback_data: `mode_personal_${chatId}` },
+              { text: "👥 Group Voice Bridge Call", callback_data: `mode_group_bridge_${chatId}` },
+            ],
+          ],
+        });
+        return;
+      }
+
       const welcome = `👋 *Namaste ${senderName}! Main Friday AI Assistant hoon.* 🚀⚡
 
-Main aapke saare kaam yahan Telegram par bhi handle kar sakti hoon:
-• 💬 *AI Smart Chat:* Mujhse koi bhi sawal poochiye
-• 🆔 *Get Chat ID:* _"send chat id"_ ya _"/id"_
-• 📷 *Vision AI:* Photo ya PDF bhejiye — OCR aur Face Recognition
-• 🎵 *Music Finder:* _"Gana chalao Arijit Singh"_
-• 🤖 *Coding Agent:* Code plans review & approve
-• 🔒 *Voice PIN Sync:* _"voice pin - 123456"_
-• 📅 *Daily Updates:* _"aaj ka update note karo..."_
-
-Bataiye Boss, aaj kya help karoon?`;
-      await this.sendMessage(chatId, welcome);
+Kripya neeche se mode choose karein ya direct message type karein:`;
+      await this.sendMessage(chatId, welcome, {
+        inline_keyboard: [
+          [
+            { text: "💬 Personal Chat", callback_data: `mode_personal_${chatId}` },
+            { text: "👥 Group Voice Bridge Call", callback_data: `mode_group_bridge_${chatId}` },
+          ],
+        ],
+      });
       return;
+    }
+
+    // 2.01 Handle Group Textual Role Setup: "User A @username" / "User B @username"
+    const isGroupChat = msg.chat?.type === "group" || msg.chat?.type === "supergroup";
+    if (isGroupChat) {
+      // Setup User A: e.g. "User A @username" or "User A 12345"
+      const matchUserA = text.match(/^(?:user\s*a|set\s*user\s*a)\s*[:=-]?\s*(.+)/i);
+      if (matchUserA) {
+        const rawTarget = matchUserA[1].trim();
+        const resolved = await this.resolveTargetChatId(rawTarget);
+        const targetId = resolved.chatId || from.id;
+        const targetName = resolved.name || rawTarget;
+
+        voiceBridgeService.setUserAInGroup(chatId, targetId, targetName);
+        await this.sendMessage(
+          chatId,
+          `✅ *User A (Text Mode User) Set:* **${targetName}** (ID: \`${targetId}\`)\n\n• _User A text likhega to direct voice note bankar User B ko sunai dega._\n\n👉 Ab User B set karein: \`User B @username\``,
+          this.getGroupControlPanelMarkup(chatId)
+        );
+        return;
+      }
+
+      // Setup User B: e.g. "User B @username" or "User B 12345"
+      const matchUserB = text.match(/^(?:user\s*b|set\s*user\s*b)\s*[:=-]?\s*(.+)/i);
+      if (matchUserB) {
+        const rawTarget = matchUserB[1].trim();
+        const resolved = await this.resolveTargetChatId(rawTarget);
+        const targetId = resolved.chatId || from.id;
+        const targetName = resolved.name || rawTarget;
+
+        voiceBridgeService.setUserBInGroup(chatId, targetId, targetName);
+        await this.sendMessage(
+          chatId,
+          `✅ *User B (Voice Mode User) Set:* **${targetName}** (ID: \`${targetId}\`)\n\n• _User B voice note bolega to uska transcribed text User A ko milega._\n\n👉 Call start karne ke liye likhein: \`Start Call\` ya neeche button dabayein!`,
+          this.getGroupControlPanelMarkup(chatId)
+        );
+        return;
+      }
+
+      // Group Call Actions via text
+      if (/^(start\s*call|start\s*bridge|\/call\s*start)/i.test(text)) {
+        const res = voiceBridgeService.startGroupCall(chatId);
+        if (!res.success) {
+          await this.sendMessage(chatId, `⚠️ ${res.error}`, this.getGroupControlPanelMarkup(chatId));
+        } else {
+          await this.sendMessage(
+            chatId,
+            `🚀 *LIVE GROUP CALL BRIDGE STARTED!* ⚡📞\n\n• ✍️ *User A (${res.session?.userA_name}):* Ab normal text likhiye — Friday voice me bolegi!\n• 🎙️ *User B (${res.session?.userB_name}):* Ab Voice Notes bhejiye — Friday text me transcribe karegi!\n\n_Call controls live below:_`,
+            this.getGroupControlPanelMarkup(chatId)
+          );
+        }
+        return;
+      }
+
+      if (/^(end\s*call|stop\s*call|end\s*bridge|stop\s*bridge|\/call\s*stop)/i.test(text)) {
+        voiceBridgeService.endGroupCall(chatId);
+        await this.sendMessage(
+          chatId,
+          `🔴 *Group Live Call Bridge Ended.* Call successfully disconnect ho gayi hai. ✨`,
+          this.getGroupControlPanelMarkup(chatId)
+        );
+        return;
+      }
+
+      if (/^(mute\s*call|mute\s*bot|\/mute)/i.test(text)) {
+        voiceBridgeService.toggleMuteGroupCall(chatId);
+        await this.sendMessage(
+          chatId,
+          `🔇 *Friday Bot is now MUTED in this group call.*`,
+          this.getGroupControlPanelMarkup(chatId)
+        );
+        return;
+      }
+
+      if (/^(unmute\s*call|unmute\s*bot|\/unmute)/i.test(text)) {
+        const res = voiceBridgeService.initOrGetGroupSession(chatId);
+        res.isMuted = false;
+        await this.sendMessage(
+          chatId,
+          `🔊 *Friday Bot is now UNMUTED in this group call.*`,
+          this.getGroupControlPanelMarkup(chatId)
+        );
+        return;
+      }
     }
 
     // 2.1 Handle "send chat id" / "my chat id" / "/id" request
@@ -437,6 +599,241 @@ Bataiye Boss, aaj kya help karoon?`;
       const idReply = `🆔 *Aapka Telegram Chat ID hai:*\n\`${chatId}\`\n\n📌 *Details:*\n• Name: *${senderName}*\n• Username: *${from.username ? `@${from.username}` : "Not set"}*\n\n_(Aap is Chat ID ko copy karke apne .env me \`TELEGRAM_OWNER_CHAT_ID=${chatId}\` set kar sakte hain)_ ✨`;
       await this.sendMessage(chatId, idReply);
       return;
+    }
+
+    // 2.2 Handle Voice Bridge Commands (/bridge, /tts, /voice)
+    if (text.startsWith("/bridge") || /^(bridge start|start bridge|bridge stop|voice bridge)/i.test(text)) {
+      const parts = text.split(/\s+/);
+      const subCommand = parts[1]?.toLowerCase();
+
+      if (subCommand === "stop" || /^(stop|end|band|khatam)/i.test(subCommand || "")) {
+        const stopped = await voiceBridgeService.stopBridgeSession(chatId);
+        if (stopped) {
+          await this.sendMessage(
+            chatId,
+            `🔴 *Voice-Text Bridge session disconnect kar diya gaya hai.*`
+          );
+          const partnerChatId = chatId === stopped.userA_chatId ? stopped.userB_chatId : stopped.userA_chatId;
+          await this.sendMessage(
+            partnerChatId,
+            `🔴 *${senderName} ne Voice-Text Bridge session disconnect kar diya hai.*`
+          );
+        } else {
+          await this.sendMessage(chatId, "ℹ️ Aapka koi active Voice Bridge session nahi chal raha hai.");
+        }
+        return;
+      }
+
+      if (subCommand === "status") {
+        const session = voiceBridgeService.getSession(chatId);
+        if (session) {
+          const isUserA = chatId === session.userA_chatId;
+          const role = isUserA ? "✍️ User A (Text Mode)" : "🎙️ User B (Voice Mode)";
+          const partnerName = isUserA ? session.userB_name : session.userA_name;
+          await this.sendMessage(
+            chatId,
+            `🟢 *Voice Bridge Active:*\n\n• *Aapka Role:* ${role}\n• *Partner:* ${partnerName}\n• *Voice:* \`${session.preferredVoice || "hi-IN-MadhurNeural"}\`\n\n_User A text likhega to Voice banegi, User B voice bolega to Text aayega._`
+          );
+        } else {
+          await this.sendMessage(chatId, "ℹ️ Koi active bridge session nahi hai. Start karne ke liye: `/bridge @username`");
+        }
+        return;
+      }
+
+      // Start Bridge with Target: /bridge @target_username or /bridge <chatId>
+      const targetQuery = parts.slice(1).join(" ").trim();
+      if (!targetQuery) {
+        await this.sendMessage(
+          chatId,
+          `ℹ️ *Voice Bridge kaise use karein:*\n\n1. \`/bridge @username\` — Kisi contact ke sath bridge start karein\n2. \`/bridge stop\` — Bridge session end karein\n3. \`/bridge status\` — Current bridge check karein\n4. \`/voice female\` ya \`/voice male\` — Voice badlein\n5. \`/tts <text>\` — Instant voice note generate karein`
+        );
+        return;
+      }
+
+      const resolved = await this.resolveTargetChatId(targetQuery);
+      if (!resolved.chatId) {
+        await this.sendMessage(chatId, `❌ ${resolved.error || `Target '${targetQuery}' nahi mila.`}`);
+        return;
+      }
+
+      if (resolved.chatId === chatId) {
+        await this.sendMessage(chatId, "⚠️ Aap khud ke sath bridge nahi bana sakte. Kisi dusre user ka username ya Chat ID dein.");
+        return;
+      }
+
+      const newSession = await voiceBridgeService.createBridgeSession(
+        chatId,
+        senderName,
+        resolved.chatId,
+        resolved.name || targetQuery
+      );
+
+      await this.sendMessage(
+        chatId,
+        `🚀 *Voice-Text Bridge ACTIVATED!* ⚡\n\n• *Aap (User A):* ✍️ Text likhiye (Friday isko audio banakar bheje gi)\n• *${newSession.userB_name} (User B):* 🎙️ Voice notes bhejenge (Friday unko text me convert karke aapko degi)\n\n_Ab aap normal message type kijiye!_`
+      );
+
+      await this.sendMessage(
+        resolved.chatId,
+        `🔊 *Voice-Text Bridge Connected with ${senderName}!* ⚡\n\n• *Aap (User B):* 🎙️ Voice notes boliye (Friday text banakar unko deliver karegi)\n• *${senderName} (User A):* ✍️ Jo bhi likhenge, aapko Voice Note me sunai dega!\n\n_Bridge band karne ke liye \`/bridge stop\` likhein._`
+      );
+      return;
+    }
+
+    // 2.3 Handle /voice command (Switch TTS Voice Tone)
+    if (text.startsWith("/voice")) {
+      const choice = text.replace(/^\/voice\s*/i, "").trim().toLowerCase();
+      let voiceCode = VoiceBridgeService.DEFAULT_VOICE;
+      if (choice.includes("female") || choice.includes("ladki") || choice.includes("swara")) {
+        voiceCode = VoiceBridgeService.FEMALE_VOICE;
+      } else if (choice.includes("english") || choice.includes("en")) {
+        voiceCode = VoiceBridgeService.ENGLISH_VOICE;
+      }
+
+      voiceBridgeService.setPreferredVoice(chatId, voiceCode);
+      await this.sendMessage(
+        chatId,
+        `🎙️ *Voice tone updated to:* \`${voiceCode}\` (${voiceCode.includes("Swara") ? "Female Hindi" : voiceCode.includes("Prabhat") ? "Indian English" : "Male Hindi"})\n\nAb bridge me yehi voice use hogi! ✨`
+      );
+      return;
+    }
+
+    // 2.4 Handle /tts command (Instant Text-to-Speech Voice Note)
+    if (text.startsWith("/tts ") || /^voice me bolo /i.test(text)) {
+      const speechText = text.replace(/^(\/tts|voice me bolo)\s*/i, "").trim();
+      if (speechText) {
+        try {
+          await this.sendChatAction(chatId, "record_voice");
+          const audioBuf = await voiceBridgeService.textToSpeechBuffer(speechText);
+          await this.sendVoice(chatId, audioBuf, `🔊 "${speechText}"`);
+        } catch (e: any) {
+          await this.sendMessage(chatId, `❌ Voice generate karne me error: ${e?.message || e}`);
+        }
+        return;
+      }
+    }
+
+    // 2.5 Handle Incoming Voice Notes / Audio Messages (Live STT via Groq Whisper)
+    const voiceObj = msg.voice || msg.audio;
+    if (voiceObj) {
+      try {
+        await this.sendChatAction(chatId, "typing");
+        const { buffer } = await this.downloadFile(voiceObj.file_id);
+        const transcribedText = await voiceBridgeService.transcribeAudio(
+          buffer,
+          voiceObj.mime_type || "audio/ogg",
+          voiceObj.file_name || "voice.ogg"
+        );
+
+        console.log(`[TelegramBot] Voice Transcribed from ${senderName}: "${transcribedText}"`);
+
+        // Check if sender is in an active 1-on-1 bridge session
+        const session = voiceBridgeService.getSession(chatId);
+        if (session) {
+          // If sender is User B (Voice mode) -> Deliver transcribed text to User A
+          if (chatId === session.userB_chatId) {
+            await this.sendMessage(
+              session.userA_chatId,
+              `🎙️ *${senderName} (Voice):*\n\n"${transcribedText}"`
+            );
+            await this.sendMessage(chatId, `✍️ _Text deliver ho gaya to ${session.userA_name}_`);
+            return;
+          }
+          // If sender is User A (User A also sent a voice note) -> Deliver transcribed text or voice to User B
+          if (chatId === session.userA_chatId) {
+            await this.sendVoice(session.userB_chatId, buffer, `🔊 Voice from ${senderName}`);
+            await this.sendMessage(chatId, `🔊 _Voice note deliver ho gaya to ${session.userB_name}_`);
+            return;
+          }
+        }
+
+        // Check if Group Call Bridge is active in this group
+        const grpSession = voiceBridgeService.getGroupSession(chatId);
+        if (grpSession && grpSession.isCallActive) {
+          if (!grpSession.isMuted) {
+            await this.sendMessage(
+              chatId,
+              `🎙️ *${grpSession.userB_name || senderName} (Voice):*\n\n"${transcribedText}"`
+            );
+          }
+          return;
+        }
+
+        // Outside bridge session: Display transcription and generate smart AI reply
+        await this.sendMessage(
+          chatId,
+          `🎙️ *Aapki Aawaz (Transcription):*\n_"${transcribedText}"_`
+        );
+
+        const ownerChatId = process.env.TELEGRAM_OWNER_CHAT_ID;
+        const isOwner = !!ownerChatId && String(chatId) === String(ownerChatId);
+        const replyText = await this.generateSmartAiReply(senderName, transcribedText, isOwner);
+        await this.sendHumanLikeMessage(chatId, replyText);
+      } catch (e: any) {
+        console.error("[TelegramBot] Error processing voice note:", e);
+        await this.sendMessage(chatId, `❌ Voice note process karne me error: ${e?.message || e}`);
+      }
+      return;
+    }
+
+    // 2.6 Active Bridge Check for Text Messages (1-on-1 Bridge)
+    const activeSession = voiceBridgeService.getSession(chatId);
+    if (activeSession && chatId === activeSession.userA_chatId && text && !text.startsWith("/")) {
+      try {
+        await this.sendChatAction(chatId, "record_voice");
+        const voiceBuffer = await voiceBridgeService.textToSpeechBuffer(
+          text,
+          activeSession.preferredVoice || VoiceBridgeService.DEFAULT_VOICE
+        );
+
+        // Send real voice note directly to User B
+        await this.sendVoice(
+          activeSession.userB_chatId,
+          voiceBuffer,
+          `🔊 Voice from ${senderName}`
+        );
+
+        // Confirm delivery to User A
+        await this.sendMessage(
+          chatId,
+          `🔊 _Delivered as Voice Note to ${activeSession.userB_name}_`
+        );
+        return;
+      } catch (e: any) {
+        console.error("[TelegramBot] Bridge TTS send failed:", e);
+        await this.sendMessage(chatId, `⚠️ Voice conversion error: ${e?.message || e}`);
+      }
+    }
+
+    // 2.7 Active Group Call Bridge Check for Text Messages (Group User A -> TTS in Group)
+    const activeGrpSession = voiceBridgeService.getGroupSession(chatId);
+    if (
+      activeGrpSession &&
+      activeGrpSession.isCallActive &&
+      !activeGrpSession.isMuted &&
+      text &&
+      !text.startsWith("/")
+    ) {
+      const isUserA = from.id === activeGrpSession.userA_id || senderName === activeGrpSession.userA_name;
+      if (isUserA) {
+        try {
+          await this.sendChatAction(chatId, "record_voice");
+          const voiceBuffer = await voiceBridgeService.textToSpeechBuffer(
+            text,
+            activeGrpSession.preferredVoice || VoiceBridgeService.DEFAULT_VOICE
+          );
+
+          await this.sendVoice(
+            chatId,
+            voiceBuffer,
+            `🔊 [Voice from ${activeGrpSession.userA_name} to ${activeGrpSession.userB_name || "Group"}]`
+          );
+          return;
+        } catch (e: any) {
+          console.error("[TelegramBot] Group Bridge TTS error:", e);
+          await this.sendMessage(chatId, `⚠️ Voice conversion error: ${e?.message || e}`);
+        }
+      }
     }
 
     // 3. Handle Voice PIN updates (e.g. "voice pin - 123456", "voice pin: 994411")
@@ -528,20 +925,170 @@ Bataiye Boss, aaj kya help karoon?`;
   }
 
   /**
-   * Handles interactive button clicks from Telegram (e.g. Coding Agent inline actions).
+   * Generates interactive inline keyboard controls for Group Voice Bridge Call.
+   */
+  private getGroupControlPanelMarkup(groupId: number) {
+    const session = voiceBridgeService.getGroupSession(groupId);
+    const isCallActive = session?.isCallActive || false;
+    const isMuted = session?.isMuted || false;
+    const voiceName = session?.preferredVoice?.includes("Swara")
+      ? "Female (Swara)"
+      : session?.preferredVoice?.includes("Prabhat")
+      ? "English (Prabhat)"
+      : "Male (Madhur)";
+
+    return {
+      inline_keyboard: [
+        [
+          { text: `✍️ User A: ${session?.userA_name || "❌ Not Set"}`, callback_data: `grp_set_a_${groupId}` },
+          { text: `🎙️ User B: ${session?.userB_name || "❌ Not Set"}`, callback_data: `grp_set_b_${groupId}` },
+        ],
+        [
+          {
+            text: isCallActive ? "🔴 End Call Bridge" : "⚡ Start Call Bridge",
+            callback_data: isCallActive ? `grp_end_${groupId}` : `grp_start_${groupId}`,
+          },
+          {
+            text: isMuted ? "🔊 Unmute Bot" : "🔇 Mute Bot",
+            callback_data: `grp_mute_${groupId}`,
+          },
+        ],
+        [
+          { text: `🗣️ Voice: ${voiceName}`, callback_data: `grp_voice_${groupId}` },
+          { text: "📊 Call Status", callback_data: `grp_status_${groupId}` },
+        ],
+      ],
+    };
+  }
+
+  /**
+   * Generates a status summary message for group call bridge.
+   */
+  private getGroupStatusText(groupId: number): string {
+    const session = voiceBridgeService.initOrGetGroupSession(groupId);
+    return `👑 *Friday Live Group Voice-Text Bridge:* ⚡\n\n• ✍️ *User A (Text User):* ${session.userA_name || "_Not set (likhein 'User A @username')_"}\n• 🎙️ *User B (Voice User):* ${session.userB_name || "_Not set (likhein 'User B @username')_"}\n• 📞 *Call State:* ${session.isCallActive ? "🟢 LIVE CALL ACTIVE" : "⚪ IDLE (Not Started)"}\n• 🔇 *Bot Audio:* ${session.isMuted ? "🔇 MUTED" : "🔊 UNMUTED (Active)"}\n• 🗣️ *TTS Voice:* \`${session.preferredVoice || "hi-IN-MadhurNeural"}\`\n\n_User A text likhega to direct voice sunai degi, User B voice bolega to text aayega!_`;
+  }
+
+  /**
+   * Handles interactive button clicks from Telegram (e.g. Coding Agent inline actions & Group Call Controls).
    */
   private async handleCallbackQuery(query: any): Promise<void> {
-    const data = query.data;
+    const data = String(query.data || "");
     const chatId = query.message?.chat?.id;
+    const senderName = query.from?.first_name || "User";
 
     try {
       await this.callApi("answerCallbackQuery", { callback_query_id: query.id });
 
-      if (data?.startsWith("code_approve_")) {
+      // 1. Mode Selection: Personal Chat
+      if (data.startsWith("mode_personal_")) {
+        await this.sendMessage(
+          chatId,
+          `✨ *Personal Chat Mode Active!* 💬\n\nNamaste ${senderName}! Main Friday hoon — DK Boss ka AI assistant. Mujhse koi bhi sawal poochiye ya task karwaiye.`
+        );
+        return;
+      }
+
+      // 2. Mode Selection: Group Voice Bridge Call
+      if (data.startsWith("mode_group_bridge_")) {
+        const targetGroupId = Number(data.replace("mode_group_bridge_", "")) || chatId;
+        const introText = `🎉 *Thank you! Main Group Voice Bridge Call activate kar rahi hoon.* ⚡\n\n👑 *DK Boss ne mujhe is group me live call & voice bridge sambhalne ke liye banaya hai.*\nMain live call & voice ko real-time *TTS (Text-to-Speech)* aur *STT (Speech-to-Text)* kar sakti hoon.\n\n📋 *Rules samajh lijiye:*\n• ✍️ *User A (Text Mode):* User A jo bhi text likhega, uski aawaz direct Voice Note bankar group me User B ko sunai degi.\n• 🎙️ *User B (Voice Mode):* User B group me voice bolega to User A ko uska transcribed text milega.\n\n👇 *Neeche diye gaye buttons ya text format se User A & B set karein:*`;
+        await this.sendMessage(targetGroupId, introText, this.getGroupControlPanelMarkup(targetGroupId));
+        return;
+      }
+
+      // 3. Group Set User A Prompt
+      if (data.startsWith("grp_set_a_")) {
+        const targetGroupId = Number(data.replace("grp_set_a_", "")) || chatId;
+        await this.sendMessage(
+          targetGroupId,
+          `✍️ *User A (Text User) set karne ke liye group me likhein:*\n\`User A @username\` ya \`User A ${query.from.id}\`\n\n_(User A text type karega aur Friday usko voice bana degi)_`
+        );
+        return;
+      }
+
+      // 4. Group Set User B Prompt
+      if (data.startsWith("grp_set_b_")) {
+        const targetGroupId = Number(data.replace("grp_set_b_", "")) || chatId;
+        await this.sendMessage(
+          targetGroupId,
+          `🎙️ *User B (Voice User) set karne ke liye group me likhein:*\n\`User B @username\` ya \`User B ${query.from.id}\`\n\n_(User B voice bolega aur Friday text me transcribe karegi)_`
+        );
+        return;
+      }
+
+      // 5. Group Start Call
+      if (data.startsWith("grp_start_")) {
+        const targetGroupId = Number(data.replace("grp_start_", "")) || chatId;
+        const res = voiceBridgeService.startGroupCall(targetGroupId);
+        if (!res.success) {
+          await this.sendMessage(targetGroupId, `⚠️ ${res.error}`, this.getGroupControlPanelMarkup(targetGroupId));
+        } else {
+          await this.sendMessage(
+            targetGroupId,
+            `🚀 *LIVE GROUP CALL BRIDGE STARTED!* ⚡📞\n\n• ✍️ *User A (${res.session?.userA_name}):* Ab normal text likhiye — Friday voice me bolegi!\n• 🎙️ *User B (${res.session?.userB_name}):* Ab Voice Notes bhejiye — Friday text me transcribe karegi!\n\n_Call controls live below:_`,
+            this.getGroupControlPanelMarkup(targetGroupId)
+          );
+        }
+        return;
+      }
+
+      // 6. Group End Call
+      if (data.startsWith("grp_end_")) {
+        const targetGroupId = Number(data.replace("grp_end_", "")) || chatId;
+        const ended = voiceBridgeService.endGroupCall(targetGroupId);
+        await this.sendMessage(
+          targetGroupId,
+          `🔴 *Group Live Call Bridge Ended.* Call successfully disconnect ho gayi hai. ✨`,
+          this.getGroupControlPanelMarkup(targetGroupId)
+        );
+        return;
+      }
+
+      // 7. Group Mute / Unmute
+      if (data.startsWith("grp_mute_")) {
+        const targetGroupId = Number(data.replace("grp_mute_", "")) || chatId;
+        const muteRes = voiceBridgeService.toggleMuteGroupCall(targetGroupId);
+        await this.sendMessage(
+          targetGroupId,
+          muteRes.isMuted
+            ? `🔇 *Friday Bot is now MUTED in this group call.* (Audio generation paused)`
+            : `🔊 *Friday Bot is now UNMUTED in this group call.* (Audio generation active)`,
+          this.getGroupControlPanelMarkup(targetGroupId)
+        );
+        return;
+      }
+
+      // 8. Group Switch Voice Tone
+      if (data.startsWith("grp_voice_")) {
+        const targetGroupId = Number(data.replace("grp_voice_", "")) || chatId;
+        const newVoice = voiceBridgeService.switchGroupVoice(targetGroupId);
+        const name = newVoice.includes("Swara") ? "Female Hindi (Swara)" : newVoice.includes("Prabhat") ? "Indian English (Prabhat)" : "Male Hindi (Madhur)";
+        await this.sendMessage(
+          targetGroupId,
+          `🗣️ *Voice updated to:* \`${name}\` ✨`,
+          this.getGroupControlPanelMarkup(targetGroupId)
+        );
+        return;
+      }
+
+      // 9. Group Status Query
+      if (data.startsWith("grp_status_")) {
+        const targetGroupId = Number(data.replace("grp_status_", "")) || chatId;
+        await this.sendMessage(
+          targetGroupId,
+          this.getGroupStatusText(targetGroupId),
+          this.getGroupControlPanelMarkup(targetGroupId)
+        );
+        return;
+      }
+
+      // 10. Coding Agent Approvals
+      if (data.startsWith("code_approve_")) {
         const reqId = data.replace("code_approve_", "");
         await codeAgentService.approveAndPushDirectlyToMain(reqId);
         await this.sendMessage(chatId, `🚀 *Task ${reqId} Approved & Pushed directly to Main Origin Branch!*`);
-      } else if (data?.startsWith("code_deny_")) {
+      } else if (data.startsWith("code_deny_")) {
         const reqId = data.replace("code_deny_", "");
         await codeAgentService.deny(reqId);
         await this.sendMessage(chatId, `❌ *Task ${reqId} Denied and Cancelled.*`);
