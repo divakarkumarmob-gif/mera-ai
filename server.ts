@@ -348,6 +348,7 @@ PUBLIC API TOOLS — INDIA-FIRST DEFAULT:
 - For "get_country_info", "get_directions", "get_weather" etc. — if DK just says a city name with no country, assume it's an Indian city unless the name is unambiguous elsewhere (e.g. "Paris" stays Paris, France).
 - This default only applies when DK doesn't specify — if he names a country/city/exchange explicitly, always respect that instead.
 - TOOL FAILURES: every public API tool returns a "success" field — check it before answering. If "success" is false (key missing/wrong, or the API itself failed), tell DK honestly and simply in your own natural voice — e.g. "Boss, iska API abhi connect nahi ho pa raha" or "Boss, iski key galat lag rahi hai, ek baar check kar lena." Don't read out raw error text or technical jargon, and never pretend you got the data when you didn't.
+- TRAIN TOOLS QUOTA: "get_trains_between_stations", "get_train_schedule", and "get_pnr_status" run on a very limited free quota (~50 calls/month total). Only call these when DK explicitly asks about trains/PNR — never speculatively, never to double-check, never as part of a broader multi-tool answer.
 
 SHUTDOWN: Judge by intent, not exact words — any way DK says to stop/go quiet/end session ("chup ho jao", "bye", "stop"...) means the same thing. Acknowledge briefly and warmly ("Theek hai DK, main chup ho rahi hoon..."), then stop — no follow-up questions, session closes automatically.
 
@@ -1007,6 +1008,45 @@ HOW TO READ MESSAGES:
             required: ["upc"],
           },
         },
+        // ---------------------------------------------------------------
+        // Public API tools — Batch 6 (Indian Railways, RapidAPI IRCTC1)
+        // NOTE: very limited free quota (~50 calls/month) — use only when
+        // DK explicitly asks about trains, not casually.
+        // ---------------------------------------------------------------
+        {
+          name: "get_trains_between_stations",
+          description: "Find trains running between two cities/stations. Use for 'Delhi se Mumbai konsi trains hain', 'X se Y ke beech train batao'. Free quota is very limited, so only call this when DK explicitly asks about trains.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              fromPlace: { type: "STRING", description: "Origin city/station name" },
+              toPlace: { type: "STRING", description: "Destination city/station name" },
+            },
+            required: ["fromPlace", "toPlace"],
+          },
+        },
+        {
+          name: "get_train_schedule",
+          description: "Get the full stop-by-stop schedule/route for a specific train number. Free quota is very limited, so only call this when DK explicitly asks.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              trainNumber: { type: "STRING", description: "The train number, e.g. '12951'" },
+            },
+            required: ["trainNumber"],
+          },
+        },
+        {
+          name: "get_pnr_status",
+          description: "Check the booking/PNR status of a train ticket. Free quota is very limited, so only call this when DK explicitly gives a PNR number to check.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              pnrNumber: { type: "STRING", description: "The 10-digit PNR number" },
+            },
+            required: ["pnrNumber"],
+          },
+        },
       ];
 
       return await ai.live.connect({
@@ -1544,6 +1584,27 @@ HOW TO READ MESSAGES:
                     result = await publicApisService.getProductByBarcode(String(upc || ""));
                   } catch (e: any) {
                     result = { success: false, message: `Barcode lookup fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_trains_between_stations") {
+                  const { fromPlace, toPlace } = call.args || {};
+                  try {
+                    result = await publicApisService.getTrainsBetweenStations(String(fromPlace || ""), String(toPlace || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Train list fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_train_schedule") {
+                  const { trainNumber } = call.args || {};
+                  try {
+                    result = await publicApisService.getTrainSchedule(String(trainNumber || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Train schedule fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_pnr_status") {
+                  const { pnrNumber } = call.args || {};
+                  try {
+                    result = await publicApisService.getPnrStatus(String(pnrNumber || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `PNR status fetch fail hui: ${e?.message || e}` };
                   }
                 }
 
