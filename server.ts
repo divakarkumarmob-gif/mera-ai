@@ -23,6 +23,7 @@ import { publicApisService } from "./src/services/publicApisService";
 import { saveMessage, getHistory, clearHistory } from "./src/services/historyService";
 import { visionMemoryService } from "./src/services/visionMemoryService";
 import { voiceBiometricsService } from "./src/services/voiceBiometricsService";
+import { telegramBotService } from "./src/services/telegramBotService";
 
 const PORT = Number(process.env.PORT) || 3000;
 const isProduction = process.env.NODE_ENV === "production";
@@ -269,6 +270,18 @@ async function startServer() {
     }
   });
 
+  // ── Telegram Bot Endpoints ────────────────────────────────────────────────
+  app.get("/api/telegram/status", (_req, res) => {
+    res.json({ ok: true, ...telegramBotService.getStatus() });
+  });
+
+  app.post("/api/telegram/send", async (req, res) => {
+    const { chatId, text } = req.body || {};
+    if (!chatId || !text) return res.status(400).json({ error: "chatId_and_text_required" });
+    const result = await telegramBotService.sendMessage(chatId, text);
+    res.json(result);
+  });
+
   app.get("/api/code-agent/requests", async (_req, res) => {
     try {
       res.json({ requests: await codeAgentService.getRequests() });
@@ -463,6 +476,24 @@ async function startServer() {
           }
         })
         .catch((e) => console.error("[Server] Voice PIN Cloud handler error:", e));
+    }
+  });
+
+  // Start Friday Telegram Bot and connect live broadcasts
+  telegramBotService.start().catch((err) =>
+    console.error("[Server] Telegram Bot start error:", err)
+  );
+
+  telegramBotService.setMessageCallback((msg) => {
+    const payload = JSON.stringify({
+      type: "whatsapp_incoming",
+      sender: msg.sender,
+      text: msg.text,
+      time: msg.time,
+      isGroup: false,
+    });
+    for (const client of connectedClients) {
+      if (client.readyState === client.OPEN) client.send(payload);
     }
   });
 
@@ -1848,6 +1879,18 @@ HOW TO READ MESSAGES:
           },
         },
         {
+          name: "send_telegram_message",
+          description: "Send a message or notification to Boss via Friday Telegram Bot. Call when DK says 'Telegram par message bhejo', 'Telegram pe link share karo', 'Telegram par notify karo'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              text: { type: "STRING", description: "Message text to send on Telegram" },
+              chatId: { type: "STRING", description: "Optional chat ID (defaults to OWNER chat if configured)" },
+            },
+            required: ["text"],
+          },
+        },
+        {
           name: "get_linkedin_insights",
           description: "Get LinkedIn company hub page and job opening search links for any company or skill.",
           parameters: {
@@ -3052,6 +3095,24 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                     };
                   } catch (e: any) {
                     result = { success: false, message: `Voice profile delete fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "send_telegram_message") {
+                  const { text, chatId } = call.args || {};
+                  try {
+                    const targetChat = chatId || process.env.TELEGRAM_OWNER_CHAT_ID;
+                    if (!targetChat) {
+                      result = { success: false, message: "Boss, Telegram chat ID configure nahi hai. Pehle Telegram bot par /start dabayein." };
+                    } else {
+                      const sendRes = await telegramBotService.sendMessage(targetChat, String(text || ""));
+                      result = {
+                        success: sendRes.success,
+                        message: sendRes.success
+                          ? `Boss, Telegram par message bhej diya gaya hai!`
+                          : `Telegram send failed: ${sendRes.error}`,
+                      };
+                    }
+                  } catch (e: any) {
+                    result = { success: false, message: `Telegram message fail hua: ${e?.message || e}` };
                   }
                 } else if (call.name === "get_linkedin_insights") {
                   const { query } = call.args || {};

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { X, Mic, Plus, Loader2, Settings, ChevronDown, Captions, MessageSquare, Square, Code2, Terminal, Shield, Trash2, Key, Check, AlertCircle } from 'lucide-react';
+import { X, Mic, Plus, Loader2, Settings, ChevronDown, Captions, MessageSquare, Square, Code2, Terminal, Shield, Trash2, Key, Check, AlertCircle, Send } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import AgentFace from './AgentFace';
 import ChatHistoryModal from './ChatHistoryModal';
@@ -349,6 +349,59 @@ function VoiceBiometricsManager() {
                     </motion.div>
                 )}
             </AnimatePresence>
+        </div>
+    );
+}
+
+// ── Telegram Bot Card (Status & Quick Launch) ─────────────────────────────────
+function TelegramBotCard() {
+    const [status, setStatus] = useState<{ isConfigured: boolean; botUsername: string | null; pollingActive: boolean } | null>(null);
+
+    useEffect(() => {
+        fetch('/api/telegram/status')
+            .then((r) => r.json())
+            .then((d) => setStatus(d))
+            .catch(() => {});
+    }, []);
+
+    return (
+        <div className="pt-3 border-t border-white/10">
+            <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                    <Send className="w-4 h-4 text-sky-400" />
+                    <span className="text-white font-bold text-sm">Friday Telegram Bot</span>
+                </div>
+                <span
+                    className={`text-[10px] font-black tracking-wider px-2 py-0.5 rounded-full uppercase ${
+                        status?.isConfigured
+                            ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40 shadow-[0_0_8px_rgba(56,189,248,0.3)]'
+                            : 'bg-slate-800 text-slate-400 border border-slate-700'
+                    }`}
+                >
+                    {status?.isConfigured ? 'Connected' : 'Offline'}
+                </span>
+            </div>
+            <p className="text-xs text-slate-400 mb-2.5">
+                AI Smart Chat, Vision OCR, Coding Agent Buttons, Song Finder & PIN Sync via Telegram.
+            </p>
+
+            {status?.isConfigured && status?.botUsername ? (
+                <a
+                    href={`https://t.me/${status.botUsername}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="w-full py-2 px-3 rounded-xl bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white font-semibold text-xs transition-all shadow-md flex items-center justify-center gap-2 active:scale-98"
+                >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>Open @{status.botUsername} on Telegram</span>
+                </a>
+            ) : (
+                <div className="p-2.5 rounded-xl bg-slate-900/70 border border-white/10 text-center">
+                    <span className="text-[11px] text-slate-400">
+                        Add <code>TELEGRAM_BOT_TOKEN</code> in your <code>.env</code> to activate.
+                    </span>
+                </div>
+            )}
         </div>
     );
 }
@@ -1572,6 +1625,9 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
 
                             {/* Boss Voice Biometrics & Recognition Manager */}
                             <VoiceBiometricsManager />
+
+                            {/* Friday Telegram Bot Card */}
+                            <TelegramBotCard />
                         </div>
                     </motion.div>
                 )}
