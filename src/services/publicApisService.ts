@@ -1038,7 +1038,163 @@ class PublicApisService {
     return { code: station.code, name: station.name };
   }
 
-  // Helper: Free Indian Railway provider fallback (No API key required)
+  // Popular Indian Railways trains fast map
+  private static readonly POPULAR_TRAINS = [
+    { numbers: ["12559", "12560"], name: "Shiv Ganga Express", route: "Banaras - New Delhi" },
+    { numbers: ["12951", "12952"], name: "Mumbai Central Tejas Rajdhani Express", route: "Mumbai Central - New Delhi" },
+    { numbers: ["12953", "12954"], name: "August Kranti Tejas Rajdhani Express", route: "Mumbai Central - Hazrat Nizamuddin" },
+    { numbers: ["22436", "22435"], name: "Vande Bharat Express (New Delhi - Varanasi)", route: "New Delhi - Varanasi" },
+    { numbers: ["22416", "22415"], name: "Vande Bharat Express (Varanasi - New Delhi)", route: "Varanasi - New Delhi" },
+    { numbers: ["12301", "12302"], name: "Howrah Rajdhani Express", route: "Howrah - New Delhi" },
+    { numbers: ["12303", "12304", "12381", "12382"], name: "Poorva Express", route: "Howrah - New Delhi" },
+    { numbers: ["12393", "12394"], name: "Sampoorna Kranti Express", route: "Rajendra Nagar Terminal (Patna) - New Delhi" },
+    { numbers: ["12859", "12860"], name: "Gitanjali Express", route: "Mumbai CSMT - Howrah" },
+    { numbers: ["12625", "12626"], name: "Kerala Express", route: "New Delhi - Thiruvananthapuram" },
+    { numbers: ["12615", "12616"], name: "Grand Trunk (GT) Express", route: "New Delhi - Chennai Central" },
+    { numbers: ["12621", "12622"], name: "Tamil Nadu Express", route: "New Delhi - Chennai Central" },
+    { numbers: ["12627", "12628"], name: "Karnataka Express", route: "New Delhi - KSR Bengaluru" },
+    { numbers: ["12259", "12260"], name: "Sealdah Bikaner AC Duronto Express", route: "Sealdah - Bikaner" },
+    { numbers: ["12004", "12003"], name: "Lucknow Shatabdi Express", route: "New Delhi - Lucknow" },
+    { numbers: ["12429", "12430"], name: "Lucknow Mail", route: "Lucknow - New Delhi" },
+    { numbers: ["12417", "12418"], name: "Prayagraj Express", route: "Prayagraj - New Delhi" },
+    { numbers: ["12137", "12138"], name: "Punjab Mail", route: "Mumbai CSMT - Firozpur Cantt" },
+    { numbers: ["12903", "12904"], name: "Golden Temple Mail", route: "Mumbai Central - Amritsar" },
+    { numbers: ["12155", "12156"], name: "Shaan-e-Bhopal Express", route: "Rani Kamlapati (Bhopal) - Hazrat Nizamuddin" },
+  ];
+
+  // Helper: Resolve Train Name or Number to verified Train Number & Train Name
+  public async resolveTrain(trainQuery: string): Promise<{ trainNumber: string; trainName: string; route?: string }> {
+    const clean = String(trainQuery || "").trim();
+    if (!clean) return { trainNumber: "", trainName: "" };
+
+    // 1. If already 4-5 digit train number
+    const numMatch = clean.match(/\b([12]\d{4}|0\d{4}|\d{4,5})\b/);
+    if (numMatch) {
+      return { trainNumber: numMatch[1], trainName: clean };
+    }
+
+    // 2. Check popular trains map
+    const cleanLower = clean.toLowerCase();
+    for (const t of PublicApisService.POPULAR_TRAINS) {
+      if (cleanLower.includes(t.name.toLowerCase()) || t.name.toLowerCase().includes(cleanLower)) {
+        return { trainNumber: t.numbers[0], trainName: t.name, route: t.route };
+      }
+    }
+
+    // 3. Try RapidAPI searchTrain if key is present
+    const headers = this.rapidApiHeaders();
+    if (headers) {
+      try {
+        const res = await fetch(
+          `https://irctc1.p.rapidapi.com/api/v1/searchTrain?query=${encodeURIComponent(clean)}`,
+          { headers }
+        );
+        if (res.ok) {
+          const data = await res.json();
+          const first = data?.data?.[0];
+          if (first && (first.train_number || first.train_no)) {
+            return {
+              trainNumber: String(first.train_number || first.train_no),
+              trainName: first.train_name || clean,
+            };
+          }
+        }
+      } catch {}
+    }
+
+    // 4. Resolve via Wikipedia Train Search + Summary API
+    try {
+      const url = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(clean + " train Indian Railways")}&format=json&utf8=1&srlimit=3`;
+      const res = await fetch(url, { headers: { "User-Agent": "MeraAI-TrainService/1.0" } });
+      if (res.ok) {
+        const data = await res.json();
+        const searchResults = data?.query?.search || [];
+        for (const r of searchResults) {
+          const text = `${r.title} ${r.snippet}`;
+          const foundNums = text.match(/\b([12]\d{4}|0\d{4})\b/g);
+          if (foundNums && foundNums.length) {
+            return {
+              trainNumber: foundNums[0],
+              trainName: r.title.replace(/<[^>]*>/g, ""),
+            };
+          }
+          // Check summary extract
+          try {
+            const sumUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(r.title.replace(/\s+/g, "_"))}`;
+            const sumRes = await fetch(sumUrl, { headers: { "User-Agent": "MeraAI-TrainService/1.0" } });
+            if (sumRes.ok) {
+              const sumData = await sumRes.json();
+              const sumNums = (sumData.extract || "").match(/\b([12]\d{4}|0\d{4})\b/g);
+              if (sumNums && sumNums.length) {
+                return {
+                  trainNumber: sumNums[0],
+                  trainName: sumData.title,
+                };
+              }
+            }
+          } catch {}
+        }
+      }
+    } catch {}
+
+    return { trainNumber: clean, trainName: clean };
+  }
+
+  // Helper: Live running status from RailYatri
+  private async getRailYatriLiveStatus(trainNumber: string): Promise<any> {
+    try {
+      const res = await fetch(`https://www.railyatri.in/live-train-status/${encodeURIComponent(trainNumber)}`, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        },
+      });
+      if (!res.ok) return null;
+      const html = await res.text();
+      const match = html.match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/);
+      if (!match) return null;
+
+      const nextData = JSON.parse(match[1]);
+      const lts = nextData?.props?.pageProps?.ltsData;
+      const tt = nextData?.props?.pageProps?.timeTableData?.["0"];
+
+      if (lts && lts.success) {
+        let routeStops: any[] = [];
+        if (tt && Array.isArray(tt.route)) {
+          routeStops = tt.route.slice(0, 10).map((s: any) => ({
+            station: s.station_name,
+            code: s.station_code,
+            platform: s.platform_number || "TBD",
+            day: s.day,
+            distance: `${s.distance_from_source} km`,
+          }));
+        }
+
+        return {
+          success: true,
+          trainNumber: lts.train_number || trainNumber,
+          trainName: lts.train_name,
+          source: `${lts.source_stn_name} (${lts.source})`,
+          destination: `${lts.dest_stn_name} (${lts.destination})`,
+          scheduledDeparture: lts.std,
+          journeyTime: lts.journey_time ? `${Math.floor(lts.journey_time / 60)}h ${lts.journey_time % 60}m` : undefined,
+          statusSummary: lts.new_message || lts.title || "Live status retrieved",
+          title: lts.title,
+          nextStation: lts.next_station_name ? `${lts.next_station_name} (${lts.next_station_code})` : undefined,
+          expectedPlatform: lts.platform_number ? String(lts.platform_number) : "TBD",
+          runDays: lts.run_days,
+          isAtSource: !!lts.at_src,
+          isAtDestination: !!lts.at_dstn,
+          upcomingStops: routeStops.length ? routeStops : undefined,
+          stopsCount: tt?.route?.length || 0,
+          sourceProvider: "railyatri_live",
+        };
+      }
+    } catch {}
+    return null;
+  }
+
+  // Helper: Free Indian Railway provider fallback
   private async getFreeTrainData(trainNumber: string): Promise<any> {
     try {
       const res = await fetch(`https://rappid.in/apis/train.php?train_no=${encodeURIComponent(trainNumber)}`, {
@@ -1111,8 +1267,11 @@ class PublicApisService {
     return { success: false, message: `"${fromPlace}" se "${toPlace}" ke beech train list nahi mil saki.` };
   }
 
-  // 41. Train schedule by train number
-  public async getTrainSchedule(trainNumber: string): Promise<any> {
+  // 41. Train schedule by train number OR train name
+  public async getTrainSchedule(trainNumberOrName: string): Promise<any> {
+    const resolved = await this.resolveTrain(trainNumberOrName);
+    const trainNumber = resolved.trainNumber || trainNumberOrName;
+
     const headers = this.rapidApiHeaders();
     if (headers) {
       try {
@@ -1130,14 +1289,30 @@ class PublicApisService {
             platform: s.platform_number || s.platform_num || s.platform || "Not specified",
             day: s.day_count,
           }));
-          return { success: true, trainNumber, trainName: t.train_name, stops, source: "rapidapi" };
+          return { success: true, trainNumber, trainName: t.train_name || resolved.trainName, stops, source: "rapidapi" };
         }
       } catch {
-        // Fall through to free fallback
+        // Fall through to RailYatri / free fallback
       }
     }
 
-    // Free fallback (No API key needed)
+    // RailYatri live timetable fallback
+    const ryData = await this.getRailYatriLiveStatus(trainNumber);
+    if (ryData && ryData.upcomingStops && ryData.upcomingStops.length) {
+      return {
+        success: true,
+        trainNumber,
+        trainName: ryData.trainName || resolved.trainName,
+        source: ryData.source,
+        destination: ryData.destination,
+        scheduledDeparture: ryData.scheduledDeparture,
+        runDays: ryData.runDays,
+        stops: ryData.upcomingStops,
+        sourceProvider: "railyatri_timetable",
+      };
+    }
+
+    // Free fallback
     const freeData = await this.getFreeTrainData(trainNumber);
     if (freeData) {
       const stops = freeData.data.slice(0, 15).map((s: any) => ({
@@ -1151,18 +1326,22 @@ class PublicApisService {
       return {
         success: true,
         trainNumber,
-        trainName: freeData.train_name || `Train ${trainNumber}`,
+        trainName: freeData.train_name || resolved.trainName || `Train ${trainNumber}`,
         updatedTime: freeData.updated_time,
         stops,
         source: "free_fallback",
       };
     }
 
-    return { success: false, message: `Train number "${trainNumber}" ka schedule nahi mila.` };
+    return { success: false, message: `Train "${trainNumberOrName}" ka schedule nahi mila.` };
   }
 
-  // 42. Live train running status (Location, delay, expected platform)
-  public async getLiveTrainStatus(trainNumber: string, startDay: number = 0): Promise<any> {
+  // 42. Live train running status by Train Number OR Train Name
+  public async getLiveTrainStatus(trainNumberOrName: string, startDay: number = 0): Promise<any> {
+    const resolved = await this.resolveTrain(trainNumberOrName);
+    const trainNumber = resolved.trainNumber || trainNumberOrName;
+
+    // 1. RapidAPI Live Status (if key available)
     const headers = this.rapidApiHeaders();
     if (headers) {
       try {
@@ -1187,7 +1366,7 @@ class PublicApisService {
           return {
             success: true,
             trainNumber,
-            trainName: d.train_name,
+            trainName: d.train_name || resolved.trainName,
             currentLocation: currentOrLast,
             statusSummary: d.status_as_of || d.status || d.headline || "Running",
             delayMinutes: d.delay || (upcoming.length ? upcoming[0].delayInArrival : 0),
@@ -1198,11 +1377,17 @@ class PublicApisService {
           };
         }
       } catch {
-        // Fall through to free fallback
+        // Fall through to RailYatri live real-time status
       }
     }
 
-    // Free fallback (No API key needed)
+    // 2. RailYatri live real-time status (Highly accurate, updated in real-time)
+    const ryData = await this.getRailYatriLiveStatus(trainNumber);
+    if (ryData && ryData.success) {
+      return ryData;
+    }
+
+    // 3. Free fallback (No API key needed)
     const freeData = await this.getFreeTrainData(trainNumber);
     if (freeData) {
       const stations = freeData.data || [];
@@ -1218,7 +1403,7 @@ class PublicApisService {
       return {
         success: true,
         trainNumber,
-        trainName: freeData.train_name,
+        trainName: freeData.train_name || resolved.trainName,
         statusSummary: freeData.message || freeData.updated_time || "Live status retrieved",
         currentLocation: currentStation?.station_name || "En route",
         expectedPlatform: currentStation?.platform || upcoming[0]?.platform || "TBD",
@@ -1229,7 +1414,27 @@ class PublicApisService {
       };
     }
 
-    return { success: false, message: `Train number "${trainNumber}" ka live status nahi mila.` };
+    return { success: false, message: `Train "${trainNumberOrName}" ka live running status nahi mila.` };
+  }
+
+  // 42b. Search Train by Name or Number
+  public async searchTrain(query: string): Promise<any> {
+    const resolved = await this.resolveTrain(query);
+    if (resolved && resolved.trainNumber && resolved.trainNumber !== query) {
+      return {
+        success: true,
+        query,
+        trainNumber: resolved.trainNumber,
+        trainName: resolved.trainName,
+        route: resolved.route,
+      };
+    }
+    return {
+      success: true,
+      query,
+      trainNumber: resolved.trainNumber,
+      trainName: resolved.trainName || query,
+    };
   }
 
   // 43. PNR status
@@ -1494,18 +1699,41 @@ class PublicApisService {
     return { success: false, message: `"${query}" ke bare me jankari nahi mil saki.` };
   }
 
+  // Helper to decode HTML entities
+  private decodeHtmlEntities(str: string): string {
+    if (!str) return "";
+    return str
+      .replace(/&amp;/g, "&")
+      .replace(/&quot;/g, '"')
+      .replace(/&#064;/g, "@")
+      .replace(/&#x2022;/g, "•")
+      .replace(/&#39;/g, "'")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">");
+  }
+
   // 47. Instagram Profile Lookup (Followers, Following, Total Posts, Bio, Verified Status)
-  public async getInstagramUserInfo(username: string): Promise<any> {
-    const cleanUsername = username.replace(/^@/, "").trim().toLowerCase();
+  public async getInstagramUserInfo(usernameOrQuery: string): Promise<any> {
+    let cleanUsername = String(usernameOrQuery || "")
+      .replace(/^@/, "")
+      .trim()
+      .toLowerCase();
+
     if (!cleanUsername) return { success: false, message: "Instagram username zaroori hai." };
 
+    // If query has spaces (e.g. "virat kohli" or "salman khan"), normalize
+    if (cleanUsername.includes(" ")) {
+      cleanUsername = cleanUsername.replace(/\s+/g, ".");
+    }
+
+    // Attempt 1: Official Web Profile API with browser headers
     try {
       const res = await fetch(
         `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(cleanUsername)}`,
         {
           headers: {
             "x-ig-app-id": "936619743392459",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
             "Accept": "*/*",
             "Accept-Language": "en-US,en;q=0.9",
             "Referer": `https://www.instagram.com/${cleanUsername}/`,
@@ -1513,54 +1741,161 @@ class PublicApisService {
         }
       );
 
-      const json = await res.json();
-      const user = json?.data?.user;
-      if (user) {
-        const edges = user.edge_owner_to_timeline_media?.edges || [];
-        const latestPosts = edges.slice(0, 4).map((e: any) => {
-          const node = e.node;
-          const caption = node.edge_media_to_caption?.edges?.[0]?.node?.text || "";
-          return {
-            type: node.is_video ? "Reel / Video" : "Photo",
-            caption: caption.length > 120 ? caption.slice(0, 120) + "..." : caption,
-            likes: node.edge_liked_by?.count || node.edge_media_preview_like?.count || 0,
-            comments: node.edge_media_to_comment?.count || 0,
-            views: node.video_view_count || undefined,
-            postUrl: `https://www.instagram.com/p/${node.shortcode}/`,
-            shortcode: node.shortcode,
-          };
-        });
+      if (res.ok) {
+        const json = await res.json();
+        const user = json?.data?.user;
+        if (user) {
+          const edges = user.edge_owner_to_timeline_media?.edges || [];
+          const latestPosts = edges.slice(0, 4).map((e: any) => {
+            const node = e.node;
+            const caption = node.edge_media_to_caption?.edges?.[0]?.node?.text || "";
+            return {
+              type: node.is_video ? "Reel / Video" : "Photo",
+              caption: caption.length > 120 ? caption.slice(0, 120) + "..." : caption,
+              likes: node.edge_liked_by?.count || node.edge_media_preview_like?.count || 0,
+              comments: node.edge_media_to_comment?.count || 0,
+              views: node.video_view_count || undefined,
+              postUrl: `https://www.instagram.com/p/${node.shortcode}/`,
+              shortcode: node.shortcode,
+            };
+          });
 
-        const followers = user.edge_followed_by?.count || 0;
-        let avgLikes = 0;
-        if (latestPosts.length > 0 && followers > 0) {
-          const totalLikes = latestPosts.reduce((acc: number, p: any) => acc + (p.likes || 0), 0);
-          avgLikes = Math.round(totalLikes / latestPosts.length);
+          const followers = user.edge_followed_by?.count || 0;
+          let avgLikes = 0;
+          if (latestPosts.length > 0 && followers > 0) {
+            const totalLikes = latestPosts.reduce((acc: number, p: any) => acc + (p.likes || 0), 0);
+            avgLikes = Math.round(totalLikes / latestPosts.length);
+          }
+
+          return {
+            success: true,
+            username: user.username,
+            fullName: user.full_name || user.username,
+            biography: user.biography || "",
+            followersCount: followers,
+            followingCount: user.edge_follow?.count || 0,
+            totalPosts: user.edge_owner_to_timeline_media?.count || 0,
+            isVerified: !!user.is_verified,
+            isPrivate: !!user.is_private,
+            profilePicUrl: user.profile_pic_url_hd || user.profile_pic_url,
+            externalUrl: user.external_url || undefined,
+            profileUrl: `https://www.instagram.com/${user.username}/`,
+            avgRecentLikes: avgLikes,
+            recentPostsCount: latestPosts.length,
+            latestPosts,
+            sourceProvider: "instagram_api",
+          };
+        }
+      }
+    } catch {}
+
+    // Attempt 2: Direct Instagram Page Meta Scraper
+    try {
+      const res = await fetch(`https://www.instagram.com/${encodeURIComponent(cleanUsername)}/`, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.9",
+          "Sec-Fetch-Dest": "document",
+          "Sec-Fetch-Mode": "navigate",
+        },
+      });
+
+      if (res.ok) {
+        const html = await res.text();
+        const ogTitle = this.decodeHtmlEntities(
+          html.match(/<meta\s+(?:property|name)="og:title"\s+content="([^"]*)"/i)?.[1] ||
+          html.match(/<meta\s+content="([^"]*)"\s+(?:property|name)="og:title"/i)?.[1] || ""
+        );
+        const ogDesc = this.decodeHtmlEntities(
+          html.match(/<meta\s+(?:property|name)="og:description"\s+content="([^"]*)"/i)?.[1] ||
+          html.match(/<meta\s+content="([^"]*)"\s+(?:property|name)="og:description"/i)?.[1] || ""
+        );
+        const metaDesc = this.decodeHtmlEntities(
+          html.match(/<meta\s+name="description"\s+content="([^"]*)"/i)?.[1] ||
+          html.match(/<meta\s+content="([^"]*)"\s+name="description"/i)?.[1] || ""
+        );
+        const ogImage = this.decodeHtmlEntities(
+          html.match(/<meta\s+(?:property|name)="og:image"\s+content="([^"]*)"/i)?.[1] ||
+          html.match(/<meta\s+content="([^"]*)"\s+(?:property|name)="og:image"/i)?.[1] || ""
+        );
+
+        const descText = ogDesc || metaDesc;
+        const followersMatch = descText.match(/([0-9.,]+[KkMmBb]?)\s+Followers/i);
+        const followingMatch = descText.match(/([0-9.,]+[KkMmBb]?)\s+Following/i);
+        const postsMatch = descText.match(/([0-9.,]+[KkMmBb]?)\s+Posts/i);
+
+        let fullName = "";
+        const nameMatch = ogTitle.match(/^(.*?)\s*\(@[a-zA-Z0-9._]+\)/);
+        if (nameMatch) {
+          fullName = nameMatch[1].trim();
         }
 
-        return {
-          success: true,
-          username: user.username,
-          fullName: user.full_name || user.username,
-          biography: user.biography || "",
-          followersCount: followers,
-          followingCount: user.edge_follow?.count || 0,
-          totalPosts: user.edge_owner_to_timeline_media?.count || 0,
-          isVerified: !!user.is_verified,
-          isPrivate: !!user.is_private,
-          profilePicUrl: user.profile_pic_url_hd || user.profile_pic_url,
-          externalUrl: user.external_url || undefined,
-          profileUrl: `https://www.instagram.com/${user.username}/`,
-          avgRecentLikes: avgLikes,
-          recentPostsCount: latestPosts.length,
-          latestPosts,
-        };
+        let bio = "";
+        const bioMatch = metaDesc.match(/on Instagram:\s*"(.*?)"$/s);
+        if (bioMatch) {
+          bio = bioMatch[1].trim();
+        }
+
+        if (followersMatch || fullName || ogTitle.toLowerCase().includes(cleanUsername)) {
+          return {
+            success: true,
+            username: cleanUsername,
+            fullName: fullName || cleanUsername,
+            biography: bio,
+            followers: followersMatch ? followersMatch[1] : undefined,
+            followersCount: followersMatch ? followersMatch[1] : undefined,
+            followingCount: followingMatch ? followingMatch[1] : undefined,
+            totalPosts: postsMatch ? postsMatch[1] : undefined,
+            profilePicUrl: ogImage || undefined,
+            profileUrl: `https://www.instagram.com/${cleanUsername}/`,
+            sourceProvider: "instagram_html_meta",
+          };
+        }
       }
-    } catch (e: any) {
-      // Fall through to error
+    } catch {}
+
+    return {
+      success: false,
+      message: `Instagram profile "@${cleanUsername}" fetch nahi ho saki ya account private/not found hai.`,
+    };
+  }
+
+  // 47b. Search Instagram Users / IDs
+  public async searchInstagramUser(query: string): Promise<any> {
+    const clean = String(query || "").replace(/^@/, "").trim();
+    if (!clean) return { success: false, message: "Search query zaroori hai." };
+
+    // Possible handles to check
+    const candidates = [
+      clean.toLowerCase().replace(/\s+/g, "."),
+      clean.toLowerCase().replace(/\s+/g, "_"),
+      clean.toLowerCase().replace(/\s+/g, ""),
+      `official${clean.toLowerCase().replace(/\s+/g, "")}`,
+      `the${clean.toLowerCase().replace(/\s+/g, "")}`,
+    ];
+
+    const uniqueCandidates = [...new Set(candidates)];
+    const foundProfiles: any[] = [];
+
+    for (const handle of uniqueCandidates.slice(0, 3)) {
+      const info = await this.getInstagramUserInfo(handle);
+      if (info && info.success) {
+        foundProfiles.push(info);
+      }
     }
 
-    return { success: false, message: `Instagram profile "@${cleanUsername}" fetch nahi ho saki ya account private/not found hai.` };
+    if (foundProfiles.length) {
+      return {
+        success: true,
+        query,
+        count: foundProfiles.length,
+        profiles: foundProfiles,
+      };
+    }
+
+    // Direct lookup attempt
+    return await this.getInstagramUserInfo(clean);
   }
 
   // 48. X (Twitter) Profile, Tweets & Search Helper

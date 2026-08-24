@@ -348,7 +348,7 @@ PUBLIC API TOOLS — INDIA-FIRST DEFAULT:
 - For "get_country_info", "get_directions", "get_weather" etc. — if DK just says a city name with no country, assume it's an Indian city unless the name is unambiguous elsewhere (e.g. "Paris" stays Paris, France).
 - This default only applies when DK doesn't specify — if he names a country/city/exchange explicitly, always respect that instead.
 - TOOL FAILURES: every public API tool returns a "success" field — check it before answering. If "success" is false (key missing/wrong, or the API itself failed), tell DK honestly and simply in your own natural voice — e.g. "Boss, iska API abhi connect nahi ho pa raha" or "Boss, iski key galat lag rahi hai, ek baar check kar lena." Don't read out raw error text or technical jargon, and never pretend you got the data when you didn't.
-- TRAIN TOOLS QUOTA: "get_trains_between_stations", "get_train_schedule", "get_live_train_status", and "get_pnr_status" run on a very limited free quota (~50 calls/month total). Only call these when DK explicitly asks about trains/PNR — never speculatively, never to double-check, never as part of a broader multi-tool answer.
+- TRAIN TOOLS: "get_live_train_status", "get_train_schedule", "search_train", "get_trains_between_stations", and "get_pnr_status". DK can search train live status and schedule by either TRAIN NAME (e.g. 'Shiv Ganga Express', 'Mumbai Rajdhani', 'Vande Bharat Varanasi to Delhi') OR TRAIN NUMBER (e.g. '12559', '12951'). State the current location, delay, next station, and expected platform clearly in conversational Hindi.
 
 SHUTDOWN: Judge by intent, not exact words — any way DK says to stop/go quiet/end session ("chup ho jao", "bye", "stop"...) means the same thing. Acknowledge briefly and warmly ("Theek hai DK, main chup ho rahi hoon..."), then stop — no follow-up questions, session closes automatically.
 
@@ -384,10 +384,10 @@ WEBSITE INFO & CUSTOMER CARE HELPLINES:
   - Explain clearly what the portal does and speak the customer care number.
   - Offer or automatically WhatsApp the details if requested.
 
-INSTAGRAM PROFILE, REELS & POSTS LOOKUP:
-- Tool: 'get_instagram_user_info'.
-- When DK asks about an Instagram account (e.g. "Instagram par iska username check karo", "is user ke kitne followers hain", "latest reel/post kya hai", "kitne likes aaye hain"):
-  - Call 'get_instagram_user_info' with the username (without '@').
+INSTAGRAM PROFILE, REELS & ID SEARCH:
+- Tools: 'get_instagram_user_info', 'search_instagram_user'.
+- When DK asks about an Instagram account or wants to search an ID (e.g. "Instagram par iska username check karo", "Virat Kohli ki ID kya hai", "Instagram ID search karo", "is user ke kitne followers hain", "latest reel/post kya hai"):
+  - Call 'get_instagram_user_info' with username, or 'search_instagram_user' to search by person name / keyword.
   - State: Username, Full Name, Total Followers (in natural words like "27 crore followers" or "15 lakh followers"), Following count, Total Posts, Bio, and Verified Blue Tick status.
   - If requested or relevant, mention their Latest Reels / Posts: caption summary, likes, views, and comments.
   - If DK asks to send the profile link or post link to WhatsApp (e.g. "iski profile link WhatsApp kar do"): send via 'send_whatsapp_to_contact' (by default to DK / Boss / Divakar).
@@ -1125,25 +1125,36 @@ HOW TO READ MESSAGES:
         },
         {
           name: "get_train_schedule",
-          description: "Get the full stop-by-stop schedule/route for a specific train number with platform info. Free quota is very limited, so only call this when DK explicitly asks.",
+          description: "Get the full stop-by-stop schedule/route with station codes and platform numbers for a specific train number or train name (e.g. '12951' or 'Shiv Ganga Express').",
           parameters: {
             type: "OBJECT",
             properties: {
-              trainNumber: { type: "STRING", description: "The train number, e.g. '12951'" },
+              trainNumberOrName: { type: "STRING", description: "The train number (e.g. '12951') or train name (e.g. 'Shiv Ganga Express', 'Mumbai Rajdhani')" },
             },
-            required: ["trainNumber"],
+            required: ["trainNumberOrName"],
           },
         },
         {
           name: "get_live_train_status",
-          description: "Get real-time live running status, current location, delay, next station, and expected platform number for a running train. Use when DK asks live status, kahan tak pahunchi, late hai ya nahi, ya platform number kya hai.",
+          description: "Get real-time live running status, current location, delay, next station, and expected platform number for a running train by train number OR train name. Use when DK asks live status, kahan tak pahunchi, late hai ya nahi, ya platform number kya hai.",
           parameters: {
             type: "OBJECT",
             properties: {
-              trainNumber: { type: "STRING", description: "The train number, e.g. '12951'" },
+              trainNumberOrName: { type: "STRING", description: "The train number (e.g. '12559') or train name (e.g. 'Shiv Ganga Express', 'Vande Bharat Delhi to Varanasi')" },
               startDay: { type: "INTEGER", description: "Journey start day: 0 for today (default), 1 for yesterday, 2 for 2 days ago" },
             },
-            required: ["trainNumber"],
+            required: ["trainNumberOrName"],
+          },
+        },
+        {
+          name: "search_train",
+          description: "Find the official train number and route for any train name (e.g. 'Shiv Ganga', 'Poorva Express', 'Vande Bharat', 'Lucknow Mail').",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              query: { type: "STRING", description: "Train name or keyword to search" },
+            },
+            required: ["query"],
           },
         },
         {
@@ -1193,13 +1204,24 @@ HOW TO READ MESSAGES:
         },
         {
           name: "get_instagram_user_info",
-          description: "Get public profile details of any Instagram username: Realtime Followers count, Following count, Total Posts count, Bio, Verified status, and Latest Reels/Posts with Likes, Views, and Comments.",
+          description: "Get public profile details of any Instagram handle or user: Realtime Followers count, Following count, Total Posts count, Bio, Verified status, and Latest Reels/Posts with Likes, Views, and Comments.",
           parameters: {
             type: "OBJECT",
             properties: {
-              username: { type: "STRING", description: "The Instagram username (e.g. 'cristiano', 'instagram', 'virat.kohli')" },
+              username: { type: "STRING", description: "The Instagram username or handle (e.g. 'virat.kohli', 'cristiano', 'narendramodi')" },
             },
             required: ["username"],
+          },
+        },
+        {
+          name: "search_instagram_user",
+          description: "Search for Instagram IDs, user handles, and profiles by person name, celebrity name, brand, or query (e.g. 'Salman Khan', 'Virat Kohli', 'CarryMinati').",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              query: { type: "STRING", description: "Person name, creator, brand or handle to search on Instagram" },
+            },
+            required: ["query"],
           },
         },
         {
@@ -1953,21 +1975,28 @@ HOW TO READ MESSAGES:
                     result = { success: false, message: `Train list fetch fail hui: ${e?.message || e}` };
                   }
                 } else if (call.name === "get_train_schedule") {
-                  const { trainNumber } = call.args || {};
+                  const { trainNumberOrName, trainNumber, trainName } = call.args || {};
                   try {
-                    result = await publicApisService.getTrainSchedule(String(trainNumber || ""));
+                    result = await publicApisService.getTrainSchedule(String(trainNumberOrName || trainNumber || trainName || ""));
                   } catch (e: any) {
                     result = { success: false, message: `Train schedule fetch fail hui: ${e?.message || e}` };
                   }
                 } else if (call.name === "get_live_train_status") {
-                  const { trainNumber, startDay } = call.args || {};
+                  const { trainNumberOrName, trainNumber, trainName, startDay } = call.args || {};
                   try {
                     result = await publicApisService.getLiveTrainStatus(
-                      String(trainNumber || ""),
+                      String(trainNumberOrName || trainNumber || trainName || ""),
                       typeof startDay === "number" ? startDay : 0
                     );
                   } catch (e: any) {
                     result = { success: false, message: `Live train status fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "search_train") {
+                  const { query, trainName, trainNumber } = call.args || {};
+                  try {
+                    result = await publicApisService.searchTrain(String(query || trainName || trainNumber || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Train search fail hui: ${e?.message || e}` };
                   }
                 } else if (call.name === "get_pnr_status") {
                   const { pnrNumber } = call.args || {};
@@ -2001,11 +2030,18 @@ HOW TO READ MESSAGES:
                     result = { success: false, message: `Website/Helpline info fetch fail hui: ${e?.message || e}` };
                   }
                 } else if (call.name === "get_instagram_user_info") {
-                  const { username } = call.args || {};
+                  const { username, usernameOrQuery, query } = call.args || {};
                   try {
-                    result = await publicApisService.getInstagramUserInfo(String(username || ""));
+                    result = await publicApisService.getInstagramUserInfo(String(username || usernameOrQuery || query || ""));
                   } catch (e: any) {
                     result = { success: false, message: `Instagram user info fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "search_instagram_user") {
+                  const { query, username, name } = call.args || {};
+                  try {
+                    result = await publicApisService.searchInstagramUser(String(query || username || name || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Instagram search fail hui: ${e?.message || e}` };
                   }
                 } else if (call.name === "get_x_twitter_info") {
                   const { usernameOrTopic } = call.args || {};
