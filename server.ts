@@ -624,6 +624,20 @@ WHATSAPP VISION AI & LONG-TERM PERSON RECOGNITION MEMORY:
      - If recognized: "Boss, ye [Person Name] hain! [Details/notes]."
      - If not recognized: "Boss, ye photo meri memory ke kisi saved person se match nahi hui. Agar aap inka naam batayein to main save kar lungi."
 
+VOICE CONTROL FOR ALL TOGGLES & INTERFACE SWITCHES:
+- Tool: 'toggle_ui_setting'.
+- You can turn ON or OFF ANY toggle switch or interface panel on screen by voice:
+  * "Captions on/off karo" / "Subtitles chalao/band karo" -> toggle_ui_setting(settingName: 'captions', state: true/false)
+  * "Accurate mode on/off karo" -> toggle_ui_setting(settingName: 'accurate_mode', state: true/false)
+  * "Google search on/off karo" -> toggle_ui_setting(settingName: 'google_search', state: true/false)
+  * "Wake word on/off karo" / "Hello Friday listening on/off karo" -> toggle_ui_setting(settingName: 'wake_word', state: true/false)
+  * "Baileys WhatsApp on/off karo" -> toggle_ui_setting(settingName: 'baileys_whatsapp', state: true/false)
+  * "Coding agent window kholo/band karo" -> toggle_ui_setting(settingName: 'code_agent', state: true/false)
+  * "Chat history kholo/band karo" -> toggle_ui_setting(settingName: 'chat_history', state: true/false)
+  * "Settings kholo/band karo" -> toggle_ui_setting(settingName: 'settings', state: true/false)
+  * "WhatsApp linking modal kholo/band karo" -> toggle_ui_setting(settingName: 'whatsapp_modal', state: true/false)
+- After toggling, ALWAYS reply: "Boss, [setting name] ko [ON / OFF] kar diya hai."
+
 DAILY LIFE ESSENTIALS (MEDICINE, GOLD/PETROL, EMERGENCY, CHALLAN, BILLS, SCHEMES, EXPENSES, BUS):
 - 'get_medicine_and_generic_info': Explain medicine uses, precautions, and suggest 70% cheaper Jan Aushadhi generic alternative salts.
 - 'get_daily_commodity_rates': Gold (22K/24K), Silver, Petrol, Diesel, and LPG cylinder rates in Indian cities.
@@ -1696,6 +1710,24 @@ HOW TO READ MESSAGES:
             type: "OBJECT",
             properties: {},
             required: [],
+          },
+        },
+        {
+          name: "toggle_ui_setting",
+          description: "Turn ON or OFF any UI toggle switch, panel, or modal by voice (e.g. captions, accurate_mode, google_search, wake_word, baileys_whatsapp, code_agent, chat_history, settings, whatsapp_modal).",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              settingName: {
+                type: "STRING",
+                description: "Name of the setting/toggle: 'captions', 'accurate_mode', 'google_search', 'wake_word', 'baileys_whatsapp', 'code_agent', 'chat_history', 'settings', 'whatsapp_modal'",
+              },
+              state: {
+                type: "BOOLEAN",
+                description: "true for ON, false for OFF. If omitted, flips/toggles the current state.",
+              },
+            },
+            required: ["settingName"],
           },
         },
         {
@@ -2821,6 +2853,57 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                     };
                   } catch (e: any) {
                     result = { success: false, message: `Person identify karne me error: ${e?.message || e}` };
+                  }
+                } else if (call.name === "toggle_ui_setting") {
+                  const { settingName, state } = call.args || {};
+                  try {
+                    const norm = String(settingName || "").toLowerCase().trim();
+                    let finalState: boolean | undefined = typeof state === "boolean" ? state : undefined;
+
+                    if (norm.includes("baileys") || norm === "baileys_whatsapp") {
+                      if (finalState === undefined) baileysEnabled = !baileysEnabled;
+                      else baileysEnabled = finalState;
+                      finalState = baileysEnabled;
+                    }
+
+                    const normalizedSetting = norm.includes("caption") || norm.includes("subtitle")
+                      ? "captions"
+                      : norm.includes("accurate")
+                      ? "accurate_mode"
+                      : norm.includes("google") || norm.includes("search")
+                      ? "google_search"
+                      : norm.includes("wake") || norm.includes("hello")
+                      ? "wake_word"
+                      : norm.includes("chat") || norm.includes("history")
+                      ? "chat_history"
+                      : norm.includes("code") || norm.includes("agent")
+                      ? "code_agent"
+                      : norm.includes("modal") || norm.includes("link")
+                      ? "whatsapp_modal"
+                      : norm.includes("setting")
+                      ? "settings"
+                      : norm;
+
+                    const payload = JSON.stringify({
+                      type: "ui_toggle_command",
+                      setting: normalizedSetting,
+                      state: finalState,
+                    });
+
+                    for (const client of connectedClients) {
+                      if (client.readyState === 1) {
+                        try { client.send(payload); } catch {}
+                      }
+                    }
+
+                    result = {
+                      success: true,
+                      setting: normalizedSetting,
+                      state: finalState,
+                      message: `Boss, ${settingName} ko ${finalState === false ? "OFF" : "ON"} kar diya hai!`,
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `Toggle fail hua: ${e?.message || e}` };
                   }
                 } else if (call.name === "get_linkedin_insights") {
                   const { query } = call.args || {};

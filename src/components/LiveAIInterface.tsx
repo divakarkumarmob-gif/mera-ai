@@ -15,6 +15,51 @@ interface LiveAIInterfaceProps {
 const VOICES = ['Aoede', 'Charon', 'Fenrir', 'Kore', 'Puck'];
 const THINKING_LEVELS = ['low', 'medium', 'high'];
 
+// ── Reusable Toggle Switch with Clear "ON" / "OFF" Visual Badge ───────────────
+interface ToggleSwitchProps {
+    label: string;
+    description?: string;
+    active: boolean;
+    onToggle: () => void;
+    activeColor?: string;
+    disabled?: boolean;
+}
+
+function ToggleSwitch({ label, description, active, onToggle, activeColor = 'bg-purple-600', disabled }: ToggleSwitchProps) {
+    return (
+        <div className="flex items-center justify-between gap-4 py-2 border-b border-white/5 last:border-0">
+            <div className="min-w-0 flex-1">
+                <span className="text-white text-sm block font-medium leading-tight">{label}</span>
+                {description && <span className="text-slate-400 text-xs block mt-0.5">{description}</span>}
+            </div>
+            <div className="flex flex-col items-center gap-1 shrink-0">
+                <span
+                    className={`text-[9px] font-black tracking-widest px-2 py-0.5 rounded-full uppercase transition-all ${
+                        active
+                            ? 'bg-emerald-500/25 text-emerald-300 border border-emerald-500/50 shadow-[0_0_10px_rgba(16,185,129,0.35)]'
+                            : 'bg-slate-800 text-slate-400 border border-slate-700'
+                    }`}
+                >
+                    {active ? 'ON' : 'OFF'}
+                </span>
+                <button
+                    onClick={onToggle}
+                    disabled={disabled}
+                    className={`w-12 h-7 rounded-full transition-all relative cursor-pointer active:scale-95 ${
+                        active ? activeColor : 'bg-slate-700'
+                    } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                    <span
+                        className={`absolute top-1 w-5 h-5 rounded-full bg-white shadow-md transition-transform ${
+                            active ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                    />
+                </button>
+            </div>
+        </div>
+    );
+}
+
 // ── Baileys Backup WhatsApp Toggle (inline mini-component) ────────────────────
 function BaileysToggle() {
     const [enabled, setEnabled] = useState(false);
@@ -42,21 +87,14 @@ function BaileysToggle() {
     };
 
     return (
-        <div className="flex items-center justify-between">
-            <div>
-                <span className="text-white text-sm block">Baileys Backup WhatsApp</span>
-                <span className={`text-xs font-medium ${enabled ? 'text-amber-400' : 'text-slate-400'}`}>
-                    {enabled ? '⚡ Backup Active — Baileys fallback ON' : '🛡️ Cloud API Only (Safe)'}
-                </span>
-            </div>
-            <button
-                onClick={toggle}
-                disabled={loading}
-                className={`w-12 h-7 rounded-full transition-colors relative ${enabled ? 'bg-amber-500' : 'bg-slate-700'} ${loading ? 'opacity-50' : ''}`}
-            >
-                <span className={`absolute top-1 w-5 h-5 rounded-full bg-white transition-transform ${enabled ? 'translate-x-6' : 'translate-x-1'}`} />
-            </button>
-        </div>
+        <ToggleSwitch
+            label="Baileys Backup WhatsApp"
+            description={enabled ? '⚡ Backup Active — Baileys fallback ON' : '🛡️ Cloud API Only (Safe)'}
+            active={enabled}
+            onToggle={toggle}
+            activeColor="bg-amber-500"
+            disabled={loading}
+        />
     );
 }
 
@@ -760,6 +798,31 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         pendingImagePayloadsRef.current = [];
                         queued.forEach(img => sendImageToWebSocket(img));
                     }
+                } else if (msg.type === 'ui_toggle_command') {
+                    const { setting, state } = msg;
+                    if (setting === 'captions') {
+                        setShowCaptions((prev) => (typeof state === 'boolean' ? state : !prev));
+                    } else if (setting === 'accurate_mode') {
+                        setAccurateMode((prev) => (typeof state === 'boolean' ? state : !prev));
+                    } else if (setting === 'google_search') {
+                        setGoogleSearchMode((prev) => (typeof state === 'boolean' ? state : !prev));
+                    } else if (setting === 'wake_word') {
+                        setWakeWordActive((prev) => {
+                            const next = typeof state === 'boolean' ? state : !prev;
+                            localStorage.setItem('wakeWordActive', String(next));
+                            return next;
+                        });
+                    } else if (setting === 'chat_history') {
+                        setShowChatHistory((prev) => (typeof state === 'boolean' ? state : !prev));
+                    } else if (setting === 'code_agent') {
+                        setShowCodeAgent((prev) => (typeof state === 'boolean' ? state : !prev));
+                    } else if (setting === 'whatsapp_modal') {
+                        setShowWhatsAppModal((prev) => (typeof state === 'boolean' ? state : !prev));
+                    } else if (setting === 'settings') {
+                        setShowSettings((prev) => (typeof state === 'boolean' ? state : !prev));
+                    } else if (setting === 'music') {
+                        if (state === false) stopMusicPlayback();
+                    }
                 } else if (msg.type === 'session_reconnecting') {
                     // Server is auto-reconnecting the Gemini session
                     isInitializedRef.current = false;
@@ -1213,42 +1276,41 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                                 </div>
                             </div>
 
-                            <div className="flex items-center justify-between">
-                                <span className="text-white text-sm">Careful / Accurate Mode</span>
-                                <button
-                                    onClick={() => setAccurateMode(!accurateMode)}
-                                    className={`w-12 h-7 rounded-full transition-colors relative ${accurateMode ? 'bg-purple-600' : 'bg-slate-700'}`}
-                                >
-                                    <span className={`absolute top-1 w-5 h-5 rounded-full bg-white transition-transform ${accurateMode ? 'translate-x-6' : 'translate-x-1'}`} />
-                                </button>
-                            </div>
+                            <ToggleSwitch
+                                label="Careful / Accurate Mode"
+                                description="Double-checks facts and calculations before speaking"
+                                active={accurateMode}
+                                onToggle={() => setAccurateMode(!accurateMode)}
+                                activeColor="bg-purple-600"
+                            />
 
-                            <div className="flex items-center justify-between">
-                                <span className="text-white text-sm">Google Search Mode</span>
-                                <button
-                                    onClick={() => setGoogleSearchMode(!googleSearchMode)}
-                                    className={`w-12 h-7 rounded-full transition-colors relative ${googleSearchMode ? 'bg-purple-600' : 'bg-slate-700'}`}
-                                >
-                                    <span className={`absolute top-1 w-5 h-5 rounded-full bg-white transition-transform ${googleSearchMode ? 'translate-x-6' : 'translate-x-1'}`} />
-                                </button>
-                            </div>
+                            <ToggleSwitch
+                                label="Google Search Grounding"
+                                description="Live web search integration for real-time information"
+                                active={googleSearchMode}
+                                onToggle={() => setGoogleSearchMode(!googleSearchMode)}
+                                activeColor="bg-blue-600"
+                            />
 
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <span className="text-white text-sm block">Wake Word ("Hello Friday")</span>
-                                    <span className="text-slate-400 text-xs">Say "Hello Friday" anytime to start</span>
-                                </div>
-                                <button
-                                    onClick={() => {
-                                        const next = !wakeWordActive;
-                                        setWakeWordActive(next);
-                                        localStorage.setItem('wakeWordActive', String(next));
-                                    }}
-                                    className={`w-12 h-7 rounded-full transition-colors relative ${wakeWordActive ? 'bg-cyan-500' : 'bg-slate-700'}`}
-                                >
-                                    <span className={`absolute top-1 w-5 h-5 rounded-full bg-white transition-transform ${wakeWordActive ? 'translate-x-6' : 'translate-x-1'}`} />
-                                </button>
-                            </div>
+                            <ToggleSwitch
+                                label="Wake Word ('Hello Friday')"
+                                description="Say 'Hello Friday' anytime to instantly wake assistant"
+                                active={wakeWordActive}
+                                onToggle={() => {
+                                    const next = !wakeWordActive;
+                                    setWakeWordActive(next);
+                                    localStorage.setItem('wakeWordActive', String(next));
+                                }}
+                                activeColor="bg-cyan-500"
+                            />
+
+                            <ToggleSwitch
+                                label="Live Subtitles (Captions)"
+                                description="Display real-time speech-to-text subtitles"
+                                active={showCaptions}
+                                onToggle={() => setShowCaptions(!showCaptions)}
+                                activeColor="bg-emerald-600"
+                            />
 
                             {/* Baileys Backup WhatsApp Toggle */}
                             <BaileysToggle />
