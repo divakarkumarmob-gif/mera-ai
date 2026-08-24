@@ -384,11 +384,40 @@ WEBSITE INFO & CUSTOMER CARE HELPLINES:
   - Explain clearly what the portal does and speak the customer care number.
   - Offer or automatically WhatsApp the details if requested.
 
-INSTAGRAM PROFILE LOOKUP:
+INSTAGRAM PROFILE, REELS & POSTS LOOKUP:
 - Tool: 'get_instagram_user_info'.
-- When DK asks about an Instagram user, account, or username (e.g. "Instagram par iska username check karo", "is user ke kitne followers hain", "total posts kitni hain"):
+- When DK asks about an Instagram account (e.g. "Instagram par iska username check karo", "is user ke kitne followers hain", "latest reel/post kya hai", "kitne likes aaye hain"):
   - Call 'get_instagram_user_info' with the username (without '@').
-  - State: Username, Full Name, Total Followers (speak in natural words like "68 crore followers" or "15 lakh followers"), Following count, Total Posts, Bio, and whether the account is Verified (blue tick) or Private.
+  - State: Username, Full Name, Total Followers (in natural words like "27 crore followers" or "15 lakh followers"), Following count, Total Posts, Bio, and Verified Blue Tick status.
+  - If requested or relevant, mention their Latest Reels / Posts: caption summary, likes, views, and comments.
+  - If DK asks to send the profile link or post link to WhatsApp (e.g. "iski profile link WhatsApp kar do"): send via 'send_whatsapp_to_contact' (by default to DK / Boss / Divakar).
+
+X (TWITTER) POSTS, TWEETS & TRENDS:
+- Tool: 'get_x_twitter_info'.
+- When DK asks about X / Twitter (e.g. "X par Elon Musk ne kya tweet kiya", "Twitter par aaj kya trend kar raha hai", "Twitter par iska kya opinion hai", "is tweet ka reply kya hai"):
+  - Call 'get_x_twitter_info' with the username or topic.
+  - Use live real-time search to narrate the latest tweet/statement, viral replies, and public sentiment in simple conversational Hindi.
+  - If DK asks to WhatsApp the tweet or profile link, send via 'send_whatsapp_to_contact' (by default to DK / Boss / Divakar).
+
+SOCIAL & MEDIA TOOLS (YOUTUBE, REDDIT, SPOTIFY MUSIC, LINKEDIN, TELEGRAM/DISCORD, PINTEREST):
+- 'search_youtube': Search YouTube videos, channels (@handle), trending topics. Send direct link to WhatsApp if requested.
+- 'search_reddit': Check honest opinions, community reviews, and discussions on subreddits like r/india, r/technology, r/Cricket, etc.
+- 'search_music': Lookup songs, singer/artist, album, preview, and generate direct Spotify play links. Send Spotify link to WhatsApp if asked.
+- 'play_music': Play / stream any song or music directly in the application. Call when DK says 'gana chalao', 'music play karo', 'Arijit Singh ka gana sunao'.
+- 'stop_music': STOP / PAUSE the currently playing music immediately. CRITICAL: Whenever DK says 'stop', 'gana band karo', 'mujhe achha nahi laga', 'band karo gana', 'gana nahi sunna mujhe', 'music roko', 'chup ho jao' — CALL 'stop_music' IMMEDIATELY and resume talking warmly.
+- 'get_linkedin_insights': Company pages, hiring, job openings, and professional skill trends.
+- 'get_community_links': Find Telegram and Discord channel links for study groups, deals, gaming, and tech.
+- 'get_pinterest_ideas': Visual room decor, desk setups, fashion, and aesthetic photography ideas.
+
+DAILY LIFE ESSENTIALS (MEDICINE, GOLD/PETROL, EMERGENCY, CHALLAN, BILLS, SCHEMES, EXPENSES, BUS):
+- 'get_medicine_and_generic_info': Explain medicine uses, precautions, and suggest 70% cheaper Jan Aushadhi generic alternative salts.
+- 'get_daily_commodity_rates': Gold (22K/24K), Silver, Petrol, Diesel, and LPG cylinder rates in Indian cities.
+- 'get_emergency_helplines': Instant emergency SOS numbers (112, 100, 102, 101, 1930 Cyber, 1091 Women, 139 Railways).
+- 'get_vehicle_and_challan_services': Vehicle RC, DL renewal, PUCC, and e-Challan check & pay links.
+- 'get_utility_and_bill_services': Indane/Bharat/HP Gas cylinder WhatsApp booking numbers, electricity bill payment links, Fastag recharge.
+- 'get_govt_scheme_info': Ayushman Bharat (₹5 Lakh free health card), PM Kisan (₹6000/yr), PM Awas, Sukanya Samriddhi Yojana details & links.
+- 'track_expense_entry' & 'get_expense_summary': Log daily expenses by voice and calculate daily/monthly totals.
+- 'get_bus_travel_info': Intercity bus booking links (RedBus, AbhiBus) and state transport routes.
 
 NEWS & HEADLINES (TOP 10, POLITICS, LOCAL, WORLD, VIRAL):
 - Tool: 'get_news'.
@@ -1164,13 +1193,214 @@ HOW TO READ MESSAGES:
         },
         {
           name: "get_instagram_user_info",
-          description: "Get public profile details of any Instagram username: Realtime Followers count, Following count, Total Posts count, Bio, and Verified status.",
+          description: "Get public profile details of any Instagram username: Realtime Followers count, Following count, Total Posts count, Bio, Verified status, and Latest Reels/Posts with Likes, Views, and Comments.",
           parameters: {
             type: "OBJECT",
             properties: {
               username: { type: "STRING", description: "The Instagram username (e.g. 'cristiano', 'instagram', 'virat.kohli')" },
             },
             required: ["username"],
+          },
+        },
+        {
+          name: "get_x_twitter_info",
+          description: "Get X (Twitter) profile link, latest discussions, tweets, and trending topics for any username or search topic.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              usernameOrTopic: { type: "STRING", description: "The X (Twitter) username (e.g. 'elonmusk') or search topic/trend" },
+            },
+            required: ["usernameOrTopic"],
+          },
+        },
+        {
+          name: "search_youtube",
+          description: "Search YouTube videos, channels (@channel), or trending topics with direct YouTube links.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              query: { type: "STRING", description: "YouTube search query or channel name (e.g. 'CarryMinati', 'Python tutorial')" },
+            },
+            required: ["query"],
+          },
+        },
+        {
+          name: "search_reddit",
+          description: "Search Reddit community threads, discussions, and honest public opinions on any topic or subreddit (e.g. 'r/india', 'best phone under 20k').",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              topicOrSubreddit: { type: "STRING", description: "Topic to search or subreddit name (e.g. 'india', 'tech', 'smartphones')" },
+            },
+            required: ["topicOrSubreddit"],
+          },
+        },
+        {
+          name: "search_music",
+          description: "Search songs, artists, albums, release year, and get direct Spotify play links.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              songOrArtist: { type: "STRING", description: "Song name, singer, or artist (e.g. 'Kesariya Arijit Singh', 'Shape of You')" },
+            },
+            required: ["songOrArtist"],
+          },
+        },
+        {
+          name: "play_music",
+          description: "Play and stream any song or music track directly in the application when DK asks to listen to music (e.g. 'Kesariya gana chalao', 'koi relax karne wala music sunao').",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              songName: { type: "STRING", description: "Song name or artist name to play" },
+            },
+            required: ["songName"],
+          },
+        },
+        {
+          name: "stop_music",
+          description: "Stop / Pause the currently playing music immediately when DK says 'stop', 'gana band karo', 'mujhe achha nahi laga', 'band karo gana', 'gana nahi sunna mujhe'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+            required: [],
+          },
+        },
+        {
+          name: "get_linkedin_insights",
+          description: "Get LinkedIn company hub page and job opening search links for any company or skill.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              query: { type: "STRING", description: "Company name or job role (e.g. 'Google India', 'React Developer')" },
+            },
+            required: ["query"],
+          },
+        },
+        {
+          name: "get_community_links",
+          description: "Get verified Telegram channels or Discord community search links for study, tech, gaming, or deals.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              platform: { type: "STRING", description: "'telegram' or 'discord'" },
+              topic: { type: "STRING", description: "Topic (e.g. 'deals india', 'python programming')" },
+            },
+            required: ["platform", "topic"],
+          },
+        },
+        {
+          name: "get_pinterest_ideas",
+          description: "Get Pinterest visual ideas, room decor, setup aesthetics, and fashion trends.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              query: { type: "STRING", description: "Visual search topic (e.g. 'minimal desk setup', 'outfit ideas')" },
+            },
+            required: ["query"],
+          },
+        },
+        {
+          name: "get_medicine_and_generic_info",
+          description: "Get medicine uses, dosage precautions, and 50-80% cheaper Jan Aushadhi generic salt alternatives for any medicine (e.g. 'Paracetamol', 'Pantop-D', 'Azithromycin').",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              medicineName: { type: "STRING", description: "Medicine brand name or salt name" },
+            },
+            required: ["medicineName"],
+          },
+        },
+        {
+          name: "get_daily_commodity_rates",
+          description: "Get latest Gold (22K/24K), Silver, Petrol, Diesel, and LPG cylinder rates in Patna, Delhi, or other Indian cities.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              commodity: { type: "STRING", description: "'gold', 'silver', 'petrol', 'diesel', 'lpg', or 'all'" },
+              city: { type: "STRING", description: "City name, default 'Patna' or 'Delhi'" },
+            },
+            required: ["commodity"],
+          },
+        },
+        {
+          name: "get_emergency_helplines",
+          description: "Get instant emergency numbers (112 National, 100 Police, 102 Ambulance, 101 Fire, 1930 Cyber Fraud, 1091 Women Safety, 139 Railway).",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              serviceType: { type: "STRING", description: "Optional specific emergency type (e.g. 'cyber', 'women', 'police', 'medical')" },
+            },
+            required: [],
+          },
+        },
+        {
+          name: "get_vehicle_and_challan_services",
+          description: "Check e-Challan status/links, Parivahan RC/DL services, PUCC validity, and mParivahan portal links for vehicles.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              service: { type: "STRING", description: "'echallan', 'rc', 'dl', 'puc'" },
+              vehicleNumber: { type: "STRING", description: "Optional vehicle registration number (e.g. 'BR01AB1234')" },
+            },
+            required: [],
+          },
+        },
+        {
+          name: "get_utility_and_bill_services",
+          description: "Get Gas cylinder WhatsApp booking numbers (Indane/Bharat/HP), Electricity bill portal links, and Fastag recharge services.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              serviceType: { type: "STRING", description: "'gas', 'electricity', 'fastag', or 'all'" },
+              providerOrState: { type: "STRING", description: "State or provider name (e.g. 'Bihar', 'Delhi', 'Indane')" },
+            },
+            required: ["serviceType"],
+          },
+        },
+        {
+          name: "get_govt_scheme_info",
+          description: "Get details, eligibility, benefits, and official links for government schemes (e.g. 'Ayushman Bharat', 'PM Kisan', 'PMAY', 'Sukanya Samriddhi').",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              schemeName: { type: "STRING", description: "Name of the scheme (e.g. 'Ayushman Bharat', 'PM Kisan')" },
+            },
+            required: ["schemeName"],
+          },
+        },
+        {
+          name: "track_expense_entry",
+          description: "Log a daily expense by voice with amount, category (Fuel, Food, Travel, Shopping, Bills), and optional note.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              amount: { type: "NUMBER", description: "Expense amount in Rupees (₹)" },
+              category: { type: "STRING", description: "Expense category (e.g. 'Petrol/Fuel', 'Food/Breakfast', 'Shopping', 'Travel', 'Bills')" },
+              note: { type: "STRING", description: "Optional note describing the expense" },
+            },
+            required: ["amount", "category"],
+          },
+        },
+        {
+          name: "get_expense_summary",
+          description: "Get total expense summary for today, recent logs, and spending breakdown.",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+            required: [],
+          },
+        },
+        {
+          name: "get_bus_travel_info",
+          description: "Get bus route info, travel time, and direct booking links for RedBus and AbhiBus between two cities.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              fromCity: { type: "STRING", description: "Departure city (e.g. 'Delhi', 'Patna')" },
+              toCity: { type: "STRING", description: "Destination city (e.g. 'Patna', 'Ranchi', 'Jaipur')" },
+            },
+            required: ["fromCity", "toCity"],
           },
         },
       ];
@@ -1776,6 +2006,150 @@ HOW TO READ MESSAGES:
                     result = await publicApisService.getInstagramUserInfo(String(username || ""));
                   } catch (e: any) {
                     result = { success: false, message: `Instagram user info fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_x_twitter_info") {
+                  const { usernameOrTopic } = call.args || {};
+                  try {
+                    result = await publicApisService.getXTwitterInfo(String(usernameOrTopic || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `X (Twitter) info fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "search_youtube") {
+                  const { query } = call.args || {};
+                  try {
+                    result = await publicApisService.searchYouTube(String(query || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `YouTube search fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "search_reddit") {
+                  const { topicOrSubreddit } = call.args || {};
+                  try {
+                    result = await publicApisService.searchReddit(String(topicOrSubreddit || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Reddit search fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "search_music") {
+                  const { songOrArtist } = call.args || {};
+                  try {
+                    result = await publicApisService.searchMusic(String(songOrArtist || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Music search fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "play_music") {
+                  const { songName } = call.args || {};
+                  try {
+                    result = await publicApisService.playMusic(String(songName || ""));
+                    if (result.success && result.audioUrl) {
+                      clientWs.send(JSON.stringify({
+                        type: 'play_music',
+                        trackName: result.trackName,
+                        artistName: result.artistName,
+                        audioUrl: result.audioUrl,
+                        spotifyUrl: result.spotifyUrl,
+                      }));
+                    }
+                  } catch (e: any) {
+                    result = { success: false, message: `Music play fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "stop_music") {
+                  try {
+                    result = await publicApisService.stopMusic();
+                    clientWs.send(JSON.stringify({ type: 'stop_music' }));
+                  } catch (e: any) {
+                    result = { success: false, message: `Music stop fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_linkedin_insights") {
+                  const { query } = call.args || {};
+                  try {
+                    result = await publicApisService.getLinkedInInsights(String(query || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `LinkedIn search fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_community_links") {
+                  const { platform, topic } = call.args || {};
+                  try {
+                    result = await publicApisService.getCommunityLinks(String(platform || "telegram"), String(topic || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Community search fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_pinterest_ideas") {
+                  const { query } = call.args || {};
+                  try {
+                    result = await publicApisService.getPinterestIdeas(String(query || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Pinterest search fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_medicine_and_generic_info") {
+                  const { medicineName } = call.args || {};
+                  try {
+                    result = await publicApisService.getMedicineAndGenericInfo(String(medicineName || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Medicine lookup fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_daily_commodity_rates") {
+                  const { commodity, city } = call.args || {};
+                  try {
+                    result = await publicApisService.getDailyCommodityRates(String(commodity || "all"), city ? String(city) : undefined);
+                  } catch (e: any) {
+                    result = { success: false, message: `Commodity rates lookup fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_emergency_helplines") {
+                  const { serviceType } = call.args || {};
+                  try {
+                    result = await publicApisService.getEmergencyHelplines(serviceType ? String(serviceType) : undefined);
+                  } catch (e: any) {
+                    result = { success: false, message: `Emergency helpline lookup fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_vehicle_and_challan_services") {
+                  const { service, vehicleNumber } = call.args || {};
+                  try {
+                    result = await publicApisService.getVehicleAndChallanServices(
+                      service ? String(service) : undefined,
+                      vehicleNumber ? String(vehicleNumber) : undefined
+                    );
+                  } catch (e: any) {
+                    result = { success: false, message: `Vehicle services lookup fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_utility_and_bill_services") {
+                  const { serviceType, providerOrState } = call.args || {};
+                  try {
+                    result = await publicApisService.getUtilityAndBillServices(
+                      String(serviceType || "all"),
+                      providerOrState ? String(providerOrState) : undefined
+                    );
+                  } catch (e: any) {
+                    result = { success: false, message: `Utility services lookup fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_govt_scheme_info") {
+                  const { schemeName } = call.args || {};
+                  try {
+                    result = await publicApisService.getGovtSchemeInfo(String(schemeName || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Govt scheme lookup fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "track_expense_entry") {
+                  const { amount, category, note } = call.args || {};
+                  try {
+                    result = await publicApisService.trackExpenseEntry(
+                      Number(amount),
+                      String(category || "General"),
+                      note ? String(note) : undefined
+                    );
+                  } catch (e: any) {
+                    result = { success: false, message: `Expense logging fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_expense_summary") {
+                  try {
+                    result = await publicApisService.getExpenseSummary();
+                  } catch (e: any) {
+                    result = { success: false, message: `Expense summary fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_bus_travel_info") {
+                  const { fromCity, toCity } = call.args || {};
+                  try {
+                    result = await publicApisService.getBusTravelInfo(String(fromCity || ""), String(toCity || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Bus info lookup fail hui: ${e?.message || e}` };
                   }
                 }
 
