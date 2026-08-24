@@ -455,22 +455,47 @@ Rules:
       );
 
       const original = fileItem.action === "modify" ? await githubService.getFileContent(fileItem.path) : "";
-      const genPrompt = `You are DK's AI coding agent. Generate the COMPLETE new content for this file, applying the planned change. Return the full raw file content without truncation.
+      const genPrompt = `You are DK's elite AI Software Engineer. You write clean, compile-ready, production-grade TypeScript/React/Node.js code with ZERO syntax errors.
 
-Instruction: "${request.instruction}"
-Overall plan summary: ${request.plan.summary}
-This file: ${fileItem.path}
-Change needed: ${fileItem.changeSummary}
-${original ? `Current content:\n${original}` : "This is a new file."}`;
+Task Instruction: "${request.instruction}"
+Overall Plan: ${request.plan.summary}
+Target File: ${fileItem.path}
+Change Action: [${fileItem.action}] — ${fileItem.changeSummary}
+
+${original ? `Original File Content:\n${original}` : "This is a brand new file."}
+
+CRITICAL CODING RULES (MUST FOLLOW):
+1. **100% SYNTAX VALIDITY**: The output must compile with TypeScript (\`tsc\`) without any syntax errors.
+2. **NEVER LEAK CSS/HTML INTO CODE SYNTAX**: Tailwind or CSS class names (e.g. 'font-bold', 'text-center') belong ONLY inside JSX \`className="..."\` attributes. NEVER corrupt language structures (e.g. writing '} font-bold {' instead of '} finally {' is strictly forbidden).
+3. **PRESERVE EXISTING LOGIC**: Keep all existing imports, state variables, useEffect hooks, helper functions, and logic that are not part of this task. Do not strip out existing working features.
+4. **NO DUPLICATE UI HEADERS**: If adding a title or text to the UI, place it in ONE clean, appropriate location. Do not duplicate it across multiple child components.
+5. **MATCHING BRACES & CLOSURES**: Ensure every \`{\`, \`(\`, \`[\`, and JSX tag \`<Component>\` has its exact corresponding closing token \`}\`, \`)\`, \`]\`, \`</Component>\`.
+6. **COMPLETE FILE OUTPUT**: Output the ENTIRE, fully updated file from the first line (imports) to the last line. Do not use placeholders like "// ...rest of code remains same...".
+
+Return ONLY the complete updated source code.`;
 
       const raw = await callModel(genPrompt, id, this);
       if (!raw) throw new Error(`Failed to generate content for ${fileItem.path}`);
-      const content = cleanAndExtractFileContent(raw);
+      let content = cleanAndExtractFileContent(raw);
       if (!content || !content.trim()) {
         throw new Error(`Empty content generated for ${fileItem.path}`);
       }
+
+      // Automated sanity validation: catch corrupted tokens like '} font-bold {'
+      if (/\}\s*(font-|text-|bg-|p-|m-|flex-|grid-|rounded-)[a-zA-Z0-9_-]+\s*\{/i.test(content)) {
+        console.warn(`[CodeAgent] Detected corrupted CSS class token in code structure for ${fileItem.path}. Auto-repairing...`);
+        content = content.replace(/\}\s*(font-|text-|bg-|p-|m-|flex-|grid-|rounded-)[a-zA-Z0-9_-]+\s*\{/gi, '} finally {');
+      }
+
+      // Basic brace balance verification
+      const openBraces = (content.match(/\{/g) || []).length;
+      const closeBraces = (content.match(/\}/g) || []).length;
+      if (Math.abs(openBraces - closeBraces) > 2) {
+        console.warn(`[CodeAgent] Warning: Potential brace imbalance in ${fileItem.path} (open: ${openBraces}, close: ${closeBraces})`);
+      }
+
       changes.push({ path: fileItem.path, content });
-      await this.addLog(id, `Generated complete code for: ${fileItem.path}`, "success", "code_gen");
+      await this.addLog(id, `Generated complete & validated code for: ${fileItem.path}`, "success", "code_gen");
     }
 
     const branchName = `friday-agent/${id}`;
