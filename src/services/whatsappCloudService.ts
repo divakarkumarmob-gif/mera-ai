@@ -19,7 +19,7 @@ export interface CloudMessage {
   timestamp: number;
 }
 
-type MessageCallback = (msg: CloudMessage) => void;
+export type MessageCallback = (msg: CloudMessage) => void;
 
 class WhatsAppCloudService {
   private token: string = "";
@@ -42,6 +42,7 @@ class WhatsAppCloudService {
   }
 
   public getStatus(): { configured: boolean; phoneId: string; fromNumber: string } {
+    this.reload();
     return {
       configured: this.isConfigured,
       phoneId: this.phoneId,
@@ -53,17 +54,29 @@ class WhatsAppCloudService {
     this.messageCallback = cb;
   }
 
+  /**
+   * Cleans and normalizes raw phone numbers or WhatsApp JIDs to standard E.164 digits format.
+   * e.g., "+1 (555) 012-3456" -> "15550123456", "919876543210@s.whatsapp.net" -> "919876543210"
+   */
+  private formatPhoneNumber(toPhone: string): string {
+    return toPhone.replace(/@.*$/, "").replace(/\D/g, "");
+  }
+
   // ── Send a text message via Cloud API ──────────────────────────────────────
   public async sendMessage(toPhone: string, text: string): Promise<{ success: boolean; message: string }> {
+    this.reload();
+
     if (!this.isConfigured) {
       return {
         success: false,
-        message: "WhatsApp Cloud API configured nahi hai. .env mein WHATSAPP_API_TOKEN aur WHATSAPP_PHONE_ID set karo.",
+        message: "WhatsApp Cloud API is not configured. Please set WHATSAPP_API_TOKEN and WHATSAPP_PHONE_ID in environment settings.",
       };
     }
 
-    // Normalize phone number — remove spaces, dashes, +
-    const phone = toPhone.replace(/[\s\-\(\)\+]/g, "");
+    const phone = this.formatPhoneNumber(toPhone);
+    if (!phone) {
+      return { success: false, message: "Invalid recipient phone number." };
+    }
 
     try {
       const res = await fetch(
@@ -92,11 +105,76 @@ class WhatsAppCloudService {
       }
 
       const errMsg = data?.error?.message || JSON.stringify(data);
-      console.error(`[WhatsApp Cloud] Send failed:`, errMsg);
+      console.error(`[WhatsApp Cloud] Send failed to ${phone}:`, errMsg);
       return { success: false, message: errMsg };
 
     } catch (e: any) {
       console.error("[WhatsApp Cloud] Network error:", e?.message);
+      return { success: false, message: `Network error: ${e?.message}` };
+    }
+  }
+
+  // ── Send a media message (Image, Document, Audio, Video) via Cloud API ────
+  public async sendMediaMessage(
+    toPhone: string,
+    mediaType: "image" | "document" | "audio" | "video",
+    mediaUrl: string,
+    caption?: string,
+    fileName?: string
+  ): Promise<{ success: boolean; message: string }> {
+    this.reload();
+
+    if (!this.isConfigured) {
+      return {
+        success: false,
+        message: "WhatsApp Cloud API is not configured. Please set WHATSAPP_API_TOKEN and WHATSAPP_PHONE_ID in environment settings.",
+      };
+    }
+
+    const phone = this.formatPhoneNumber(toPhone);
+    if (!phone) {
+      return { success: false, message: "Invalid recipient phone number." };
+    }
+
+    const mediaObj: Record<string, any> = { link: mediaUrl };
+    if (caption && (mediaType === "image" || mediaType === "document" || mediaType === "video")) {
+      mediaObj.caption = caption;
+    }
+    if (fileName && mediaType === "document") {
+      mediaObj.filename = fileName;
+    }
+
+    try {
+      const res = await fetch(
+        `https://graph.facebook.com/v19.0/${this.phoneId}/messages`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${this.token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            messaging_product: "whatsapp",
+            recipient_type: "individual",
+            to: phone,
+            type: mediaType,
+            [mediaType]: mediaObj,
+          }),
+        }
+      );
+
+      const data = await res.json();
+
+      if (res.ok && data.messages?.[0]?.id) {
+        console.log(`[WhatsApp Cloud] Sent ${mediaType} to ${phone}`);
+        return { success: true, message: `Media sent to ${phone}` };
+      }
+
+      const errMsg = data?.error?.message || JSON.stringify(data);
+      console.error(`[WhatsApp Cloud] Send media failed to ${phone}:`, errMsg);
+      return { success: false, message: errMsg };
+    } catch (e: any) {
+      console.error("[WhatsApp Cloud] Network error sending media:", e?.message);
       return { success: false, message: `Network error: ${e?.message}` };
     }
   }
@@ -107,10 +185,17 @@ class WhatsAppCloudService {
     templateName: string = "hello_world",
     langCode: string = "en_US"
   ): Promise<{ success: boolean; message: string }> {
+    this.reload();
+
     if (!this.isConfigured) {
       return { success: false, message: "Cloud API not configured." };
     }
-    const phone = toPhone.replace(/[\s\-\(\)\+]/g, "");
+
+    const phone = this.formatPhoneNumber(toPhone);
+    if (!phone) {
+      return { success: false, message: "Invalid recipient phone number." };
+    }
+
     try {
       const res = await fetch(
         `https://graph.facebook.com/v19.0/${this.phoneId}/messages`,
@@ -132,7 +217,7 @@ class WhatsAppCloudService {
       if (res.ok && data.messages?.[0]?.id) {
         return { success: true, message: `Template sent to ${phone}` };
       }
-      return { success: false, message: data?.error?.message || "Unknown error" };
+      return { success: false, message: data?.error?.message || JSON.stringify(data) };
     } catch (e: any) {
       return { success: false, message: `Error: ${e?.message}` };
     }
@@ -140,6 +225,7 @@ class WhatsAppCloudService {
 
   // ── Verify webhook (Meta calls this when you set up the webhook) ────────────
   public verifyWebhook(mode: string, challenge: string, verifyToken: string): string | null {
+    this.reload();
     if (mode === "subscribe" && verifyToken === this.webhookVerifyToken) {
       console.log("[WhatsApp Cloud] Webhook verified by Meta.");
       return challenge;
@@ -150,6 +236,7 @@ class WhatsAppCloudService {
   // ── Handle incoming webhook payload from Meta ──────────────────────────────
   public handleWebhook(body: any): void {
     try {
+      this.reload();
       const entry = body?.entry?.[0];
       const changes = entry?.changes?.[0];
       const value = changes?.value;
@@ -158,12 +245,14 @@ class WhatsAppCloudService {
 
       for (const msg of value.messages) {
         const isText = msg.type === "text";
-        const isMedia = msg.type === "image" || msg.type === "document";
+        const isMedia = msg.type === "image" || msg.type === "document" || msg.type === "audio" || msg.type === "video";
 
         const from = msg.from;
-        const text = isText ? (msg.text?.body || "") : (msg.image?.caption || msg.document?.caption || `[${msg.type}]`);
+        const text = isText
+          ? (msg.text?.body || "")
+          : (msg.image?.caption || msg.document?.caption || msg.video?.caption || `[${msg.type}]`);
         const messageId = msg.id;
-        const timestamp = parseInt(msg.timestamp, 10) * 1000;
+        const timestamp = parseInt(msg.timestamp, 10) * 1000 || Date.now();
 
         const contacts = value?.contacts || [];
         const contact = contacts.find((c: any) => c.wa_id === from);
@@ -171,9 +260,9 @@ class WhatsAppCloudService {
 
         // Vision AI: Download Cloud media if image/document
         if (isMedia && this.token) {
-          const mediaId = msg.image?.id || msg.document?.id;
-          const mimeType = msg.image?.mime_type || msg.document?.mime_type || "image/jpeg";
-          const caption = msg.image?.caption || msg.document?.caption || "";
+          const mediaId = msg.image?.id || msg.document?.id || msg.audio?.id || msg.video?.id;
+          const mimeType = msg.image?.mime_type || msg.document?.mime_type || msg.audio?.mime_type || msg.video?.mime_type || "image/jpeg";
+          const caption = msg.image?.caption || msg.document?.caption || msg.video?.caption || "";
 
           if (mediaId) {
             (async () => {
@@ -212,7 +301,9 @@ class WhatsAppCloudService {
 
   // ── Mark message as read ───────────────────────────────────────────────────
   public async markRead(messageId: string): Promise<void> {
-    if (!this.isConfigured) return;
+    this.reload();
+    if (!this.isConfigured || !messageId) return;
+
     try {
       await fetch(`https://graph.facebook.com/v19.0/${this.phoneId}/messages`, {
         method: "POST",
@@ -226,7 +317,9 @@ class WhatsAppCloudService {
           message_id: messageId,
         }),
       });
-    } catch { /* non-critical */ }
+    } catch {
+      /* non-critical background operation */
+    }
   }
 }
 
