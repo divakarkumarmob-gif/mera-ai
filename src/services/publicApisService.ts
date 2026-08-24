@@ -1350,6 +1350,193 @@ class PublicApisService {
       contextGiven: context || "General daily routine",
     };
   }
+
+  // 46. Website Info, Direct Links & Customer Care Helpline Directory
+  public async getWebsiteOrHelplineInfo(query: string): Promise<any> {
+    const verifiedDirectory: Record<string, { name: string; url: string; customerCare: string; description: string }> = {
+      irctc: {
+        name: "IRCTC (Indian Railway Catering and Tourism Corporation)",
+        url: "https://www.irctc.co.in",
+        customerCare: "14646 / 0755-6610661",
+        description: "Indian Railways ki official ticket booking, train schedule, PNR status aur tourism portal.",
+      },
+      uidai: {
+        name: "UIDAI (Unique Identification Authority of India)",
+        url: "https://uidai.gov.in",
+        customerCare: "1947 (Toll-Free)",
+        description: "Aadhaar card download, PVC card order, update aur biometric lock/unlock portal.",
+      },
+      aadhaar: {
+        name: "UIDAI (Unique Identification Authority of India)",
+        url: "https://uidai.gov.in",
+        customerCare: "1947 (Toll-Free)",
+        description: "Aadhaar card download, PVC card order, update aur biometric lock/unlock portal.",
+      },
+      epfo: {
+        name: "EPFO (Employees' Provident Fund Organisation)",
+        url: "https://www.epfindia.gov.in",
+        customerCare: "1800 118 005 (Toll-Free)",
+        description: "PF balance check, UAN passbook, PF withdrawal aur member claim portal.",
+      },
+      incometax: {
+        name: "Income Tax e-Filing Portal",
+        url: "https://www.incometax.gov.in",
+        customerCare: "1800 103 0025 / 1800 419 0025",
+        description: "ITR filing, PAN-Aadhaar link, tax refund status aur AIS check portal.",
+      },
+      sbi: {
+        name: "State Bank of India (SBI)",
+        url: "https://onlinesbi.sbi",
+        customerCare: "1800 1234 / 1800 2100",
+        description: "SBI Online Net Banking, card block, balance enquiry aur customer support.",
+      },
+      hdfc: {
+        name: "HDFC Bank",
+        url: "https://www.hdfcbank.com",
+        customerCare: "1800 1600 / 1800 2600",
+        description: "HDFC NetBanking, loan, credit card aur account services portal.",
+      },
+      icici: {
+        name: "ICICI Bank",
+        url: "https://www.icicibank.com",
+        customerCare: "1800 1080",
+        description: "ICICI NetBanking, credit card, iMobile Pay aur customer care portal.",
+      },
+      amazon: {
+        name: "Amazon India",
+        url: "https://www.amazon.in",
+        customerCare: "1800 3000 9009 (Toll-Free)",
+        description: "Online shopping, electronics, fashion, groceries aur customer support portal.",
+      },
+      flipkart: {
+        name: "Flipkart",
+        url: "https://www.flipkart.com",
+        customerCare: "1800 202 9898 (Toll-Free)",
+        description: "Online shopping, mobile, fashion, appliances aur return/refund portal.",
+      },
+      meesho: {
+        name: "Meesho",
+        url: "https://www.meesho.com",
+        customerCare: "080-61799600",
+        description: "Budget shopping, clothing, home essentials aur reseller marketplace portal.",
+      },
+      zomato: {
+        name: "Zomato",
+        url: "https://www.zomato.com",
+        customerCare: "In-App Support / help@zomato.com",
+        description: "Food delivery, restaurant booking aur dining reviews portal.",
+      },
+      swiggy: {
+        name: "Swiggy",
+        url: "https://www.swiggy.com",
+        customerCare: "080-67466729 / In-App Support",
+        description: "Food delivery, Instamart grocery aur parcel delivery portal.",
+      },
+      jio: {
+        name: "Reliance Jio",
+        url: "https://www.jio.com",
+        customerCare: "198 / 199 (From Jio) or 1800 889 9999",
+        description: "Jio Mobile recharge, Fiber broadband, 5G plans aur Jio services portal.",
+      },
+      airtel: {
+        name: "Bharti Airtel",
+        url: "https://www.airtel.in",
+        customerCare: "121 / 198 (From Airtel) or 1800 103 0121",
+        description: "Airtel Mobile prepaid/postpaid, DTH, Xstream fiber aur banking portal.",
+      },
+      cybercrime: {
+        name: "National Cyber Crime Reporting Portal",
+        url: "https://cybercrime.gov.in",
+        customerCare: "1930 (National Helpline)",
+        description: "Online financial fraud, cyber stalking, hacking aur social media complaint portal.",
+      },
+      passport: {
+        name: "Passport Seva Portal",
+        url: "https://www.passportindia.gov.in",
+        customerCare: "1800 258 1800 (Toll-Free)",
+        description: "New passport application, renewal, appointment booking aur tracking portal.",
+      },
+    };
+
+    const key = query.toLowerCase().replace(/[^a-z0-9]/g, "");
+    for (const [k, v] of Object.entries(verifiedDirectory)) {
+      if (key.includes(k) || k.includes(key)) {
+        return { success: true, ...v, source: "verified_directory" };
+      }
+    }
+
+    // Web search fallback
+    try {
+      const q = encodeURIComponent(`${query} official website link customer care number what is it`);
+      const res = await fetch(`https://html.duckduckgo.com/html/?q=${q}`, {
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+      });
+      const html = await res.text();
+      const snippets: string[] = [];
+      const regex = /<a class="result__snippet[^>]*>(.*?)<\/a>/g;
+      let match;
+      while ((match = regex.exec(html)) !== null && snippets.length < 3) {
+        const clean = match[1].replace(/<[^>]*>/g, "").trim();
+        if (clean) snippets.push(clean);
+      }
+      if (snippets.length) {
+        return {
+          success: true,
+          name: query,
+          url: `https://www.google.com/search?q=${encodeURIComponent(query)}`,
+          customerCare: "Details mentioned in description",
+          description: snippets.join(" | "),
+          source: "web_search",
+        };
+      }
+    } catch {}
+
+    return { success: false, message: `"${query}" ke bare me jankari nahi mil saki.` };
+  }
+
+  // 47. Instagram Profile Lookup (Followers, Following, Total Posts, Bio, Verified Status)
+  public async getInstagramUserInfo(username: string): Promise<any> {
+    const cleanUsername = username.replace(/^@/, "").trim().toLowerCase();
+    if (!cleanUsername) return { success: false, message: "Instagram username zaroori hai." };
+
+    try {
+      const res = await fetch(
+        `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(cleanUsername)}`,
+        {
+          headers: {
+            "x-ig-app-id": "936619743392459",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "*/*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": `https://www.instagram.com/${cleanUsername}/`,
+          },
+        }
+      );
+
+      const json = await res.json();
+      const user = json?.data?.user;
+      if (user) {
+        return {
+          success: true,
+          username: user.username,
+          fullName: user.full_name || user.username,
+          biography: user.biography || "",
+          followersCount: user.edge_followed_by?.count || 0,
+          followingCount: user.edge_follow?.count || 0,
+          totalPosts: user.edge_owner_to_timeline_media?.count || 0,
+          isVerified: !!user.is_verified,
+          isPrivate: !!user.is_private,
+          profilePicUrl: user.profile_pic_url_hd || user.profile_pic_url,
+          externalUrl: user.external_url || undefined,
+          profileUrl: `https://www.instagram.com/${user.username}/`,
+        };
+      }
+    } catch (e: any) {
+      // Fall through to error
+    }
+
+    return { success: false, message: `Instagram profile "@${cleanUsername}" fetch nahi ho saki ya account private/not found hai.` };
+  }
 }
 
 function decodeHtmlEntities(str: string): string {

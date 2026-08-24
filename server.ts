@@ -365,17 +365,31 @@ SHOPPING & E-COMMERCE (AMAZON, FLIPKART, MEESHO):
 - When DK asks about product prices, deals, or comparisons (e.g. 'football sabse sasti kispe mil rahi hai', 'ye item kitne ka aata hai', 'Amazon vs Flipkart vs Meesho'):
   - Give a clear, practical price comparison across Amazon, Flipkart, and Meesho in Rupees (₹).
   - Break down: 1) Lowest entry-level price (Meesho/Flipkart budget options, e.g. basic rubber footballs from ₹150–₹250), 2) Standard popular brands & models (e.g. Nivia Storm / Cosco size 5 around ₹350–₹550 on Amazon/Flipkart), 3) Which platform is best for budget vs brand/speed.
-  - If Google Search is ON, retrieve the latest live deal prices directly.
 
-SENDING PRODUCT LINKS VIA WHATSAPP:
-- When DK asks to send or share a product link/details on WhatsApp (e.g. "iska link WhatsApp par bhej do", "Rahul ko link bhejo", "Amazon/Flipkart ka link share karo", "buy link send karo"):
+- SENDING PRODUCT LINKS & WEBSITE/HELPLINE VIA WHATSAPP:
+- When DK asks to send or share any link, product, website URL, or customer care helpline number on WhatsApp (e.g. "iska link WhatsApp par bhej do", "Rahul ko link bhejo", "customer care number WhatsApp kar do", "mujhe send karo"):
   1. Recipient Selection:
      - If DK specifies someone's name (e.g. "Aman ko bhej do", "Mummy ko bhejo"), use that contact name/number in 'send_whatsapp_to_contact'.
      - If DK does NOT name anyone (or says "mujhe bhej do", "link send karo"), by default send to DK / Boss / Divakar ('DK' or 'Divakar' or 'Boss').
   2. Message Formatting:
-     - Formulate a clean, ready-to-buy message with the Product Title, Recommended Store (Amazon / Flipkart / Meesho), Best Price, and direct link (e.g. "https://www.amazon.in/s?k=..." or "https://www.flipkart.com/search?q=..." or "https://www.meesho.com/search?q=...").
+     - Formulate a clean, formatted message with Title, Official Website Link, Customer Care / Helpline Number, and Purpose/Summary.
   3. Action & Voice Confirmation:
      - Call 'send_whatsapp_to_contact' immediately.
+     - Once sent, confirm warmly: "Haan boss, maine details aapke WhatsApp par bhej di hain!" (or to the specified contact).
+
+WEBSITE INFO & CUSTOMER CARE HELPLINES:
+- Tool: 'get_website_or_helpline_info'.
+- When DK asks what happens on a website (e.g. "IRCTC par kya hota hai", "UIDAI kya hai", "EPFO website par kya hota hai") or asks for its official link or customer care helpline number:
+  - Call 'get_website_or_helpline_info' to get verified official URL, toll-free number, and purpose.
+  - Explain clearly what the portal does and speak the customer care number.
+  - Offer or automatically WhatsApp the details if requested.
+
+INSTAGRAM PROFILE LOOKUP:
+- Tool: 'get_instagram_user_info'.
+- When DK asks about an Instagram user, account, or username (e.g. "Instagram par iska username check karo", "is user ke kitne followers hain", "total posts kitni hain"):
+  - Call 'get_instagram_user_info' with the username (without '@').
+  - State: Username, Full Name, Total Followers (speak in natural words like "68 crore followers" or "15 lakh followers"), Following count, Total Posts, Bio, and whether the account is Verified (blue tick) or Private.
+
 NEWS & HEADLINES (TOP 10, POLITICS, LOCAL, WORLD, VIRAL):
 - Tool: 'get_news'.
 - When DK asks for news (e.g. "top 10 news batao", "politics news", "local news batao", "international/world news", "viral news", "aaj ki khabrein"):
@@ -1137,6 +1151,28 @@ HOW TO READ MESSAGES:
             required: [],
           },
         },
+        {
+          name: "get_website_or_helpline_info",
+          description: "Get verified information about what happens on a website/portal (e.g. IRCTC, UIDAI, EPFO, SBI, Amazon, Cybercrime), its official URL, and verified customer care helpline numbers.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              query: { type: "STRING", description: "Name of the website, company, bank, or government portal (e.g. 'IRCTC', 'UIDAI Aadhaar', 'EPFO', 'SBI', 'Amazon', 'Cybercrime')" },
+            },
+            required: ["query"],
+          },
+        },
+        {
+          name: "get_instagram_user_info",
+          description: "Get public profile details of any Instagram username: Realtime Followers count, Following count, Total Posts count, Bio, and Verified status.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              username: { type: "STRING", description: "The Instagram username (e.g. 'cristiano', 'instagram', 'virat.kohli')" },
+            },
+            required: ["username"],
+          },
+        },
       ];
 
       return await ai.live.connect({
@@ -1726,6 +1762,20 @@ HOW TO READ MESSAGES:
                     );
                   } catch (e: any) {
                     result = { success: false, message: `Life suggestion fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_website_or_helpline_info") {
+                  const { query } = call.args || {};
+                  try {
+                    result = await publicApisService.getWebsiteOrHelplineInfo(String(query || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Website/Helpline info fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_instagram_user_info") {
+                  const { username } = call.args || {};
+                  try {
+                    result = await publicApisService.getInstagramUserInfo(String(username || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Instagram user info fetch fail hui: ${e?.message || e}` };
                   }
                 }
 
