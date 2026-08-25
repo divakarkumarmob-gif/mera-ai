@@ -73,7 +73,7 @@ class VoiceBiometricsService {
       return {
         success: true,
         pin: cleanPin,
-        message: `Boss, aapka naya Voice PIN [${cleanPin}] save ho gaya hai! Purana PIN replace ho gaya. Ab aap is naye PIN se voice enroll ya delete kar sakte hain. ✅`,
+        message: `Boss, aapka naya Voice PIN [${cleanPin}] save ho gaya hai! Purana PIN replace ho gaya. Ab aap is naye PIN se voice enroll ya delete kar سکتے hain. ✅`,
       };
     } catch (e: any) {
       console.error("[VoiceBiometrics] Failed to save PIN to Firestore:", e);
@@ -172,7 +172,8 @@ Spoken Phrase: "${spokenPhrase || "Friday main tumhara boss hoon, meri aawaz peh
 Extract key vocal characteristics:
 1. Fundamental pitch range (deep/medium/high baritone/tenor)
 2. Cadence, speech rhythm, articulation style, distinct acoustic harmonics
-3. Vocal timbre and tone signature for strict biometric matching against impostors.`;
+3. Vocal timbre and tone signature for strict biometric matching against impostors.
+4. Vocal gender characteristics (Ensure strict gender classification to confirm if speaker is male/female).`;
 
         const response = await ai.models.generateContent({
           model: "gemini-2.5-flash",
@@ -256,7 +257,7 @@ Extract key vocal characteristics:
   }
 
   /**
-   * Verifies if the speaker audio matches enrolled Boss profiles.
+   * Verifies if the speaker audio matches enrolled Boss profiles with enforced gender-filtering check.
    */
   public async verifySpeaker(
     audioBase64: string
@@ -279,20 +280,25 @@ Extract key vocal characteristics:
     }
 
     try {
-      const prompt = `You are Friday AI Biometric Voice Verifier.
-Compare this live audio sample against the enrolled Boss voice traits:
+      const prompt = `You are Friday AI Biometric Voice Verifier and Gender Security Analyzer.
+Compare this live audio sample against the enrolled Boss voice traits.
+
+CRITICAL GENDER SECURITY RULE:
+- The Boss (DK) is strictly male. 
+- Perform a thorough acoustic gender classification on the live speaker. 
+- If the speaker's vocal frequency, pitch, resonance, or biometric signature indicates a FEMALE voice, you MUST immediately set "isBoss": false, "confidence": 0.0, and "reason": "Female voice detected; unauthorized as Boss." regardless of any phrase or incidental similarity. A female voice must NEVER be recognized as the boss.
 
 ENROLLED BOSS PROFILES:
 ${JSON.stringify(profiles.map((p) => ({ id: p.id, name: p.name, traits: p.voiceTraits })), null, 2)}
 
 TASK:
-Determine if this live audio belongs to the enrolled Boss.
+Determine if this live audio belongs to the enrolled Boss while upholding the strict male gender check.
 Return ONLY valid JSON:
 {
   "isBoss": true | false,
   "confidence": 0.0 to 1.0,
   "matchedName": "Boss Name or empty",
-  "reason": "Short reason"
+  "reason": "Short reason including gender classification check"
 }`;
 
       const response = await ai.models.generateContent({
