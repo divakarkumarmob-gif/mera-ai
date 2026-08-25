@@ -46,6 +46,41 @@ jobs:
           npx cap add android || true
           npx cap sync android
 
+      - name: 🛠️ Fix Kotlin Duplicate Classes & Configure Gradle
+        run: |
+          # 1. Enable Jetifier & AndroidX in gradle.properties
+          PROP="android/gradle.properties"
+          if [ -f "$PROP" ]; then
+            echo "android.enableJetifier=true" >> "$PROP"
+            echo "android.useAndroidX=true" >> "$PROP"
+          fi
+
+          # 2. Add Kotlin stdlib resolution constraints to android/app/build.gradle
+          APP_GRADLE="android/app/build.gradle"
+          if [ -f "$APP_GRADLE" ]; then
+            cat << 'EOF' >> "$APP_GRADLE"
+
+configurations.all {
+    resolutionStrategy {
+        force 'org.jetbrains.kotlin:kotlin-stdlib:1.8.22'
+        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22'
+        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22'
+    }
+}
+
+dependencies {
+    constraints {
+        implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22") {
+            because("kotlin-stdlib-jdk7 is now part of kotlin-stdlib")
+        }
+        implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22") {
+            because("kotlin-stdlib-jdk8 is now part of kotlin-stdlib")
+        }
+    }
+}
+EOF
+          fi
+
       - name: 🔑 Configure Permissions in AndroidManifest
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
