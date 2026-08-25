@@ -79,5 +79,12 @@ if (!admin.apps.length) {
 }
 
 export const db = admin.apps.length ? admin.firestore() : (null as unknown as admin.firestore.Firestore);
+if (db) {
+  try {
+    db.settings({ ignoreUndefinedProperties: true });
+  } catch {
+    // ignore if settings already applied
+  }
+}
 export const FieldValue = admin.firestore.FieldValue;
 export default admin;

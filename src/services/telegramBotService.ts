@@ -189,20 +189,19 @@ class TelegramBotService {
     }
   }
 
-  /**
-   * Saves or updates a Telegram user's profile in Firestore.
-   */
   public async saveTelegramUser(chatId: number, from: any): Promise<void> {
     try {
-      const fullName = `${from.first_name || ""} ${from.last_name || ""}`.trim() || "Telegram User";
+      const fullName = `${from?.first_name || ""} ${from?.last_name || ""}`.trim() || "Telegram User";
       const profile: TelegramUserProfile = {
         chatId,
-        username: from.username ? from.username.toLowerCase() : undefined,
-        firstName: from.first_name || "",
-        lastName: from.last_name || "",
+        firstName: from?.first_name || "",
+        lastName: from?.last_name || "",
         fullName,
         lastSeenAt: Date.now(),
       };
+      if (from?.username) {
+        profile.username = String(from.username).toLowerCase();
+      }
       await db.collection("telegramUsers").doc(String(chatId)).set(profile, { merge: true });
     } catch (e) {
       console.warn("[TelegramBot] Failed to save telegram user:", e);

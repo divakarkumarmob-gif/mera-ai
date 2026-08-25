@@ -127,9 +127,6 @@ class InstagramBotService {
     }
   }
 
-  /**
-   * Saves or updates an Instagram user in Firestore collection 'instagramUsers'.
-   */
   public async saveInstagramUser(igid: string, name?: string, username?: string): Promise<void> {
     try {
       const ref = db.collection("instagramUsers").doc(igid);
@@ -138,11 +135,15 @@ class InstagramBotService {
 
       const profile: InstagramUserProfile = {
         igid,
-        username: username ? username.toLowerCase().replace(/^@/, "") : snap.data()?.username,
         name: name || snap.data()?.name || "Instagram User",
         lastSeenAt: Date.now(),
         messageCount: count,
       };
+
+      const resolvedUsername = username ? username.toLowerCase().replace(/^@/, "") : snap.data()?.username;
+      if (resolvedUsername) {
+        profile.username = resolvedUsername;
+      }
 
       await ref.set(profile, { merge: true });
     } catch (e) {
