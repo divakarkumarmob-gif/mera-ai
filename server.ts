@@ -936,6 +936,11 @@ ADVANCED AUTONOMOUS & IRON MAN SYSTEM TOOLS:
 - 'get_smart_home_status': View all connected smart home devices and current ON/OFF status.
 - 'start_focus_mode': Pomodoro Focus Mode with relaxing Lo-Fi background stream. Call when DK says "Focus Mode on karo", "25 minute ka study timer chalao".
 - 'stop_focus_mode': Deactivates focus mode and restores normal notifications.
+- 'track_product_price': E-Commerce Autonomous Price Drop Tracker. Monitors product price and notifies when it drops below target threshold. Call when DK says "price track karo", "is laptop ka price monitor karo".
+- 'get_tracked_prices': List all active tracked products and price alerts.
+- 'analyze_document': Document & PDF Voice Copilot. Analyzes contracts, research papers, resumes, or specifications. Call when DK asks to analyze or summarize a document.
+- 'query_document': Ask specific questions or extract clauses from a document. Call when DK asks questions about document contents.
+- 'get_daily_work_digest': Daily Work, Coding & Productivity Digest. Compiles daily accomplishments, schedule, health, and expenses into an executive summary with grade. Call when DK says "aaj ka work report batao", "daily productivity digest do".
 
 SELF-HEALING & AUTOMATIC BUG DELEGATION TO CODING AGENT:
 - When ANY tool, API, service, or feature fails or throws an error, or when DK gives commands about build failure, broken code, or last changes (e.g. "build failed ho gaya", "last change theek karo", "jo last changes kiya tha usko acche se coding karo taki build success ho", "code me error aa raha hai", "bina syntax error ke fix karo"):
@@ -2404,6 +2409,62 @@ HOW TO READ MESSAGES:
         {
           name: "stop_focus_mode",
           description: "Deactivate Pomodoro Focus Mode and return to normal mode. Use when DK says 'Focus mode band karo'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+            required: [],
+          },
+        },
+        {
+          name: "track_product_price",
+          description: "Track an e-commerce product price on Amazon/Flipkart and set target drop alert. Use when DK says 'Price monitor karo', 'Is product ka price track karo'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              productName: { type: "STRING", description: "Name of the product (e.g. 'iPhone 16 Pro', 'MacBook Air M3')" },
+              currentPrice: { type: "NUMBER", description: "Current product price in Rupees" },
+              targetPrice: { type: "NUMBER", description: "Target alert threshold price in Rupees" },
+              productUrl: { type: "STRING", description: "Optional product URL" },
+            },
+            required: ["productName", "currentPrice"],
+          },
+        },
+        {
+          name: "get_tracked_prices",
+          description: "List all active tracked e-commerce products and target price drop alerts. Use when DK asks 'Kaun se products track ho rahe hain'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+            required: [],
+          },
+        },
+        {
+          name: "analyze_document",
+          description: "Analyze a PDF, resume, contract, research paper, or technical specification. Use when DK asks to analyze, review, or summarize a document.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              documentTextOrSnippet: { type: "STRING", description: "The document text or extracted content" },
+              docTitle: { type: "STRING", description: "Title or filename of the document" },
+            },
+            required: ["documentTextOrSnippet"],
+          },
+        },
+        {
+          name: "query_document",
+          description: "Ask specific questions or query clauses from a document. Use when DK asks questions about a document.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              documentText: { type: "STRING", description: "The document text content" },
+              question: { type: "STRING", description: "The specific question to answer" },
+            },
+            required: ["documentText", "question"],
+          },
+        },
+        {
+          name: "get_daily_work_digest",
+          description: "Generate end-of-day daily work, coding, and productivity activity digest with overall grade. Use when DK says 'Aaj ka work report do', 'Daily productivity digest batao'.",
           parameters: {
             type: "OBJECT",
             properties: {},
@@ -3925,6 +3986,47 @@ HOW TO READ MESSAGES:
                     safeSend(JSON.stringify({ type: 'stop_music' }));
                   } catch (e: any) {
                     result = { success: false, message: `Focus mode stop fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "track_product_price") {
+                  const { productName, currentPrice, targetPrice, productUrl } = call.args || {};
+                  try {
+                    result = await toolsEngine.trackProductPrice(
+                      String(productName || ""),
+                      Number(currentPrice || 0),
+                      targetPrice ? Number(targetPrice) : undefined,
+                      productUrl ? String(productUrl) : undefined
+                    );
+                  } catch (e: any) {
+                    result = { success: false, message: `Price tracking fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_tracked_prices") {
+                  try {
+                    result = await toolsEngine.getTrackedProducts();
+                  } catch (e: any) {
+                    result = { success: false, message: `Tracked prices check fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "analyze_document") {
+                  const { documentTextOrSnippet, docTitle } = call.args || {};
+                  try {
+                    result = await toolsEngine.analyzeDocument(
+                      String(documentTextOrSnippet || ""),
+                      docTitle ? String(docTitle) : undefined
+                    );
+                  } catch (e: any) {
+                    result = { success: false, message: `Document analysis fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "query_document") {
+                  const { documentText, question } = call.args || {};
+                  try {
+                    result = await toolsEngine.queryDocument(String(documentText || ""), String(question || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Document query fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_daily_work_digest") {
+                  try {
+                    result = await toolsEngine.generateDailyWorkDigest();
+                  } catch (e: any) {
+                    result = { success: false, message: `Daily work digest fail hui: ${e?.message || e}` };
                   }
                 } else if (call.name === "play_music") {
                   const { songName } = call.args || {};

@@ -349,6 +349,40 @@ class ToolsEngine {
     const { focusModeService } = require("./focusModeService");
     return focusModeService.stopFocusMode();
   }
+
+  /**
+   * Autonomous Price Drop Tracker
+   */
+  public async trackProductPrice(productName: string, currentPrice: number, targetPrice?: number, productUrl?: string) {
+    const { priceDropTrackerService } = await import("./priceDropTrackerService");
+    return await priceDropTrackerService.trackProduct(productName, currentPrice, targetPrice, productUrl);
+  }
+
+  public async getTrackedProducts() {
+    const { priceDropTrackerService } = await import("./priceDropTrackerService");
+    return await priceDropTrackerService.getTrackedProducts();
+  }
+
+  /**
+   * Document & PDF Voice Copilot
+   */
+  public async analyzeDocument(documentTextOrSnippet: string, docTitle?: string) {
+    const { documentCopilotService } = await import("./documentCopilotService");
+    return await documentCopilotService.analyzeDocument(documentTextOrSnippet, docTitle);
+  }
+
+  public async queryDocument(documentText: string, question: string) {
+    const { documentCopilotService } = await import("./documentCopilotService");
+    return await documentCopilotService.queryDocument(documentText, question);
+  }
+
+  /**
+   * Daily Work & Productivity Digest
+   */
+  public async generateDailyWorkDigest() {
+    const { productivityDigestService } = await import("./productivityDigestService");
+    return await productivityDigestService.generateDailyWorkDigest();
+  }
 }
 
 export const toolsEngine = new ToolsEngine();
