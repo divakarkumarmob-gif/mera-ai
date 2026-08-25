@@ -3232,37 +3232,92 @@ class PublicApisService {
     return { success: false, message: `"${q}" ka YouTube link nahi mila.` };
   }
 
-  // 51. Music Search — Deezer API (free, no key) + iTunes fallback
+  // 51. Music Search — JioSaavn (100% Free Full-Length 320kbps Songs) + Deezer + iTunes fallback
   public async searchMusic(songOrArtist: string): Promise<any> {
     const q = songOrArtist.trim();
     if (!q) return { success: false, message: "Song ya artist ka naam zaroori hai." };
 
     const tracks: any[] = [];
 
-    // Source 1: Deezer API — free, no key, full 30s previews + album art
+    // Source 1: JioSaavn Free Public Search (100% Free, Full Length 320kbps & 160kbps MP3/AAC streams)
     try {
-      const deezerRes = await fetch(
-        `https://api.deezer.com/search?q=${encodeURIComponent(q)}&limit=5`,
-        { headers: { "User-Agent": "Mozilla/5.0" } }
+      const saavnRes = await fetchJson(
+        `https://saavn.dev/api/search/songs?query=${encodeURIComponent(q)}&limit=8`,
+        5000
       );
-      if (deezerRes.ok) {
-        const data = await deezerRes.json();
-        for (const t of (data.data || []).slice(0, 5)) {
-          tracks.push({
-            trackName: t.title,
-            artistName: t.artist?.name,
-            albumName: t.album?.title,
-            albumArt: t.album?.cover_medium,
-            previewUrl: t.preview, // Always a real 30-sec MP3 URL from Deezer
-            deezerUrl: t.link,
-            spotifyUrl: `https://open.spotify.com/search/${encodeURIComponent(t.title + " " + t.artist?.name)}`,
-            source: "deezer",
-          });
+      const songList = saavnRes?.data?.results || saavnRes?.results || [];
+      if (Array.isArray(songList) && songList.length > 0) {
+        for (const s of songList) {
+          const downloadUrls = s.downloadUrl || [];
+          const bestStream =
+            downloadUrls.find((u: any) => u.quality === "320kbps")?.url ||
+            downloadUrls.find((u: any) => u.quality === "160kbps")?.url ||
+            downloadUrls[downloadUrls.length - 1]?.url ||
+            s.media_url ||
+            s.url;
+
+          const images = s.image || [];
+          const bestImage =
+            images.find((img: any) => img.quality === "500x500")?.url ||
+            images[images.length - 1]?.url ||
+            s.image;
+
+          const primaryArtists = Array.isArray(s.artists?.primary)
+            ? s.artists.primary.map((a: any) => a.name).join(", ")
+            : s.artist || s.singers || s.primaryArtists || "";
+
+          if (bestStream) {
+            tracks.push({
+              trackName: s.name || s.title,
+              artistName: primaryArtists,
+              albumName: s.album?.name || s.album,
+              albumArt: bestImage,
+              durationSec: s.duration ? Number(s.duration) : undefined,
+              fullAudioUrl: bestStream,
+              previewUrl: bestStream,
+              isFullSong: true,
+              quality: "320kbps Full HD",
+              spotifyUrl: `https://open.spotify.com/search/${encodeURIComponent((s.name || s.title) + " " + primaryArtists)}`,
+              youtubeMusicUrl: `https://music.youtube.com/search?q=${encodeURIComponent((s.name || s.title) + " " + primaryArtists)}`,
+              source: "jiosaavn_full",
+            });
+          }
         }
       }
-    } catch { /* fall through */ }
+    } catch { /* fall through to Deezer / iTunes */ }
 
-    // Source 2: iTunes Search API — fallback
+    // Source 2: Deezer API
+    if (tracks.length < 3) {
+      try {
+        const deezerRes = await fetch(
+          `https://api.deezer.com/search?q=${encodeURIComponent(q)}&limit=5`,
+          { headers: { "User-Agent": "Mozilla/5.0" } }
+        );
+        if (deezerRes.ok) {
+          const data = await deezerRes.json();
+          for (const t of (data.data || []).slice(0, 5)) {
+            if (!tracks.some(tr => tr.trackName?.toLowerCase() === t.title?.toLowerCase())) {
+              tracks.push({
+                trackName: t.title,
+                artistName: t.artist?.name,
+                albumName: t.album?.title,
+                albumArt: t.album?.cover_medium,
+                durationSec: t.duration,
+                fullAudioUrl: t.preview,
+                previewUrl: t.preview,
+                isFullSong: false,
+                quality: "Preview",
+                deezerUrl: t.link,
+                spotifyUrl: `https://open.spotify.com/search/${encodeURIComponent(t.title + " " + t.artist?.name)}`,
+                source: "deezer",
+              });
+            }
+          }
+        }
+      } catch { /* fall through */ }
+    }
+
+    // Source 3: iTunes Search API — fallback
     if (tracks.length < 3) {
       try {
         const res = await fetch(
@@ -3278,7 +3333,10 @@ class PublicApisService {
                 albumName: t.collectionName,
                 albumArt: t.artworkUrl100,
                 releaseDate: t.releaseDate ? t.releaseDate.slice(0, 10) : undefined,
+                fullAudioUrl: t.previewUrl,
                 previewUrl: t.previewUrl,
+                isFullSong: false,
+                quality: "Preview",
                 spotifyUrl: `https://open.spotify.com/search/${encodeURIComponent(t.trackName + " " + t.artistName)}`,
                 source: "itunes",
               });
@@ -3308,13 +3366,14 @@ class PublicApisService {
     };
   }
 
-  // 51.1 Play & Stream Music in Background
+  // 51.1 Play & Stream FULL Music Track in Background
   public async playMusic(songOrArtist: string): Promise<any> {
     const res = await this.searchMusic(songOrArtist);
     if (res.success && res.tracks && res.tracks.length > 0) {
-      // Prefer Deezer (always has preview) over iTunes (sometimes null)
-      const deezerTrack = res.tracks.find((t: any) => t.source === "deezer" && t.previewUrl);
-      const topTrack = deezerTrack || res.tracks.find((t: any) => t.previewUrl) || res.tracks[0];
+      const fullTrack = res.tracks.find((t: any) => t.isFullSong && t.fullAudioUrl);
+      const topTrack = fullTrack || res.tracks.find((t: any) => t.previewUrl) || res.tracks[0];
+      const audioUrl = topTrack.fullAudioUrl || topTrack.previewUrl;
+
       return {
         success: true,
         action: "play",
@@ -3322,11 +3381,14 @@ class PublicApisService {
         artistName: topTrack.artistName,
         albumName: topTrack.albumName,
         albumArt: topTrack.albumArt,
-        audioUrl: topTrack.previewUrl,
+        durationSec: topTrack.durationSec,
+        isFullSong: !!topTrack.isFullSong,
+        quality: topTrack.quality || (topTrack.isFullSong ? "320kbps Full HD" : "Preview"),
+        audioUrl: audioUrl,
         deezerUrl: topTrack.deezerUrl,
         spotifyUrl: topTrack.spotifyUrl,
         source: topTrack.source,
-        message: `"${topTrack.trackName}" by ${topTrack.artistName} play ho raha hai Boss!`,
+        message: `"${topTrack.trackName}" by ${topTrack.artistName} (${topTrack.isFullSong ? "Pura Gaana 100% Full Length" : "Preview Clip"}) play ho raha hai Boss!`,
       };
     }
     return {

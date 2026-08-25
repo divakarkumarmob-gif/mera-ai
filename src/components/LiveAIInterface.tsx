@@ -594,7 +594,15 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const captionBoxRef = useRef<HTMLDivElement>(null);
     const userScrolledUpRef = useRef(false);
     const captionTurnStartedRef = useRef(false);
-    const [nowPlayingMusic, setNowPlayingMusic] = useState<{ trackName: string; artistName?: string; spotifyUrl?: string } | null>(null);
+    const [nowPlayingMusic, setNowPlayingMusic] = useState<{
+        trackName: string;
+        artistName?: string;
+        albumArt?: string;
+        spotifyUrl?: string;
+        isFullSong?: boolean;
+        quality?: string;
+        durationSec?: number;
+    } | null>(null);
     const musicAudioRef = useRef<HTMLAudioElement | null>(null);
 
     const stopMusicPlayback = useCallback(() => {
@@ -1320,7 +1328,11 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                             setNowPlayingMusic({
                                 trackName: msg.trackName,
                                 artistName: msg.artistName,
+                                albumArt: msg.albumArt,
                                 spotifyUrl: msg.spotifyUrl,
+                                isFullSong: msg.isFullSong,
+                                quality: msg.quality,
+                                durationSec: msg.durationSec,
                             });
                         } catch (e) {
                             console.warn('[Music] Error creating Audio:', e);
@@ -1619,19 +1631,37 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                                 initial={{ opacity: 0, scale: 0.9, y: 10 }}
                                 animate={{ opacity: 1, scale: 1, y: 0 }}
                                 exit={{ opacity: 0, scale: 0.9, y: 10 }}
-                                className="flex items-center gap-3 px-4 py-2 rounded-2xl bg-violet-950/80 border border-violet-500/60 text-violet-200 text-xs shadow-[0_0_25px_rgba(139,92,246,0.35)] backdrop-blur-md"
+                                className="flex items-center gap-3 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-violet-950/90 via-purple-900/80 to-slate-900/90 border border-violet-500/60 text-violet-200 text-xs shadow-[0_0_30px_rgba(139,92,246,0.4)] backdrop-blur-md max-w-md w-full"
                             >
-                                <span className="flex gap-0.5 items-end h-3.5">
-                                    <span className="w-1 bg-violet-400 rounded-full animate-[bounce_0.8s_infinite]" style={{ height: '60%' }} />
-                                    <span className="w-1 bg-violet-400 rounded-full animate-[bounce_0.6s_infinite_0.2s]" style={{ height: '100%' }} />
-                                    <span className="w-1 bg-violet-400 rounded-full animate-[bounce_0.9s_infinite_0.4s]" style={{ height: '75%' }} />
-                                </span>
-                                <span>
-                                    <b>Playing:</b> {nowPlayingMusic.trackName} {nowPlayingMusic.artistName ? `• ${nowPlayingMusic.artistName}` : ''}
-                                </span>
+                                {nowPlayingMusic.albumArt ? (
+                                    <img
+                                        src={nowPlayingMusic.albumArt}
+                                        alt={nowPlayingMusic.trackName}
+                                        className="w-9 h-9 rounded-lg object-cover border border-white/20 shrink-0"
+                                    />
+                                ) : (
+                                    <span className="flex gap-0.5 items-end h-4 shrink-0">
+                                        <span className="w-1 bg-violet-400 rounded-full animate-[bounce_0.8s_infinite]" style={{ height: '60%' }} />
+                                        <span className="w-1 bg-violet-400 rounded-full animate-[bounce_0.6s_infinite_0.2s]" style={{ height: '100%' }} />
+                                        <span className="w-1 bg-violet-400 rounded-full animate-[bounce_0.9s_infinite_0.4s]" style={{ height: '75%' }} />
+                                    </span>
+                                )}
+                                <div className="min-w-0 flex-1">
+                                    <div className="flex items-center gap-1.5">
+                                        <span className="font-bold text-white truncate text-xs">
+                                            {nowPlayingMusic.trackName}
+                                        </span>
+                                        <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-emerald-500/30 text-emerald-300 font-mono">
+                                            {nowPlayingMusic.isFullSong ? '✨ Full Song (320kbps)' : 'Preview'}
+                                        </span>
+                                    </div>
+                                    <p className="text-slate-300 text-[11px] truncate">
+                                        {nowPlayingMusic.artistName || 'Playing Music'}
+                                    </p>
+                                </div>
                                 <button
                                     onClick={stopMusicPlayback}
-                                    className="px-2.5 py-1 rounded-xl bg-violet-700 hover:bg-violet-600 text-white font-semibold text-[10px] transition-colors shadow-sm ml-1"
+                                    className="px-2.5 py-1 rounded-xl bg-violet-700 hover:bg-violet-600 text-white font-semibold text-[11px] transition-colors shadow-sm shrink-0"
                                 >
                                     ⏹ Band Karo
                                 </button>

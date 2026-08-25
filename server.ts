@@ -3299,8 +3299,12 @@ HOW TO READ MESSAGES:
                         type: 'play_music',
                         trackName: result.trackName,
                         artistName: result.artistName,
+                        albumArt: result.albumArt,
                         audioUrl: result.audioUrl,
                         spotifyUrl: result.spotifyUrl,
+                        isFullSong: result.isFullSong,
+                        quality: result.quality,
+                        durationSec: result.durationSec,
                       }));
                     }
                   } catch (e: any) {

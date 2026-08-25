@@ -153,6 +153,24 @@ class MusicRecognitionService {
 
     if (lyricsMatch.success && lyricsMatch.bestMatch && lyricsMatch.bestMatch.matchScore >= 0.4) {
       const best = lyricsMatch.bestMatch;
+
+      // Enhance with JioSaavn full-length audio stream
+      let fullAudioUrl = best.previewUrl;
+      let isFullSong = false;
+      let albumArt = best.albumArt;
+
+      try {
+        const fullTrackSearch = await publicApisService.searchMusic(`${best.trackName} ${best.artistName}`);
+        if (fullTrackSearch.success && fullTrackSearch.tracks && fullTrackSearch.tracks.length > 0) {
+          const topFull = fullTrackSearch.tracks[0];
+          if (topFull.fullAudioUrl) {
+            fullAudioUrl = topFull.fullAudioUrl;
+            isFullSong = !!topFull.isFullSong;
+          }
+          if (topFull.albumArt) albumArt = topFull.albumArt;
+        }
+      } catch {}
+
       return {
         success: true,
         mode: "humming_melody",
@@ -161,13 +179,13 @@ class MusicRecognitionService {
           trackName: best.trackName,
           artistName: best.artistName,
           albumName: best.albumName,
-          albumArt: best.albumArt,
+          albumArt: albumArt,
           matchedPatternOrLyrics: best.matchedSnippet || `Matched humming / melody lines: "${effectiveQuery}"`,
           matchScore: best.matchScore,
           matchType: best.matchType === "exact" ? "exact_lyrics" : "melody_partial",
           spotifyUrl: best.spotifyUrl,
           youtubeMusicUrl: best.youtubeMusicUrl,
-          previewUrl: best.previewUrl,
+          previewUrl: fullAudioUrl,
         },
         otherCandidates: lyricsMatch.otherCandidates,
         message: `Boss, aapki humming aur tune se gaana match ho gaya: "${best.trackName}" by ${best.artistName}! (Confidence: ${Math.round(best.matchScore * 100)}%).`,
