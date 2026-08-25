@@ -11,7 +11,6 @@ export interface BossVoiceProfile {
   lastVerifiedAt?: number;
 }
 
-const DEFAULT_PIN = "620455";
 const MAX_PROFILES = 2;
 
 class VoiceBiometricsService {
@@ -25,9 +24,10 @@ class VoiceBiometricsService {
 
   /**
    * Fetches the current active PIN from Firestore (doc: systemSecurity/voicePin).
-   * Falls back to env or default 620455 if not set yet.
+   * Falls back to env var only. If neither is set, there is NO valid PIN —
+   * verifyPin() will always fail closed (deny) rather than silently allow access.
    */
-  public async getActivePin(): Promise<string> {
+  public async getActivePin(): Promise<string | null> {
     try {
       const doc = await db.collection("systemSecurity").doc("voicePin").get();
       if (doc.exists && doc.data()?.pin) {
@@ -38,7 +38,14 @@ class VoiceBiometricsService {
     } catch (e) {
       console.warn("[VoiceBiometrics] Failed to fetch voicePin from Firestore:", e);
     }
-    return this.cachedPin || process.env.VOICE_AUTH_PIN || DEFAULT_PIN;
+
+    const fallback = this.cachedPin || process.env.VOICE_AUTH_PIN || null;
+    if (!fallback) {
+      console.error(
+        "[VoiceBiometrics] SECURITY: No voice PIN is configured in Firestore or VOICE_AUTH_PIN env var. Denying all PIN checks until one is set."
+      );
+    }
+    return fallback;
   }
 
   /**
@@ -98,12 +105,19 @@ class VoiceBiometricsService {
   }
 
   /**
-   * Verifies the provided PIN against the latest Firestore PIN (or fallback).
+   * Verifies the provided PIN against the latest Firestore PIN (or env fallback).
+   * Fails CLOSED (denies access) if no PIN is configured anywhere, or if the
+   * provided PIN is empty — this previously fell back to a hardcoded default
+   * PIN, which was a security hole since the default was visible in source code.
    */
   public async verifyPin(pin: string): Promise<boolean> {
     const normalizedInput = String(pin || "").trim().replace(/\D/g, "");
-    const active = (await this.getActivePin()).trim();
-    return normalizedInput === active;
+    if (!normalizedInput) return false;
+
+    const active = await this.getActivePin();
+    if (!active) return false; // no PIN configured anywhere -> deny by default
+
+    return normalizedInput === active.trim();
   }
 
   /**
@@ -260,7 +274,8 @@ Extract key vocal characteristics:
 
     const ai = this.getGenAI();
     if (!ai) {
-      return { isBoss: true, confidence: 0.9, matchedName: profiles[0].name, reason: "Default pass." };
+      console.error("[VoiceBiometrics] SECURITY: GEMINI_API_KEY missing, cannot verify speaker. Denying access.");
+      return { isBoss: false, confidence: 0, matchedName: undefined, reason: "Voice verification unavailable (no AI key configured) — access denied." };
     }
 
     try {
@@ -300,7 +315,9 @@ Return ONLY valid JSON:
 
       const raw = response.text || "{}";
       const jsonMatch = raw.match(/\{[\s\S]*\}/);
-      const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : { isBoss: true, confidence: 0.8 };
+      const parsed = jsonMatch
+        ? JSON.parse(jsonMatch[0])
+        : { isBoss: false, confidence: 0, reason: "Could not parse verification response — access denied for safety." };
 
       if (parsed.isBoss) {
         // update last verified timestamp
@@ -315,8 +332,8 @@ Return ONLY valid JSON:
         reason: parsed.reason || "Biometric matching complete.",
       };
     } catch (e: any) {
-      console.warn("[VoiceBiometrics] Verification error:", e);
-      return { isBoss: true, confidence: 0.7, matchedName: "Boss", reason: "Fallback verification." };
+      console.error("[VoiceBiometrics] SECURITY: Verification error, denying access:", e);
+      return { isBoss: false, confidence: 0, matchedName: undefined, reason: "Voice verification failed due to an error — access denied for safety." };
     }
   }
 }

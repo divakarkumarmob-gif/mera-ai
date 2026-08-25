@@ -208,70 +208,111 @@ class CyberSecurityService {
 
   /**
    * 2. Email & Account Data Breach Hunter
-   * Checks if an email address or username has been exposed in major known breaches.
+   * Checks if an email address has been exposed in real known breaches, using
+   * the free XposedOrNot public breach API (no API key required).
+   * Docs: https://xposedornot.com/api-doc
    */
   public async checkDataBreach(query: string): Promise<BreachCheckResult> {
     const cleanQuery = String(query || "").trim().toLowerCase();
 
-    // Known global & Indian historical data breach archive
-    const KNOWN_BREACH_DB: Array<{
-      name: string;
-      domain: string;
-      breachDate: string;
-      dataClasses: string[];
-      description: string;
-      matchPattern: (q: string) => boolean;
-    }> = [
-      {
-        name: "LinkedIn Scraping Leak",
-        domain: "linkedin.com",
-        breachDate: "2021-06",
-        dataClasses: ["Email addresses", "Full names", "Phone numbers", "Work history"],
-        description: "700M users scraped and leaked on dark web forums.",
-        matchPattern: (q) => q.includes("@gmail") || q.includes("@yahoo") || q.includes("@outlook") || q.length > 5,
-      },
-      {
-        name: "Canva Security Breach",
-        domain: "canva.com",
-        breachDate: "2019-05",
-        dataClasses: ["Email addresses", "Passwords (Bcrypt)", "Names", "City"],
-        description: "137M Canva user accounts compromised.",
-        matchPattern: (q) => q.includes("@"),
-      },
-      {
-        name: "BigBasket India Breach",
-        domain: "bigbasket.com",
-        breachDate: "2020-10",
-        dataClasses: ["Email addresses", "Phone numbers", "Passwords (Hashed)", "Full names", "Addresses"],
-        description: "20M customer records from BigBasket India leaked on cybercrime forums.",
-        matchPattern: (q) => q.includes(".in") || q.includes("@gmail") || q.length > 7,
-      },
-      {
-        name: "Adobe Customer Data Breach",
-        domain: "adobe.com",
-        breachDate: "2013-10",
-        dataClasses: ["Email addresses", "Password hints", "Passwords", "Usernames"],
-        description: "153M Adobe accounts compromised.",
-        matchPattern: (q) => q.includes("@"),
-      },
-    ];
+    if (!cleanQuery || !cleanQuery.includes("@")) {
+      return {
+        query: cleanQuery,
+        isCompromised: false,
+        breachCount: 0,
+        breaches: [],
+        compromisedDataTypes: [],
+        recommendation:
+          "Boss, breach check ke liye ek valid email address provide karo (e.g. 'check breach for xyz@gmail.com').",
+      };
+    }
 
-    const matchedBreaches = KNOWN_BREACH_DB.filter((b) => b.matchPattern(cleanQuery)).slice(0, 3);
-    const allDataTypes = Array.from(new Set(matchedBreaches.flatMap((b) => b.dataClasses)));
+    try {
+      const res = await fetch(
+        `https://api.xposedornot.com/v1/check-email/${encodeURIComponent(cleanQuery)}`,
+        { method: "GET" }
+      );
 
-    const isCompromised = matchedBreaches.length > 0;
-    const recommendation = isCompromised
-      ? `Boss, '${cleanQuery}' ${matchedBreaches.length} data breaches me compromised paya gaya hai (${matchedBreaches.map((b) => b.name).join(", ")}). Kripya apna password turant badlein aur 2-Factor Authentication (2FA) chalu karein.`
-      : `Boss, '${cleanQuery}' kisi public dark web data breach me nahi mila! Aapka account safe lag raha hai.`;
+      // XposedOrNot returns 404 with {"Error":"Not found"} when the email is clean
+      if (res.status === 404) {
+        return {
+          query: cleanQuery,
+          isCompromised: false,
+          breachCount: 0,
+          breaches: [],
+          compromisedDataTypes: [],
+          recommendation: `Boss, '${cleanQuery}' kisi known public data breach me nahi mila! Aapka account safe lag raha hai. (Source: XposedOrNot)`,
+        };
+      }
 
-    return {
-      query: cleanQuery,
-      isCompromised,
-      breachCount: matchedBreaches.length,
-      breaches: matchedBreaches,
-      compromisedDataTypes: allDataTypes,
-      recommendation,
-    };
+      if (!res.ok) {
+        throw new Error(`XposedOrNot API returned status ${res.status}`);
+      }
+
+      const data: any = await res.json();
+      const breachNames: string[] = Array.isArray(data?.breaches?.[0]) ? data.breaches[0] : [];
+
+      if (breachNames.length === 0) {
+        return {
+          query: cleanQuery,
+          isCompromised: false,
+          breachCount: 0,
+          breaches: [],
+          compromisedDataTypes: [],
+          recommendation: `Boss, '${cleanQuery}' kisi known public data breach me nahi mila! Aapka account safe lag raha hai. (Source: XposedOrNot)`,
+        };
+      }
+
+      // Fetch details for each breach name to get date/exposed data types
+      let breachDetailsMap: Record<string, any> = {};
+      try {
+        const analyticsRes = await fetch(
+          `https://api.xposedornot.com/v1/breach-analytics?email=${encodeURIComponent(cleanQuery)}`
+        );
+        if (analyticsRes.ok) {
+          const analyticsData: any = await analyticsRes.json();
+          const details = analyticsData?.ExposedBreaches?.breaches_details || [];
+          for (const d of details) {
+            if (d?.breach) breachDetailsMap[d.breach] = d;
+          }
+        }
+      } catch (e) {
+        console.warn("[CyberSecurity] breach-analytics fetch failed, using names only:", e);
+      }
+
+      const breaches = breachNames.map((name) => {
+        const detail = breachDetailsMap[name];
+        return {
+          name,
+          domain: detail?.domain || "unknown",
+          breachDate: detail?.breached_date || "unknown",
+          dataClasses: detail?.xposed_data ? String(detail.xposed_data).split(";").map((s: string) => s.trim()) : [],
+          description: detail?.details || `Exposed in the "${name}" data breach.`,
+        };
+      });
+
+      const allDataTypes = Array.from(new Set(breaches.flatMap((b) => b.dataClasses).filter(Boolean)));
+      const recommendation = `Boss, '${cleanQuery}' ${breaches.length} real data breach(es) me compromised paya gaya hai (${breaches.map((b) => b.name).join(", ")}). Kripya apna password turant badlein aur 2-Factor Authentication (2FA) chalu karein. (Source: XposedOrNot)`;
+
+      return {
+        query: cleanQuery,
+        isCompromised: true,
+        breachCount: breaches.length,
+        breaches,
+        compromisedDataTypes: allDataTypes,
+        recommendation,
+      };
+    } catch (e: any) {
+      console.error("[CyberSecurity] checkDataBreach failed:", e);
+      return {
+        query: cleanQuery,
+        isCompromised: false,
+        breachCount: 0,
+        breaches: [],
+        compromisedDataTypes: [],
+        recommendation: `Boss, breach check abhi service error ki wajah se complete nahi ho paya. Kripya thodi der baad try karein. (Error: ${e?.message || "unknown"})`,
+      };
+    }
   }
 
   /**

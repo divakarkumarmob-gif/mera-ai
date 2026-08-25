@@ -327,14 +327,14 @@ class ToolsEngine {
   /**
    * Smart Home & IoT Voice Controller
    */
-  public controlSmartDevice(deviceNameOrRoom: string, action: any, value?: number) {
+  public async controlSmartDevice(deviceNameOrRoom: string, action: any, value?: number) {
     const { smartHomeService } = require("./smartHomeService");
-    return smartHomeService.controlDevice(deviceNameOrRoom, action, value);
+    return await smartHomeService.controlDevice(deviceNameOrRoom, action, value);
   }
 
-  public getSmartHomeStatus() {
+  public async getSmartHomeStatus() {
     const { smartHomeService } = require("./smartHomeService");
-    return smartHomeService.getHomeStatus();
+    return await smartHomeService.getHomeStatus();
   }
 
   /**

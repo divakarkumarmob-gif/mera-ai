@@ -5,7 +5,7 @@ export interface SmsSendResult {
   recipient: string;
   recipientName?: string;
   messageId?: string;
-  deliveryStatus: "sent" | "failed" | "demo_preview";
+  deliveryStatus: "sent" | "failed";
   message: string;
 }
 
@@ -38,8 +38,8 @@ class Fast2SmsService {
     }
 
     const text = (messageText || "").trim();
-    if (!targetNumber || targetNumber.length !== 10) {
-      throw new Error(`Boss, "${rawInput}" ka koi valid 10-digit mobile number nahi mila.`);
+    if (!targetNumber || targetNumber.length !== 10 || !/^[6-9]\d{9}$/.test(targetNumber)) {
+      throw new Error(`Boss, "${rawInput}" ka koi valid 10-digit Indian mobile number nahi mila (number 6-9 se start hona chahiye).`);
     }
     if (!text) {
       throw new Error("SMS message body text zaroori hai.");
@@ -74,7 +74,18 @@ class Fast2SmsService {
         body: JSON.stringify(payload),
       });
 
-      const data = await res.json();
+      const rawBody = await res.text();
+      let data: any;
+      try {
+        data = JSON.parse(rawBody);
+      } catch {
+        return {
+          success: false,
+          recipient: targetNumber,
+          deliveryStatus: "failed",
+          message: `Fast2SMS se unexpected response mila (HTTP ${res.status}). Ho sakta hai API key invalid ho ya rate limit lag gaya ho. Raw: ${rawBody.slice(0, 200)}`,
+        };
+      }
 
       if (data && (data.return === true || data.status_code === 200 || data.message?.[0]?.includes("success"))) {
         const requestId = data.request_id || "F2S_" + Math.random().toString(36).substring(2, 8);

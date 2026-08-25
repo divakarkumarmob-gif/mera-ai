@@ -41,48 +41,56 @@ class MusicRecognitionService {
   ): Promise<SongRecognitionResult> {
     const hint = (clueOrSongHint || "").trim();
 
-    // 1. If audio snippet Base64 is provided, attempt AudD / Acoustic Recognition
+    // 1. If audio snippet Base64 is provided, attempt AudD acoustic fingerprint recognition
     if (audioSnippetBase64) {
-      try {
-        const formData = new URLSearchParams();
-        formData.append("audio", audioSnippetBase64);
-        formData.append("return", "spotify,deezer,apple_music");
-        const auddToken = process.env.AUDD_API_TOKEN || "test"; // free tier allows limited tests
-        formData.append("api_token", auddToken);
+      const auddToken = process.env.AUDD_API_TOKEN;
+      if (!auddToken) {
+        console.warn(
+          "[MusicRecognition] AUDD_API_TOKEN not set — skipping real acoustic recognition (AudD's public 'test' token only recognizes AudD's own demo clips, not real user audio) and falling back to text-based search."
+        );
+      } else {
+        try {
+          const formData = new URLSearchParams();
+          formData.append("audio", audioSnippetBase64);
+          formData.append("return", "spotify,deezer,apple_music");
+          formData.append("api_token", auddToken);
 
-        const res = await fetch("https://api.audd.io/", {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: formData.toString(),
-        });
+          const res = await fetch("https://api.audd.io/", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: formData.toString(),
+          });
 
-        if (res.ok) {
-          const data = await res.json();
-          if (data.status === "success" && data.result) {
-            const r = data.result;
-            return {
-              success: true,
-              mode: "live_playing_song",
-              queryOrClue: hint || "Live Microphone Audio",
-              identifiedSong: {
-                trackName: r.title,
-                artistName: r.artist,
-                albumName: r.album,
-                releaseDate: r.release_date,
-                albumArt: r.spotify?.album?.images?.[0]?.url || r.deezer?.album?.cover_medium,
-                matchedPatternOrLyrics: `Exact Acoustic Audio Fingerprint Match`,
-                matchScore: 0.99,
-                matchType: "exact_acoustic",
-                spotifyUrl: r.spotify?.external_urls?.spotify || `https://open.spotify.com/search/${encodeURIComponent(r.title + " " + r.artist)}`,
-                youtubeMusicUrl: `https://music.youtube.com/search?q=${encodeURIComponent(r.title + " " + r.artist)}`,
-                previewUrl: r.deezer?.preview || r.spotify?.preview_url,
-              },
-              message: `Boss, background me gaana pehchan liya gaya hai: "${r.title}" by ${r.artist}!`,
-            };
+          if (res.ok) {
+            const data = await res.json();
+            if (data.status === "success" && data.result) {
+              const r = data.result;
+              return {
+                success: true,
+                mode: "live_playing_song",
+                queryOrClue: hint || "Live Microphone Audio",
+                identifiedSong: {
+                  trackName: r.title,
+                  artistName: r.artist,
+                  albumName: r.album,
+                  releaseDate: r.release_date,
+                  albumArt: r.spotify?.album?.images?.[0]?.url || r.deezer?.album?.cover_medium,
+                  matchedPatternOrLyrics: `Exact Acoustic Audio Fingerprint Match`,
+                  matchScore: 0.99,
+                  matchType: "exact_acoustic",
+                  spotifyUrl: r.spotify?.external_urls?.spotify || `https://open.spotify.com/search/${encodeURIComponent(r.title + " " + r.artist)}`,
+                  youtubeMusicUrl: `https://music.youtube.com/search?q=${encodeURIComponent(r.title + " " + r.artist)}`,
+                  previewUrl: r.deezer?.preview || r.spotify?.preview_url,
+                },
+                message: `Boss, background me gaana pehchan liya gaya hai: "${r.title}" by ${r.artist}!`,
+              };
+            }
+          } else {
+            console.warn(`[MusicRecognition] AudD API returned status ${res.status}`);
           }
+        } catch (err) {
+          console.warn("[MusicRecognition] AudD acoustic fingerprint call failed, falling back to text search:", err);
         }
-      } catch (err) {
-        console.warn("[MusicRecognition] AudD acoustic fingerprint fallback:", err);
       }
     }
 

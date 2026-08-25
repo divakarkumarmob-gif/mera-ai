@@ -3986,7 +3986,7 @@ HOW TO READ MESSAGES:
                 } else if (call.name === "control_smart_device") {
                   const { deviceNameOrRoom, action, value } = call.args || {};
                   try {
-                    result = toolsEngine.controlSmartDevice(
+                    result = await toolsEngine.controlSmartDevice(
                       String(deviceNameOrRoom || ""),
                       action,
                       value ? Number(value) : undefined
@@ -3996,7 +3996,7 @@ HOW TO READ MESSAGES:
                   }
                 } else if (call.name === "get_smart_home_status") {
                   try {
-                    result = toolsEngine.getSmartHomeStatus();
+                    result = await toolsEngine.getSmartHomeStatus();
                   } catch (e: any) {
                     result = { success: false, message: `Smart home status check fail hui: ${e?.message || e}` };
                   }
