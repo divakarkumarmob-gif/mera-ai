@@ -2295,14 +2295,14 @@ HOW TO READ MESSAGES:
         },
         {
           name: "send_fast2sms_message",
-          description: "Send a real cellular mobile SMS to any Indian phone number using Fast2SMS Gateway. Use when DK says 'SMS bhejo', 'message send karo', '9876543210 par SMS karo'.",
+          description: "Send a real cellular mobile SMS to any Indian phone number or saved contact by name (e.g. 'Papa', 'Rohit', '9876543210') using Fast2SMS Gateway. Use when DK says 'SMS bhejo', 'Papa ko SMS karo', 'message send karo'.",
           parameters: {
             type: "OBJECT",
             properties: {
-              phoneNumber: { type: "STRING", description: "10-digit Indian mobile number (e.g. '9876543210')" },
+              phoneNumberOrContactName: { type: "STRING", description: "10-digit Indian mobile number OR saved contact name (e.g. 'Papa', 'Rohit', 'Aman', '9876543210')" },
               messageText: { type: "STRING", description: "Body text of the SMS" },
             },
-            required: ["phoneNumber", "messageText"],
+            required: ["phoneNumberOrContactName", "messageText"],
           },
         },
         {
@@ -3892,9 +3892,10 @@ HOW TO READ MESSAGES:
                     result = { success: false, message: `Podcast generation fail hui: ${e?.message || e}` };
                   }
                 } else if (call.name === "send_fast2sms_message") {
-                  const { phoneNumber, messageText } = call.args || {};
+                  const { phoneNumberOrContactName, phoneNumber, contactName, messageText } = call.args || {};
+                  const target = String(phoneNumberOrContactName || phoneNumber || contactName || "");
                   try {
-                    result = await toolsEngine.sendFast2Sms(String(phoneNumber || ""), String(messageText || ""));
+                    result = await toolsEngine.sendFast2Sms(target, String(messageText || ""));
                   } catch (e: any) {
                     result = { success: false, message: `Fast2SMS send fail hua: ${e?.message || e}` };
                   }
