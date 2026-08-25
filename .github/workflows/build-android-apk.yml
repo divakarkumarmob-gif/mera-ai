@@ -18,11 +18,11 @@ jobs:
       - name: 📥 Checkout Repository
         uses: actions/checkout@v4
 
-      - name: ☕ Setup Java 17 (OpenJDK)
+      - name: ☕ Setup Java 21 (Required for Capacitor 7 / Android Gradle)
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '21'
 
       - name: 🤖 Setup Android SDK
         uses: android-actions/setup-android@v3
@@ -46,12 +46,14 @@ jobs:
           npx cap add android || true
           npx cap sync android
 
-      - name: 🔑 Configure Permissions & Network Security in AndroidManifest
+      - name: 🔑 Configure Permissions in AndroidManifest
         run: |
-          # Ensure Internet & Audio recording permissions are enabled
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           if [ -f "$MANIFEST" ]; then
-            sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />' "$MANIFEST"
+            # Add RECORD_AUDIO and MODIFY_AUDIO_SETTINGS if not already present
+            if ! grep -q "RECORD_AUDIO" "$MANIFEST"; then
+              sed -i '/<application/i \    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />' "$MANIFEST"
+            fi
           fi
 
       - name: 🔨 Build Debug APK via Gradle
