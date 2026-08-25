@@ -3345,6 +3345,321 @@ class PublicApisService {
     };
   }
 
+  // ── Lyrics Normalization & Fuzzy / Partial Match Helpers ──────────────────
+  private normalizeLyricsText(str: string): string {
+    return (str || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9\s]/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  private levenshteinDistance(s1: string, s2: string): number {
+    const m = s1.length;
+    const n = s2.length;
+    const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+    for (let i = 0; i <= m; i++) dp[i][0] = i;
+    for (let j = 0; j <= n; j++) dp[0][j] = j;
+    for (let i = 1; i <= m; i++) {
+      for (let j = 1; j <= n; j++) {
+        if (s1[i - 1] === s2[j - 1]) dp[i][j] = dp[i - 1][j - 1];
+        else dp[i][j] = 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+      }
+    }
+    return dp[m][n];
+  }
+
+  private stringSimilarity(s1: string, s2: string): number {
+    const maxLen = Math.max(s1.length, s2.length);
+    if (maxLen === 0) return 1.0;
+    const dist = this.levenshteinDistance(s1, s2);
+    return Math.max(0, 1 - dist / maxLen);
+  }
+
+  private extractLyricsSnippet(fullLyrics: string, query: string): string {
+    if (!fullLyrics) return "";
+    const lines = fullLyrics.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const normQuery = this.normalizeLyricsText(query);
+    const queryWords = normQuery.split(" ").filter((w) => w.length > 2);
+
+    for (let i = 0; i < lines.length; i++) {
+      const normLine = this.normalizeLyricsText(lines[i]);
+      if (normLine.includes(normQuery)) {
+        const prev = i > 0 ? lines[i - 1] + "\n" : "";
+        const next = i < lines.length - 1 ? "\n" + lines[i + 1] : "";
+        return `${prev}"${lines[i]}"${next}`;
+      }
+    }
+
+    for (let i = 0; i < lines.length; i++) {
+      const normLine = this.normalizeLyricsText(lines[i]);
+      const hasMostWords = queryWords.filter((w) => normLine.includes(w)).length >= Math.max(1, Math.ceil(queryWords.length * 0.6));
+      if (hasMostWords) {
+        return `"${lines[i]}"`;
+      }
+    }
+
+    return lines.slice(0, 2).join("\n");
+  }
+
+  private calculateLyricsMatchScore(
+    query: string,
+    lyrics: string,
+    title: string,
+    artist: string
+  ): { score: number; matchType: "exact" | "partial" | "fuzzy"; matchedSnippet?: string } {
+    const normQuery = this.normalizeLyricsText(query);
+    const normLyrics = this.normalizeLyricsText(lyrics);
+    const normTitle = this.normalizeLyricsText(title);
+    const normArtist = this.normalizeLyricsText(artist);
+
+    if (!normQuery) return { score: 0, matchType: "fuzzy" };
+
+    const queryWords = normQuery.split(" ").filter((w) => w.length > 1);
+    if (queryWords.length === 0) return { score: 0, matchType: "fuzzy" };
+
+    // 1. Exact phrase match in lyrics
+    if (normLyrics && normLyrics.includes(normQuery)) {
+      const snippet = this.extractLyricsSnippet(lyrics, query);
+      return { score: 0.98, matchType: "exact", matchedSnippet: snippet };
+    }
+
+    // 2. Exact phrase match in Title
+    if (normTitle && (normTitle.includes(normQuery) || normQuery.includes(normTitle))) {
+      return { score: 0.92, matchType: "exact", matchedSnippet: `Song Title: "${title}"` };
+    }
+
+    // 3. Partial phrase / line match in lyrics
+    let bestLineScore = 0;
+    let bestLineSnippet: string | undefined;
+    if (lyrics) {
+      const lines = lyrics.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+      for (const line of lines) {
+        const normLine = this.normalizeLyricsText(line);
+        if (!normLine) continue;
+
+        if (normLine.includes(normQuery) || (normQuery.length > 8 && normLine.includes(normQuery.substring(0, Math.floor(normQuery.length * 0.75))))) {
+          return { score: 0.88, matchType: "partial", matchedSnippet: line };
+        }
+
+        const lineWords = normLine.split(" ").filter((w) => w.length > 1);
+        let matchCount = 0;
+        for (const qw of queryWords) {
+          if (lineWords.some((lw) => lw === qw || this.stringSimilarity(qw, lw) > 0.82)) {
+            matchCount++;
+          }
+        }
+        const lineOverlap = matchCount / queryWords.length;
+        if (lineOverlap > bestLineScore) {
+          bestLineScore = lineOverlap;
+          bestLineSnippet = line;
+        }
+      }
+    }
+
+    if (bestLineScore >= 0.7) {
+      return { score: 0.72 + bestLineScore * 0.18, matchType: "partial", matchedSnippet: bestLineSnippet };
+    }
+
+    // 4. Token Overlap & Fuzzy similarity across lyrics + title + artist
+    const allText = `${normLyrics} ${normTitle} ${normArtist}`;
+    const allWords = new Set(allText.split(" ").filter((w) => w.length > 1));
+    let matchedTokens = 0;
+    for (const qw of queryWords) {
+      if (allWords.has(qw)) {
+        matchedTokens++;
+      } else {
+        for (const w of allWords) {
+          if (Math.abs(w.length - qw.length) <= 2 && this.stringSimilarity(qw, w) >= 0.82) {
+            matchedTokens += 0.85;
+            break;
+          }
+        }
+      }
+    }
+
+    const tokenRatio = matchedTokens / queryWords.length;
+    if (tokenRatio >= 0.5) {
+      return {
+        score: 0.5 + tokenRatio * 0.35,
+        matchType: tokenRatio >= 0.75 ? "partial" : "fuzzy",
+        matchedSnippet: bestLineSnippet || `Lyrics contain: "${queryWords.slice(0, 4).join(" ")}..."`,
+      };
+    }
+
+    return { score: Math.max(0.1, tokenRatio * 0.5), matchType: "fuzzy", matchedSnippet: bestLineSnippet };
+  }
+
+  // 51.3 Search Song by Lyrics (Exact + Fuzzy/Partial Fallback)
+  public async searchSongByLyrics(lyricsQuery: string, artistHint?: string): Promise<any> {
+    const q = (lyricsQuery || "").trim();
+    if (!q) {
+      return { success: false, message: "Lyrics ya song ke bol provide karna zaroori hai." };
+    }
+
+    const candidateSongs: Map<string, any> = new Map();
+
+    // Source 1: LRCLIB API (free, dedicated lyrics database with plain & synced lyrics)
+    try {
+      const lrcUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(q + (artistHint ? " " + artistHint : ""))}`;
+      const lrcRes = await fetchJson(lrcUrl, 5000);
+      if (Array.isArray(lrcRes)) {
+        for (const item of lrcRes.slice(0, 10)) {
+          const key = `${(item.trackName || "").toLowerCase()}::${(item.artistName || "").toLowerCase()}`;
+          if (!candidateSongs.has(key)) {
+            candidateSongs.set(key, {
+              trackName: item.trackName,
+              artistName: item.artistName,
+              albumName: item.albumName,
+              lyrics: item.plainLyrics || item.syncedLyrics || "",
+              duration: item.duration,
+              source: "lrclib",
+              spotifyUrl: `https://open.spotify.com/search/${encodeURIComponent(item.trackName + " " + item.artistName)}`,
+              youtubeMusicUrl: `https://music.youtube.com/search?q=${encodeURIComponent(item.trackName + " " + item.artistName)}`,
+            });
+          }
+        }
+      }
+    } catch { /* fall through */ }
+
+    // Source 2: Deezer API
+    try {
+      const deezerRes = await fetchJson(
+        `https://api.deezer.com/search?q=${encodeURIComponent(q + (artistHint ? " " + artistHint : ""))}&limit=10`,
+        4000
+      );
+      if (deezerRes?.data && Array.isArray(deezerRes.data)) {
+        for (const t of deezerRes.data) {
+          const key = `${(t.title || "").toLowerCase()}::${(t.artist?.name || "").toLowerCase()}`;
+          if (!candidateSongs.has(key)) {
+            candidateSongs.set(key, {
+              trackName: t.title,
+              artistName: t.artist?.name,
+              albumName: t.album?.title,
+              albumArt: t.album?.cover_medium || t.album?.cover,
+              previewUrl: t.preview,
+              deezerUrl: t.link,
+              lyrics: "",
+              source: "deezer",
+              spotifyUrl: `https://open.spotify.com/search/${encodeURIComponent(t.title + " " + (t.artist?.name || ""))}`,
+              youtubeMusicUrl: `https://music.youtube.com/search?q=${encodeURIComponent(t.title + " " + (t.artist?.name || ""))}`,
+            });
+          }
+        }
+      }
+    } catch { /* fall through */ }
+
+    // Source 3: iTunes Search API
+    if (candidateSongs.size < 5) {
+      try {
+        const itunesRes = await fetchJson(
+          `https://itunes.apple.com/search?term=${encodeURIComponent(q + (artistHint ? " " + artistHint : ""))}&media=music&limit=10`,
+          4000
+        );
+        if (itunesRes?.results && Array.isArray(itunesRes.results)) {
+          for (const t of itunesRes.results) {
+            const key = `${(t.trackName || "").toLowerCase()}::${(t.artistName || "").toLowerCase()}`;
+            if (!candidateSongs.has(key)) {
+              candidateSongs.set(key, {
+                trackName: t.trackName,
+                artistName: t.artistName,
+                albumName: t.collectionName,
+                albumArt: t.artworkUrl100,
+                previewUrl: t.previewUrl,
+                lyrics: "",
+                source: "itunes",
+                spotifyUrl: `https://open.spotify.com/search/${encodeURIComponent(t.trackName + " " + t.artistName)}`,
+                youtubeMusicUrl: `https://music.youtube.com/search?q=${encodeURIComponent(t.trackName + " " + t.artistName)}`,
+              });
+            }
+          }
+        }
+      } catch { /* fall through */ }
+    }
+
+    // Score and rank all candidate tracks
+    const scoredResults: any[] = [];
+
+    for (const song of candidateSongs.values()) {
+      const match = this.calculateLyricsMatchScore(
+        q,
+        song.lyrics || "",
+        song.trackName || "",
+        song.artistName || ""
+      );
+
+      let matchedSnippet = match.matchedSnippet;
+      let lyricsText = song.lyrics;
+
+      if (!lyricsText && match.score >= 0.4) {
+        try {
+          const lrcItem = await fetchJson(
+            `https://lrclib.net/api/get?track_name=${encodeURIComponent(song.trackName)}&artist_name=${encodeURIComponent(song.artistName)}`,
+            3000
+          );
+          if (lrcItem?.plainLyrics) {
+            lyricsText = lrcItem.plainLyrics;
+            const updatedMatch = this.calculateLyricsMatchScore(q, lyricsText, song.trackName, song.artistName);
+            match.score = Math.max(match.score, updatedMatch.score);
+            match.matchType = updatedMatch.matchType;
+            matchedSnippet = updatedMatch.matchedSnippet || matchedSnippet;
+          }
+        } catch { /* ignore */ }
+      }
+
+      scoredResults.push({
+        trackName: song.trackName,
+        artistName: song.artistName,
+        albumName: song.albumName,
+        albumArt: song.albumArt,
+        previewUrl: song.previewUrl,
+        spotifyUrl: song.spotifyUrl,
+        youtubeMusicUrl: song.youtubeMusicUrl,
+        matchedSnippet: matchedSnippet || `Identified in track by ${song.artistName}`,
+        matchScore: Math.round(match.score * 100) / 100,
+        matchType: match.matchType,
+        sampleLyrics: lyricsText ? lyricsText.slice(0, 300) + (lyricsText.length > 300 ? "..." : "") : undefined,
+      });
+    }
+
+    scoredResults.sort((a, b) => b.matchScore - a.matchScore);
+    const topMatches = scoredResults.slice(0, 5);
+
+    if (topMatches.length > 0 && topMatches[0].matchScore >= 0.35) {
+      const best = topMatches[0];
+      return {
+        success: true,
+        query: q,
+        bestMatch: {
+          trackName: best.trackName,
+          artistName: best.artistName,
+          albumName: best.albumName,
+          albumArt: best.albumArt,
+          matchedSnippet: best.matchedSnippet,
+          matchType: best.matchType,
+          matchScore: best.matchScore,
+          spotifyUrl: best.spotifyUrl,
+          youtubeMusicUrl: best.youtubeMusicUrl,
+          previewUrl: best.previewUrl,
+        },
+        otherCandidates: topMatches.slice(1),
+        message: `Boss, "${q}" lyrics se gaana mil gaya: "${best.trackName}" by ${best.artistName}! (Match: ${best.matchType}, Score: ${Math.round(best.matchScore * 100)}%).`,
+      };
+    }
+
+    return {
+      success: true,
+      query: q,
+      bestMatch: null,
+      candidates: topMatches,
+      spotifySearchUrl: `https://open.spotify.com/search/${encodeURIComponent(q)}`,
+      youtubeMusicUrl: `https://music.youtube.com/search?q=${encodeURIComponent(q)}`,
+      message: `"${q}" lyrics se match search kiya gaya. Spotify aur YouTube Music par direct links available hain.`,
+    };
+  }
+
   // 52. LinkedIn Company & Jobs Hub
   public async getLinkedInInsights(query: string): Promise<any> {
     const q = query.trim();

@@ -579,6 +579,11 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const [dueReminder, setDueReminder] = useState<{ title: string; timeString: string } | null>(null);
     const [whatsappNotif, setWhatsappNotif] = useState<{ sender: string; text: string; isGroup: boolean; groupName?: string | null } | null>(null);
     const whatsappNotifTimerRef = useRef<any>(null);
+    const [activeBgTask, setActiveBgTask] = useState<{ id: string; name: string; type: string; progressStep: string } | null>(null);
+    const [completedBgTask, setCompletedBgTask] = useState<{ id: string; name: string; resultSummary: string } | null>(null);
+    const completedBgTaskTimerRef = useRef<any>(null);
+    const [identifiedSong, setIdentifiedSong] = useState<any | null>(null);
+    const identifiedSongTimerRef = useRef<any>(null);
     const [inactivityCountdown, setInactivityCountdown] = useState<number | null>(null);
     const [showCaptions, setShowCaptions] = useState(true);
     const [captionText, setCaptionText] = useState('');
@@ -1268,6 +1273,40 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         () => setWhatsappNotif(null),
                         msg.isGroup ? 8000 : 12000
                     );
+                } else if (msg.type === 'background_task_event' || msg.type === 'background_task_started' || msg.type === 'background_task_completed') {
+                    const task = msg.task;
+                    if (task) {
+                        if (task.status === 'running' || task.status === 'pending') {
+                            setActiveBgTask({
+                                id: task.id,
+                                name: task.name,
+                                type: task.type,
+                                progressStep: task.progressStep || 'Processing...',
+                            });
+                        } else if (task.status === 'completed') {
+                            setActiveBgTask((prev) => (prev?.id === task.id ? null : prev));
+                            setCompletedBgTask({
+                                id: task.id,
+                                name: task.name,
+                                resultSummary: task.resultSummary || 'Completed successfully',
+                            });
+                            clearTimeout(completedBgTaskTimerRef.current);
+                            completedBgTaskTimerRef.current = setTimeout(() => {
+                                setCompletedBgTask(null);
+                            }, 12000);
+                        } else if (task.status === 'cancelled' || task.status === 'failed') {
+                            setActiveBgTask((prev) => (prev?.id === task.id ? null : prev));
+                        }
+                    }
+                } else if (msg.type === 'song_identified') {
+                    if (msg.song) {
+                        setIdentifiedSong({
+                            ...msg.song,
+                            mode: msg.mode,
+                        });
+                        clearTimeout(identifiedSongTimerRef.current);
+                        identifiedSongTimerRef.current = setTimeout(() => setIdentifiedSong(null), 20000);
+                    }
                 } else if (msg.type === 'play_music') {
                     stopMusicPlayback();
                     if (msg.audioUrl) {
@@ -1423,6 +1462,137 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                             <button onClick={() => setWhatsappNotif(null)} className="text-slate-400 hover:text-white shrink-0">
                                 <X className="h-4 w-4" />
                             </button>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+
+                {/* ── Active Background Task Live Banner ── */}
+                <AnimatePresence>
+                    {activeBgTask && (
+                        <motion.div
+                            initial={{ opacity: 0, y: -10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -10 }}
+                            className="w-full mb-3 flex items-center justify-between gap-3 px-4 py-2.5 rounded-2xl bg-cyan-500/15 border border-cyan-500/40 shadow-[0_0_20px_rgba(6,182,212,0.2)] backdrop-blur-sm"
+                        >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                                <Loader2 className="w-4 h-4 text-cyan-400 animate-spin shrink-0" />
+                                <div className="min-w-0">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-cyan-300 text-xs font-bold truncate">⚡ Background: {activeBgTask.name}</span>
+                                        <span className="text-[9px] px-1.5 py-0.2 rounded bg-cyan-500/30 text-cyan-200 uppercase font-mono tracking-wider">Running</span>
+                                    </div>
+                                    <p className="text-slate-300 text-[11px] truncate">{activeBgTask.progressStep}</p>
+                                </div>
+                            </div>
+                            <button onClick={() => setActiveBgTask(null)} className="text-cyan-300/70 hover:text-cyan-200 shrink-0">
+                                <X className="h-3.5 w-3.5" />
+                            </button>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+
+                {/* ── Completed Background Task Notification Banner ── */}
+                <AnimatePresence>
+                    {completedBgTask && (
+                        <motion.div
+                            initial={{ opacity: 0, y: -10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -10 }}
+                            className="w-full mb-3 flex items-center justify-between gap-3 px-4 py-2.5 rounded-2xl bg-emerald-500/15 border border-emerald-500/40 shadow-[0_0_20px_rgba(16,185,129,0.25)] backdrop-blur-sm"
+                        >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                                <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                                <div className="min-w-0">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-emerald-300 text-xs font-bold truncate">✅ Done: {completedBgTask.name}</span>
+                                    </div>
+                                    <p className="text-slate-200 text-[11px] truncate max-w-[280px]">{completedBgTask.resultSummary}</p>
+                                </div>
+                            </div>
+                            <button onClick={() => setCompletedBgTask(null)} className="text-emerald-300/70 hover:text-emerald-200 shrink-0">
+                                <X className="h-3.5 w-3.5" />
+                            </button>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+
+                {/* ── Shazam / Google Humming Identified Song Card ── */}
+                <AnimatePresence>
+                    {identifiedSong && (
+                        <motion.div
+                            initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                            className="w-full mb-3 p-3 rounded-2xl bg-gradient-to-r from-violet-950/90 via-purple-900/80 to-slate-900/90 border border-violet-500/50 shadow-[0_0_25px_rgba(168,85,247,0.3)] backdrop-blur-md flex items-center justify-between gap-3"
+                        >
+                            <div className="flex items-center gap-3 min-w-0">
+                                {identifiedSong.albumArt ? (
+                                    <img
+                                        src={identifiedSong.albumArt}
+                                        alt={identifiedSong.trackName}
+                                        className="w-11 h-11 rounded-xl object-cover border border-white/20 shadow-md shrink-0"
+                                    />
+                                ) : (
+                                    <div className="w-11 h-11 rounded-xl bg-violet-600/30 border border-violet-500/40 flex items-center justify-center shrink-0">
+                                        <span className="text-xl">🎵</span>
+                                    </div>
+                                )}
+                                <div className="min-w-0">
+                                    <div className="flex items-center gap-2 mb-0.5">
+                                        <span className="text-violet-300 text-xs font-bold truncate">
+                                            {identifiedSong.trackName}
+                                        </span>
+                                        <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-violet-500/30 text-violet-200 uppercase font-mono tracking-wider">
+                                            {identifiedSong.mode === 'live_playing_song' ? '🎧 Live Audio' : '🎵 Hum-Matched'}
+                                        </span>
+                                    </div>
+                                    <p className="text-slate-300 text-[11px] truncate">
+                                        {identifiedSong.artistName} {identifiedSong.albumName ? `• ${identifiedSong.albumName}` : ''}
+                                    </p>
+                                    {identifiedSong.matchedPatternOrLyrics && (
+                                        <p className="text-violet-400/90 text-[10px] truncate italic mt-0.5">
+                                            "{identifiedSong.matchedPatternOrLyrics}"
+                                        </p>
+                                    )}
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                                {identifiedSong.previewUrl && (
+                                    <button
+                                        onClick={() => {
+                                            stopMusicPlayback();
+                                            const audio = new Audio(identifiedSong.previewUrl);
+                                            audio.volume = 0.85;
+                                            musicAudioRef.current = audio;
+                                            audio.play().catch(() => {});
+                                            setNowPlayingMusic({
+                                                trackName: identifiedSong.trackName,
+                                                artistName: identifiedSong.artistName,
+                                                spotifyUrl: identifiedSong.spotifyUrl,
+                                            });
+                                        }}
+                                        className="px-2.5 py-1 rounded-xl bg-violet-600/30 hover:bg-violet-600/50 border border-violet-500/50 text-violet-200 text-xs font-semibold flex items-center gap-1 transition-all"
+                                        title="Play 30s preview"
+                                    >
+                                        ▶ Play
+                                    </button>
+                                )}
+                                <a
+                                    href={identifiedSong.spotifyUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="px-2.5 py-1 rounded-xl bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-500/50 text-emerald-200 text-xs font-semibold flex items-center gap-1 transition-all"
+                                >
+                                    Spotify ↗
+                                </a>
+                                <button
+                                    onClick={() => setIdentifiedSong(null)}
+                                    className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/10 shrink-0"
+                                >
+                                    <X className="h-4 w-4" />
+                                </button>
+                            </div>
                         </motion.div>
                     )}
                 </AnimatePresence>

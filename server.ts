@@ -27,6 +27,7 @@ import { voiceBiometricsService } from "./src/services/voiceBiometricsService";
 import { telegramBotService } from "./src/services/telegramBotService";
 import { instagramBotService } from "./src/services/instagramBotService";
 import { cyberSecurityService } from "./src/services/cyberSecurityService";
+import { backgroundTasksService } from "./src/services/backgroundTasksService";
 
 const PORT = Number(process.env.PORT) || 3000;
 const isProduction = process.env.NODE_ENV === "production";
@@ -504,6 +505,15 @@ async function startServer() {
     }
   });
 
+  app.get("/api/background-tasks", (_req, res) => {
+    res.json({
+      ok: true,
+      activeTasks: backgroundTasksService.getActiveTasks(),
+      unnotifiedTasks: backgroundTasksService.getUnnotifiedCompletedTasks(),
+      recentTasks: backgroundTasksService.getAllRecentTasks(),
+    });
+  });
+
   const distPath = path.resolve("dist");
 
   let vite: any;
@@ -537,6 +547,30 @@ async function startServer() {
   });
 
   dailyUpdateReminderScheduler.start();
+
+  // Push live background task updates/events to all connected clients in real-time
+  backgroundTasksService.onTaskChange((task) => {
+    const payload = JSON.stringify({
+      type: "background_task_event",
+      task: {
+        id: task.id,
+        name: task.name,
+        type: task.type,
+        description: task.description,
+        status: task.status,
+        progressStep: task.progressStep,
+        resultSummary: task.resultSummary,
+        startedAt: task.startedAt,
+        completedAt: task.completedAt,
+        notified: task.notified,
+      },
+    });
+    for (const client of connectedClients) {
+      if (client.readyState === client.OPEN) {
+        client.send(payload);
+      }
+    }
+  });
 
   // Push incoming WhatsApp messages to all connected clients in real-time
   whatsappBotService.setMessageCallback((msg) => {
@@ -667,6 +701,8 @@ ${memoryContext}
 DK'S CONTACTS BOOK:
 ${contactsList}
 ============================================================
+
+${backgroundTasksService.compileBackgroundTasksPromptContext()}
 
 CODE CHANGES (YOUR PROJECT):
 - If DK asks for a code/feature change or bug fix in his app (e.g. "ye feature add karo", "isko fix karo", "code me change karo"), call "request_code_change" with his exact instruction. Tell him you'll analyze and come back with a plan — never claim you already made the change.
@@ -857,6 +893,9 @@ SOCIAL & MEDIA TOOLS (YOUTUBE, REDDIT, SPOTIFY MUSIC, LINKEDIN, TELEGRAM/DISCORD
 - 'search_youtube': Search YouTube videos, channels (@handle), trending topics. Send direct link to WhatsApp if requested.
 - 'search_reddit': Check honest opinions, community reviews, and discussions on subreddits like r/india, r/technology, r/Cricket, etc.
 - 'search_music': Lookup songs, singer/artist, album, preview, and generate direct Spotify play links. Send Spotify link to WhatsApp if asked.
+- 'search_song_by_lyrics': Identify and search any song by its lyrics, hummed words, or memorable lines (e.g. "tu hai to mujhe phir aur kya chahiye", "tere vaaste falak se main chaand", "ye gana kaun sa hai jisme aata hai..."). Identifies track title, singer/artist, album, and matching lyrics snippet.
+- 'identify_playing_song': Shazam-Style Live Music Recognition. Identify any song/track playing live in the background, room, car, or TV. Call when DK asks "suno ye kaun sa gana baj raha hai", "ye music pehchano", "identify this playing song".
+- 'identify_song_by_humming_or_tune': Google Hum-to-Search Style Recognition. Identify a song when DK hums ("ta na na...", "hmm hmm..."), whistles, gives broken tune descriptions, or beat rhythms.
 - 'play_music': Play / stream any song or music directly in the application. Call when DK says 'gana chalao', 'music play karo', 'Arijit Singh ka gana sunao'.
 - 'stop_music': STOP / PAUSE the currently playing music immediately. CRITICAL: Whenever DK says 'stop', 'gana band karo', 'mujhe achha nahi laga', 'band karo gana', 'gana nahi sunna mujhe', 'music roko', 'chup ho jao' — CALL 'stop_music' IMMEDIATELY and resume talking warmly.
 - 'send_music_on_whatsapp': Send the YouTube link of any song to DK's WhatsApp via Cloud API. If Cloud API fails, Friday will inform DK and ask if Baileys should be enabled as backup.
@@ -949,6 +988,29 @@ VOICE CONTROL FOR ALL TOGGLES & INTERFACE SWITCHES:
   * "Settings kholo/band karo" -> toggle_ui_setting(settingName: 'settings', state: true/false)
   * "WhatsApp linking modal kholo/band karo" -> toggle_ui_setting(settingName: 'whatsapp_modal', state: true/false)
 - After toggling, ALWAYS reply: "Boss, [setting name] ko [ON / OFF] kar diya hai."
+
+BACKGROUND TASKS & AUTONOMOUS REPORTING SYSTEM:
+- Tools: 'start_background_task', 'get_background_tasks_status', 'mark_background_task_notified', 'cancel_background_task'.
+- When DK asks for something that updates/runs in the background (e.g. weather update, live match tracking, deals search, security audit, code diagnostic) or if an API failed and you say "mai background me check karke batati hu":
+  1. STARTING BACKGROUND WORK:
+     - Call 'start_background_task' with 'taskName' (e.g. "Weather Update for Patna") and 'taskType' ('weather' | 'cricket' | 'deals' | 'security_scan' | 'wifi_scan' | 'code_fix' | 'custom').
+     - Confirm immediately in warm conversational Hindi: "Theek hai Boss, maine [Task Name] background me start kar diya hai! Jaise hi complete hoga main aapko bata dungi."
+  2. WHEN DK ASKS "BACKGROUND ME KYA KAR RAHI HO?" / "KYA CHAL RAHA HAI BACKGROUND ME?":
+     - Call 'get_background_tasks_status'.
+     - If active tasks exist: Tell DK clearly what is running and its current progress step (e.g. "Boss, abhi background me Patna ka weather update chal raha hai! Satellite API se latest temperature aur rainfall forecast analyze ho raha hai.").
+     - If no task is running: Reply: "Boss, abhi background me koi task nahi chal raha, main bilkul free hoon!"
+  3. WHEN DK ASKS ABOUT A TASK ("UPDATE KIYA KYA HUA BATAO?", "WEATHER UPDATE KA KYA HUA?", "JO KAAM BOLA THA WO HUA?"):
+     - Call 'get_background_tasks_status' (with query e.g. "weather" or "cricket").
+     - If completed: Tell DK the exact result summary with complete warm details in Hindi (e.g. "Haan boss, Patna ka weather update complete ho gaya hai! Wahan abhi 28°C hai, mausam bilkul saaf hai aur barish ka koi chance nahi hai.").
+     - If still running: Tell DK that it is currently fetching and will be completed in a few seconds.
+  4. AUTONOMOUS END-OF-TURN REPORTING (PIGGYBACK RULE FOR COMPLETED TASKS):
+     - When any background task completes (it will appear under COMPLETED TASKS WAITING TO BE REPORTED):
+     - In ANY foreground conversation turn where DK talks to you (asks a question, gives a command, or chats):
+       * Step 1: FIRST, answer DK's current foreground question/topic fully, naturally, and warmly. NEVER cut off your primary answer.
+       * Step 2: At the VERY END of that same turn, add the smooth bridge announcement:
+         "...aur haan Boss, jo background me [Task Name] chal raha tha wo complete ho gaya hai! [Result details]"
+       * Step 3: Call 'mark_background_task_notified' (or the server automatically marks it) so you don't repeat the notification again.
+
 
 DAILY LIFE ESSENTIALS (MEDICINE, GOLD/PETROL, EMERGENCY, CHALLAN, BILLS, SCHEMES, EXPENSES, BUS):
 - 'get_medicine_and_generic_info': Explain medicine uses, precautions, and suggest 70% cheaper Jan Aushadhi generic alternative salts.
@@ -1047,6 +1109,56 @@ HOW TO READ MESSAGES:
       let outputTranscriptBuffer = "";
 
       const functionDeclarations: any[] = [
+        {
+          name: "start_background_task",
+          description: "Start a background task (e.g. weather update, live cricket score check, product deal search, security scan, codebase audit, or custom background operation). Friday immediately acknowledges in conversation that the task has started in background, and when it finishes, it will be reported at the end of a turn or when DK asks.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              taskName: { type: "STRING", description: "Clear name of the background task, e.g. 'Weather Update for Patna', 'Live Cricket Match Score', 'Godrej Fridge Price Search'" },
+              taskType: {
+                type: "STRING",
+                description: "Type/category: 'weather', 'cricket', 'deals', 'security_scan', 'wifi_scan', 'code_fix', or 'custom'",
+              },
+              targetOrQuery: { type: "STRING", description: "Target city, query, product, or topic (e.g. 'Patna', 'India match', 'shoes')" },
+              description: { type: "STRING", description: "Short description of what is being processed in background" },
+            },
+            required: ["taskName", "taskType"],
+          },
+        },
+        {
+          name: "get_background_tasks_status",
+          description: "Check the live status of all running, active, and completed background tasks. Use when DK asks 'Background me kya chal raha hai?', 'Kya kar rahi ho background me?', 'Weather update hua kya?', 'Update kiya kya hua batao?', or 'Jo kaam bola tha uska kya hua?'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              query: { type: "STRING", description: "Optional filter for a specific task or topic, e.g. 'weather', 'cricket', 'deals'" },
+            },
+            required: [],
+          },
+        },
+        {
+          name: "mark_background_task_notified",
+          description: "Mark a completed background task as notified after informing DK about its outcome/result in conversation.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              taskId: { type: "STRING", description: "ID of the completed task, or 'all' to mark all completed tasks as notified" },
+            },
+            required: ["taskId"],
+          },
+        },
+        {
+          name: "cancel_background_task",
+          description: "Cancel a currently running background task if DK asks to cancel, stop, or abort it.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              taskIdOrName: { type: "STRING", description: "ID or name of the background task to cancel" },
+            },
+            required: ["taskIdOrName"],
+          },
+        },
         {
           name: "request_code_change",
           description: "Use when DK asks for a code/feature change or to fix a bug in his app/project (e.g. 'ye feature add karo', 'ye bug fix karo', 'code me change karo'). Sends the instruction to Friday's coding agent, which will analyze the repo and come back with a plan for DK to approve — this does NOT make any change itself.",
@@ -1886,6 +1998,41 @@ HOW TO READ MESSAGES:
           },
         },
         {
+          name: "search_song_by_lyrics",
+          description: "Identify and search a song using its lyrics, memorable lines, or hummed words (e.g. 'tu hai to mujhe phir aur kya chahiye', 'tere vaaste falak se main chaand', 'shape of you lyrics'). Uses exact and fuzzy partial matching to identify the song title, artist/singer, album, matching lyrics snippet, and links.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              lyrics: { type: "STRING", description: "The lyrics phrase, line, or words to search for (e.g. 'tu hai to mujhe phir aur kya chahiye', 'tere vaaste falak se main chaand')" },
+              artistHint: { type: "STRING", description: "Optional singer or artist name if known or hinted by DK (e.g. 'Arijit Singh', 'Ed Sheeran')" },
+            },
+            required: ["lyrics"],
+          },
+        },
+        {
+          name: "identify_playing_song",
+          description: "Identify any music/song playing live in the background, room, car, or TV (Shazam-style acoustic recognition). Use when DK says 'ye kaun sa gana baj raha hai', 'ye music pehchano', 'identify playing song'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              songClue: { type: "STRING", description: "Optional title clue, language, or singer hint if DK mentioned any" },
+            },
+            required: [],
+          },
+        },
+        {
+          name: "identify_song_by_humming_or_tune",
+          description: "Identify a song from DK's humming, whistling, tune description, or beat rhythm (Google Hum-to-Search style). Use when DK hums ('ta na na...', 'hmm hmm...'), whistles, or describes a tune/rhythm.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              hummingOrTuneClue: { type: "STRING", description: "The hummed words, rhythm description, tune, or partial lyrics (e.g. 'ta na na na... tere vaaste falak se', 'hmm hmm romantic slow flute song')" },
+              artistHint: { type: "STRING", description: "Optional singer or artist hint" },
+            },
+            required: ["hummingOrTuneClue"],
+          },
+        },
+        {
           name: "play_music",
           description: "Play and stream any song or music track directly in the application when DK asks to listen to music (e.g. 'Kesariya gana chalao', 'koi relax karne wala music sunao').",
           parameters: {
@@ -2384,6 +2531,24 @@ HOW TO READ MESSAGES:
                   console.error("[Server] Failed to save AI message:", e)
                 );
                 memoryEngine.recordMessage(sessionId, "ai", outputTranscriptBuffer);
+
+                // Auto-mark completed background tasks as notified if AI reported them to DK
+                try {
+                  const unnotified = backgroundTasksService.getUnnotifiedCompletedTasks();
+                  const lowerOutput = outputTranscriptBuffer.toLowerCase();
+                  for (const t of unnotified) {
+                    if (
+                      lowerOutput.includes(t.name.toLowerCase()) ||
+                      (t.type === "weather" && (lowerOutput.includes("weather") || lowerOutput.includes("mausam"))) ||
+                      (t.type === "cricket" && (lowerOutput.includes("cricket") || lowerOutput.includes("score"))) ||
+                      (lowerOutput.includes("background") && lowerOutput.includes("complete"))
+                    ) {
+                      backgroundTasksService.markTaskNotified(t.id);
+                    }
+                  }
+                } catch (err) {
+                  console.error("[Server] Error auto-marking background task as notified:", err);
+                }
               }
               inputTranscriptBuffer = "";
               outputTranscriptBuffer = "";
@@ -2402,7 +2567,49 @@ HOW TO READ MESSAGES:
                 console.log(`[Friday Tools] Calling function: ${call.name}`, call.args);
                 let result: any = { success: true };
 
-                if (call.name === "request_code_change") {
+                if (call.name === "start_background_task") {
+                  const { taskName, taskType, targetOrQuery, description } = call.args || {};
+                  try {
+                    const task = await backgroundTasksService.executeAutonomousTask(
+                      String(taskName || "Background Task"),
+                      String(taskType || "custom"),
+                      String(targetOrQuery || ""),
+                      description ? String(description) : undefined
+                    );
+                    result = {
+                      success: true,
+                      taskId: task.id,
+                      taskName: task.name,
+                      status: task.status,
+                      message: `Boss, '${task.name}' background me start kar diya hai! Jaise hi complete hoga main aapko bata dungi.`,
+                    };
+                    clientWs.send(JSON.stringify({ type: "background_task_started", task }));
+                  } catch (e: any) {
+                    result = { success: false, message: `Could not start background task: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_background_tasks_status") {
+                  const { query } = call.args || {};
+                  try {
+                    const statusSummary = backgroundTasksService.getTaskStatusSummary(query ? String(query) : undefined);
+                    result = {
+                      success: true,
+                      ...statusSummary,
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `Could not retrieve background tasks: ${e?.message || e}` };
+                  }
+                } else if (call.name === "mark_background_task_notified") {
+                  const { taskId } = call.args || {};
+                  backgroundTasksService.markTaskNotified(String(taskId || "all"));
+                  result = { success: true, message: "Task marked as notified to DK." };
+                } else if (call.name === "cancel_background_task") {
+                  const { taskIdOrName } = call.args || {};
+                  const cancelled = backgroundTasksService.cancelTask(String(taskIdOrName || ""));
+                  result = {
+                    success: cancelled,
+                    message: cancelled ? "Task successfully cancelled." : "No matching running task found to cancel.",
+                  };
+                } else if (call.name === "request_code_change") {
                   const { instruction } = call.args || {};
                   if (instruction && String(instruction).trim()) {
                     await codeAgentService.createRequest(String(instruction));
@@ -2611,8 +2818,29 @@ HOW TO READ MESSAGES:
                   const { place } = call.args || {};
                   try {
                     result = await publicApisService.getWeather(String(place || ""));
+                    if (!result || !result.success) {
+                      const bgTask = await backgroundTasksService.executeAutonomousTask(
+                        `Weather Update (${place || "Local"})`,
+                        "weather",
+                        String(place || "")
+                      );
+                      result = {
+                        success: false,
+                        message: `Boss, ${place || "local"} weather instant connect nahi ho paya. Maine background me update start kar diya hai, jald hi complete karke batati hu!`,
+                        backgroundTaskId: bgTask.id,
+                      };
+                    }
                   } catch (e: any) {
-                    result = { success: false, message: `Weather fetch fail hui: ${e?.message || e}` };
+                    const bgTask = await backgroundTasksService.executeAutonomousTask(
+                      `Weather Update (${place || "Local"})`,
+                      "weather",
+                      String(place || "")
+                    );
+                    result = {
+                      success: false,
+                      message: `Boss, weather fetch karne me dikkat aayi. Maine background me weather update laga diya hai, main update karke aapko batati hu!`,
+                      backgroundTaskId: bgTask.id,
+                    };
                   }
                 } else if (call.name === "get_air_quality") {
                   const { place } = call.args || {};
@@ -3020,6 +3248,47 @@ HOW TO READ MESSAGES:
                     result = await publicApisService.searchMusic(String(songOrArtist || ""));
                   } catch (e: any) {
                     result = { success: false, message: `Music search fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "search_song_by_lyrics") {
+                  const { lyrics, artistHint } = call.args || {};
+                  try {
+                    result = await toolsEngine.searchSongByLyrics(String(lyrics || ""), artistHint ? String(artistHint) : undefined);
+                  } catch (e: any) {
+                    result = { success: false, message: `Lyrics search fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "identify_playing_song") {
+                  const { songClue, audioSnippetBase64 } = call.args || {};
+                  try {
+                    result = await toolsEngine.identifyPlayingSong(
+                      audioSnippetBase64 ? String(audioSnippetBase64) : undefined,
+                      songClue ? String(songClue) : undefined
+                    );
+                    if (result.success && result.identifiedSong) {
+                      clientWs.send(JSON.stringify({
+                        type: 'song_identified',
+                        song: result.identifiedSong,
+                        mode: 'live_playing_song',
+                      }));
+                    }
+                  } catch (e: any) {
+                    result = { success: false, message: `Playing song identify fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "identify_song_by_humming_or_tune") {
+                  const { hummingOrTuneClue, artistHint } = call.args || {};
+                  try {
+                    result = await toolsEngine.identifySongByHummingOrTune(
+                      String(hummingOrTuneClue || ""),
+                      artistHint ? String(artistHint) : undefined
+                    );
+                    if (result.success && result.identifiedSong) {
+                      clientWs.send(JSON.stringify({
+                        type: 'song_identified',
+                        song: result.identifiedSong,
+                        mode: 'humming_melody',
+                      }));
+                    }
+                  } catch (e: any) {
+                    result = { success: false, message: `Humming identify fail hui: ${e?.message || e}` };
                   }
                 } else if (call.name === "play_music") {
                   const { songName } = call.args || {};
