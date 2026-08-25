@@ -59,6 +59,22 @@ class TelegramBotService {
     };
   }
 
+  /**
+   * Retrieves the owner Chat ID from env or the most recent active Telegram user in Firestore.
+   */
+  public async getOwnerOrLatestChatId(): Promise<number | null> {
+    if (process.env.TELEGRAM_OWNER_CHAT_ID) {
+      return Number(process.env.TELEGRAM_OWNER_CHAT_ID);
+    }
+    try {
+      const snap = await db.collection("telegramUsers").orderBy("lastSeenAt", "desc").limit(1).get();
+      if (!snap.empty) {
+        return snap.docs[0].data().chatId;
+      }
+    } catch {}
+    return null;
+  }
+
   public setMessageCallback(cb: (msg: { sender: string; text: string; time: string; chatId: number }) => void) {
     this.messageCallback = cb;
   }

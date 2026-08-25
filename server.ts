@@ -4495,15 +4495,16 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                 } else if (call.name === "send_telegram_message") {
                   const { text, chatId } = call.args || {};
                   try {
-                    const targetChat = chatId || process.env.TELEGRAM_OWNER_CHAT_ID;
+                    const targetChat = chatId || (await telegramBotService.getOwnerOrLatestChatId()) || process.env.TELEGRAM_OWNER_CHAT_ID;
                     if (!targetChat) {
-                      result = { success: false, message: "Boss, Telegram chat ID configure nahi hai. Pehle Telegram bot par /start dabayein." };
+                      const botName = telegramBotService.getStatus().botUsername || "dk_Friday_bot";
+                      result = { success: false, message: `Boss, Telegram bot (@${botName}) par pehle /start dabayein taaki aapka Chat ID detect ho sake.` };
                     } else {
                       const sendRes = await telegramBotService.sendMessage(targetChat, String(text || ""));
                       result = {
                         success: sendRes.success,
                         message: sendRes.success
-                          ? `Boss, Telegram par message bhej diya gaya hai!`
+                          ? `Boss, Telegram par message successfully bhej diya gaya hai! ✅`
                           : `Telegram send failed: ${sendRes.error}`,
                       };
                     }
