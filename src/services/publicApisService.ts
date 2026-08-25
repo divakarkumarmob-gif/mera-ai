@@ -3277,20 +3277,31 @@ class PublicApisService {
               : (typeof s.artists === "string" ? s.artists : "") || s.artist || s.singers || s.primaryArtists || "";
 
             if (bestStream) {
-              tracks.push({
-                trackName: s.name || s.title,
-                artistName: primaryArtists,
-                albumName: s.album?.name || s.album,
-                albumArt: bestImage,
-                durationSec: s.duration ? Number(s.duration) : undefined,
-                fullAudioUrl: bestStream,
-                previewUrl: bestStream,
-                isFullSong: true,
-                quality: "320kbps Full HD",
-                spotifyUrl: `https://open.spotify.com/search/${encodeURIComponent((s.name || s.title) + " " + primaryArtists)}`,
-                youtubeMusicUrl: `https://music.youtube.com/search?q=${encodeURIComponent((s.name || s.title) + " " + primaryArtists)}`,
-                source: "jiosaavn_full",
-              });
+              // Quick HEAD check to ensure the CDN stream is active (not 404)
+              let isLinkLive = false;
+              try {
+                const headRes = await fetch(bestStream, { method: "HEAD", signal: AbortSignal.timeout(1500) });
+                isLinkLive = headRes.status === 200;
+              } catch {
+                isLinkLive = false;
+              }
+
+              if (isLinkLive) {
+                tracks.push({
+                  trackName: s.name || s.title,
+                  artistName: primaryArtists,
+                  albumName: s.album?.name || s.album,
+                  albumArt: bestImage,
+                  durationSec: s.duration ? Number(s.duration) : undefined,
+                  fullAudioUrl: bestStream,
+                  previewUrl: bestStream,
+                  isFullSong: true,
+                  quality: "320kbps Full HD",
+                  spotifyUrl: `https://open.spotify.com/search/${encodeURIComponent((s.name || s.title) + " " + primaryArtists)}`,
+                  youtubeMusicUrl: `https://music.youtube.com/search?q=${encodeURIComponent((s.name || s.title) + " " + primaryArtists)}`,
+                  source: "jiosaavn_full",
+                });
+              }
             }
           }
         }
@@ -3398,6 +3409,7 @@ class PublicApisService {
         audioUrl: audioUrl,
         deezerUrl: topTrack.deezerUrl,
         spotifyUrl: topTrack.spotifyUrl,
+        youtubeMusicUrl: topTrack.youtubeMusicUrl || `https://music.youtube.com/search?q=${encodeURIComponent(topTrack.trackName + " " + topTrack.artistName)}`,
         source: topTrack.source,
         message: `"${topTrack.trackName}" by ${topTrack.artistName} (${topTrack.isFullSong ? "Pura Gaana 100% Full Length" : "Preview Clip"}) play ho raha hai Boss!`,
       };

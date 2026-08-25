@@ -1299,6 +1299,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         artistName: msg.artistName,
                         albumArt: msg.albumArt,
                         spotifyUrl: msg.spotifyUrl,
+                        youtubeMusicUrl: msg.youtubeMusicUrl,
                         isFullSong: msg.isFullSong,
                         quality: msg.quality,
                         durationSec: msg.durationSec,
@@ -1712,6 +1713,16 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                                             className="px-2 py-1 rounded-xl bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-500/50 text-emerald-200 text-[11px] font-semibold transition-all"
                                         >
                                             Spotify ↗
+                                        </a>
+                                    )}
+                                    {nowPlayingMusic.youtubeMusicUrl && (
+                                        <a
+                                            href={nowPlayingMusic.youtubeMusicUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="px-2 py-1 rounded-xl bg-rose-600/30 hover:bg-rose-600/50 border border-rose-500/50 text-rose-200 text-[11px] font-semibold transition-all"
+                                        >
+                                            YouTube ↗
                                         </a>
                                     )}
                                     <button

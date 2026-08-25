@@ -4139,6 +4139,7 @@ HOW TO READ MESSAGES:
                         albumArt: result.albumArt,
                         audioUrl: result.audioUrl,
                         spotifyUrl: result.spotifyUrl,
+                        youtubeMusicUrl: result.youtubeMusicUrl,
                         isFullSong: result.isFullSong,
                         quality: result.quality,
                         durationSec: result.durationSec,
