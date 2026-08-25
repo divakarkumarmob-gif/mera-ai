@@ -1,5 +1,3 @@
-import { toolsEngine } from "./toolsEngine";
-
 export interface FocusSessionState {
   isActive: boolean;
   durationMinutes: number;
@@ -36,8 +34,9 @@ class FocusModeService {
       message: `Boss, ${durationMinutes} minute ka Focus Mode activate ho gaya hai! (Goal: "${goalTitle}", Ends at: ${endsAt}). Lo-Fi background beats ready hain. All notifications silenced for maximum productivity!`,
     };
 
-    // Schedule completion reminder
+    // Schedule completion reminder (dynamic import to prevent circular dependency)
     try {
+      const { toolsEngine } = await import("./toolsEngine");
       await toolsEngine.addReminder(
         `Focus Session Complete: "${goalTitle}" (${durationMinutes} mins done!)`,
         endsAt,

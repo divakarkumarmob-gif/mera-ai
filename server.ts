@@ -2910,7 +2910,7 @@ HOW TO READ MESSAGES:
           },
         },
         {
-          name: "get_expense_summary",
+          name: "get_daily_expense_summary",
           description: "Get total expense summary for today, recent logs, and spending breakdown.",
           parameters: {
             type: "OBJECT",
@@ -4694,7 +4694,7 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                   } catch (e: any) {
                     result = { success: false, message: `Expense logging fail hui: ${e?.message || e}` };
                   }
-                } else if (call.name === "get_expense_summary") {
+                } else if (call.name === "get_daily_expense_summary") {
                   try {
                     result = await publicApisService.getExpenseSummary();
                   } catch (e: any) {
