@@ -426,6 +426,42 @@ async function startServer() {
     res.json(result);
   });
 
+  // ── Voice Biometrics & Calibration REST Endpoints ─────────────────────────
+  app.get("/api/voice-biometrics/status", async (_req, res) => {
+    try {
+      const profiles = await voiceBiometricsService.getProfiles();
+      res.json({ ok: true, profiles, maxProfiles: 5 });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || e });
+    }
+  });
+
+  app.post("/api/voice-biometrics/enroll", async (req, res) => {
+    try {
+      const { pin, name, relationWithDivakar, spokenPhrase, audioBase64 } = req.body || {};
+      const result = await voiceBiometricsService.enrollVoice(
+        String(pin || ""),
+        String(name || "Boss (Divakar)"),
+        String(relationWithDivakar || "Boss (DK)"),
+        audioBase64,
+        spokenPhrase
+      );
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e?.message || "Enrollment failed" });
+    }
+  });
+
+  app.post("/api/voice-biometrics/delete", async (req, res) => {
+    try {
+      const { pin, profileId } = req.body || {};
+      const result = await voiceBiometricsService.deleteVoiceProfile(String(pin || ""), profileId);
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e?.message || "Deletion failed" });
+    }
+  });
+
   // ── Friday Cyber Security & OSINT Recon Endpoints ─────────────────────────
   app.post("/api/cyber/scan-url", async (req, res) => {
     const { url } = req.body || {};
@@ -796,9 +832,10 @@ async function startServer() {
       answerLength: string,
       googleSearchMode: boolean
     ) => {
-      const [memoryContext, contactsList] = await Promise.all([
+      const [memoryContext, contactsList, voiceProfilesContext] = await Promise.all([
         memoryEngine.compileMemoryPrompt(),
         contactsService.compileContactsForPrompt(),
+        voiceBiometricsService.compileVoiceProfilesPromptContext(),
       ]);
 
       return `YOU ARE FRIDAY: DK's ultra-intelligent, warm, witty, human-like personal voice AI companion.
@@ -809,6 +846,11 @@ IDENTITY:
 - Speak in fluent Hindi/Hinglish, mirroring DK's style.
 
 NAME USAGE: Don't repeat "DK" every sentence — sounds robotic. Use "DK"/"mere bhai" sparingly, mainly in emotional moments (comforting him when sad/stressed, celebrating when happy, deep advice, greetings/farewells).
+
+============================================================
+CALIBRATED VOICE RECOGNITION PROFILES (MAX 5 PROFILES):
+${voiceProfilesContext}
+============================================================
 
 ============================================================
 LONG-TERM & SHORT-TERM MEMORY:
@@ -1099,28 +1141,44 @@ LIVE CODING AGENT PERMISSION & VOICE COMMIT TO MAIN (SEAMLESS NON-INTERRUPTING F
   1. Call 'deny_code_agent_request'.
   2. Confirm: "Boss, Coding Agent ka task cancel kar diya gaya hai."
 
-BOSS VOICE BIOMETRIC RECOGNITION & SENSITIVE QUERY PROTECTION:
+VOICE CALIBRATION & STRICT VOICE-GATED CONVERSATION SYSTEM (MAX 5 PROFILES):
 - Tools: 'setup_boss_voice_recognition', 'delete_boss_voice_recognition'.
-- Authorization PIN: Verified dynamically against Firestore (doc: systemSecurity/voicePin). Never use a hardcoded PIN.
-- Maximum Profiles Allowed: 2 profiles.
-- ENROLLMENT FLOW (When DK says "voice recognise karo", "meri voice save karo", "voice setup karo", "voice pehchano"):
-  1. If PIN is not provided in DK's speech:
-     - Ask warmly: "Boss ready hoon! Voice recognition setup karne ke liye apna authorization password (PIN) batayein, aur phir calibration phrase boliye: 'Friday main tumhara boss Divakar hoon, meri aawaz pehchano'."
-  2. When DK provides the PIN or speaks the phrase:
-     - Call 'setup_boss_voice_recognition' with the exact pin provided by DK, name="Boss (Divakar)".
-     - Confirm warmly: "Boss, aapki voice profile Firestore memory me successfully save ho gayi hai! Ab main aapki aawaz hamesha pehchan lungi."
-  3. If PIN is wrong:
-     - Reply: "Sorry bhai, password galat hai! Voice recognition setup nahi ho sakta."
-- DELETION FLOW (When DK says "voice delete karo", "boss voice profile hatao"):
-  1. If PIN is not provided, ask: "Boss, voice profile delete karne ke liye apna authorization PIN confirm kijiye."
-  2. When PIN is given by DK:
-     - Call 'delete_boss_voice_recognition' with the exact pin given by DK.
-     - Confirm: "Boss, voice profile delete kar diya gaya hai."
-  3. If wrong PIN: "Sorry bhai, galat password hai! Voice delete nahi ho sakta."
-- SENSITIVE COMMAND VERIFICATION:
-  * When a sensitive request is made (e.g. asking for personal secrets, modifying private data, deleting memories, code rollbacks):
-    If the speaker's voice does NOT match Boss:
-    Strictly refuse: "I can't help with that bro, aapki aawaz mere boss se nahi mili. Kuch aur poochiye."
+- Authorization Password (PIN): Verified dynamically against Firestore (doc: systemSecurity/voicePin).
+- Maximum Profiles Allowed: 5 profiles.
+
+🚨 STRICT CONVERSATION POLICY (MANDATORY RULE):
+1. ONLY TALK TO CALIBRATED & RECOGNIZED VOICES:
+   - Match the active speaker against the Calibrated Voice Recognition Profiles listed above.
+   - If the speaker's voice matches an enrolled person (e.g. DK Boss, Friend, Brother, Mom, Colleague), greet and converse with them warmly and naturally based on their Name and Relation with Divakar!
+
+2. UNCALIBRATED / UNRECOGNIZED VOICE STRICT REFUSAL:
+   - If ANY person speaks whose voice is NOT calibrated in the system:
+     * DO NOT answer their questions or execute normal tools!
+     * Strictly reply:
+       "Please set voice, system me aapki voice add nahi hai. Voice add karne ke liye authorization password (PIN) batayein."
+   - If they ask anything else without providing the password or calibrating their voice, strictly say:
+     "Sorry, voice match nahi hui. Voice add karne ke liye authorization password batayein."
+
+3. 4-STEP VOICE CALIBRATION FLOW (When a user provides PIN or says "voice calibration karo", "voice add karo", "meri aawaz pehchano"):
+   - STEP 1 (Password Verification):
+     * Ask for authorization password: "Voice calibration ke liye apna authorization password (PIN) batayein."
+     * If wrong password: "Sorry bhai, password galat hai! Voice calibration nahi ho sakta."
+   - STEP 2 (Calibration Recognition Phrase):
+     * If password is correct, ask them:
+       "Password verified! Ab calibration phrase boliye: 'Friday main [Aapka Naam] hoon, meri aawaz pehchano'."
+   - STEP 3 (Ask Name & Relation with Divakar):
+     * After they speak the phrase, ask:
+       "Bahut badiya! Kripya apna Naam aur Divakar (DK) ke sath aapka Relation batayein (jaise: Boss, Dost, Bhai, Behen, Mummy, etc.)."
+   - STEP 4 (Save Profile to Firestore Memory):
+     * Call 'setup_boss_voice_recognition' with pin, name, relationWithDivakar, and spokenPhrase.
+     * Confirm warmly:
+       "Aapki voice calibration profile ([Name] - [Relation]) Firestore me successfully save ho gayi hai! Ab main aapki aawaz pehchan kar aapse normal baat karungi."
+     * Once saved, immediately converse normally with them!
+
+4. DELETION FLOW (When user says "voice delete karo", "voice profile hatao"):
+   - Ask: "Voice profile delete karne ke liye authorization password (PIN) confirm kijiye."
+   - When PIN is given, call 'delete_boss_voice_recognition' with pin and optional profileId.
+   - If wrong PIN: "Sorry bhai, galat password hai! Voice delete nahi ho sakta."
 
 WHATSAPP VISION AI & LONG-TERM PERSON RECOGNITION MEMORY:
 - Tools: 'get_whatsapp_photo_or_doc_info', 'save_person_visual_memory', 'identify_person_in_whatsapp_photo'.
@@ -2801,24 +2859,25 @@ HOW TO READ MESSAGES:
         },
         {
           name: "setup_boss_voice_recognition",
-          description: "Set up and enroll Boss's voice biometric profile. Requires authorization PIN verified from Firestore. Enforces max 2 profiles limit. Call when DK says 'voice recognise karo', 'meri aawaz save karo', 'voice setup karo', 'voice pehchano'.",
+          description: "Enroll and calibrate a voice recognition profile into Firestore. Requires authorization PIN verified from Firestore. Supports up to 5 profiles. Call during voice calibration after obtaining PIN, phrase, name, and relation with Divakar.",
           parameters: {
             type: "OBJECT",
             properties: {
-              pin: { type: "STRING", description: "Authorization PIN provided by DK (verified dynamically against Firestore)" },
-              name: { type: "STRING", description: "Profile Name (default 'Boss (Divakar)')" },
+              pin: { type: "STRING", description: "Authorization PIN provided by speaker (verified against Firestore)" },
+              name: { type: "STRING", description: "Name of the person being enrolled (e.g. 'Divakar', 'Rohit', 'Pooja', 'Mummy')" },
+              relationWithDivakar: { type: "STRING", description: "Relation with Divakar/DK (e.g. 'Boss (Self)', 'Dost', 'Bhai', 'Behen', 'Mummy', 'Colleague')" },
               spokenPhrase: { type: "STRING", description: "Calibration phrase spoken during enrollment" },
             },
-            required: ["pin"],
+            required: ["pin", "name"],
           },
         },
         {
           name: "delete_boss_voice_recognition",
-          description: "Delete an enrolled Boss voice profile from memory. Requires authorization PIN verified from Firestore. Call when DK says 'voice delete karo', 'boss voice profile hatao'.",
+          description: "Delete an enrolled voice profile from Firestore memory. Requires authorization PIN verified from Firestore. Call when user says 'voice delete karo', 'voice profile hatao'.",
           parameters: {
             type: "OBJECT",
             properties: {
-              pin: { type: "STRING", description: "Authorization PIN provided by DK (verified dynamically against Firestore)" },
+              pin: { type: "STRING", description: "Authorization PIN provided by user (verified against Firestore)" },
               profileId: { type: "STRING", description: "Optional specific profile ID to delete" },
             },
             required: ["pin"],
@@ -4958,6 +5017,29 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                     result = await publicApisService.disconnectWifi();
                   } catch (e: any) {
                     result = { success: false, message: `WiFi disconnect fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "setup_boss_voice_recognition") {
+                  const { pin, name, relationWithDivakar, spokenPhrase } = call.args || {};
+                  try {
+                    result = await voiceBiometricsService.enrollVoice(
+                      String(pin || ""),
+                      String(name || "Boss (Divakar)"),
+                      String(relationWithDivakar || "Boss (DK)"),
+                      undefined,
+                      spokenPhrase ? String(spokenPhrase) : undefined
+                    );
+                  } catch (e: any) {
+                    result = { success: false, message: `Voice calibration fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "delete_boss_voice_recognition") {
+                  const { pin, profileId } = call.args || {};
+                  try {
+                    result = await voiceBiometricsService.deleteVoiceProfile(
+                      String(pin || ""),
+                      profileId ? String(profileId) : undefined
+                    );
+                  } catch (e: any) {
+                    result = { success: false, message: `Voice deletion fail hui: ${e?.message || e}` };
                   }
                 }
 

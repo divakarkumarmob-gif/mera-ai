@@ -106,6 +106,7 @@ function VoiceBiometricsManager() {
     const [pinModal, setPinModal] = useState<{ mode: 'enroll' | 'delete'; targetId?: string } | null>(null);
     const [pinInput, setPinInput] = useState('');
     const [nameInput, setNameInput] = useState('Boss (Divakar)');
+    const [relationInput, setRelationInput] = useState('Boss (Self)');
     const [actionStatus, setActionStatus] = useState<{ success?: boolean; message?: string } | null>(null);
 
     const loadStatus = useCallback(async () => {
@@ -134,7 +135,8 @@ function VoiceBiometricsManager() {
                     body: JSON.stringify({
                         pin: pinInput.trim(),
                         name: nameInput.trim() || 'Boss (Divakar)',
-                        spokenPhrase: 'Friday main tumhara boss Divakar hoon, meri aawaz pehchano',
+                        relationWithDivakar: relationInput.trim() || 'Boss (Self)',
+                        spokenPhrase: `Friday main ${nameInput.trim() || 'Divakar'} hoon, meri aawaz pehchano`,
                     }),
                 });
                 const data = await res.json();
@@ -173,11 +175,11 @@ function VoiceBiometricsManager() {
     };
 
     return (
-        <div className="pt-3 border-t border-white/10">
+        <div className="p-4 rounded-2xl bg-gradient-to-br from-[#0c1435] to-[#070b1e] border border-cyan-500/20 shadow-lg mb-4">
             <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
                     <Shield className="w-4 h-4 text-cyan-400" />
-                    <span className="text-white font-bold text-sm">Boss Voice Recognition</span>
+                    <span className="text-white font-bold text-sm">Voice Calibration & Recognition</span>
                 </div>
                 <span
                     className={`text-[10px] font-black tracking-wider px-2 py-0.5 rounded-full uppercase ${
@@ -186,11 +188,11 @@ function VoiceBiometricsManager() {
                             : 'bg-slate-800 text-slate-400 border border-slate-700'
                     }`}
                 >
-                    {profiles.length}/2 Profiles
+                    {profiles.length}/5 Profiles
                 </span>
             </div>
             <p className="text-xs text-slate-400 mb-3">
-                Biometric voice shield for sensitive commands. Requires authorization PIN saved in Firestore to enroll or delete.
+                Strict Voice Shield: Friday sirf calibrated voices se baat karegi. New voice add karne ke liye Firestore PIN aur calibration zaroori hai.
             </p>
 
             {actionStatus && (
@@ -217,7 +219,12 @@ function VoiceBiometricsManager() {
                             <div className="flex items-center gap-2 min-w-0">
                                 <span className="w-2 h-2 rounded-full bg-cyan-400" />
                                 <div className="min-w-0">
-                                    <span className="text-white text-xs font-semibold block truncate">{p.name}</span>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-white text-xs font-semibold truncate">{p.name}</span>
+                                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
+                                            {p.relationWithDivakar || 'Boss (DK)'}
+                                        </span>
+                                    </div>
                                     <span className="text-[10px] text-slate-400 block">
                                         Enrolled: {new Date(p.createdAt).toLocaleDateString('en-IN')}
                                     </span>
@@ -239,23 +246,24 @@ function VoiceBiometricsManager() {
                 </div>
             ) : (
                 <div className="p-3 rounded-xl bg-slate-900/60 border border-dashed border-white/10 text-center mb-3">
-                    <span className="text-xs text-slate-400">No Boss voice enrolled yet. Click below to setup.</span>
+                    <span className="text-xs text-slate-400">No calibrated voice enrolled yet. Click below to setup.</span>
                 </div>
             )}
 
-            {/* Enroll Button (if < 2 profiles) */}
-            {profiles.length < 2 && (
+            {/* Enroll Button (if < 5 profiles) */}
+            {profiles.length < 5 && (
                 <button
                     onClick={() => {
                         setPinInput('');
                         setNameInput('Boss (Divakar)');
+                        setRelationInput('Boss (Self)');
                         setActionStatus(null);
                         setPinModal({ mode: 'enroll' });
                     }}
                     className="w-full py-2 px-3 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-semibold text-xs transition-all shadow-md flex items-center justify-center gap-2 active:scale-98"
                 >
                     <Plus className="w-3.5 h-3.5" />
-                    <span>Enroll Voice Recognition ({profiles.length}/2)</span>
+                    <span>Calibrate New Voice ({profiles.length}/5)</span>
                 </button>
             )}
 
@@ -280,7 +288,7 @@ function VoiceBiometricsManager() {
                                 <div className="flex items-center gap-2">
                                     <Key className="w-5 h-5 text-cyan-400" />
                                     <h4 className="text-white font-bold text-sm">
-                                        {pinModal.mode === 'enroll' ? 'Enroll Boss Voice' : 'Delete Voice Profile'}
+                                        {pinModal.mode === 'enroll' ? 'Voice Calibration Enrollment' : 'Delete Voice Profile'}
                                     </h4>
                                 </div>
                                 <button onClick={() => setPinModal(null)} className="text-slate-400 hover:text-white">
@@ -295,23 +303,35 @@ function VoiceBiometricsManager() {
                             </p>
 
                             {pinModal.mode === 'enroll' && (
-                                <div>
-                                    <label className="text-[11px] text-slate-400 block mb-1">Speaker Name:</label>
-                                    <input
-                                        type="text"
-                                        value={nameInput}
-                                        onChange={(e) => setNameInput(e.target.value)}
-                                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs focus:border-cyan-500 outline-none"
-                                        placeholder="Boss (Divakar)"
-                                    />
+                                <div className="space-y-2">
+                                    <div>
+                                        <label className="text-[11px] text-slate-400 block mb-1">Speaker Name:</label>
+                                        <input
+                                            type="text"
+                                            value={nameInput}
+                                            onChange={(e) => setNameInput(e.target.value)}
+                                            className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs focus:border-cyan-500 outline-none"
+                                            placeholder="Boss (Divakar)"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-[11px] text-slate-400 block mb-1">Relation with Divakar (DK):</label>
+                                        <input
+                                            type="text"
+                                            value={relationInput}
+                                            onChange={(e) => setRelationInput(e.target.value)}
+                                            className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs focus:border-cyan-500 outline-none"
+                                            placeholder="Boss (Self), Dost, Bhai, Mummy, etc."
+                                        />
+                                    </div>
                                 </div>
                             )}
 
                             <div>
-                                <label className="text-[11px] text-slate-400 block mb-1">6-Digit Password (PIN):</label>
+                                <label className="text-[11px] text-slate-400 block mb-1">Authorization Password (PIN):</label>
                                 <input
                                     type="password"
-                                    maxLength={6}
+                                    maxLength={8}
                                     value={pinInput}
                                     onChange={(e) => setPinInput(e.target.value)}
                                     className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-cyan-500/50 text-cyan-300 font-mono tracking-widest text-center text-lg focus:border-cyan-400 outline-none"
@@ -320,30 +340,20 @@ function VoiceBiometricsManager() {
                                 />
                             </div>
 
-                            {pinModal.mode === 'enroll' && (
-                                <div className="p-2.5 rounded-xl bg-cyan-950/60 border border-cyan-500/30 text-[11px] text-cyan-200 leading-tight">
-                                    💬 <b>Calibration Phrase:</b> <i>"Friday main tumhara boss Divakar hoon, meri aawaz pehchano"</i>
-                                </div>
-                            )}
-
-                            <div className="flex gap-2 mt-1">
-                                <button
-                                    onClick={handleConfirmAction}
-                                    disabled={loading || pinInput.length < 4}
-                                    className={`flex-1 py-2 rounded-xl text-white font-bold text-xs transition-all flex items-center justify-center gap-1.5 ${
-                                        pinModal.mode === 'enroll'
-                                            ? 'bg-cyan-600 hover:bg-cyan-500'
-                                            : 'bg-rose-600 hover:bg-rose-500'
-                                    } disabled:opacity-50`}
-                                >
-                                    {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-                                    <span>{pinModal.mode === 'enroll' ? 'Confirm & Enroll' : 'Confirm Delete'}</span>
-                                </button>
+                            <div className="flex gap-2 mt-2">
                                 <button
                                     onClick={() => setPinModal(null)}
-                                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition-colors"
+                                    className="flex-1 py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors"
                                 >
                                     Cancel
+                                </button>
+                                <button
+                                    onClick={handleConfirmAction}
+                                    disabled={loading || !pinInput.trim()}
+                                    className="flex-1 py-2 px-3 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-bold transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                                >
+                                    {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                                    <span>{pinModal.mode === 'enroll' ? 'Calibrate & Save' : 'Confirm Delete'}</span>
                                 </button>
                             </div>
                         </motion.div>

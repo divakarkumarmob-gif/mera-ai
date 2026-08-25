@@ -4,14 +4,16 @@ import { db } from "./firebaseAdmin";
 export interface BossVoiceProfile {
   id: string;
   name: string;
+  relationWithDivakar?: string;
   voiceTraits: string;
+  spokenPhrase?: string;
   audioFingerprint?: string;
   createdAt: number;
   updatedAt: number;
   lastVerifiedAt?: number;
 }
 
-const MAX_PROFILES = 2;
+const MAX_PROFILES = 5;
 
 class VoiceBiometricsService {
   private cachedPin: string | null = null;
@@ -73,7 +75,7 @@ class VoiceBiometricsService {
       return {
         success: true,
         pin: cleanPin,
-        message: `Boss, aapka naya Voice PIN [${cleanPin}] save ho gaya hai! Purana PIN replace ho gaya. Ab aap is naye PIN se voice enroll ya delete kar سکتے hain. ✅`,
+        message: `Boss, aapka naya Voice PIN [${cleanPin}] save ho gaya hai! Purana PIN replace ho gaya. Ab aap is naye PIN se voice enroll ya delete kar sakte hain. ✅`,
       };
     } catch (e: any) {
       console.error("[VoiceBiometrics] Failed to save PIN to Firestore:", e);
@@ -106,16 +108,13 @@ class VoiceBiometricsService {
 
   /**
    * Verifies the provided PIN against the latest Firestore PIN (or env fallback).
-   * Fails CLOSED (denies access) if no PIN is configured anywhere, or if the
-   * provided PIN is empty — this previously fell back to a hardcoded default
-   * PIN, which was a security hole since the default was visible in source code.
    */
   public async verifyPin(pin: string): Promise<boolean> {
     const normalizedInput = String(pin || "").trim().replace(/\D/g, "");
     if (!normalizedInput) return false;
 
     const active = await this.getActivePin();
-    if (!active) return false; // no PIN configured anywhere -> deny by default
+    if (!active) return false;
 
     return normalizedInput === active.trim();
   }
@@ -134,12 +133,30 @@ class VoiceBiometricsService {
   }
 
   /**
-   * Enrolls a new Boss Voice Profile into Firestore.
-   * Requires dynamic PIN from Firestore and enforces max 2 profiles.
+   * Compiles list of enrolled voice profiles for Friday system prompt context.
+   */
+  public async compileVoiceProfilesPromptContext(): Promise<string> {
+    const profiles = await this.getProfiles();
+    if (profiles.length === 0) {
+      return "NO ENROLLED VOICES YET. STRICT ACCESS POLICY: No person has completed voice calibration yet.";
+    }
+    return profiles
+      .map(
+        (p, i) =>
+          `${i + 1}. Name: "${p.name}", Relation with Divakar (DK): "${p.relationWithDivakar || "Boss (Self)"}", Calibration Phrase: "${p.spokenPhrase || "N/A"}", Profile ID: "${p.id}"`
+      )
+      .join("\n");
+  }
+
+  /**
+   * Enrolls a new Voice Profile into Firestore.
+   * Requires dynamic PIN from Firestore, calibration phrase, name, and relation with Divakar.
+   * Enforces max 5 profiles.
    */
   public async enrollVoice(
     pin: string,
     name: string = "Boss (Divakar)",
+    relationWithDivakar: string = "Boss (DK)",
     audioBase64?: string,
     spokenPhrase?: string
   ): Promise<{ success: boolean; profileId?: string; message: string; count?: number }> {
@@ -160,20 +177,21 @@ class VoiceBiometricsService {
     }
 
     const ai = this.getGenAI();
-    let voiceTraits = "Boss voice biometric profile (pitch, cadence, tone fingerprint).";
+    let voiceTraits = `Voice biometric profile for ${name} (${relationWithDivakar}).`;
 
     if (audioBase64 && ai) {
       try {
         const prompt = `You are Friday AI Voice Biometric Analyzer.
 Extract a detailed acoustic voice profile from this audio sample:
 Speaker Name: "${name}"
-Spoken Phrase: "${spokenPhrase || "Friday main tumhara boss hoon, meri aawaz pehchano"}"
+Relation with Divakar: "${relationWithDivakar}"
+Spoken Phrase: "${spokenPhrase || "Friday main " + name + " hoon, meri aawaz pehchano"}"
 
 Extract key vocal characteristics:
 1. Fundamental pitch range (deep/medium/high baritone/tenor)
 2. Cadence, speech rhythm, articulation style, distinct acoustic harmonics
 3. Vocal timbre and tone signature for strict biometric matching against impostors.
-4. Vocal gender characteristics (Ensure strict gender classification to confirm if speaker is male/female).`;
+4. Vocal gender characteristics.`;
 
         const response = await ai.models.generateContent({
           model: "gemini-2.5-flash",
@@ -202,20 +220,22 @@ Extract key vocal characteristics:
     const newProfile: BossVoiceProfile = {
       id: profileId,
       name,
+      relationWithDivakar: relationWithDivakar || "Boss (DK)",
       voiceTraits,
+      spokenPhrase: spokenPhrase || `Friday main ${name} hoon, meri aawaz pehchano`,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
 
     await db.collection("bossVoiceProfiles").doc(profileId).set(newProfile);
-    console.log(`[VoiceBiometrics] Enrolled voice profile "${name}" (ID: ${profileId})`);
+    console.log(`[VoiceBiometrics] Enrolled voice profile "${name}" (${relationWithDivakar}) (ID: ${profileId})`);
 
     const updatedCount = currentProfiles.length + 1;
     return {
       success: true,
       profileId,
       count: updatedCount,
-      message: `Boss, aapka voice profile memory me successfully save ho gaya hai! (Total profiles: ${updatedCount}/${MAX_PROFILES}). Ab main aapki aawaz pehchan lungi.`,
+      message: `Voice calibration successfully complete! "${name}" (${relationWithDivakar}) Firestore memory me save ho gaya hai. (Total profiles: ${updatedCount}/${MAX_PROFILES}). Ab Friday inki aawaz hamesha pehchan kar normal baat karegi.`,
     };
   }
 
@@ -246,7 +266,7 @@ Extract key vocal characteristics:
 
       return {
         success: true,
-        message: "Boss, voice profile successfully delete kar diya gaya hai.",
+        message: "Voice profile successfully delete kar diya gaya hai.",
       };
     } catch (e: any) {
       return {
@@ -254,6 +274,10 @@ Extract key vocal characteristics:
         message: `Delete failed: ${e?.message || e}`,
       };
     }
+  }
+
+  public async deleteVoiceProfile(pin: string, profileId?: string) {
+    return this.deleteProfile(pin, profileId);
   }
 
   /**
