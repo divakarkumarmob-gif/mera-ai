@@ -584,6 +584,9 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const completedBgTaskTimerRef = useRef<any>(null);
     const [identifiedSong, setIdentifiedSong] = useState<any | null>(null);
     const identifiedSongTimerRef = useRef<any>(null);
+    const [researchReport, setResearchReport] = useState<any | null>(null);
+    const [isScreenSharing, setIsScreenSharing] = useState(false);
+    const screenStreamRef = useRef<MediaStream | null>(null);
     const [inactivityCountdown, setInactivityCountdown] = useState<number | null>(null);
     const [showCaptions, setShowCaptions] = useState(true);
     const [captionText, setCaptionText] = useState('');
@@ -613,6 +616,28 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         }
         setNowPlayingMusic(null);
     }, []);
+
+    const toggleScreenShare = useCallback(async () => {
+        if (isScreenSharing) {
+            if (screenStreamRef.current) {
+                screenStreamRef.current.getTracks().forEach((track) => track.stop());
+                screenStreamRef.current = null;
+            }
+            setIsScreenSharing(false);
+        } else {
+            try {
+                const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+                screenStreamRef.current = stream;
+                setIsScreenSharing(true);
+                stream.getVideoTracks()[0].onended = () => {
+                    setIsScreenSharing(false);
+                    screenStreamRef.current = null;
+                };
+            } catch (err) {
+                console.warn("[ScreenShare] User cancelled or error:", err);
+            }
+        }
+    }, [isScreenSharing]);
 
     const [isTyping, setIsTyping] = useState(false);
     const targetCaptionTextRef = useRef('');
@@ -1315,6 +1340,10 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         clearTimeout(identifiedSongTimerRef.current);
                         identifiedSongTimerRef.current = setTimeout(() => setIdentifiedSong(null), 20000);
                     }
+                } else if (msg.type === 'deep_research_result') {
+                    if (msg.report) {
+                        setResearchReport(msg.report);
+                    }
                 } else if (msg.type === 'play_music') {
                     stopMusicPlayback();
                     if (msg.audioUrl) {
@@ -1405,6 +1434,17 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         >
                             <span>📲</span>
                             <span>Link WhatsApp</span>
+                        </button>
+                        <button
+                            onClick={toggleScreenShare}
+                            className={`px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                                isScreenSharing
+                                    ? 'bg-red-500/20 border border-red-500/60 text-red-300 shadow-[0_0_15px_rgba(239,68,68,0.3)] animate-pulse'
+                                    : 'bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 hover:bg-indigo-500/20'
+                            }`}
+                            title={isScreenSharing ? 'Stop Screen Sharing' : 'Share Screen with Friday for Vision AI'}
+                        >
+                            <span>{isScreenSharing ? '🔴 Sharing Screen' : '🖥️ Screen Vision'}</span>
                         </button>
                         <button onClick={() => setShowCaptions(!showCaptions)} className={showCaptions ? 'text-green-500' : 'text-white'}>
                             <Captions className="h-6 w-6" />
@@ -1924,6 +1964,67 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
             {showChatHistory && <ChatHistoryModal onClose={() => setShowChatHistory(false)} />}
             {showCodeAgent && <CodeAgentPage onClose={() => setShowCodeAgent(false)} />}
             <WhatsAppPairModal isOpen={showWhatsAppModal} onClose={() => setShowWhatsAppModal(false)} />
+
+            {/* Deep Research Report Modal */}
+            <AnimatePresence>
+                {researchReport && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4"
+                    >
+                        <motion.div
+                            initial={{ scale: 0.95, y: 20 }}
+                            animate={{ scale: 1, y: 0 }}
+                            exit={{ scale: 0.95, y: 20 }}
+                            className="w-full max-w-3xl max-h-[85vh] bg-slate-900 border border-purple-500/50 rounded-3xl p-6 shadow-[0_0_50px_rgba(168,85,247,0.35)] flex flex-col gap-4 overflow-hidden"
+                        >
+                            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                                <div className="flex items-center gap-2">
+                                    <span className="text-xl">🧠</span>
+                                    <h3 className="text-lg font-bold text-white">Deep Research Report: {researchReport.topic}</h3>
+                                </div>
+                                <button
+                                    onClick={() => setResearchReport(null)}
+                                    className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                                >
+                                    <X className="w-5 h-5" />
+                                </button>
+                            </div>
+                            <div className="flex-1 overflow-y-auto pr-2 space-y-4 text-sm text-slate-200 leading-relaxed">
+                                <div className="p-4 rounded-2xl bg-purple-950/40 border border-purple-500/30 text-purple-200">
+                                    <p className="font-bold text-xs uppercase text-purple-400 mb-1">📌 Executive Summary</p>
+                                    <p>{researchReport.executiveSummary}</p>
+                                </div>
+                                {researchReport.sections?.map((sec: any, idx: number) => (
+                                    <div key={idx} className="p-4 rounded-2xl bg-slate-800/50 border border-slate-700/50">
+                                        <h4 className="font-bold text-white mb-2">{sec.title}</h4>
+                                        <p className="text-slate-300 mb-2">{sec.content}</p>
+                                        {sec.bulletPoints && (
+                                            <ul className="list-disc list-inside space-y-1 text-slate-400 text-xs pl-2">
+                                                {sec.bulletPoints.map((bp: string, i: number) => (
+                                                    <li key={i}>{bp}</li>
+                                                ))}
+                                            </ul>
+                                        )}
+                                    </div>
+                                ))}
+                                {researchReport.keyTakeaways && (
+                                    <div className="p-4 rounded-2xl bg-emerald-950/30 border border-emerald-500/30 text-emerald-200">
+                                        <p className="font-bold text-xs uppercase text-emerald-400 mb-1">🎯 Key Takeaways</p>
+                                        <ul className="list-disc list-inside space-y-1 text-xs">
+                                            {researchReport.keyTakeaways.map((kt: string, i: number) => (
+                                                <li key={i}>{kt}</li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </div>
     );
 }

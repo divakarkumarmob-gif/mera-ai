@@ -129,6 +129,38 @@ class ToolsEngine {
     const { musicRecognitionService } = await import("./musicRecognitionService");
     return await musicRecognitionService.identifyHummingOrTune(hummingOrTuneClue, artistHint);
   }
+
+  /**
+   * Iron Man VIP Morning Briefing Protocol
+   */
+  public async getMorningBriefing(city?: string) {
+    const { morningBriefingService } = await import("./morningBriefingService");
+    return await morningBriefingService.generateMorningBriefing(city);
+  }
+
+  /**
+   * JARVIS PC & System Health Diagnostics
+   */
+  public getSystemHealth() {
+    const { systemHealthService } = require("./systemHealthService");
+    return systemHealthService.getHealthMetrics();
+  }
+
+  /**
+   * Deep Autonomous Multi-Stage Research Agent
+   */
+  public async executeDeepResearch(topic: string, onProgress?: (step: string, percent: number) => void) {
+    const { deepResearchService } = await import("./deepResearchService");
+    return await deepResearchService.executeResearch(topic, onProgress);
+  }
+
+  /**
+   * Screen Vision AI Assistant
+   */
+  public async analyzeScreenContext(imageBase64?: string, userQuery?: string) {
+    const { screenVisionService } = await import("./screenVisionService");
+    return await screenVisionService.analyzeScreenContext(imageBase64, userQuery);
+  }
 }
 
 export const toolsEngine = new ToolsEngine();

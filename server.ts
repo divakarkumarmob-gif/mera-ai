@@ -905,6 +905,12 @@ SOCIAL & MEDIA TOOLS (YOUTUBE, REDDIT, SPOTIFY MUSIC, LINKEDIN, TELEGRAM/DISCORD
 - 'get_community_links': Find Telegram and Discord channel links for study groups, deals, gaming, and tech.
 - 'get_pinterest_ideas': Visual room decor, desk setups, fashion, and aesthetic photography ideas.
 
+ADVANCED AUTONOMOUS & IRON MAN SYSTEM TOOLS:
+- 'get_morning_briefing': Iron Man VIP Morning Briefing Protocol. Delivers a complete executive morning update (live weather, top news headlines, pending reminders/tasks, market status, and motivational quote). Call when DK says "good morning friday", "aaj ka morning update do", "subah ka briefing batao".
+- 'get_system_health': JARVIS PC & Hardware Diagnostics. Reads real-time CPU load, RAM usage, system uptime, and OS health. Call when DK asks "system status check karo", "laptop ki health kaisi hai", "RAM/CPU usage batao".
+- 'deep_autonomous_research': Autonomous Deep Research Agent (Perplexity Style). Performs multi-source crawling, synthesizes technical data, and generates structured executive research reports with takeaways. Call when DK asks for deep research, detailed analysis, or market/tech reports on any topic.
+- 'analyze_screen_context': Screen & Vision AI Assistant. Inspects active screen context, visual diagrams, terminal errors, or UI to provide actionable explanations and debugging help. Call when DK says "meri screen dekho", "ye error dekho", "is diagram ko explain karo".
+
 SELF-HEALING & AUTOMATIC BUG DELEGATION TO CODING AGENT:
 - When ANY tool, API, service, or feature fails or throws an error, or when DK gives commands about build failure, broken code, or last changes (e.g. "build failed ho gaya", "last change theek karo", "jo last changes kiya tha usko acche se coding karo taki build success ho", "code me error aa raha hai", "bina syntax error ke fix karo"):
   1. Direct Build Fix Command (When DK says "build failed ho gaya theek karo" / "last changes fix karo"):
@@ -2030,6 +2036,49 @@ HOW TO READ MESSAGES:
               artistHint: { type: "STRING", description: "Optional singer or artist hint" },
             },
             required: ["hummingOrTuneClue"],
+          },
+        },
+        {
+          name: "get_morning_briefing",
+          description: "Deliver Iron Man VIP Morning Briefing Protocol (live weather, top headlines, pending reminders, and stock market status). Use when DK says 'good morning', 'aaj ka briefing do', 'morning update'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              city: { type: "STRING", description: "Optional city name for weather (default 'Patna, India')" },
+            },
+            required: [],
+          },
+        },
+        {
+          name: "get_system_health",
+          description: "Get real-time JARVIS PC and hardware diagnostics (CPU cores & load, RAM total/used/free, uptime, platform health). Use when DK asks 'system status check karo', 'laptop health check', 'CPU RAM usage batao'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+            required: [],
+          },
+        },
+        {
+          name: "deep_autonomous_research",
+          description: "Execute deep multi-stage autonomous research on any topic, technology, company, or concept (Perplexity style). Generates comprehensive report with executive summary, key findings, and takeaways.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              topic: { type: "STRING", description: "The topic, research question, or subject to investigate" },
+            },
+            required: ["topic"],
+          },
+        },
+        {
+          name: "analyze_screen_context",
+          description: "Analyze live screen frame or active window context (code errors, terminal output, diagrams, UI design). Use when DK says 'meri screen dekho', 'ye error check karo', 'is image/diagram ko explain karo'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              userQuery: { type: "STRING", description: "What DK wants explained or diagnosed about the screen" },
+              imageBase64: { type: "STRING", description: "Optional base64 image frame if captured directly" },
+            },
+            required: ["userQuery"],
           },
         },
         {
@@ -3289,6 +3338,40 @@ HOW TO READ MESSAGES:
                     }
                   } catch (e: any) {
                     result = { success: false, message: `Humming identify fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_morning_briefing") {
+                  const { city } = call.args || {};
+                  try {
+                    result = await toolsEngine.getMorningBriefing(city ? String(city) : undefined);
+                  } catch (e: any) {
+                    result = { success: false, message: `Morning briefing fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_system_health") {
+                  try {
+                    result = toolsEngine.getSystemHealth();
+                  } catch (e: any) {
+                    result = { success: false, message: `System health check fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "deep_autonomous_research") {
+                  const { topic } = call.args || {};
+                  try {
+                    result = await toolsEngine.executeDeepResearch(String(topic || ""));
+                    clientWs.send(JSON.stringify({
+                      type: 'deep_research_result',
+                      report: result,
+                    }));
+                  } catch (e: any) {
+                    result = { success: false, message: `Deep research fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "analyze_screen_context") {
+                  const { userQuery, imageBase64 } = call.args || {};
+                  try {
+                    result = await toolsEngine.analyzeScreenContext(
+                      imageBase64 ? String(imageBase64) : undefined,
+                      userQuery ? String(userQuery) : undefined
+                    );
+                  } catch (e: any) {
+                    result = { success: false, message: `Screen analysis fail hui: ${e?.message || e}` };
                   }
                 } else if (call.name === "play_music") {
                   const { songName } = call.args || {};
