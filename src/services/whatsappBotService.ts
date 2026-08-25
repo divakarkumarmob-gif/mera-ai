@@ -534,6 +534,22 @@ class WhatsAppBotService {
               console.error("[WhatsAppBot] Failed to process Voice PIN message:", pinErr);
             }
 
+            // 1.1 Check if DK is setting/updating the App Access Key (e.g. "app key - 123456", "app pass 987654")
+            if (!consumedByDailyUpdate) {
+              try {
+                const { appSecurityService } = await import("./appSecurityService");
+                const keyRes = await appSecurityService.handleOwnerAppKeyMessage(text, isFromOwner, senderName, "whatsapp");
+                if (keyRes.handled && keyRes.replyText) {
+                  consumedByDailyUpdate = true;
+                  if (this.sock && this.isConnected) {
+                    await this.sendHumanLikeMessage(replyJid, keyRes.replyText);
+                  }
+                }
+              } catch (keyErr) {
+                console.error("[WhatsAppBot] Failed to process App Key message:", keyErr);
+              }
+            }
+
             // 2. Check whether this is DK answering a forwarded question
             if (!consumedByDailyUpdate) {
               try {

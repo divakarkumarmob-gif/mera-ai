@@ -1241,6 +1241,16 @@ Kripya neeche se mode choose karein ya direct message type karein:`;
       return;
     }
 
+    // 3.1 Handle App Access Key updates (e.g. "app key - 123456", "app pass 987654", "app password: mypass")
+    const telegramOwnerChatId = process.env.TELEGRAM_OWNER_CHAT_ID;
+    const isTelegramOwner = !!telegramOwnerChatId && (String(chatId) === String(telegramOwnerChatId) || (from?.id && String(from.id) === String(telegramOwnerChatId)));
+    const { appSecurityService } = await import("./appSecurityService");
+    const keyRes = await appSecurityService.handleOwnerAppKeyMessage(text, isTelegramOwner, senderName, "telegram");
+    if (keyRes.handled && keyRes.replyText) {
+      await this.sendMessage(chatId, `🔑 *App Access Key Update:*\n\n${keyRes.replyText}`);
+      return;
+    }
+
     // 4. Handle Photos & Images (Vision AI & Face Recognition)
     if (msg.photo && msg.photo.length > 0) {
       const highestResPhoto = msg.photo[msg.photo.length - 1];

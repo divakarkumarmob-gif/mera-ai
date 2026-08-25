@@ -28,6 +28,7 @@ import { telegramBotService } from "./src/services/telegramBotService";
 import { instagramBotService } from "./src/services/instagramBotService";
 import { cyberSecurityService } from "./src/services/cyberSecurityService";
 import { backgroundTasksService } from "./src/services/backgroundTasksService";
+import { appSecurityService } from "./src/services/appSecurityService";
 
 const PORT = Number(process.env.PORT) || 3000;
 const isProduction = process.env.NODE_ENV === "production";
@@ -59,6 +60,38 @@ async function startServer() {
 
   const limiter = rateLimit({ windowMs: 60 * 1000, max: 120 });
   app.use("/api/", limiter);
+
+  // ── Zero-Trust Anti-Tamper Security Middleware ────────────────────────────
+  // Blocks any unauthorized API calls without a cryptographically signed App Token.
+  // Even if a hacker modifies the client/DOM, the server strictly refuses all requests.
+  app.use(async (req, res, next) => {
+    const path = req.path;
+    if (
+      path.startsWith("/api/app-key/") ||
+      path.startsWith("/api/instagram/webhook") ||
+      path.startsWith("/api/whatsapp/cloud/webhook") ||
+      path.startsWith("/api/telegram/webhook") ||
+      path === "/health" ||
+      !path.startsWith("/api/")
+    ) {
+      return next();
+    }
+
+    const authHeader =
+      (req.headers["x-app-key-token"] as string) ||
+      (req.headers["authorization"] ? req.headers["authorization"].replace(/^Bearer\s+/i, "") : null) ||
+      (req.query["token"] as string);
+
+    if (!authHeader || !appSecurityService.verifySessionToken(authHeader)) {
+      return res.status(401).json({
+        ok: false,
+        error: "ACCESS_LOCKED",
+        message: "Unauthorized: Valid cryptographically signed App Access Key required. Client code bypass is strictly blocked.",
+      });
+    }
+
+    next();
+  });
 
   app.get("/health", (_req, res) => res.json({ ok: true }));
 
@@ -339,6 +372,26 @@ async function startServer() {
     if (!chatId || !text) return res.status(400).json({ error: "chatId_and_text_required" });
     const result = await telegramBotService.sendMessage(chatId, text);
     res.json(result);
+  });
+
+  // ── App Key Security Endpoints ────────────────────────────────────────────
+  app.get("/api/app-key/status", async (_req, res) => {
+    try {
+      const activeKey = await appSecurityService.getAppKey();
+      res.json({ ok: true, isConfigured: !!activeKey });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || e });
+    }
+  });
+
+  app.post("/api/app-key/verify", async (req, res) => {
+    try {
+      const { key } = req.body || {};
+      const verifyRes = await appSecurityService.verifyAppKey(String(key || ""));
+      res.json(verifyRes);
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e?.message || "Verification failed" });
+    }
   });
 
   // ── Instagram Direct Bot Webhook & REST Endpoints (Meta Graph API) ─────────
@@ -713,9 +766,24 @@ async function startServer() {
     }
   });
 
-  wss.on("connection", (clientWs) => {
+  wss.on("connection", (clientWs, req: any) => {
     connectedClients.add(clientWs);
     clientWs.on("close", () => connectedClients.delete(clientWs));
+
+    const urlParams = new URLSearchParams((req.url || "").split("?")[1] || "");
+    const initialToken = urlParams.get("token");
+    let isAuthorized = initialToken ? appSecurityService.verifySessionToken(initialToken) : false;
+
+    // Zero-Trust Lock: Terminate unauthenticated connections if auth token is not provided
+    let authTimeout: any = null;
+    if (!isAuthorized) {
+      authTimeout = setTimeout(() => {
+        if (!isAuthorized) {
+          console.warn("[Server] 🚫 Terminating unauthorized WebSocket connection (Missing App Key Token)");
+          try { clientWs.close(4001, "UNAUTHORIZED_APP_KEY"); } catch {}
+        }
+      }, 5000);
+    }
 
     let currentSession: any;
     let currentSessionToken = 0;
@@ -5028,6 +5096,29 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
       try {
         parsedData = JSON.parse(data.toString());
       } catch {
+        return;
+      }
+
+      // Handle explicit auth message packet
+      if (parsedData.type === "auth") {
+        const token = parsedData.token;
+        if (token && appSecurityService.verifySessionToken(token)) {
+          isAuthorized = true;
+          if (authTimeout) clearTimeout(authTimeout);
+          safeSend(JSON.stringify({ type: "auth_ack", ok: true }));
+          return;
+        } else {
+          console.warn("[Server] 🚫 WebSocket auth failed: Invalid App Key Token");
+          safeSend(JSON.stringify({ error: "ACCESS_LOCKED", message: "Invalid App Key Token." }));
+          try { clientWs.close(4001, "UNAUTHORIZED_APP_KEY"); } catch {}
+          return;
+        }
+      }
+
+      // Zero-Trust Anti-Tamper: Block any command if not authenticated
+      if (!isAuthorized) {
+        console.warn("[Server] 🚫 WebSocket command blocked: Session is not authorized");
+        safeSend(JSON.stringify({ error: "ACCESS_LOCKED", message: "App Key authentication required." }));
         return;
       }
 

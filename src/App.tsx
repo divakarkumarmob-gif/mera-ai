@@ -2,22 +2,40 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import LiveAIInterface from './components/LiveAIInterface';
 import AgentFace from './components/AgentFace';
+import AppKeyLockModal from './components/AppKeyLockModal';
+import { getStoredAppSession } from '@/utils/appSecurityClient';
 import { wakeWordManager } from '@/utils/wakeWord';
 
 export default function App() {
+    // Application Access Key Protection (Backed by Cryptographic Token)
+    const [isUnlocked, setIsUnlocked] = useState<boolean>(() => !!getStoredAppSession());
+
+    // Listen for anti-tamper security lock events
+    useEffect(() => {
+        const handleLock = () => {
+            setIsUnlocked(false);
+        };
+        window.addEventListener('app:security_locked', handleLock);
+        return () => window.removeEventListener('app:security_locked', handleLock);
+    }, []);
+
     // The AI Live Agent page opens directly when the app loads. Closing it
     // (X button) minimizes to a small floating bubble instead of a blank
     // screen — tap the bubble or say "Hello Friday" to reopen full screen.
     const [isOpen, setIsOpen] = useState(true);
 
     useEffect(() => {
-        if (!isOpen) {
+        if (!isOpen && isUnlocked) {
             const unregister = wakeWordManager.register(() => {
                 setIsOpen(true);
             });
             return () => unregister();
         }
-    }, [isOpen]);
+    }, [isOpen, isUnlocked]);
+
+    if (!isUnlocked) {
+        return <AppKeyLockModal onUnlocked={() => setIsUnlocked(true)} />;
+    }
 
     if (isOpen) {
         return <LiveAIInterface onClose={() => setIsOpen(false)} />;

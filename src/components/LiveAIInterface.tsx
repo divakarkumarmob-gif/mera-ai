@@ -7,6 +7,7 @@ import WhatsAppPairModal from './WhatsAppPairModal';
 import CodeAgentPage from './CodeAgentPage';
 import { getWsUrl } from '@/utils/api';
 import { wakeWordManager } from '@/utils/wakeWord';
+import { getAppToken, clearAppSession } from '@/utils/appSecurityClient';
 
 interface LiveAIInterfaceProps {
     onClose: () => void;
@@ -1080,10 +1081,16 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
             }
         }
 
-        const socket = new WebSocket(getWsUrl());
+        const appToken = getAppToken();
+        const baseWs = getWsUrl();
+        const wsUrl = appToken ? `${baseWs}${baseWs.includes('?') ? '&' : '?'}token=${encodeURIComponent(appToken)}` : baseWs;
+        const socket = new WebSocket(wsUrl);
         ws.current = socket;
 
         socket.onopen = async () => {
+            if (appToken) {
+                socket.send(JSON.stringify({ type: 'auth', token: appToken }));
+            }
             setIsRecording(withMic);
             setStatus(withMic ? "Connecting AI..." : "Connected");
             nextStartTime.current = 0;
@@ -1365,7 +1372,12 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
             }
         };
 
-        socket.onclose = () => {
+        socket.onclose = (event: CloseEvent) => {
+            if (event.code === 4001) {
+                console.warn("[LiveAIInterface] 🚫 WebSocket closed: 4001 UNAUTHORIZED_APP_KEY. Forcing app lock.");
+                clearAppSession();
+                return;
+            }
             isInitializedRef.current = false;
             isConnectingRef.current = false;
             const wasActive = isRecording || isAiSpeaking.current || aiTurnActiveRef.current;
