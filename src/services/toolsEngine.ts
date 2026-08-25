@@ -161,6 +161,194 @@ class ToolsEngine {
     const { screenVisionService } = await import("./screenVisionService");
     return await screenVisionService.analyzeScreenContext(imageBase64, userQuery);
   }
+
+  /**
+   * Voice Persona & Style Switcher
+   */
+  public switchVoicePersona(personaName: string) {
+    const { voicePersonaService } = require("./voicePersonaService");
+    return voicePersonaService.switchPersona(personaName);
+  }
+
+  /**
+   * Autonomous File Organizer
+   */
+  public async organizeDirectory(dirPath?: string) {
+    const { fileOrganizerService } = await import("./fileOrganizerService");
+    return await fileOrganizerService.organizeDirectory(dirPath);
+  }
+
+  /**
+   * Clean System Temporary Cache
+   */
+  public async cleanTempFiles() {
+    const { fileOrganizerService } = await import("./fileOrganizerService");
+    return await fileOrganizerService.cleanTempFiles();
+  }
+
+  /**
+   * Personal Expense Tracker
+   */
+  public async addExpense(amount: number, description: string, categoryHint?: string) {
+    const { expenseTrackerService } = await import("./expenseTrackerService");
+    return await expenseTrackerService.addExpense(amount, description, categoryHint);
+  }
+
+  public async getExpenseSummary(filterMonth?: string) {
+    const { expenseTrackerService } = await import("./expenseTrackerService");
+    return await expenseTrackerService.getExpenseSummary(filterMonth);
+  }
+
+  /**
+   * Autonomous Meeting & Calendar Scheduler
+   */
+  public async scheduleMeeting(title: string, timeString: string, durationMinutes?: number, locationOrLink?: string) {
+    const { calendarEventService } = await import("./calendarEventService");
+    return await calendarEventService.scheduleMeeting(title, timeString, durationMinutes, locationOrLink);
+  }
+
+  public async getUpcomingMeetings() {
+    const { calendarEventService } = await import("./calendarEventService");
+    return await calendarEventService.getUpcomingMeetings();
+  }
+
+  /**
+   * Smart Email Assistant
+   */
+  public async summarizeInbox() {
+    const { gmailVoiceAssistant } = await import("./gmailVoiceAssistant");
+    return await gmailVoiceAssistant.summarizeInbox();
+  }
+
+  public async sendQuickEmail(toEmail: string, subject: string, bodyText: string) {
+    const { gmailVoiceAssistant } = await import("./gmailVoiceAssistant");
+    return await gmailVoiceAssistant.sendQuickEmail(toEmail, subject, bodyText);
+  }
+
+  /**
+   * AI Health, Hydration & Desk Coach
+   */
+  public async logWaterIntake(glasses = 1) {
+    const { healthCoachService } = await import("./healthCoachService");
+    return await healthCoachService.logWaterIntake(glasses);
+  }
+
+  public async getHealthStatus() {
+    const { healthCoachService } = await import("./healthCoachService");
+    return await healthCoachService.getDailyHealthStatus();
+  }
+
+  /**
+   * Smart Shopping List
+   */
+  public async addToShoppingList(itemsQuery: string) {
+    const { shoppingListService } = await import("./shoppingListService");
+    return await shoppingListService.addItems(itemsQuery);
+  }
+
+  public async getShoppingList() {
+    const { shoppingListService } = await import("./shoppingListService");
+    return await shoppingListService.getShoppingList();
+  }
+
+  public async sendShoppingListOnWhatsApp(targetPhone?: string) {
+    const { shoppingListService } = await import("./shoppingListService");
+    return await shoppingListService.sendListOnWhatsApp(targetPhone);
+  }
+
+  public async clearShoppingList() {
+    const { shoppingListService } = await import("./shoppingListService");
+    return await shoppingListService.clearList();
+  }
+
+  /**
+   * Voice Emergency SOS
+   */
+  public async triggerEmergencySos(customMessage?: string, targetPhone?: string) {
+    const { emergencySosService } = await import("./emergencySosService");
+    return await emergencySosService.triggerSos(customMessage, targetPhone);
+  }
+
+  /**
+   * Daily Tech Audio Podcast Generator
+   */
+  public async generateDailyPodcast() {
+    const { dailyPodcastService } = await import("./dailyPodcastService");
+    return await dailyPodcastService.generateDailyPodcast();
+  }
+
+  /**
+   * Fast2SMS Real Mobile SMS Sender
+   */
+  public async sendFast2Sms(phoneNumber: string, messageText: string, customApiKey?: string) {
+    const { fast2SmsService } = await import("./fast2SmsService");
+    return await fast2SmsService.sendSms(phoneNumber, messageText, customApiKey);
+  }
+
+  /**
+   * WhatsApp Voice Note Summarizer
+   */
+  public async summarizeVoiceNote(transcriptOrAudioSnippet: string, senderName?: string) {
+    const { voiceNoteSummarizerService } = await import("./voiceNoteSummarizerService");
+    return await voiceNoteSummarizerService.summarizeVoiceNote(transcriptOrAudioSnippet, senderName);
+  }
+
+  /**
+   * AES-256 Encrypted AI Vault & Secret Locker
+   */
+  public async storeVaultSecret(keyName: string, secretValue: string, category?: string) {
+    const { secureVaultService } = await import("./secureVaultService");
+    return await secureVaultService.storeSecret(keyName, secretValue, category);
+  }
+
+  public async retrieveVaultSecret(keyName: string) {
+    const { secureVaultService } = await import("./secureVaultService");
+    return await secureVaultService.retrieveSecret(keyName);
+  }
+
+  public async listVaultSecrets() {
+    const { secureVaultService } = await import("./secureVaultService");
+    return await secureVaultService.listSecretKeys();
+  }
+
+  /**
+   * Travel & IRCTC Train Tracker
+   */
+  public async getTrainLiveStatus(trainNumberOrName: string) {
+    const { travelTrackerService } = await import("./travelTrackerService");
+    return await travelTrackerService.getTrainLiveStatus(trainNumberOrName);
+  }
+
+  public async checkPnrStatus(pnrNumber: string) {
+    const { travelTrackerService } = await import("./travelTrackerService");
+    return await travelTrackerService.checkPnrStatus(pnrNumber);
+  }
+
+  /**
+   * Smart Home & IoT Voice Controller
+   */
+  public controlSmartDevice(deviceNameOrRoom: string, action: any, value?: number) {
+    const { smartHomeService } = require("./smartHomeService");
+    return smartHomeService.controlDevice(deviceNameOrRoom, action, value);
+  }
+
+  public getSmartHomeStatus() {
+    const { smartHomeService } = require("./smartHomeService");
+    return smartHomeService.getHomeStatus();
+  }
+
+  /**
+   * Pomodoro Focus Mode & Lo-Fi Beats
+   */
+  public async startFocusMode(durationMinutes = 25, goalTitle = "Deep Work & Coding") {
+    const { focusModeService } = await import("./focusModeService");
+    return await focusModeService.startFocusMode(durationMinutes, goalTitle);
+  }
+
+  public stopFocusMode() {
+    const { focusModeService } = require("./focusModeService");
+    return focusModeService.stopFocusMode();
+  }
 }
 
 export const toolsEngine = new ToolsEngine();

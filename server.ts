@@ -910,6 +910,32 @@ ADVANCED AUTONOMOUS & IRON MAN SYSTEM TOOLS:
 - 'get_system_health': JARVIS PC & Hardware Diagnostics. Reads real-time CPU load, RAM usage, system uptime, and OS health. Call when DK asks "system status check karo", "laptop ki health kaisi hai", "RAM/CPU usage batao".
 - 'deep_autonomous_research': Autonomous Deep Research Agent (Perplexity Style). Performs multi-source crawling, synthesizes technical data, and generates structured executive research reports with takeaways. Call when DK asks for deep research, detailed analysis, or market/tech reports on any topic.
 - 'analyze_screen_context': Screen & Vision AI Assistant. Inspects active screen context, visual diagrams, terminal errors, or UI to provide actionable explanations and debugging help. Call when DK says "meri screen dekho", "ye error dekho", "is diagram ko explain karo".
+- 'switch_voice_persona': Switch Friday's persona and tone (e.g. 'friday_classic', 'jarvis_british', 'cyberpunk_ai', 'professor_mentor', 'motivational_coach'). Call when DK says "JARVIS ban jao", "British accent me bolo", "Cyberpunk mode on karo", "Coach mode on karo", "Normal Friday ban jao".
+- 'organize_directory': Autonomous File Organizer. Sorts cluttered folders (Downloads/Desktop) into categorized subfolders (Images, Documents, Videos, Code, Archives, Installers). Call when DK says "Downloads folder organize karo", "Desktop saaf karo".
+- 'clean_temp_files': Clean System Cache. Safely deletes temporary `.tmp`/`.log` files to free up disk space. Call when DK says "temp files delete karo", "PC cache clean karo".
+- 'add_expense': Personal Expense Tracker. Logs expenses with amount, category, and description into Firestore ledger. Call when DK says "500 rupay petrol me kharch hue", "Lunch me 250 lag gaye".
+- 'get_expense_summary': Expense Summary & Budget. Returns monthly spending breakdown by category and highest expense area. Call when DK says "Is mahine kitna kharcha hua", "Expense summary batao".
+- 'schedule_meeting': Autonomous Meeting & Calendar Scheduler. Schedules meetings and automatically sets up 15-minute proactive audio alerts. Call when DK says "Kal subah 11 baje meeting schedule karo", "Doctor appointment add karo".
+- 'get_upcoming_meetings': List upcoming scheduled meetings and calendar events.
+- 'summarize_inbox': Email & Inbox Assistant. Checks unread emails and summarizes priority messages. Call when DK asks "unread emails check karo", "inbox update do".
+- 'send_quick_email': Quick Email Sender. Drafts and sends emails with recipient, subject, and body. Call when DK says "Rahul ko email bhejo", "email send karo".
+- 'log_water_intake': Hydration & Health Tracker. Logs glasses of water drank and tracks daily 8-glass goal. Call when DK says "1 glass paani piya", "water log karo".
+- 'get_health_status': Health & Posture Check. Returns hydration progress percentage, eye-rest 20-20-20 rule, and desk ergonomics tips. Call when DK asks "health status batao", "aaj kitna paani piya".
+- 'add_to_shopping_list': Voice Grocery & Shopping List. Adds items to checklist. Call when DK says "doodh aur bread shopping list me daalo".
+- 'get_shopping_list': View current shopping checklist.
+- 'send_shopping_list_on_whatsapp': Sends formatted shopping checklist directly to WhatsApp. Call when DK says "shopping list WhatsApp par bhej do".
+- 'trigger_emergency_sos': Voice Emergency SOS Alert. Dispatches urgent high-priority emergency notifications to trusted family contacts via WhatsApp. Call when DK triggers emergency or says "emergency alert".
+- 'generate_daily_podcast': Daily Custom Tech Audio Podcast. Generates a 2-minute studio-style tech and news audio briefing. Call when DK says "aaj ka tech podcast sunao", "daily audio summary do".
+- 'send_fast2sms_message': Send real mobile SMS via Fast2SMS Cloud API. Call when DK says "SMS bhejo", "message send karo", "9876543210 par SMS karo".
+- 'summarize_voice_note': WhatsApp Audio Voice Note Digest. Generates a 2-line summary and action items from voice notes. Call when DK asks to summarize an audio note.
+- 'store_vault_secret': Personal AES-256 Encrypted AI Vault. Stores passwords, API keys, and secret notes. Call when DK says "secret vault me save karo", "password yaad rakh lo".
+- 'retrieve_vault_secret': Retrieves and decrypts a secret from the vault. Call when DK asks for a stored password or key.
+- 'get_train_live_status': IRCTC Live Train Running Status & Platform Locator. Call when DK asks "Rajdhani train ka status kya hai", "train kitni late hai".
+- 'check_pnr_status': IRCTC PNR Booking & Coach Status. Call when DK asks to check a 10-digit PNR.
+- 'control_smart_device': Smart Home & IoT Voice Controller. Turns on/off lights, smart plugs, AC temperature, fan speed. Call when DK says "light band karo", "AC 24 degree karo".
+- 'get_smart_home_status': View all connected smart home devices and current ON/OFF status.
+- 'start_focus_mode': Pomodoro Focus Mode with relaxing Lo-Fi background stream. Call when DK says "Focus Mode on karo", "25 minute ka study timer chalao".
+- 'stop_focus_mode': Deactivates focus mode and restores normal notifications.
 
 SELF-HEALING & AUTOMATIC BUG DELEGATION TO CODING AGENT:
 - When ANY tool, API, service, or feature fails or throws an error, or when DK gives commands about build failure, broken code, or last changes (e.g. "build failed ho gaya", "last change theek karo", "jo last changes kiya tha usko acche se coding karo taki build success ho", "code me error aa raha hai", "bina syntax error ke fix karo"):
@@ -2079,6 +2105,309 @@ HOW TO READ MESSAGES:
               imageBase64: { type: "STRING", description: "Optional base64 image frame if captured directly" },
             },
             required: ["userQuery"],
+          },
+        },
+        {
+          name: "switch_voice_persona",
+          description: "Switch Friday's persona, accent, or attitude (e.g. 'friday_classic', 'jarvis_british', 'cyberpunk_ai', 'professor_mentor', 'motivational_coach'). Use when DK asks to change persona, switch to JARVIS, or act like a coach/professor.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              personaName: { type: "STRING", description: "Name or style of persona (e.g. 'jarvis', 'cyberpunk', 'professor', 'coach', 'friday')" },
+            },
+            required: ["personaName"],
+          },
+        },
+        {
+          name: "organize_directory",
+          description: "Sort and organize all cluttered files in a folder (Downloads / Desktop) into clean subfolders (Images, Documents, Videos, Code, Archives, Installers). Use when DK says 'Downloads organize karo', 'Desktop files arrange karo'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              directoryPath: { type: "STRING", description: "Optional folder path to organize (default: Downloads folder)" },
+            },
+            required: [],
+          },
+        },
+        {
+          name: "clean_temp_files",
+          description: "Scan and clean temporary Windows cache and junk files to free up disk space. Use when DK says 'temp files delete karo', 'PC junk clean karo'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+            required: [],
+          },
+        },
+        {
+          name: "add_expense",
+          description: "Log an expense with amount, description, and auto-categorization into the personal budget ledger. Use when DK says '500 rupay petrol me kharch hue', 'Khane pe 300 lag gaye'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              amount: { type: "NUMBER", description: "Expense amount in Rupees (e.g. 500, 1200)" },
+              description: { type: "STRING", description: "What the expense was for (e.g. 'petrol', 'dinner with friends', 'wifi recharge')" },
+              categoryHint: { type: "STRING", description: "Optional category if explicitly specified" },
+            },
+            required: ["amount", "description"],
+          },
+        },
+        {
+          name: "get_expense_summary",
+          description: "Get monthly personal expense breakdown, total spent, and top spending category. Use when DK asks 'Is mahine kitna kharcha hua', 'Expense summary batao'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              filterMonth: { type: "STRING", description: "Optional month filter in YYYY-MM format (e.g. '2026-08')" },
+            },
+            required: [],
+          },
+        },
+        {
+          name: "schedule_meeting",
+          description: "Schedule a meeting, appointment, or calendar event with automatic 15-minute proactive audio reminder. Use when DK says 'Kal subah 11 baje meeting schedule karo', 'Doctor appointment add karo'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              title: { type: "STRING", description: "Meeting title or purpose (e.g. 'Project Review with Team', 'Client Call')" },
+              timeString: { type: "STRING", description: "Date and time of meeting (e.g. 'Tomorrow 11 AM', 'Friday 4 PM')" },
+              durationMinutes: { type: "NUMBER", description: "Duration of meeting in minutes (default 30)" },
+              locationOrLink: { type: "STRING", description: "Optional Google Meet / Zoom link or venue" },
+            },
+            required: ["title", "timeString"],
+          },
+        },
+        {
+          name: "get_upcoming_meetings",
+          description: "Get a list of upcoming scheduled meetings and calendar events. Use when DK asks 'Meri upcoming meetings kaun si hain', 'Calendar check karo'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+            required: [],
+          },
+        },
+        {
+          name: "summarize_inbox",
+          description: "Summarize unread emails and priority inbox messages. Use when DK asks 'unread emails check karo', 'inbox status batao'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+            required: [],
+          },
+        },
+        {
+          name: "send_quick_email",
+          description: "Draft and send an email to a recipient with subject and body text. Use when DK says 'Email bhejo', 'Email draft karo'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              toEmail: { type: "STRING", description: "Recipient email address (e.g. 'friend@example.com')" },
+              subject: { type: "STRING", description: "Subject of the email" },
+              bodyText: { type: "STRING", description: "Body contents of the email" },
+            },
+            required: ["toEmail", "subject", "bodyText"],
+          },
+        },
+        {
+          name: "log_water_intake",
+          description: "Log water intake and track progress toward the daily 8-glass hydration goal. Use when DK says '1 glass paani piya', 'water log karo'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              glasses: { type: "NUMBER", description: "Number of glasses of water (default 1)" },
+            },
+            required: [],
+          },
+        },
+        {
+          name: "get_health_status",
+          description: "Check daily hydration percentage, posture ergonomics, and eye-rest tips. Use when DK asks 'Health status batao', 'Aaj kitna paani piya'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+            required: [],
+          },
+        },
+        {
+          name: "add_to_shopping_list",
+          description: "Add items to the voice grocery and shopping checklist. Use when DK says 'Doodh, bread aur ande shopping list me daal do'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              itemsQuery: { type: "STRING", description: "Comma or 'and' separated list of items to buy" },
+            },
+            required: ["itemsQuery"],
+          },
+        },
+        {
+          name: "get_shopping_list",
+          description: "View the active shopping and grocery checklist. Use when DK asks 'Shopping list me kya kya hai', 'Checklist dikhao'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+            required: [],
+          },
+        },
+        {
+          name: "send_shopping_list_on_whatsapp",
+          description: "Send the formatted shopping checklist directly to DK's WhatsApp. Use when DK says 'Shopping list WhatsApp par bhej do'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              targetPhone: { type: "STRING", description: "Optional phone number (defaults to DK's WhatsApp)" },
+            },
+            required: [],
+          },
+        },
+        {
+          name: "clear_shopping_list",
+          description: "Clear all items from the shopping list after shopping is complete. Use when DK says 'Shopping list clear kar do'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+            required: [],
+          },
+        },
+        {
+          name: "trigger_emergency_sos",
+          description: "Trigger an urgent high-priority Emergency SOS alert to trusted contacts via WhatsApp. Use when DK says 'Emergency SOS alert', 'Help emergency'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              customMessage: { type: "STRING", description: "Optional custom emergency message or situation description" },
+              targetPhone: { type: "STRING", description: "Optional specific contact phone number to alert" },
+            },
+            required: [],
+          },
+        },
+        {
+          name: "generate_daily_podcast",
+          description: "Generate and deliver a custom 2-minute energetic tech and breaking news audio podcast. Use when DK says 'Daily tech podcast sunao', 'Aaj ka audio summary do'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+            required: [],
+          },
+        },
+        {
+          name: "send_fast2sms_message",
+          description: "Send a real cellular mobile SMS to any Indian phone number using Fast2SMS Gateway. Use when DK says 'SMS bhejo', 'message send karo', '9876543210 par SMS karo'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              phoneNumber: { type: "STRING", description: "10-digit Indian mobile number (e.g. '9876543210')" },
+              messageText: { type: "STRING", description: "Body text of the SMS" },
+            },
+            required: ["phoneNumber", "messageText"],
+          },
+        },
+        {
+          name: "summarize_voice_note",
+          description: "Summarize a WhatsApp audio voice note into a 2-line executive digest and action items. Use when DK asks to summarize an incoming audio message.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              transcript: { type: "STRING", description: "The audio note speech transcript or text" },
+              senderName: { type: "STRING", description: "Name of the person who sent the voice note" },
+            },
+            required: ["transcript"],
+          },
+        },
+        {
+          name: "store_vault_secret",
+          description: "Store a password, API key, or confidential note in the AES-256 Encrypted AI Vault. Use when DK says 'Vault me save karo', 'Password yaad rakh lo'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              keyName: { type: "STRING", description: "Identifier / name of the secret (e.g. 'wifi_password', 'github_token')" },
+              secretValue: { type: "STRING", description: "The confidential password, key, or secret value" },
+              category: { type: "STRING", description: "Optional category (e.g. 'Passwords', 'API Keys', 'Personal')" },
+            },
+            required: ["keyName", "secretValue"],
+          },
+        },
+        {
+          name: "retrieve_vault_secret",
+          description: "Retrieve and decrypt a stored secret or password from the encrypted vault. Use when DK asks 'Vault se password batao', 'Mera wifi password kya hai'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              keyName: { type: "STRING", description: "Identifier / name of the secret to retrieve" },
+            },
+            required: ["keyName"],
+          },
+        },
+        {
+          name: "list_vault_secrets",
+          description: "List all secret keys stored in the encrypted AI vault. Use when DK asks 'Vault me kya kya save hai'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+            required: [],
+          },
+        },
+        {
+          name: "get_train_live_status",
+          description: "Get IRCTC live train running status, delay minutes, platform number, and route status. Use when DK asks 'Train ka running status batao', 'Rajdhani express kitni late hai'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              trainNumberOrName: { type: "STRING", description: "Train number or name (e.g. '12309', 'Rajdhani Express', 'Vande Bharat')" },
+            },
+            required: ["trainNumberOrName"],
+          },
+        },
+        {
+          name: "check_pnr_status",
+          description: "Check IRCTC 10-digit PNR booking status, coach, and berth confirmation. Use when DK asks to check a PNR number.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              pnrNumber: { type: "STRING", description: "10-digit Indian Railways PNR number" },
+            },
+            required: ["pnrNumber"],
+          },
+        },
+        {
+          name: "control_smart_device",
+          description: "Control smart home lights, smart plugs, AC temperature, and fan speeds. Use when DK says 'Light band karo', 'AC 24 degree karo', 'Fan speed badhao'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              deviceNameOrRoom: { type: "STRING", description: "Device name or room (e.g. 'Desk Light', 'AC', 'Bedroom lights')" },
+              action: { type: "STRING", description: "Action: 'turn_on', 'turn_off', 'toggle', 'set_temp', 'set_brightness'" },
+              value: { type: "NUMBER", description: "Optional numeric value for temperature or brightness (e.g. 24 for AC, 80 for brightness)" },
+            },
+            required: ["deviceNameOrRoom", "action"],
+          },
+        },
+        {
+          name: "get_smart_home_status",
+          description: "View all connected IoT smart home devices and their current ON/OFF status. Use when DK asks 'Smart home status batao'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+            required: [],
+          },
+        },
+        {
+          name: "start_focus_mode",
+          description: "Activate Pomodoro Focus Mode with relaxing background Lo-Fi audio stream and silenced notifications. Use when DK says 'Focus mode on karo', '25 minute ka study timer chalao'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              durationMinutes: { type: "NUMBER", description: "Duration of focus session in minutes (default 25)" },
+              goalTitle: { type: "STRING", description: "Focus goal or work title (e.g. 'Deep Coding', 'Exam Prep')" },
+            },
+            required: [],
+          },
+        },
+        {
+          name: "stop_focus_mode",
+          description: "Deactivate Pomodoro Focus Mode and return to normal mode. Use when DK says 'Focus mode band karo'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+            required: [],
           },
         },
         {
@@ -3372,6 +3701,230 @@ HOW TO READ MESSAGES:
                     );
                   } catch (e: any) {
                     result = { success: false, message: `Screen analysis fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "switch_voice_persona") {
+                  const { personaName } = call.args || {};
+                  try {
+                    result = toolsEngine.switchVoicePersona(String(personaName || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Persona switch fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "organize_directory") {
+                  const { directoryPath } = call.args || {};
+                  try {
+                    result = await toolsEngine.organizeDirectory(directoryPath ? String(directoryPath) : undefined);
+                  } catch (e: any) {
+                    result = { success: false, message: `File organization fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "clean_temp_files") {
+                  try {
+                    result = await toolsEngine.cleanTempFiles();
+                  } catch (e: any) {
+                    result = { success: false, message: `Temp file cleanup fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "add_expense") {
+                  const { amount, description, categoryHint } = call.args || {};
+                  try {
+                    result = await toolsEngine.addExpense(
+                      Number(amount || 0),
+                      String(description || ""),
+                      categoryHint ? String(categoryHint) : undefined
+                    );
+                  } catch (e: any) {
+                    result = { success: false, message: `Expense add fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_expense_summary") {
+                  const { filterMonth } = call.args || {};
+                  try {
+                    result = await toolsEngine.getExpenseSummary(filterMonth ? String(filterMonth) : undefined);
+                  } catch (e: any) {
+                    result = { success: false, message: `Expense summary check fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "schedule_meeting") {
+                  const { title, timeString, durationMinutes, locationOrLink } = call.args || {};
+                  try {
+                    result = await toolsEngine.scheduleMeeting(
+                      String(title || "Meeting"),
+                      String(timeString || "Soon"),
+                      durationMinutes ? Number(durationMinutes) : 30,
+                      locationOrLink ? String(locationOrLink) : undefined
+                    );
+                  } catch (e: any) {
+                    result = { success: false, message: `Meeting schedule fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_upcoming_meetings") {
+                  try {
+                    result = await toolsEngine.getUpcomingMeetings();
+                  } catch (e: any) {
+                    result = { success: false, message: `Upcoming meetings check fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "summarize_inbox") {
+                  try {
+                    result = await toolsEngine.summarizeInbox();
+                  } catch (e: any) {
+                    result = { success: false, message: `Inbox summary fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "send_quick_email") {
+                  const { toEmail, subject, bodyText } = call.args || {};
+                  try {
+                    result = await toolsEngine.sendQuickEmail(
+                      String(toEmail || ""),
+                      String(subject || ""),
+                      String(bodyText || "")
+                    );
+                  } catch (e: any) {
+                    result = { success: false, message: `Email send fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "log_water_intake") {
+                  const { glasses } = call.args || {};
+                  try {
+                    result = await toolsEngine.logWaterIntake(glasses ? Number(glasses) : 1);
+                  } catch (e: any) {
+                    result = { success: false, message: `Water log fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_health_status") {
+                  try {
+                    result = await toolsEngine.getHealthStatus();
+                  } catch (e: any) {
+                    result = { success: false, message: `Health status check fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "add_to_shopping_list") {
+                  const { itemsQuery } = call.args || {};
+                  try {
+                    result = await toolsEngine.addToShoppingList(String(itemsQuery || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Shopping list add fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_shopping_list") {
+                  try {
+                    result = await toolsEngine.getShoppingList();
+                  } catch (e: any) {
+                    result = { success: false, message: `Shopping list get fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "send_shopping_list_on_whatsapp") {
+                  const { targetPhone } = call.args || {};
+                  try {
+                    result = await toolsEngine.sendShoppingListOnWhatsApp(targetPhone ? String(targetPhone) : undefined);
+                  } catch (e: any) {
+                    result = { success: false, message: `Shopping list WhatsApp send fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "clear_shopping_list") {
+                  try {
+                    result = await toolsEngine.clearShoppingList();
+                  } catch (e: any) {
+                    result = { success: false, message: `Shopping list clear fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "trigger_emergency_sos") {
+                  const { customMessage, targetPhone } = call.args || {};
+                  try {
+                    result = await toolsEngine.triggerEmergencySos(
+                      customMessage ? String(customMessage) : undefined,
+                      targetPhone ? String(targetPhone) : undefined
+                    );
+                  } catch (e: any) {
+                    result = { success: false, message: `Emergency SOS trigger fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "generate_daily_podcast") {
+                  try {
+                    result = await toolsEngine.generateDailyPodcast();
+                  } catch (e: any) {
+                    result = { success: false, message: `Podcast generation fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "send_fast2sms_message") {
+                  const { phoneNumber, messageText } = call.args || {};
+                  try {
+                    result = await toolsEngine.sendFast2Sms(String(phoneNumber || ""), String(messageText || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Fast2SMS send fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "summarize_voice_note") {
+                  const { transcript, senderName } = call.args || {};
+                  try {
+                    result = await toolsEngine.summarizeVoiceNote(String(transcript || ""), senderName ? String(senderName) : undefined);
+                  } catch (e: any) {
+                    result = { success: false, message: `Voice note summary fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "store_vault_secret") {
+                  const { keyName, secretValue, category } = call.args || {};
+                  try {
+                    result = await toolsEngine.storeVaultSecret(
+                      String(keyName || ""),
+                      String(secretValue || ""),
+                      category ? String(category) : undefined
+                    );
+                  } catch (e: any) {
+                    result = { success: false, message: `Vault save fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "retrieve_vault_secret") {
+                  const { keyName } = call.args || {};
+                  try {
+                    result = await toolsEngine.retrieveVaultSecret(String(keyName || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Vault retrieve fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "list_vault_secrets") {
+                  try {
+                    result = await toolsEngine.listVaultSecrets();
+                  } catch (e: any) {
+                    result = { success: false, message: `Vault list fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_train_live_status") {
+                  const { trainNumberOrName } = call.args || {};
+                  try {
+                    result = await toolsEngine.getTrainLiveStatus(String(trainNumberOrName || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Train status check fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "check_pnr_status") {
+                  const { pnrNumber } = call.args || {};
+                  try {
+                    result = await toolsEngine.checkPnrStatus(String(pnrNumber || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `PNR check fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "control_smart_device") {
+                  const { deviceNameOrRoom, action, value } = call.args || {};
+                  try {
+                    result = toolsEngine.controlSmartDevice(
+                      String(deviceNameOrRoom || ""),
+                      action,
+                      value ? Number(value) : undefined
+                    );
+                  } catch (e: any) {
+                    result = { success: false, message: `Smart device control fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_smart_home_status") {
+                  try {
+                    result = toolsEngine.getSmartHomeStatus();
+                  } catch (e: any) {
+                    result = { success: false, message: `Smart home status check fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "start_focus_mode") {
+                  const { durationMinutes, goalTitle } = call.args || {};
+                  try {
+                    result = await toolsEngine.startFocusMode(
+                      durationMinutes ? Number(durationMinutes) : 25,
+                      goalTitle ? String(goalTitle) : undefined
+                    );
+                    if (result.lofiStreamUrl) {
+                      clientWs.send(JSON.stringify({
+                        type: 'play_music',
+                        trackName: `Focus Mode Lo-Fi Beats (${result.goalTitle})`,
+                        artistName: "Friday Productivity Lo-Fi",
+                        audioUrl: result.lofiStreamUrl,
+                        isFullSong: true,
+                        quality: "Chill Lo-Fi Radio",
+                      }));
+                    }
+                  } catch (e: any) {
+                    result = { success: false, message: `Focus mode start fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "stop_focus_mode") {
+                  try {
+                    result = toolsEngine.stopFocusMode();
+                    safeSend(JSON.stringify({ type: 'stop_music' }));
+                  } catch (e: any) {
+                    result = { success: false, message: `Focus mode stop fail hua: ${e?.message || e}` };
                   }
                 } else if (call.name === "play_music") {
                   const { songName } = call.args || {};
