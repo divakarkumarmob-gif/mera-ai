@@ -5,7 +5,6 @@ import AgentFace from './AgentFace';
 import ChatHistoryModal from './ChatHistoryModal';
 import WhatsAppPairModal from './WhatsAppPairModal';
 import CodeAgentPage from './CodeAgentPage';
-import { FridayMessenger } from './FridayMessenger';
 import { getWsUrl } from '@/utils/api';
 import { wakeWordManager } from '@/utils/wakeWord';
 
@@ -594,7 +593,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const [showChatHistory, setShowChatHistory] = useState(false);
     const [showCodeAgent, setShowCodeAgent] = useState(false);
     const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
-    const [showFridayMessenger, setShowFridayMessenger] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const captionBoxRef = useRef<HTMLDivElement>(null);
     const userScrolledUpRef = useRef(false);
@@ -798,12 +796,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const isWarningSpokenRef = useRef<boolean>(false);
     const speakingCooldownUntilRef = useRef<number>(0);
     const hasSpokenInTurnRef = useRef<boolean>(false);
-    // Timestamp of the last moment real speech (RMS above threshold) was
-    // detected on the mic. Used by the "stuck on Listening" watchdog below.
-    const lastSpeechAtRef = useRef<number>(0);
-    // Guards against sending the audioStreamEnd nudge more than once per
-    // turn (would otherwise fire repeatedly every watchdog tick).
-    const stuckNudgeSentRef = useRef<boolean>(false);
     // True for the ENTIRE duration of one AI turn (from the first "thinking"/
     // "speaking" event until turnComplete AND all buffered audio has actually
     // finished playing). Unlike isAiSpeaking (which briefly flips false in the
@@ -916,8 +908,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         aiTurnActiveRef.current = false;
         turnCompletePendingRef.current = false;
         isConnectingRef.current = false;
-        hasSpokenInTurnRef.current = false;
-        stuckNudgeSentRef.current = false;
         setIsRecording(false);
         setStatus("Idle");
     };
@@ -928,8 +918,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         resetTypewriter();
         aiTurnActiveRef.current = false;
         turnCompletePendingRef.current = false;
-        hasSpokenInTurnRef.current = false;
-        stuckNudgeSentRef.current = false;
         setStatus("Listening...");
     };
 
@@ -998,46 +986,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isRecording]);
 
-    // ── "Stuck on Listening" watchdog ───────────────────────────────────────
-    // DK says "Hello Friday", speaks, then goes quiet -> we keep streaming
-    // audio to Gemini and wait for its server-side VAD to notice the silence
-    // and finalize the turn (thinking/speaking/turnComplete). If Gemini's VAD
-    // doesn't fire in time (background noise, a very soft trailing word, etc.)
-    // nothing ever arrives and the UI is left saying "Listening..." forever
-    // with no way out. This watches for that exact case and gives Gemini an
-    // explicit nudge — the same audioStreamEnd signal the server already
-    // knows how to handle — instead of silently hanging.
-    useEffect(() => {
-        if (!isRecording) return;
-
-        const watchdog = setInterval(() => {
-            if (statusRef.current !== "Listening...") return;
-            if (!hasSpokenInTurnRef.current) return;
-            if (aiTurnActiveRef.current) return;
-            const silentFor = Date.now() - lastSpeechAtRef.current;
-
-            if (!stuckNudgeSentRef.current && silentFor > 2500) {
-                // First nudge: tell Gemini explicitly that the user stopped
-                // talking so its VAD flushes the buffered audio right away.
-                stuckNudgeSentRef.current = true;
-                try {
-                    ws.current?.send(JSON.stringify({ type: "audio_stream_end" }));
-                } catch (e) {
-                    console.error("[Friday] Failed to send stuck-listening nudge:", e);
-                }
-            } else if (stuckNudgeSentRef.current && silentFor > 8000) {
-                // Nudge didn't help either — give up waiting on this turn so
-                // the mic doesn't stay in limbo; DK can just speak again.
-                console.warn("[Friday] Listening watchdog: no AI response after nudge, resetting turn.");
-                hasSpokenInTurnRef.current = false;
-                stuckNudgeSentRef.current = false;
-            }
-        }, 500);
-
-        return () => clearInterval(watchdog);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isRecording]);
-
     /**
      * Wires up a MediaStream to the input AudioContext + ScriptProcessor and
      * attaches the shared onaudioprocess handler (RMS voice detection, hard
@@ -1094,8 +1042,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
             const isHumanSpeaking = rms >= 10;
             if (isHumanSpeaking) {
                 lastActivityTimeRef.current = Date.now();
-                lastSpeechAtRef.current = Date.now();
-                hasSpokenInTurnRef.current = true;
                 if (isWarningSpokenRef.current) {
                     isWarningSpokenRef.current = false;
                     setInactivityCountdown(null);
@@ -1211,8 +1157,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     if (outputAudioCtx.current) {
                         aiTurnActiveRef.current = true;
                         turnCompletePendingRef.current = false;
-                        hasSpokenInTurnRef.current = false;
-                        stuckNudgeSentRef.current = false;
                         setStatus("Speaking...");
                         playAudioChunk(outputAudioCtx.current, msg.audio, nextStartTime, isAiSpeaking, speakingCooldownUntilRef);
                     }
@@ -1220,8 +1164,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     aiTurnActiveRef.current = true;
                     turnCompletePendingRef.current = false;
                     isAiThinkingRef.current = true;
-                    hasSpokenInTurnRef.current = false;
-                    stuckNudgeSentRef.current = false;
                     setStatus("Thinking...");
                     // Bug Fix 2: Safety escape — if AI is stuck in thinking for >30s,
                     // force-clear it so the mic is not permanently muted.
@@ -1255,8 +1197,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 } else if (msg.turnComplete) {
                     captionTurnStartedRef.current = false;
                     isAiThinkingRef.current = false;
-                    hasSpokenInTurnRef.current = false;
-                    stuckNudgeSentRef.current = false;
                     // Don't drop aiTurnActiveRef here — text/turnComplete can
                     // arrive before the trailing audio chunks finish playing.
                     // The status-polling interval clears it once currentTime
@@ -1279,8 +1219,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     // the flag here so the mic can't stay muted forever.
                     aiTurnActiveRef.current = false;
                     turnCompletePendingRef.current = false;
-                    hasSpokenInTurnRef.current = false;
-                    stuckNudgeSentRef.current = false;
                     if (initAckTimeoutRef.current) { clearTimeout(initAckTimeoutRef.current); initAckTimeoutRef.current = null; }
                     setStatus("Listening...");
                     if (pendingImagePayloadsRef.current.length > 0) {
@@ -1338,8 +1276,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     isAiThinkingRef.current = false;
                     aiTurnActiveRef.current = false;
                     turnCompletePendingRef.current = false;
-                    hasSpokenInTurnRef.current = false;
-                    stuckNudgeSentRef.current = false;
                     nextStartTime.current = outputAudioCtx.current?.currentTime || 0;
                     resetTypewriter();
                     setStatus("Listening...");
@@ -1513,7 +1449,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         <button onClick={() => setShowCaptions(!showCaptions)} className={showCaptions ? 'text-green-500' : 'text-white'}>
                             <Captions className="h-6 w-6" />
                         </button>
-                        <button onClick={() => setShowChatHistory(true)} className="text-white" title="Chat History">
+                        <button onClick={() => setShowChatHistory(true)} className="text-white">
                             <MessageSquare className="h-6 w-6" />
                         </button>
                         <button onClick={() => setShowCodeAgent(true)} className="text-white hover:text-cyan-400 transition-colors" title="Coding Agent & Diagnostics Logs">
@@ -2028,7 +1964,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
             {showChatHistory && <ChatHistoryModal onClose={() => setShowChatHistory(false)} />}
             {showCodeAgent && <CodeAgentPage onClose={() => setShowCodeAgent(false)} />}
             <WhatsAppPairModal isOpen={showWhatsAppModal} onClose={() => setShowWhatsAppModal(false)} />
-            {showFridayMessenger && <FridayMessenger onClose={() => setShowFridayMessenger(false)} />}
 
             {/* Deep Research Report Modal */}
             <AnimatePresence>
