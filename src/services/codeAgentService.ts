@@ -403,43 +403,79 @@ Rules:
     return snap.docs[0].data() as CodeAgentRequest;
   }
 
-  public async approve(id: string) {
-    await this.addLog(id, "User approved plan. Starting code generation and git operations...", "info", "approved");
-    await requestsCol().doc(id).set({ status: "approved", updatedAt: Date.now() }, { merge: true });
-    this.applyChanges(id).catch((e) => {
-      console.error(`[CodeAgent] Applying changes failed for request ${id}:`, e);
-      this.markFailed(id, e?.message || String(e), "apply_phase");
+  public async approve(id?: string): Promise<{ success: boolean; message: string }> {
+    let targetId = id;
+    if (!targetId) {
+      const pending = await this.getPendingRequest();
+      if (!pending) return { success: false, message: "Koi pending Coding Agent request nahi mili jise approve kiya ja sake." };
+      targetId = pending.id;
+    }
+
+    await this.addLog(targetId, "User approved plan. Starting code generation and git operations...", "info", "approved");
+    await requestsCol().doc(targetId).set({ status: "approved", updatedAt: Date.now() }, { merge: true });
+    this.applyChanges(targetId).catch((e) => {
+      console.error(`[CodeAgent] Applying changes failed for request ${targetId}:`, e);
+      this.markFailed(targetId!, e?.message || String(e), "apply_phase");
     });
+    return { success: true, message: `Boss, Coding Agent task (${targetId}) approve kar diya gaya hai! Code likhkar branch me commit kiya ja raha hai.` };
   }
 
   /**
    * Approves the plan, writes code, and immediately pushes & commits directly to the main origin branch.
    */
-  public async approveAndPushDirectlyToMain(id: string): Promise<void> {
-    await this.addLog(id, "Direct Commit to Main requested via Live Voice by Boss.", "info", "approved_main");
-    await requestsCol().doc(id).set({ status: "applying", updatedAt: Date.now() }, { merge: true });
+  public async approveAndPushDirectlyToMain(id?: string): Promise<{ success: boolean; message: string }> {
+    let targetId = id;
+    if (!targetId) {
+      const pending = await this.getPendingRequest();
+      if (!pending) return { success: false, message: "Koi pending Coding Agent request nahi mili jise master me commit kiya ja sake." };
+      targetId = pending.id;
+    }
+
+    await this.addLog(targetId, "Direct Commit to Main requested via Live Voice by Boss.", "info", "approved_main");
+    await requestsCol().doc(targetId).set({ status: "applying", updatedAt: Date.now() }, { merge: true });
 
     (async () => {
       try {
-        await this.generateDiffPreview(id);
-        const result = await this.pushToMain(id);
-        await this.addLog(id, `Successfully committed directly to main origin: ${result.commitUrl}`, "success", "completed");
+        await this.generateDiffPreview(targetId!);
+        const result = await this.pushToMain(targetId!);
+        await this.addLog(targetId!, `Successfully committed directly to main origin: ${result.commitUrl}`, "success", "completed");
       } catch (err: any) {
-        console.error(`[CodeAgent] Direct push to main failed for ${id}:`, err);
-        await this.markFailed(id, err?.message || String(err), "push_to_main");
+        console.error(`[CodeAgent] Direct push to main failed for ${targetId}:`, err);
+        await this.markFailed(targetId!, err?.message || String(err), "push_to_main");
       }
     })();
+
+    return {
+      success: true,
+      message: `Boss, Coding Agent ko command de di hai! Code generate karke direct main origin branch me commit aur push kiya ja raha hai.`,
+    };
   }
 
-  public async deny(id: string) {
-    await this.addLog(id, "Plan denied by user.", "warn", "denied");
-    await requestsCol().doc(id).set({ status: "denied", updatedAt: Date.now() }, { merge: true });
+  public async deny(id?: string): Promise<{ success: boolean; message: string }> {
+    let targetId = id;
+    if (!targetId) {
+      const pending = await this.getPendingRequest();
+      if (!pending) return { success: false, message: "Koi pending Coding Agent request nahi mili jise reject kiya ja sake." };
+      targetId = pending.id;
+    }
+
+    await this.addLog(targetId, "Plan denied by user.", "warn", "denied");
+    await requestsCol().doc(targetId).set({ status: "denied", updatedAt: Date.now() }, { merge: true });
+    return { success: true, message: `Boss, Coding Agent task (${targetId}) reject/cancel kar diya gaya hai.` };
   }
 
   /** Stops and cancels an in-progress coding agent task */
-  public async stop(id: string) {
-    await this.addLog(id, "⏹️ Task stopped and cancelled by user.", "warn", "stopped");
-    await requestsCol().doc(id).set(
+  public async stop(id?: string): Promise<{ success: boolean; message: string }> {
+    let targetId = id;
+    if (!targetId) {
+      const requests = await this.getRequests();
+      const active = requests.find((r) => r.status === "analyzing" || r.status === "applying" || r.status === "pending_approval");
+      if (!active) return { success: false, message: "Koi active running Coding Agent task nahi mila." };
+      targetId = active.id;
+    }
+
+    await this.addLog(targetId, "⏹️ Task stopped and cancelled by user.", "warn", "stopped");
+    await requestsCol().doc(targetId).set(
       {
         status: "denied",
         error: "Task was manually stopped by user.",
@@ -447,6 +483,70 @@ Rules:
       },
       { merge: true }
     );
+    return { success: true, message: `Boss, Coding Agent task (${targetId}) stop kar diya gaya hai.` };
+  }
+
+  /**
+   * Executive summary for Friday's Voice AI to understand live Coding Agent status.
+   */
+  public async getLiveStatusSummary(): Promise<{
+    hasPendingApproval: boolean;
+    pendingRequestId?: string;
+    pendingPlanTitle?: string;
+    pendingFiles?: string[];
+    latestStatus: string;
+    message: string;
+  }> {
+    try {
+      const pending = await this.getPendingRequest();
+      if (pending) {
+        return {
+          hasPendingApproval: true,
+          pendingRequestId: pending.id,
+          pendingPlanTitle: pending.plan?.summary || pending.problemTitle,
+          pendingFiles: pending.plan?.files.map((f) => f.path) || [],
+          latestStatus: "pending_approval",
+          message: `Boss, Coding Agent approval maang raha hai! Task: "${pending.problemTitle}". Plan summary: "${pending.plan?.summary || 'Code modifications'}". Affected files: ${pending.plan?.files.map((f) => f.path).join(", ") || "N/A"}. Aap bol sakte hain: "Approve kar do", "Commit to master kar do", ya "Reject kar do".`,
+        };
+      }
+
+      const requests = await this.getRequests();
+      if (!requests || requests.length === 0) {
+        return {
+          hasPendingApproval: false,
+          latestStatus: "idle",
+          message: "Boss, Coding Agent abhi bilkul idle hai. Koi pending task ya approval nahi hai.",
+        };
+      }
+
+      const latest = requests[0];
+      let statusDesc = "";
+      if (latest.status === "analyzing") {
+        statusDesc = `Coding Agent abhi "${latest.problemTitle}" ka code analyze karke plan bana raha hai.`;
+      } else if (latest.status === "applying") {
+        statusDesc = `Coding Agent abhi code likh raha hai aur git branch me commit prepare kar raha hai. Task: "${latest.problemTitle}".`;
+      } else if (latest.status === "completed") {
+        statusDesc = `Coding Agent ka last task "${latest.problemTitle}" complete ho chuka hai! Code likhkar branch me commit aur push kar diya gaya hai.`;
+      } else if (latest.status === "denied") {
+        statusDesc = `Last task "${latest.problemTitle}" reject kar diya gaya tha.`;
+      } else if (latest.status === "failed") {
+        statusDesc = `Last task "${latest.problemTitle}" fail ho gaya tha: ${latest.error || "Unknown error"}.`;
+      } else {
+        statusDesc = `Coding Agent ka status abhi "${latest.status}" hai. Task: "${latest.problemTitle}".`;
+      }
+
+      return {
+        hasPendingApproval: false,
+        latestStatus: latest.status,
+        message: `Boss, ${statusDesc}`,
+      };
+    } catch (e: any) {
+      return {
+        hasPendingApproval: false,
+        latestStatus: "error",
+        message: `Coding Agent status check fail hua: ${e?.message || e}`,
+      };
+    }
   }
 
   public async handleWhatsAppApprovalReply(text: string): Promise<boolean> {
