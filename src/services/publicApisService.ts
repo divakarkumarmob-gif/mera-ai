@@ -3240,51 +3240,62 @@ class PublicApisService {
     const tracks: any[] = [];
 
     // Source 1: JioSaavn Free Public Search (100% Free, Full Length 320kbps & 160kbps MP3/AAC streams)
-    try {
-      const saavnRes = await fetchJson(
-        `https://saavn.dev/api/search/songs?query=${encodeURIComponent(q)}&limit=8`,
-        5000
-      );
-      const songList = saavnRes?.data?.results || saavnRes?.results || [];
-      if (Array.isArray(songList) && songList.length > 0) {
-        for (const s of songList) {
-          const downloadUrls = s.downloadUrl || [];
-          const bestStream =
-            downloadUrls.find((u: any) => u.quality === "320kbps")?.url ||
-            downloadUrls.find((u: any) => u.quality === "160kbps")?.url ||
-            downloadUrls[downloadUrls.length - 1]?.url ||
-            s.media_url ||
-            s.url;
+    const saavnEndpoints = [
+      `https://jiosaavn-api-unofficial.vercel.app/search/songs?query=${encodeURIComponent(q)}&limit=8`,
+      `https://saavn.dev/api/search/songs?query=${encodeURIComponent(q)}&limit=8`,
+      `https://jiosaavn-api.vercel.app/search/songs?query=${encodeURIComponent(q)}&limit=8`,
+    ];
 
-          const images = s.image || [];
-          const bestImage =
-            images.find((img: any) => img.quality === "500x500")?.url ||
-            images[images.length - 1]?.url ||
-            s.image;
+    for (const ep of saavnEndpoints) {
+      if (tracks.length > 0) break;
+      try {
+        const saavnRes = await fetchJson(ep, 5000);
+        const songList = saavnRes?.results || saavnRes?.data?.results || saavnRes?.data || [];
+        if (Array.isArray(songList) && songList.length > 0) {
+          for (const s of songList) {
+            const downloadUrls = s.downloadUrl || [];
+            const bestStream =
+              downloadUrls.find((u: any) => u.quality === "320kbps")?.link ||
+              downloadUrls.find((u: any) => u.quality === "320kbps")?.url ||
+              downloadUrls.find((u: any) => u.quality === "160kbps")?.link ||
+              downloadUrls.find((u: any) => u.quality === "160kbps")?.url ||
+              downloadUrls[downloadUrls.length - 1]?.link ||
+              downloadUrls[downloadUrls.length - 1]?.url ||
+              s.media_url ||
+              s.url;
 
-          const primaryArtists = Array.isArray(s.artists?.primary)
-            ? s.artists.primary.map((a: any) => a.name).join(", ")
-            : s.artist || s.singers || s.primaryArtists || "";
+            const images = s.image || [];
+            const bestImage =
+              images.find((img: any) => img.quality === "500x500")?.link ||
+              images.find((img: any) => img.quality === "500x500")?.url ||
+              images[images.length - 1]?.link ||
+              images[images.length - 1]?.url ||
+              s.image;
 
-          if (bestStream) {
-            tracks.push({
-              trackName: s.name || s.title,
-              artistName: primaryArtists,
-              albumName: s.album?.name || s.album,
-              albumArt: bestImage,
-              durationSec: s.duration ? Number(s.duration) : undefined,
-              fullAudioUrl: bestStream,
-              previewUrl: bestStream,
-              isFullSong: true,
-              quality: "320kbps Full HD",
-              spotifyUrl: `https://open.spotify.com/search/${encodeURIComponent((s.name || s.title) + " " + primaryArtists)}`,
-              youtubeMusicUrl: `https://music.youtube.com/search?q=${encodeURIComponent((s.name || s.title) + " " + primaryArtists)}`,
-              source: "jiosaavn_full",
-            });
+            const primaryArtists = Array.isArray(s.artists?.primary)
+              ? s.artists.primary.map((a: any) => a.name).join(", ")
+              : (typeof s.artists === "string" ? s.artists : "") || s.artist || s.singers || s.primaryArtists || "";
+
+            if (bestStream) {
+              tracks.push({
+                trackName: s.name || s.title,
+                artistName: primaryArtists,
+                albumName: s.album?.name || s.album,
+                albumArt: bestImage,
+                durationSec: s.duration ? Number(s.duration) : undefined,
+                fullAudioUrl: bestStream,
+                previewUrl: bestStream,
+                isFullSong: true,
+                quality: "320kbps Full HD",
+                spotifyUrl: `https://open.spotify.com/search/${encodeURIComponent((s.name || s.title) + " " + primaryArtists)}`,
+                youtubeMusicUrl: `https://music.youtube.com/search?q=${encodeURIComponent((s.name || s.title) + " " + primaryArtists)}`,
+                source: "jiosaavn_full",
+              });
+            }
           }
         }
-      }
-    } catch { /* fall through to Deezer / iTunes */ }
+      } catch { /* try next endpoint */ }
+    }
 
     // Source 2: Deezer API
     if (tracks.length < 3) {
