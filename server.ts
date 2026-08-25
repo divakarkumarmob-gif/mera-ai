@@ -2959,9 +2959,41 @@ HOW TO READ MESSAGES:
         },
       ];
 
-      return await ai.live.connect({
+      // Closure ref so onopen/onerror/onclose below can tell whether THIS
+      // session is still the active one (vs. one that was intentionally
+      // superseded/closed, e.g. on a settings change) before reconnecting.
+      // Assigned right after ai.live.connect() resolves, below.
+      let thisSessionRef: any;
+
+      const newSession = await ai.live.connect({
         model: "gemini-3.1-flash-live-preview",
         callbacks: {
+          onopen: () => {
+            console.log(`[Server] 🟢 Gemini Live session opened (session=${sessionId})`);
+          },
+          onerror: (err: any) => {
+            // ── DEBUG: this is the #1 suspect for "stuck on Listening" ──
+            // If the underlying Gemini socket dies mid-conversation and we
+            // never hear about it, currentSession stays non-null, audio
+            // keeps getting silently forwarded into a dead session, and the
+            // client just sits on "Listening..." forever waiting for a
+            // reply that will never come. Previously there was NO onerror/
+            // onclose handler at all, so this failure mode was invisible.
+            console.error(`[Server] ❌ Gemini Live session ERROR (session=${sessionId}):`, err?.message || err);
+            if (currentSession === thisSessionRef) {
+              currentSession = undefined;
+              autoReconnect();
+            }
+          },
+          onclose: (evt: any) => {
+            console.warn(
+              `[Server] 🔌 Gemini Live session CLOSED (session=${sessionId}) code=${evt?.code} reason=${evt?.reason || "n/a"}`
+            );
+            if (currentSession === thisSessionRef) {
+              currentSession = undefined;
+              autoReconnect();
+            }
+          },
           onmessage: async (message: any) => {
             const parts = message.serverContent?.modelTurn?.parts || [];
             let hasAudio = false;
@@ -4750,6 +4782,13 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
           systemInstruction,
         },
       });
+
+      // Now that connect() has resolved, wire up the self-reference so the
+      // onerror/onclose handlers above can confirm this is still the active
+      // session before triggering a reconnect (avoids reconnect-storms when
+      // a session is closed on purpose, e.g. settings change).
+      thisSessionRef = newSession;
+      return newSession;
     };
 
     let pendingImages: any[] = [];
@@ -4834,6 +4873,7 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
       }
 
       if (parsedData.type === "init") {
+        console.log(`[Server] 🎙️ init received (session=${sessionId}), (re)creating Gemini Live session...`);
         // Track params for auto-reconnect
         lastVoice = parsedData.voice || "Aoede";
         lastThinkingLevel = parsedData.thinkingLevel || "high";
@@ -4901,6 +4941,7 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
           // explicitly so its server-side VAD flushes the buffered audio and
           // finalizes the turn immediately, instead of waiting indefinitely
           // for more audio that will never come until the mic re-opens.
+          console.log(`[Server] 🔕 audio_stream_end received from client (session=${sessionId}) — flushing turn to Gemini.`);
           try {
             currentSession.sendRealtimeInput({ audioStreamEnd: true });
           } catch (e) {
@@ -4933,14 +4974,16 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
         }
       } catch (streamErr: any) {
         const msg = streamErr?.message || String(streamErr);
-        // Detect connection-forcibly-closed (wsarecv) or stream errors
-        if (/wsarecv|stream reading|forcibly closed|ECONNRESET|EPIPE|closed/i.test(msg)) {
-          console.warn("[Server] ⚠️ Gemini stream dropped mid-message:", msg);
-          currentSession = undefined;
-          autoReconnect();
-        } else {
-          console.error("[Server] Message handling error:", streamErr);
-        }
+        console.error(`[Server] ⚠️ Gemini send failed (session=${sessionId}):`, msg);
+        // DEBUG NOTE: this used to only reconnect for a narrow regex of
+        // known socket-closed error strings; anything else was just logged
+        // and swallowed, leaving `currentSession` pointing at a session that
+        // could no longer actually deliver audio to Gemini — the client
+        // would then sit on "Listening..." forever with no response ever
+        // arriving. Now ANY failure to send here is treated as the session
+        // being unusable, so we always attempt a reconnect.
+        currentSession = undefined;
+        autoReconnect();
       }
     });
 
