@@ -286,6 +286,54 @@ async function startServer() {
     res.json({ ok: true, ...telegramBotService.getStatus() });
   });
 
+  app.get("/api/telegram/users", async (_req, res) => {
+    try {
+      const users = await telegramBotService.getAllTelegramUsers();
+      res.json({ ok: true, users, count: users.length });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || e });
+    }
+  });
+
+  app.get("/api/telegram/groups", async (_req, res) => {
+    try {
+      const groups = await telegramBotService.getAllTelegramGroups();
+      res.json({ ok: true, groups, count: groups.length });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || e });
+    }
+  });
+
+  app.get("/api/telegram/messages", async (req, res) => {
+    try {
+      const target = (req.query.target as string) || "all";
+      const limit = Number(req.query.limit) || 25;
+      const history = await telegramBotService.getChatHistory(target, limit);
+      res.json({ ok: true, ...history });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || e });
+    }
+  });
+
+  app.post("/api/telegram/users/modify", async (req, res) => {
+    const { target, customAlias, customNotes } = req.body || {};
+    if (!target) return res.status(400).json({ ok: false, error: "target_required" });
+    const result = await telegramBotService.modifyTelegramUser(target, { customAlias, customNotes });
+    res.json(result);
+  });
+
+  app.get("/api/telegram/busy-message", async (_req, res) => {
+    const customBusy = await telegramBotService.getCustomBusyReply();
+    res.json({ ok: true, customBusyReply: customBusy });
+  });
+
+  app.post("/api/telegram/busy-message", async (req, res) => {
+    const { message } = req.body || {};
+    if (!message) return res.status(400).json({ ok: false, error: "message_required" });
+    const result = await telegramBotService.setCustomBusyReply(message);
+    res.json(result);
+  });
+
   app.post("/api/telegram/send", async (req, res) => {
     const { chatId, text } = req.body || {};
     if (!chatId || !text) return res.status(400).json({ error: "chatId_and_text_required" });
@@ -713,17 +761,21 @@ MEMORY — SAVING PERSONAL FACTS:
 - Always call it when DK explicitly says to remember something ("yaad rakhna", "yaad rakho", "don't forget").
 - This is separate from small talk — don't call it for generic chit-chat with no real fact in it.
 
-CONTACTS & WHATSAPP TOOLS:
+CONTACTS, WHATSAPP & TELEGRAM BOT TOOLS:
 - "save_contact": save a name+number DK gives you.
 - "delete_contact": remove a saved contact.
 - "send_whatsapp_to_contact": send a message to any contact.
-- "send_telegram_to_contact": send a Telegram message to any contact, person, username, or chat ID (e.g. "Rahul ko telegram par good night bhej do", "Telegram par @rahul ko message bhejo"). Check "success" field before confirming.
+- "send_telegram_to_contact": send a Telegram message to any contact, person, username (@user), or Telegram group (by group name or group ID). E.g. "Rahul ko telegram par good night bhej do", "Telegram par @rahul ko message bhejo", "Telegram group Tech Squad me meeting message bhejo". Check "success" field before confirming.
+- "get_telegram_bot_data": check all Telegram users and groups where Friday bot is active/used (e.g. "Telegram par kaun kaun active hai", "Telegram ke groups aur users dikhao").
+- "get_telegram_chat_history": view or search full message logs and conversations sent by users to the bot in DMs or in Telegram groups (e.g. "Telegram par kisne kya message bheja", "Rahul ne Telegram par kya bola tha", "Telegram group me kya baatein hui", "aaj Telegram par kya messages aaye").
+- "modify_telegram_user": update or add nickname/alias or notes for a Telegram user (e.g. "Telegram user rahul ka nickname 'Bro' set kar do", "is user ke notes modify karo").
+- "set_telegram_busy_message": customize Friday's auto-reply message on Telegram when people text while DK is busy (e.g. "Telegram bot ka busy message change kar do ki Boss coding kar rahe hain").
 - "pair_dedicated_whatsapp_number": link DK's spare number. Returns an 8-char Pairing Code — speak it letter by letter, tell DK to enter it in WhatsApp → Linked Devices. Never say an SMS/OTP was sent — you give the code directly.
 - "set_whatsapp_reply_limit": change how many auto-replies Friday can send a specific contact per day (default 10/day). Use whenever DK wants to increase, decrease, or set someone's daily auto-reply cap, in any phrasing — e.g. "Priya ka limit 15 kar do", "isko din mein sirf 3 hi reply karo". Confirm the new limit back to DK once set.
 - "save_daily_update": whenever DK dictates something as today's update/status ("aaj ka update note karo, maine khana kha liya"), save it with this tool. Multiple calls the same day all accumulate into one log for today — DK may call this many times across the day, each new bit gets appended, not replaced.
 - "get_daily_update": use when DK asks what he logged for a day — "aaj/kal/parso kya update tha", "X din pehle kya kiya tha".
 - Occasionally (not every turn, only when DK has been quiet for a while and nothing else is going on) you may gently ask DK "Boss, aaj ka update kya hai?" if today has no update logged yet — but don't be repetitive or pushy about it.
-- After "send_whatsapp_to_contact", check the "success" field before confirming. True → confirm warmly. False → tell DK honestly it failed, using the "message" field's reason. Never guess success.
+- After "send_whatsapp_to_contact" or "send_telegram_to_contact", check the "success" field before confirming. True → confirm warmly. False → tell DK honestly it failed, using the "message" field's reason. Never guess success.
 
 IMMEDIATE ANSWER TRIGGER: When DK asks for your response now, in any phrasing ("jawab do", "bolo", "batao"...), stop and answer immediately, no hesitation.
 
@@ -981,20 +1033,20 @@ LIVE CODING AGENT PERMISSION & VOICE COMMIT TO MAIN (SEAMLESS NON-INTERRUPTING F
 
 BOSS VOICE BIOMETRIC RECOGNITION & SENSITIVE QUERY PROTECTION:
 - Tools: 'setup_boss_voice_recognition', 'delete_boss_voice_recognition'.
-- Master Passcode/PIN: '620455' (Strictly required for setup and delete actions).
+- Authorization PIN: Verified dynamically against Firestore (doc: systemSecurity/voicePin). Never use a hardcoded PIN.
 - Maximum Profiles Allowed: 2 profiles.
 - ENROLLMENT FLOW (When DK says "voice recognise karo", "meri voice save karo", "voice setup karo", "voice pehchano"):
   1. If PIN is not provided in DK's speech:
-     - Ask warmly: "Boss ready hoon! Voice recognition setup karne ke liye apna 6-digit password batayein, aur phir calibration phrase boliye: 'Friday main tumhara boss Divakar hoon, meri aawaz pehchano'."
-  2. When DK provides the PIN (e.g. "620455") or speaks the phrase:
-     - Call 'setup_boss_voice_recognition' with pin="620455", name="Boss (Divakar)".
+     - Ask warmly: "Boss ready hoon! Voice recognition setup karne ke liye apna authorization password (PIN) batayein, aur phir calibration phrase boliye: 'Friday main tumhara boss Divakar hoon, meri aawaz pehchano'."
+  2. When DK provides the PIN or speaks the phrase:
+     - Call 'setup_boss_voice_recognition' with the exact pin provided by DK, name="Boss (Divakar)".
      - Confirm warmly: "Boss, aapki voice profile Firestore memory me successfully save ho gayi hai! Ab main aapki aawaz hamesha pehchan lungi."
   3. If PIN is wrong:
-     - Reply: "Sorry bhai, galat password hai! Voice recognition setup nahi ho sakta."
+     - Reply: "Sorry bhai, password galat hai! Voice recognition setup nahi ho sakta."
 - DELETION FLOW (When DK says "voice delete karo", "boss voice profile hatao"):
-  1. If PIN is not provided, ask: "Boss, voice profile delete karne ke liye password (PIN) confirm kijiye."
-  2. When PIN is given:
-     - Call 'delete_boss_voice_recognition' with pin="620455".
+  1. If PIN is not provided, ask: "Boss, voice profile delete karne ke liye apna authorization PIN confirm kijiye."
+  2. When PIN is given by DK:
+     - Call 'delete_boss_voice_recognition' with the exact pin given by DK.
      - Confirm: "Boss, voice profile delete kar diya gaya hai."
   3. If wrong PIN: "Sorry bhai, galat password hai! Voice delete nahi ho sakta."
 - SENSITIVE COMMAND VERIFICATION:
@@ -2681,11 +2733,11 @@ HOW TO READ MESSAGES:
         },
         {
           name: "setup_boss_voice_recognition",
-          description: "Set up and enroll Boss's voice biometric profile. Requires 6-digit PIN (620455). Enforces max 2 profiles limit. Call when DK says 'voice recognise karo', 'meri aawaz save karo', 'voice setup karo', 'voice pehchano'.",
+          description: "Set up and enroll Boss's voice biometric profile. Requires authorization PIN verified from Firestore. Enforces max 2 profiles limit. Call when DK says 'voice recognise karo', 'meri aawaz save karo', 'voice setup karo', 'voice pehchano'.",
           parameters: {
             type: "OBJECT",
             properties: {
-              pin: { type: "STRING", description: "6-digit authorization PIN (620455)" },
+              pin: { type: "STRING", description: "Authorization PIN provided by DK (verified dynamically against Firestore)" },
               name: { type: "STRING", description: "Profile Name (default 'Boss (Divakar)')" },
               spokenPhrase: { type: "STRING", description: "Calibration phrase spoken during enrollment" },
             },
@@ -2694,11 +2746,11 @@ HOW TO READ MESSAGES:
         },
         {
           name: "delete_boss_voice_recognition",
-          description: "Delete an enrolled Boss voice profile from memory. Requires 6-digit PIN (620455). Call when DK says 'voice delete karo', 'boss voice profile hatao'.",
+          description: "Delete an enrolled Boss voice profile from memory. Requires authorization PIN verified from Firestore. Call when DK says 'voice delete karo', 'boss voice profile hatao'.",
           parameters: {
             type: "OBJECT",
             properties: {
-              pin: { type: "STRING", description: "6-digit authorization PIN (620455)" },
+              pin: { type: "STRING", description: "Authorization PIN provided by DK (verified dynamically against Firestore)" },
               profileId: { type: "STRING", description: "Optional specific profile ID to delete" },
             },
             required: ["pin"],
@@ -2718,14 +2770,57 @@ HOW TO READ MESSAGES:
         },
         {
           name: "send_telegram_to_contact",
-          description: "Send a Telegram message to any person, contact name, username, or chat ID (e.g. 'Rahul ko telegram par good night bhej do', 'Telegram pe @rahul ko message bhejo'). Looks up contacts or known Telegram users and delivers the message.",
+          description: "Send a Telegram message to any person, contact name, username (@user), or Telegram group (e.g. 'Rahul ko telegram par good night bhej do', 'Telegram pe @rahul ko message bhejo', 'Telegram group Tech Squad me message bhejo'). Looks up contacts, known Telegram users, or group titles and delivers the message.",
           parameters: {
             type: "OBJECT",
             properties: {
-              recipient: { type: "STRING", description: "Contact Name (e.g. 'Rahul', 'Amit', 'Priya'), Telegram Username (e.g. '@rahul_dev'), or Chat ID" },
+              recipient: { type: "STRING", description: "Contact Name, Telegram Username (e.g. '@rahul_dev'), Group Title (e.g. 'Tech Squad'), or Chat ID" },
               message: { type: "STRING", description: "The message text to send" },
             },
             required: ["recipient", "message"],
+          },
+        },
+        {
+          name: "get_telegram_bot_data",
+          description: "Retrieve all Telegram users and groups that are using or interacting with the Friday Telegram Bot. Call when DK asks 'Telegram par kaun kaun bot use kar raha hai', 'Telegram ke groups dikhao', 'Telegram activity status batao'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+          },
+        },
+        {
+          name: "get_telegram_chat_history",
+          description: "Retrieve message logs and conversations sent by users to Friday on Telegram, in personal DMs or in Telegram groups. Call when DK asks 'Telegram par kisne kya message bheja', 'Rahul ne telegram par kya bola tha', 'Telegram group me kya baatein hui', 'aaj Telegram par kya messages aaye'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              target: { type: "STRING", description: "Optional: 'all' (default), contact name, @username, or group title" },
+              limit: { type: "NUMBER", description: "Optional number of recent messages to return (default 20)" },
+            },
+          },
+        },
+        {
+          name: "modify_telegram_user",
+          description: "Modify or set a custom nickname/alias or notes for any Telegram user. Call when DK asks 'Telegram user Rahul ka nickname Bro kar do', 'is user ke notes update karo'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              target: { type: "STRING", description: "Telegram Username (e.g. '@rahul_dev'), Name, or User ID" },
+              customAlias: { type: "STRING", description: "Optional nickname or custom alias" },
+              customNotes: { type: "STRING", description: "Optional notes about this user" },
+            },
+            required: ["target"],
+          },
+        },
+        {
+          name: "set_telegram_busy_message",
+          description: "Update the custom auto-reply busy status message for the Telegram Bot when people text while Boss is busy. Call when DK says 'Telegram bot par busy message change karo', 'auto-reply customize karo'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              message: { type: "STRING", description: "The new busy status / auto-reply message" },
+            },
+            required: ["message"],
           },
         },
         {
@@ -4524,6 +4619,68 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                     };
                   } catch (e: any) {
                     result = { success: false, message: `Telegram message fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_telegram_bot_data") {
+                  try {
+                    const [users, groups, customBusy] = await Promise.all([
+                      telegramBotService.getAllTelegramUsers(),
+                      telegramBotService.getAllTelegramGroups(),
+                      telegramBotService.getCustomBusyReply(),
+                    ]);
+                    result = {
+                      success: true,
+                      totalUsers: users.length,
+                      totalGroups: groups.length,
+                      customBusyStatus: customBusy || "Default (DK Boss is busy)",
+                      users: users.map((u) => ({
+                        id: u.chatId || u.userId,
+                        name: u.fullName,
+                        username: u.username ? `@${u.username}` : "none",
+                        alias: u.customAlias || "none",
+                        notes: u.customNotes || "none",
+                        lastSeen: new Date(u.lastSeenAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
+                        lastMessage: u.lastMessage || "",
+                        groups: u.groups || [],
+                      })),
+                      groups: groups.map((g) => ({
+                        groupId: g.groupId,
+                        title: g.title,
+                        username: g.username ? `@${g.username}` : "none",
+                        memberCount: g.activeMembers?.length || 0,
+                        members: g.activeMembers?.map((m) => m.name || m.username) || [],
+                        lastSeen: new Date(g.lastSeenAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
+                        lastMessage: g.lastMessage || "",
+                      })),
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `Telegram data retrieve karne me error: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_telegram_chat_history") {
+                  const { target, limit } = call.args || {};
+                  try {
+                    result = await telegramBotService.getChatHistory(
+                      target ? String(target) : "all",
+                      limit ? Number(limit) : 20
+                    );
+                  } catch (e: any) {
+                    result = { success: false, message: `Telegram chat history error: ${e?.message || e}` };
+                  }
+                } else if (call.name === "modify_telegram_user") {
+                  const { target, customAlias, customNotes } = call.args || {};
+                  try {
+                    result = await telegramBotService.modifyTelegramUser(
+                      String(target || ""),
+                      { customAlias, customNotes }
+                    );
+                  } catch (e: any) {
+                    result = { success: false, message: `Telegram user modify fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "set_telegram_busy_message") {
+                  const { message } = call.args || {};
+                  try {
+                    result = await telegramBotService.setCustomBusyReply(String(message || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Telegram busy reply set karne me error: ${e?.message || e}` };
                   }
                 } else if (call.name === "send_instagram_dm") {
                   const { recipient, message } = call.args || {};

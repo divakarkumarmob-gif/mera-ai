@@ -87,7 +87,7 @@ class VoiceBiometricsService {
 
   /**
    * Checks if an incoming WhatsApp message from Boss is a Voice PIN update command.
-   * e.g. "voice pin - 123456", "voice pin 620455", "voice pin: 987654"
+   * e.g. "voice pin - 123456", "voice pin 994411", "voice pin: 987654"
    */
   public async handleWhatsAppVoicePinMessage(text: string, senderName: string): Promise<{ handled: boolean; replyText?: string }> {
     const pattern = /(?:voice\s*pin|voice\s*password|security\s*pin|auth\s*pin|new\s*pin)[\s\:\-\=]+([0-9]{4,8})/i;

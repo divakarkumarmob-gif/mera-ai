@@ -98,7 +98,7 @@ function BaileysToggle() {
     );
 }
 
-// ── Boss Voice Biometrics & Recognition Manager (PIN Protected: 620455) ────────
+// ── Boss Voice Biometrics & Recognition Manager (Firestore PIN Protected) ────────
 function VoiceBiometricsManager() {
     const [profiles, setProfiles] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
@@ -189,7 +189,7 @@ function VoiceBiometricsManager() {
                 </span>
             </div>
             <p className="text-xs text-slate-400 mb-3">
-                Biometric voice shield for sensitive commands. Requires PIN <b>620455</b> to enroll or delete.
+                Biometric voice shield for sensitive commands. Requires authorization PIN saved in Firestore to enroll or delete.
             </p>
 
             {actionStatus && (
@@ -289,8 +289,8 @@ function VoiceBiometricsManager() {
 
                             <p className="text-xs text-slate-300">
                                 {pinModal.mode === 'enroll'
-                                    ? 'Setup authorization ke liye 6-digit password daalein (Default: 620455):'
-                                    : 'Voice profile delete karne ke liye 6-digit password daalein (620455):'}
+                                    ? 'Setup authorization ke liye apna saved Voice PIN daalein:'
+                                    : 'Voice profile delete karne ke liye apna saved Voice PIN daalein:'}
                             </p>
 
                             {pinModal.mode === 'enroll' && (

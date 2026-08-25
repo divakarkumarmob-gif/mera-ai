@@ -16,12 +16,43 @@ export interface TelegramStatus {
 }
 
 export interface TelegramUserProfile {
+  userId?: number;
   chatId: number;
   username?: string;
   firstName?: string;
   lastName?: string;
   fullName: string;
+  customAlias?: string;
+  customNotes?: string;
   lastSeenAt: number;
+  lastMessage?: string;
+  groups?: string[];
+}
+
+export interface TelegramGroupProfile {
+  groupId: number;
+  title: string;
+  type: "group" | "supergroup" | "channel";
+  username?: string;
+  lastSeenAt: number;
+  lastMessage?: string;
+  activeMembers?: Array<{ id: number; name: string; username?: string }>;
+}
+
+export interface TelegramMessageLog {
+  id?: string;
+  messageId: number;
+  chatId: number;
+  isGroup: boolean;
+  groupTitle?: string;
+  senderId: number;
+  senderName: string;
+  senderUsername?: string;
+  text: string;
+  mediaType: "text" | "voice" | "photo" | "document" | "audio" | "command";
+  timestamp: number;
+  timeStr: string;
+  botReply?: string;
 }
 
 class TelegramBotService {
@@ -205,47 +236,320 @@ class TelegramBotService {
     }
   }
 
-  public async saveTelegramUser(chatId: number, from: any): Promise<void> {
+  private customBusyReply: string | null = null;
+
+  public async getCustomBusyReply(): Promise<string | null> {
+    if (this.customBusyReply) return this.customBusyReply;
     try {
-      const fullName = `${from?.first_name || ""} ${from?.last_name || ""}`.trim() || "Telegram User";
-      const profile: TelegramUserProfile = {
-        chatId,
-        firstName: from?.first_name || "",
-        lastName: from?.last_name || "",
-        fullName,
-        lastSeenAt: Date.now(),
-      };
-      if (from?.username) {
-        profile.username = String(from.username).toLowerCase();
+      const doc = await db.collection("botSettings").doc("telegram").get();
+      if (doc.exists && doc.data()?.customBusyReply) {
+        this.customBusyReply = doc.data()?.customBusyReply;
+        return this.customBusyReply;
       }
-      await db.collection("telegramUsers").doc(String(chatId)).set(profile, { merge: true });
+    } catch {}
+    return null;
+  }
+
+  public async setCustomBusyReply(replyText: string): Promise<{ success: boolean; message: string }> {
+    try {
+      this.customBusyReply = replyText.trim();
+      await db.collection("botSettings").doc("telegram").set(
+        { customBusyReply: this.customBusyReply, updatedAt: Date.now() },
+        { merge: true }
+      );
+      return {
+        success: true,
+        message: `Boss, Telegram custom auto-reply status set ho gaya: "${this.customBusyReply}" ✅`,
+      };
+    } catch (e: any) {
+      return { success: false, message: `Failed to set custom busy reply: ${e?.message || e}` };
+    }
+  }
+
+  public async saveTelegramUser(from: any, directChatId?: number, groupTitle?: string, lastText?: string): Promise<void> {
+    if (!from || !from.id) return;
+    try {
+      const userId = Number(from.id);
+      const fullName = `${from.first_name || ""} ${from.last_name || ""}`.trim() || "Telegram User";
+      const docRef = db.collection("telegramUsers").doc(String(userId));
+      const existing = await docRef.get();
+      const existingData = existing.exists ? (existing.data() as TelegramUserProfile) : null;
+
+      const groupsSet = new Set<string>(existingData?.groups || []);
+      if (groupTitle) groupsSet.add(groupTitle);
+
+      const profile: Partial<TelegramUserProfile> = {
+        userId,
+        chatId: directChatId || existingData?.chatId || userId,
+        firstName: from.first_name || existingData?.firstName || "",
+        lastName: from.last_name || existingData?.lastName || "",
+        fullName: fullName || existingData?.fullName || "Telegram User",
+        lastSeenAt: Date.now(),
+        lastMessage: lastText ? lastText.substring(0, 300) : (existingData?.lastMessage || ""),
+        groups: Array.from(groupsSet),
+      };
+
+      if (from.username) {
+        profile.username = String(from.username).toLowerCase().replace(/^@/, "");
+      } else if (existingData?.username) {
+        profile.username = existingData.username;
+      }
+
+      if (existingData?.customAlias) {
+        profile.customAlias = existingData.customAlias;
+      }
+      if (existingData?.customNotes) {
+        profile.customNotes = existingData.customNotes;
+      }
+
+      await docRef.set(profile, { merge: true });
     } catch (e) {
       console.warn("[TelegramBot] Failed to save telegram user:", e);
     }
   }
 
-  /**
-   * Resolves a recipient (Contact name, username, or Chat ID) to a numeric Telegram Chat ID.
-   */
-  public async resolveTargetChatId(target: string): Promise<{ chatId?: number; name?: string; error?: string }> {
-    const raw = String(target || "").trim();
-    if (!raw) return { error: "Recipient name ya ID required hai." };
+  public async saveTelegramGroup(chat: any, from?: any, lastText?: string): Promise<void> {
+    if (!chat || !chat.id) return;
+    try {
+      const groupId = Number(chat.id);
+      const docRef = db.collection("telegramGroups").doc(String(groupId));
+      const existing = await docRef.get();
+      const existingData = existing.exists ? (existing.data() as TelegramGroupProfile) : null;
 
-    // 1. If raw is a numeric Chat ID
-    if (/^\d{5,15}$/.test(raw)) {
-      return { chatId: Number(raw), name: `User (${raw})` };
+      const membersMap = new Map<number, { id: number; name: string; username?: string }>();
+      (existingData?.activeMembers || []).forEach((m) => membersMap.set(m.id, m));
+
+      if (from && from.id) {
+        membersMap.set(Number(from.id), {
+          id: Number(from.id),
+          name: `${from.first_name || ""} ${from.last_name || ""}`.trim() || "Telegram User",
+          username: from.username ? String(from.username).toLowerCase().replace(/^@/, "") : undefined,
+        });
+      }
+
+      const groupProfile: TelegramGroupProfile = {
+        groupId,
+        title: chat.title || existingData?.title || "Telegram Group",
+        type: chat.type || existingData?.type || "group",
+        lastSeenAt: Date.now(),
+        lastMessage: lastText ? lastText.substring(0, 300) : (existingData?.lastMessage || ""),
+        activeMembers: Array.from(membersMap.values()).slice(0, 100),
+      };
+
+      if (chat.username) {
+        groupProfile.username = String(chat.username).toLowerCase().replace(/^@/, "");
+      }
+
+      await docRef.set(groupProfile, { merge: true });
+    } catch (e) {
+      console.warn("[TelegramBot] Failed to save telegram group:", e);
+    }
+  }
+
+  public async getAllTelegramUsers(): Promise<TelegramUserProfile[]> {
+    try {
+      const snap = await db.collection("telegramUsers").orderBy("lastSeenAt", "desc").limit(100).get();
+      return snap.docs.map((d) => d.data() as TelegramUserProfile);
+    } catch (e) {
+      console.warn("[TelegramBot] Error fetching telegram users:", e);
+      return [];
+    }
+  }
+
+  public async getAllTelegramGroups(): Promise<TelegramGroupProfile[]> {
+    try {
+      const snap = await db.collection("telegramGroups").orderBy("lastSeenAt", "desc").limit(100).get();
+      return snap.docs.map((d) => d.data() as TelegramGroupProfile);
+    } catch (e) {
+      console.warn("[TelegramBot] Error fetching telegram groups:", e);
+      return [];
+    }
+  }
+
+  public async modifyTelegramUser(
+    target: string,
+    updates: { customAlias?: string; customNotes?: string }
+  ): Promise<{ success: boolean; message: string; user?: TelegramUserProfile }> {
+    const raw = String(target || "").trim();
+    if (!raw) return { success: false, message: "Target username, name ya ID required hai." };
+
+    try {
+      const resolved = await this.resolveTargetChatId(raw);
+      if (!resolved.chatId) {
+        return { success: false, message: resolved.error || `User '${target}' nahi mila.` };
+      }
+
+      const userDocRef = db.collection("telegramUsers").doc(String(resolved.chatId));
+      const userSnap = await userDocRef.get();
+      if (!userSnap.exists) {
+        return { success: false, message: `Telegram user (${resolved.name || target}) record Firestore me nahi mila.` };
+      }
+
+      const updatePayload: any = { updatedAt: Date.now() };
+      if (updates.customAlias !== undefined) updatePayload.customAlias = updates.customAlias.trim();
+      if (updates.customNotes !== undefined) updatePayload.customNotes = updates.customNotes.trim();
+
+      await userDocRef.set(updatePayload, { merge: true });
+      const updatedSnap = await userDocRef.get();
+      const updatedData = updatedSnap.data() as TelegramUserProfile;
+
+      return {
+        success: true,
+        message: `Boss, Telegram user "${updatedData.fullName || updatedData.username}" ki details update ho gayi hain! (Alias: ${updatedData.customAlias || "none"}, Notes: ${updatedData.customNotes || "none"}) ✅`,
+        user: updatedData,
+      };
+    } catch (e: any) {
+      return { success: false, message: `User modify karne me error: ${e?.message || e}` };
+    }
+  }
+
+  /**
+   * Logs every incoming message and media from users or groups to Firestore telegramMessageLogs.
+   */
+  public async logMessage(msgLog: TelegramMessageLog): Promise<string | null> {
+    try {
+      const docRef = await db.collection("telegramMessageLogs").add({
+        ...msgLog,
+        createdAt: Date.now(),
+      });
+      return docRef.id;
+    } catch (e) {
+      console.warn("[TelegramBot] Failed to log message to Firestore:", e);
+      return null;
+    }
+  }
+
+  /**
+   * Updates a logged message with Friday's reply text.
+   */
+  public async updateBotReplyInLog(docId: string, replyText: string): Promise<void> {
+    if (!docId) return;
+    try {
+      await db.collection("telegramMessageLogs").doc(docId).set(
+        { botReply: replyText, repliedAt: Date.now() },
+        { merge: true }
+      );
+    } catch (e) {
+      console.warn("[TelegramBot] Failed to update bot reply in log:", e);
+    }
+  }
+
+  /**
+   * Retrieves message logs and chat history for a specific user, group, or all recent interactions.
+   */
+  public async getChatHistory(
+    target?: string,
+    limitCount: number = 25
+  ): Promise<{ success: boolean; targetResolved?: string; isGroup?: boolean; count: number; messages: TelegramMessageLog[]; error?: string }> {
+    const rawTarget = String(target || "").trim();
+
+    try {
+      // 1. If target specified (not "all", "recent", "everyone")
+      if (rawTarget && !["all", "recent", "everyone", "sab", "all messages"].includes(rawTarget.toLowerCase())) {
+        const resolved = await this.resolveTargetChatId(rawTarget);
+        if (!resolved.chatId) {
+          return {
+            success: false,
+            count: 0,
+            messages: [],
+            error: resolved.error || `Target '${rawTarget}' nahi mila.`,
+          };
+        }
+
+        const targetId = resolved.chatId;
+
+        // Query by chatId or senderId
+        const snap = await db
+          .collection("telegramMessageLogs")
+          .where("chatId", "==", targetId)
+          .orderBy("timestamp", "desc")
+          .limit(limitCount)
+          .get();
+
+        let logs = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as TelegramMessageLog[];
+
+        // If no logs by chatId, fallback to senderId query
+        if (logs.length === 0) {
+          const snapSender = await db
+            .collection("telegramMessageLogs")
+            .where("senderId", "==", targetId)
+            .orderBy("timestamp", "desc")
+            .limit(limitCount)
+            .get();
+          logs = snapSender.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as TelegramMessageLog[];
+        }
+
+        return {
+          success: true,
+          targetResolved: resolved.name || rawTarget,
+          isGroup: resolved.isGroup || false,
+          count: logs.length,
+          messages: logs.reverse(), // chronologically ordered
+        };
+      }
+
+      // 2. Fetch all recent messages across all users and groups
+      const snapAll = await db
+        .collection("telegramMessageLogs")
+        .orderBy("timestamp", "desc")
+        .limit(limitCount)
+        .get();
+
+      const logsAll = snapAll.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as TelegramMessageLog[];
+
+      return {
+        success: true,
+        targetResolved: "All Chats & Groups",
+        count: logsAll.length,
+        messages: logsAll.reverse(),
+      };
+    } catch (e: any) {
+      console.warn("[TelegramBot] Error fetching chat history:", e);
+      return {
+        success: false,
+        count: 0,
+        messages: [],
+        error: `Telegram message history fetch fail hua: ${e?.message || e}`,
+      };
+    }
+  }
+
+  /**
+   * Resolves a recipient (Contact name, username, Chat ID, or Group title) to a numeric Telegram Chat ID.
+   */
+  public async resolveTargetChatId(target: string): Promise<{ chatId?: number; name?: string; isGroup?: boolean; error?: string }> {
+    const raw = String(target || "").trim();
+    if (!raw) return { error: "Recipient name, username ya group required hai." };
+
+    // 1. If raw is a numeric Chat ID or negative Group ID
+    if (/^-?\d{5,18}$/.test(raw)) {
+      return { chatId: Number(raw), name: `Chat (${raw})` };
     }
 
     const clean = raw.replace(/^@/, "").toLowerCase().trim();
 
     try {
       // 2. Search in Firestore telegramUsers collection
-      const snap = await db.collection("telegramUsers").get();
-      const users = snap.docs.map((d) => d.data() as TelegramUserProfile);
+      const snapUsers = await db.collection("telegramUsers").get();
+      const users = snapUsers.docs.map((d) => d.data() as TelegramUserProfile);
 
       // Exact username match
       const byUsername = users.find((u) => u.username && u.username.toLowerCase() === clean);
-      if (byUsername) return { chatId: byUsername.chatId, name: byUsername.fullName || byUsername.username };
+      if (byUsername) {
+        return {
+          chatId: byUsername.chatId || byUsername.userId,
+          name: byUsername.customAlias || byUsername.fullName || byUsername.username,
+        };
+      }
+
+      // Exact or fuzzy Alias match
+      const byAlias = users.find((u) => u.customAlias && u.customAlias.toLowerCase() === clean);
+      if (byAlias) {
+        return {
+          chatId: byAlias.chatId || byAlias.userId,
+          name: byAlias.customAlias || byAlias.fullName,
+        };
+      }
 
       // Exact or fuzzy full name / first name match
       const byName = users.find(
@@ -253,9 +557,38 @@ class TelegramBotService {
           u.fullName.toLowerCase().includes(clean) ||
           (u.firstName && u.firstName.toLowerCase().includes(clean))
       );
-      if (byName) return { chatId: byName.chatId, name: byName.fullName };
+      if (byName) {
+        return {
+          chatId: byName.chatId || byName.userId,
+          name: byName.customAlias || byName.fullName,
+        };
+      }
 
-      // 3. Search in contactsService
+      // 3. Search in Firestore telegramGroups collection
+      const snapGroups = await db.collection("telegramGroups").get();
+      const groups = snapGroups.docs.map((d) => d.data() as TelegramGroupProfile);
+
+      // Group exact or fuzzy title match
+      const byGroupTitle = groups.find((g) => g.title && g.title.toLowerCase().includes(clean));
+      if (byGroupTitle) {
+        return {
+          chatId: byGroupTitle.groupId,
+          name: byGroupTitle.title,
+          isGroup: true,
+        };
+      }
+
+      // Group username match
+      const byGroupUser = groups.find((g) => g.username && g.username.toLowerCase() === clean);
+      if (byGroupUser) {
+        return {
+          chatId: byGroupUser.groupId,
+          name: byGroupUser.title || byGroupUser.username,
+          isGroup: true,
+        };
+      }
+
+      // 4. Search in contactsService
       const allContacts = await contactsService.getAllContacts();
       const matchedContact = allContacts.find((c) =>
         c.name.toLowerCase().includes(clean)
@@ -265,22 +598,24 @@ class TelegramBotService {
         // Check if any telegram user has phone matching contact phone
         const contactDigits = matchedContact.phone.replace(/\D/g, "");
         const userByPhone = users.find((u) => {
-          const uDigits = String(u.chatId);
+          const uDigits = String(u.chatId || u.userId || "");
           return uDigits === contactDigits || (u.username && u.username.toLowerCase() === clean);
         });
-        if (userByPhone) return { chatId: userByPhone.chatId, name: matchedContact.name };
+        if (userByPhone) {
+          return { chatId: userByPhone.chatId || userByPhone.userId, name: matchedContact.name };
+        }
       }
     } catch (e) {
-      console.warn("[TelegramBot] Error resolving contact:", e);
+      console.warn("[TelegramBot] Error resolving contact/group:", e);
     }
 
     return {
-      error: `Boss, '${target}' ka Telegram Chat ID nahi mila. Unhone abhi tak bot (@${this.botUsername || "FridayAIBot"}) ko start nahi kiya hai ya unka username save nahi hai.`,
+      error: `Boss, '${target}' ka Telegram User ya Group nahi mila. Kripya ensure karein ki unhone bot (@${this.botUsername || "FridayAIBot"}) ko start kiya ho ya bot us group me added ho.`,
     };
   }
 
   /**
-   * Sends a Telegram message to anyone (Contact name, username, or Chat ID).
+   * Sends a Telegram message to anyone (Contact name, username, Chat ID, or Group).
    */
   public async sendMessageToTarget(
     target: string,
@@ -290,16 +625,17 @@ class TelegramBotService {
     if (!res.chatId) {
       return {
         success: false,
-        message: res.error || `Could not find Telegram user "${target}".`,
+        message: res.error || `Could not find Telegram user/group "${target}".`,
       };
     }
 
     const sendRes = await this.sendMessage(res.chatId, message);
     if (sendRes.success) {
+      const typeLabel = res.isGroup ? "group" : "user";
       return {
         success: true,
         resolvedName: res.name,
-        message: `Boss, Telegram par ${res.name || target} ko message bhej diya gaya hai: "${message}" ✅`,
+        message: `Boss, Telegram ${typeLabel} (${res.name || target}) ko message bhej diya gaya hai: "${message}" ✅`,
       };
     } else {
       return {
@@ -351,8 +687,13 @@ class TelegramBotService {
    * Matches WhatsApp auto-reply behavior: identifies as DK's AI, explains DK is busy, takes notes.
    */
   private async generateSmartAiReply(senderName: string, messageText: string, isOwner: boolean = false): Promise<string> {
+    const customBusy = await this.getCustomBusyReply();
+
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
+      if (customBusy) {
+        return `Haanji ${senderName} ji! Main Friday hoon — DK Boss (Divakar Kumar) ka AI assistant. ${customBusy} 👍`;
+      }
       return `Haanji ${senderName} ji! Main Friday hoon — DK Boss (Divakar Kumar) ka AI assistant. Boss abhi busy hain, jaise hi aayenge main unko aapka message bol dungi 👍`;
     }
 
@@ -375,14 +716,15 @@ CHAT CONTEXT:
 Sender: "${senderName}"
 Is Sender Boss (DK)?: ${isOwner ? "YES (Talk directly to Boss with affection/respect)" : "NO (This is someone messaging DK/Friday on Telegram)"}
 Message Received: "${messageText}"
+${customBusy ? `Boss Custom Status / Busy Note: "${customBusy}"` : ""}
 
 INSTRUCTIONS FOR WHEN SENDER IS SOMEONE ELSE (NOT DK):
 1. IDENTITY & CREATOR:
    - If they ask who you are, your name, who made you, or whose bot/number this is:
      Reply: "Haanji! Main Friday hoon — DK Boss (Divakar Kumar) ka personal AI assistant. DK abhi thode busy hain. Aap bataiye, aapko kya kaam hai ya kya janna hai?"
 2. STATUS & BOSS BUSY:
-   - For general messages, greetings, or inquiries:
-     Politely clarify that DK is currently busy/occupied, but you are taking notes and will pass their message to DK as soon as he is free.
+   - For general messages, greetings ("hi", "hello", "namaste", "hey"), or inquiries:
+     Politely clarify that DK is currently busy/occupied ${customBusy ? `(${customBusy})` : ""}, but you are taking notes and will pass their message to DK as soon as he is free.
 3. PASSING MESSAGES:
    - If they leave a message, ask a question, or ask for a callback:
      Assure them: "Maine aapka message note kar liya hai, jaise hi DK aayenge main unko bol dungi aur wo reply kar denge."
@@ -419,6 +761,9 @@ INSTRUCTIONS FOR WHEN SENDER IS SOMEONE ELSE (NOT DK):
       }
     }
 
+    if (customBusy) {
+      return `Haanji ${senderName} ji! Main Friday hoon — DK Boss ka AI assistant. ${customBusy} 👍`;
+    }
     return `Haanji ${senderName} ji! Main Friday hoon — DK Boss abhi busy hain, jaise hi wo aayenge main aapka message unko bata dungi 👍`;
   }
 
@@ -475,16 +820,54 @@ INSTRUCTIONS FOR WHEN SENDER IS SOMEONE ELSE (NOT DK):
     const from = msg.from || {};
     const senderName = from.first_name ? `${from.first_name} ${from.last_name || ""}`.trim() : "Boss";
     const text = (msg.text || msg.caption || "").trim();
+    const isGroup = msg.chat?.type === "group" || msg.chat?.type === "supergroup";
 
-    // Save/Update user profile in Firestore for future targeted messaging
-    if (chatId) {
-      this.saveTelegramUser(chatId, from).catch(() => {});
+    // Auto-track user and group profiles in Firestore
+    if (isGroup) {
+      this.saveTelegramGroup(msg.chat, from, text).catch(() => {});
+      this.saveTelegramUser(from, undefined, msg.chat.title, text).catch(() => {});
+    } else if (chatId) {
+      this.saveTelegramUser(from, chatId, undefined, text).catch(() => {});
+    }
+
+    // Determine media type and log full message history
+    const mediaType: "text" | "voice" | "photo" | "document" | "audio" | "command" = msg.voice
+      ? "voice"
+      : msg.audio
+      ? "audio"
+      : msg.photo
+      ? "photo"
+      : msg.document
+      ? "document"
+      : text.startsWith("/")
+      ? "command"
+      : "text";
+
+    let loggedDocId: string | null = null;
+    if (chatId && from.id) {
+      this.logMessage({
+        messageId: msg.message_id || Date.now(),
+        chatId,
+        isGroup: !!isGroup,
+        groupTitle: isGroup ? msg.chat?.title || "Telegram Group" : undefined,
+        senderId: from.id,
+        senderName,
+        senderUsername: from.username ? `@${from.username}` : undefined,
+        text: text || (msg.photo ? "📷 [Photo]" : msg.document ? "📄 [Document]" : msg.voice ? "🎙️ [Voice Note]" : "[Media]"),
+        mediaType,
+        timestamp: Date.now(),
+        timeStr: new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
+      })
+        .then((id) => {
+          loggedDocId = id;
+        })
+        .catch(() => {});
     }
 
     // Broadcast incoming message to Live UI
     if (this.messageCallback && chatId) {
       this.messageCallback({
-        sender: `✈️ ${senderName}`,
+        sender: isGroup ? `👥 [${msg.chat?.title || "Group"}] ${senderName}` : `✈️ ${senderName}`,
         text: text || (msg.photo ? "📷 [Photo]" : msg.document ? "📄 [Document]" : "[Media]"),
         time: new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" }),
         chatId,
@@ -937,6 +1320,9 @@ Kripya neeche se mode choose karein ya direct message type karein:`;
     const isOwner = !!ownerChatId && String(chatId) === String(ownerChatId);
     const replyText = await this.generateSmartAiReply(senderName, text, isOwner);
     await this.sendHumanLikeMessage(chatId, replyText);
+    if (loggedDocId) {
+      this.updateBotReplyInLog(loggedDocId, replyText).catch(() => {});
+    }
   }
 
   /**

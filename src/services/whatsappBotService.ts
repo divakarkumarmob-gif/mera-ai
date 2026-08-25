@@ -520,7 +520,7 @@ class WhatsAppBotService {
 
           let consumedByDailyUpdate = false;
           if (isFromOwner) {
-            // 1. Check if DK is setting/updating the Voice PIN (e.g. "voice pin - 123456", "voice pin: 620455")
+            // 1. Check if DK is setting/updating the Voice PIN (e.g. "voice pin - 123456", "voice pin: 994411")
             try {
               const { voiceBiometricsService } = await import("./voiceBiometricsService");
               const pinRes = await voiceBiometricsService.handleWhatsAppVoicePinMessage(text, senderName);
