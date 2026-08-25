@@ -53,6 +53,7 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "placeholder-
 // ---------------------------------------------------------------------------
 async function startServer() {
   const app = express();
+  app.set("trust proxy", 1);
   app.use(express.json({ limit: "10mb" }));
   app.use(cors());
 
