@@ -40,6 +40,8 @@ jobs:
 
       - name: ⚡ Build Web Assets (Vite Production Build)
         run: npm run build
+        env:
+          VITE_BACKEND_URL: https://mera-ai-3496.onrender.com
 
       - name: 📱 Initialize & Sync Capacitor Android Project
         run: |
