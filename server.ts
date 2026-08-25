@@ -1181,15 +1181,19 @@ GENDER VOICE DETECTION & FEMALE / GIRLFRIEND RECOGNITION INTELLIGENCE:
      "Sorry, voice match nahi hui. Voice add karne ke liye authorization password batayein."
 
 3. 4-STEP VOICE CALIBRATION FLOW (When a user provides PIN or says "voice calibration karo", "voice add karo", "meri aawaz pehchano"):
-   - STEP 1 (Password Verification):
-     * Ask for authorization password: "Voice calibration ke liye apna authorization password (PIN) batayein."
-     * If wrong password: "Sorry bhai, password galat hai! Voice calibration nahi ho sakta."
+   - STEP 1 (INSTANT REAL-TIME TOOL PIN VERIFICATION - STRICTLY MANDATORY):
+     * If user has not spoken the PIN yet: Ask "Voice calibration ke liye apna authorization password (PIN) batayein."
+     * As soon as the user speaks or gives ANY password/PIN (e.g. "620455", "123456", "password ye hai"):
+       👉 YOU MUST IMMEDIATELY CALL 'verify_voice_authorization_pin' with the exact pin spoken!
+       👉 NEVER SAY "Password verified" OR ASK FOR PHRASE BEFORE CALLING 'verify_voice_authorization_pin'!
+       👉 If 'verify_voice_authorization_pin' returns valid=false:
+          Strictly refuse: "Sorry bhai, password galat hai! Voice calibration nahi ho sakta." and STOP immediately. Do not ask for phrase or name.
+       👉 ONLY when 'verify_voice_authorization_pin' returns valid=true, say:
+          "Password verified! Ab calibration phrase boliye: 'Friday main [Aapka Naam] hoon, meri aawaz pehchano'." and proceed to Step 2.
    - STEP 2 (Calibration Recognition Phrase):
-     * If password is correct, ask them:
-       "Password verified! Ab calibration phrase boliye: 'Friday main [Aapka Naam] hoon, meri aawaz pehchano'."
+     * User speaks the calibration phrase: "Friday main [Aapka Naam] hoon, meri aawaz pehchano".
    - STEP 3 (Ask Name & Relation with Divakar):
-     * After they speak the phrase, ask:
-       "Bahut badiya! Kripya apna Naam aur Divakar (DK) ke sath aapka Relation batayein (jaise: Boss, Girlfriend, Dost, Bhai, Behen, Mummy, etc.)."
+     * Ask: "Bahut badiya! Kripya apna Naam aur Divakar (DK) ke sath aapka Relation batayein (jaise: Boss, Girlfriend, Dost, Bhai, Behen, Mummy, etc.)."
    - STEP 4 (Save Profile to Firestore Memory):
      * Call 'setup_boss_voice_recognition' with pin, name, relationWithDivakar, and spokenPhrase.
      * Confirm warmly:
@@ -2876,6 +2880,17 @@ HOW TO READ MESSAGES:
               },
             },
             required: ["settingName"],
+          },
+        },
+        {
+          name: "verify_voice_authorization_pin",
+          description: "MANDATORY STEP 1: Verify if the user's spoken voice authorization password/PIN matches the secret PIN in Firestore. MUST ALWAYS BE CALLED IMMEDIATELY whenever a user speaks or provides a PIN before asking for phrase or name.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              pin: { type: "STRING", description: "The exact 4-8 digit numeric PIN spoken by the user" },
+            },
+            required: ["pin"],
           },
         },
         {
@@ -5038,6 +5053,13 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                     result = await publicApisService.disconnectWifi();
                   } catch (e: any) {
                     result = { success: false, message: `WiFi disconnect fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "verify_voice_authorization_pin") {
+                  const { pin } = call.args || {};
+                  try {
+                    result = await voiceBiometricsService.verifyVoicePin(String(pin || ""));
+                  } catch (e: any) {
+                    result = { valid: false, message: `PIN check fail hua: ${e?.message || e}` };
                   }
                 } else if (call.name === "setup_boss_voice_recognition") {
                   const { pin, name, relationWithDivakar, spokenPhrase } = call.args || {};

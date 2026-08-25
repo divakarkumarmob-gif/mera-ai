@@ -120,6 +120,23 @@ class VoiceBiometricsService {
   }
 
   /**
+   * Dedicated verification check for real-time live LLM tool call at Step 1.
+   */
+  public async verifyVoicePin(pin: string): Promise<{ valid: boolean; message: string }> {
+    const valid = await this.verifyPin(pin);
+    if (valid) {
+      return {
+        valid: true,
+        message: "Authorization Password verified successfully against Firestore! Proceed to ask calibration phrase.",
+      };
+    }
+    return {
+      valid: false,
+      message: "Incorrect password! Spoken PIN does NOT match Firestore voice PIN. Do NOT proceed with calibration.",
+    };
+  }
+
+  /**
    * Returns all active enrolled Boss voice profiles from Firestore.
    */
   public async getProfiles(): Promise<BossVoiceProfile[]> {
