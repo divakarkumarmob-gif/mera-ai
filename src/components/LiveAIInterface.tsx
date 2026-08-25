@@ -740,7 +740,13 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 isAiSpeaking.current = false;
             }
 
-            if (!aiTurnActiveRef.current && Date.now() > speakingCooldownUntilRef.current && status === "Speaking...") {
+            // Bug Fix: also reset from "Thinking..." → "Listening..." when AI turn ends.
+            // Previously only "Speaking..." was handled — if Gemini replied with text/thinking
+            // but no audio (or VAD didn't fire), status got permanently stuck on "Thinking...".
+            const shouldResetToListening = !aiTurnActiveRef.current &&
+                Date.now() > speakingCooldownUntilRef.current &&
+                (status === "Speaking..." || status === "Thinking...");
+            if (shouldResetToListening) {
                 setStatus("Listening...");
             }
         }, 200);
@@ -1167,18 +1173,19 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     turnCompletePendingRef.current = false;
                     isAiThinkingRef.current = true;
                     setStatus("Thinking...");
-                    // Bug Fix 2: Safety escape — if AI is stuck in thinking for >30s,
-                    // force-clear it so the mic is not permanently muted.
+                    // Bug Fix 2: Safety escape — if AI is stuck in thinking for >8s
+                    // (Gemini VAD edge case: user spoke but turnComplete never arrived),
+                    // force-clear so the mic is not permanently muted.
                     clearTimeout((window as any).__thinkingTimeout);
                     (window as any).__thinkingTimeout = setTimeout(() => {
                         if (isAiThinkingRef.current) {
-                            console.warn('[Friday] Thinking timeout — forcing Listening state');
+                            console.warn('[Friday] Thinking timeout (8s) — forcing Listening state');
                             isAiThinkingRef.current = false;
                             aiTurnActiveRef.current = false;
                             turnCompletePendingRef.current = false;
                             setStatus('Listening...');
                         }
-                    }, 30000);
+                    }, 8000);
                 } else if (msg.type === 'speaking') {
                     // AI has audio coming — clear thinking flag immediately
                     aiTurnActiveRef.current = true;
