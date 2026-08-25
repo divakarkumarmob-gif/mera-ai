@@ -488,7 +488,6 @@ function CyberSecurityCard() {
     );
 }
 
-
 function pcmToBase64(pcm: Float32Array): string {
     if (!pcm || pcm.length === 0) return "";
     const buffer = new Int16Array(pcm.length);
@@ -551,7 +550,7 @@ async function playAudioChunk(
             if (audioCtx.currentTime >= nextStartTime.current - 0.08) {
                 isAiSpeaking.current = false;
                 if (speakingCooldownUntilRef) {
-                    speakingCooldownUntilRef.current = Date.now() + 500; // 500ms safety cooldown to let speaker sound decay
+                    speakingCooldownUntilRef.current = Date.now() + 500; // 500ms safety cooldown
                 }
             }
         };
@@ -597,6 +596,8 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const captionBoxRef = useRef<HTMLDivElement>(null);
     const userScrolledUpRef = useRef(false);
     const captionTurnStartedRef = useRef(false);
+
+    // ── Music Player State & References ─────────────────────────────────────
     const [nowPlayingMusic, setNowPlayingMusic] = useState<{
         trackName: string;
         artistName?: string;
@@ -605,6 +606,10 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         isFullSong?: boolean;
         quality?: string;
         durationSec?: number;
+        audioUrl?: string;
+        isPlaying?: boolean;
+        hasError?: boolean;
+        errorMessage?: string;
     } | null>(null);
     const musicAudioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -616,6 +621,21 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         }
         setNowPlayingMusic(null);
     }, []);
+
+    const toggleMusicPlayPause = useCallback(() => {
+        if (!musicAudioRef.current) return;
+        if (nowPlayingMusic?.isPlaying) {
+            musicAudioRef.current.pause();
+            setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: false } : null);
+        } else {
+            musicAudioRef.current.play().then(() => {
+                setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: true, hasError: false } : null);
+            }).catch((err) => {
+                console.warn('[Music] Manual play error:', err);
+                setNowPlayingMusic(prev => prev ? { ...prev, hasError: true, errorMessage: 'Playback blocked or stream expired' } : null);
+            });
+        }
+    }, [nowPlayingMusic?.isPlaying]);
 
     const toggleScreenShare = useCallback(async () => {
         if (isScreenSharing) {
@@ -727,11 +747,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
             const outCtx = outputAudioCtx.current;
             const audioDrained = !outCtx || outCtx.currentTime >= nextStartTime.current - 0.05;
 
-            // Only let the turn actually end once turnComplete has arrived AND
-            // every scheduled audio chunk has really finished playing. This
-            // is checked here (not per-chunk in onended) so a brief gap
-            // between two streamed TTS chunks never gets mistaken for the
-            // turn being over.
             if (turnCompletePendingRef.current && audioDrained) {
                 turnCompletePendingRef.current = false;
                 aiTurnActiveRef.current = false;
@@ -751,13 +766,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
             if (inputAudioCtx.current && inputAudioCtx.current.state === 'suspended') {
                 inputAudioCtx.current.resume();
             }
-            // Mobile browsers often start a freshly-created AudioContext in
-            // "suspended" state when the session was opened without a direct
-            // tap (e.g. wake-word "Hello Friday" instead of pressing the mic
-            // button). If outputAudioCtx stays suspended, the AI's audio is
-            // still scheduled/generated but never actually plays — which
-            // looks like "AI spoke but I heard nothing" / mistaken for a
-            // network error. Keep retrying resume() until it takes.
             if (outputAudioCtx.current && outputAudioCtx.current.state === 'suspended') {
                 outputAudioCtx.current.resume().catch(() => {});
             }
@@ -765,7 +773,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         return () => clearInterval(interval);
     }, [isRecording]);
 
-    // Reconnect on settings change if already recording
     useEffect(() => {
         if (ws.current && ws.current.readyState === WebSocket.OPEN) {
             isInitializedRef.current = false;
@@ -795,21 +802,8 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const lastActivityTimeRef = useRef<number>(Date.now());
     const isWarningSpokenRef = useRef<boolean>(false);
     const speakingCooldownUntilRef = useRef<number>(0);
-    const hasSpokenInTurnRef = useRef<boolean>(false);
-    // True for the ENTIRE duration of one AI turn (from the first "thinking"/
-    // "speaking" event until turnComplete AND all buffered audio has actually
-    // finished playing). Unlike isAiSpeaking (which briefly flips false in the
-    // gap between two streamed TTS chunks), this never flickers mid-turn, so
-    // it's the flag the mic hard-mute relies on to avoid re-opening the mic
-    // between chunks and picking up stray audio.
     const aiTurnActiveRef = useRef<boolean>(false);
-    // Set when turnComplete arrives; only actually clears aiTurnActiveRef once
-    // the queued audio has finished playing (checked by the status interval).
     const turnCompletePendingRef = useRef<boolean>(false);
-    // Prevents two overlapping ensureConnection() calls (e.g. wake-word firing
-    // at the same moment as a manual mic tap) from both attaching a mic
-    // pipeline, which was sending duplicate audio to Gemini and made spoken
-    // numbers sound doubled/repeated.
     const isConnectingRef = useRef<boolean>(false);
     const pendingImagePayloadsRef = useRef<{ id: string; file: File; caption?: string }[]>([]);
     const selectedImagesRef = useRef(selectedImages);
@@ -951,7 +945,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         isWarningSpokenRef.current = false;
 
         const interval = setInterval(() => {
-            // NEVER count down when AI is Thinking, Speaking, or playing output audio!
             const isAudioStillPlaying = !!(outputAudioCtx.current && outputAudioCtx.current.currentTime < (nextStartTime.current - 0.05));
             const isAiBusy = aiTurnActiveRef.current || isAiSpeaking.current || isAiThinkingRef.current || statusRef.current === "Thinking..." || statusRef.current === "Speaking..." || isAudioStillPlaying;
             if (isAiBusy) {
@@ -986,20 +979,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isRecording]);
 
-    /**
-     * Wires up a MediaStream to the input AudioContext + ScriptProcessor and
-     * attaches the shared onaudioprocess handler (RMS voice detection, hard
-     * mute while AI is busy, 900ms voice-gate hangover). Used by both the
-     * "already connected, just attach mic" path and the "fresh WebSocket
-     * connect" path in ensureConnection, so the mic-gating logic only lives
-     * in one place.
-     */
     const attachMicPipeline = async (stream: MediaStream) => {
-        // Safety: if a previous input pipeline is still attached (e.g. from a
-        // race between wake-word trigger and a manual mic tap), tear it down
-        // fully first. Two live processors both sending mic audio to the same
-        // WebSocket is what made Gemini "hear" everything twice — including
-        // spoken numbers coming back doubled/repeated.
         if (processor.current) {
             try { processor.current.onaudioprocess = null; processor.current.disconnect(); } catch {}
             processor.current = null;
@@ -1022,7 +1002,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         source.connect(processor.current);
         processor.current.connect(inputAudioCtx.current.destination);
         processor.current.onaudioprocess = (e) => {
-            // 1. HARD MUTE: While AI is Thinking, Speaking, output buffer is playing, or cooling down -> Mic is 100% OFF
             const isAudioStillPlaying = !!(outputAudioCtx.current && outputAudioCtx.current.currentTime < (nextStartTime.current - 0.05));
             const isAiBusy = aiTurnActiveRef.current || isAiSpeaking.current || isAiThinkingRef.current || statusRef.current === "Thinking..." || statusRef.current === "Speaking..." || isAudioStillPlaying;
             if (isAiBusy || Date.now() < speakingCooldownUntilRef.current || !isInitializedRef.current) {
@@ -1032,8 +1011,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
 
             const pcm = e.inputBuffer.getChannelData(0);
 
-            // 2. Calculate true RMS sound power (only used for the UI volume
-            // meter now — no longer used to decide whether to send audio).
             let sumSquares = 0;
             for (let i = 0; i < pcm.length; i++) {
                 sumSquares += pcm[i] * pcm[i];
@@ -1048,16 +1025,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 }
             }
 
-            // 3. Always forward audio to Gemini, loud or quiet — no custom
-            // noise gate, no manual "user stopped talking" guessing on our
-            // end. Gemini's own server-side automatic VAD is built exactly
-            // for this: it needs a continuous, uninterrupted audio stream
-            // (including the quiet parts) to reliably detect real speech
-            // pauses and end turns on its own — the same way it works in
-            // apps that don't do any custom client-side gating. Cutting the
-            // stream ourselves (old behavior) is what caused both earlier
-            // bugs: replies stuck on "Listening..." and sentences getting
-            // chopped into fragments.
             ws.current?.send(JSON.stringify({ audio: pcmToBase64(pcm) }));
             setVolume(Math.min(100, rms * 2.2));
         };
@@ -1075,10 +1042,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     };
 
     const ensureConnection = async (withMic: boolean) => {
-        // If a connection/mic-attach is already in flight (e.g. wake-word
-        // detection fired at the same moment as a manual mic tap), skip this
-        // call entirely instead of racing it — that race was the source of
-        // two ScriptProcessors both streaming mic audio at once.
         if (withMic && isConnectingRef.current) return;
 
         if (ws.current && ws.current.readyState === WebSocket.OPEN) {
@@ -1165,8 +1128,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     turnCompletePendingRef.current = false;
                     isAiThinkingRef.current = true;
                     setStatus("Thinking...");
-                    // Bug Fix 2: Safety escape — if AI is stuck in thinking for >30s,
-                    // force-clear it so the mic is not permanently muted.
                     clearTimeout((window as any).__thinkingTimeout);
                     (window as any).__thinkingTimeout = setTimeout(() => {
                         if (isAiThinkingRef.current) {
@@ -1178,7 +1139,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         }
                     }, 30000);
                 } else if (msg.type === 'speaking') {
-                    // AI has audio coming — clear thinking flag immediately
                     aiTurnActiveRef.current = true;
                     turnCompletePendingRef.current = false;
                     isAiThinkingRef.current = false;
@@ -1197,10 +1157,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 } else if (msg.turnComplete) {
                     captionTurnStartedRef.current = false;
                     isAiThinkingRef.current = false;
-                    // Don't drop aiTurnActiveRef here — text/turnComplete can
-                    // arrive before the trailing audio chunks finish playing.
-                    // The status-polling interval clears it once currentTime
-                    // actually catches up to nextStartTime.
                     turnCompletePendingRef.current = true;
                     if (shouldCloseAfterTurnRef.current) {
                         shouldCloseAfterTurnRef.current = false;
@@ -1213,10 +1169,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 } else if (msg.type === 'init_ack') {
                     isInitializedRef.current = true;
                     isAiThinkingRef.current = false;
-                    // Safety: a fresh session (including a settings-change
-                    // reconnect mid-turn) means any previous turn's context is
-                    // dead. If it never sent turnComplete/interrupted, clear
-                    // the flag here so the mic can't stay muted forever.
                     aiTurnActiveRef.current = false;
                     turnCompletePendingRef.current = false;
                     if (initAckTimeoutRef.current) { clearTimeout(initAckTimeoutRef.current); initAckTimeoutRef.current = null; }
@@ -1252,7 +1204,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         if (state === false) stopMusicPlayback();
                     }
                 } else if (msg.type === 'session_reconnecting') {
-                    // Server is auto-reconnecting the Gemini session
                     isInitializedRef.current = false;
                     isAiThinkingRef.current = false;
                     aiTurnActiveRef.current = false;
@@ -1260,7 +1211,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     resetTypewriter();
                     setStatus("⚡ AI reconnecting...");
                 } else if (msg.type === 'session_reconnected') {
-                    // Server successfully rebuilt the Gemini session
                     isInitializedRef.current = true;
                     isAiThinkingRef.current = false;
                     aiTurnActiveRef.current = false;
@@ -1290,8 +1240,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     setPairingCode(msg.pairingCode);
                 } else if (msg.type === 'reminder_due' && msg.reminder) {
                     setDueReminder({ title: msg.reminder.title, timeString: msg.reminder.timeString });
-                    // Auto-dismiss the banner after 15s so it doesn't linger forever
-                    // if the user doesn't interact with it.
                     setTimeout(() => setDueReminder(null), 15000);
                 } else if (msg.type === 'whatsapp_incoming') {
                     setWhatsappNotif({
@@ -1300,7 +1248,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         isGroup: !!msg.isGroup,
                         groupName: msg.groupName,
                     });
-                    // Auto-dismiss personal messages after 12s, group after 8s
                     clearTimeout(whatsappNotifTimerRef.current);
                     whatsappNotifTimerRef.current = setTimeout(
                         () => setWhatsappNotif(null),
@@ -1345,27 +1292,69 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         setResearchReport(msg.report);
                     }
                 } else if (msg.type === 'play_music') {
+                    // FIX: Preserve Music Player UI Widget state on stream error / autoplay block instead of immediate dismissal!
                     stopMusicPlayback();
+                    const trackInfo = {
+                        trackName: msg.trackName || 'Music Track',
+                        artistName: msg.artistName,
+                        albumArt: msg.albumArt,
+                        spotifyUrl: msg.spotifyUrl,
+                        isFullSong: msg.isFullSong,
+                        quality: msg.quality,
+                        durationSec: msg.durationSec,
+                        audioUrl: msg.audioUrl,
+                        isPlaying: false,
+                        hasError: false,
+                    };
+
                     if (msg.audioUrl) {
                         try {
-                            const audio = new Audio(msg.audioUrl);
+                            const audio = new Audio();
+                            audio.src = msg.audioUrl;
                             audio.volume = 0.85;
-                            audio.onended = () => setNowPlayingMusic(null);
-                            audio.onerror = () => setNowPlayingMusic(null);
+
+                            audio.onended = () => {
+                                setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: false } : null);
+                            };
+
+                            // Do NOT dismiss player widget on error — set explicit error fallback state!
+                            audio.onerror = (e) => {
+                                console.warn('[Music] Audio stream playback error:', e);
+                                setNowPlayingMusic(prev => prev ? {
+                                    ...prev,
+                                    hasError: true,
+                                    isPlaying: false,
+                                    errorMessage: 'Stream playback unavailable'
+                                } : null);
+                            };
+
                             musicAudioRef.current = audio;
-                            audio.play().catch(e => console.warn('[Music] Audio play error:', e));
+
+                            const playPromise = audio.play();
+                            if (playPromise !== undefined) {
+                                playPromise.then(() => {
+                                    setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: true, hasError: false } : null);
+                                }).catch((err) => {
+                                    console.warn('[Music] Autoplay blocked or start failed:', err);
+                                    setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: false, hasError: false } : null);
+                                });
+                            }
+
                             setNowPlayingMusic({
-                                trackName: msg.trackName,
-                                artistName: msg.artistName,
-                                albumArt: msg.albumArt,
-                                spotifyUrl: msg.spotifyUrl,
-                                isFullSong: msg.isFullSong,
-                                quality: msg.quality,
-                                durationSec: msg.durationSec,
+                                ...trackInfo,
+                                isPlaying: true,
                             });
                         } catch (e) {
-                            console.warn('[Music] Error creating Audio:', e);
+                            console.warn('[Music] Error initializing Audio player:', e);
+                            setNowPlayingMusic({
+                                ...trackInfo,
+                                hasError: true,
+                                errorMessage: 'Failed to initialize audio',
+                            });
                         }
+                    } else {
+                        // If no direct stream URL is available, display track card with Spotify button!
+                        setNowPlayingMusic(trackInfo);
                     }
                 } else if (msg.type === 'stop_music') {
                     stopMusicPlayback();
@@ -1378,8 +1367,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         socket.onclose = () => {
             isInitializedRef.current = false;
             isConnectingRef.current = false;
-            // If we were actively recording/listening when connection dropped,
-            // show a reconnecting message instead of just going Idle
             const wasActive = isRecording || isAiSpeaking.current || aiTurnActiveRef.current;
             setIsRecording(false);
             isAiThinkingRef.current = false;
@@ -1396,9 +1383,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         socket.onerror = (error) => {
             console.error("WebSocket error", error);
             isConnectingRef.current = false;
-            // Don't say "Connection Failed" immediately — server may auto-reconnect
             setStatus("⚡ Connection issue, retrying...");
-            // Give server 4s to auto-reconnect before showing hard error
             setTimeout(() => {
                 if (!isInitializedRef.current && isRecording) {
                     setStatus("Error: Connection lost. Refresh if needed.");
@@ -1616,12 +1601,15 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                                             stopMusicPlayback();
                                             const audio = new Audio(identifiedSong.previewUrl);
                                             audio.volume = 0.85;
+                                            audio.onended = () => setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: false } : null);
+                                            audio.onerror = () => setNowPlayingMusic(prev => prev ? { ...prev, hasError: true, isPlaying: false } : null);
                                             musicAudioRef.current = audio;
                                             audio.play().catch(() => {});
                                             setNowPlayingMusic({
                                                 trackName: identifiedSong.trackName,
                                                 artistName: identifiedSong.artistName,
                                                 spotifyUrl: identifiedSong.spotifyUrl,
+                                                isPlaying: true,
                                             });
                                         }}
                                         className="px-2.5 py-1 rounded-xl bg-violet-600/30 hover:bg-violet-600/50 border border-violet-500/50 text-violet-200 text-xs font-semibold flex items-center gap-1 transition-all"
@@ -1665,6 +1653,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         </div>
                     )}
 
+                    {/* ── Stable Music Player UI Popup Widget ── */}
                     <AnimatePresence>
                         {nowPlayingMusic && (
                             <motion.div
@@ -1681,9 +1670,9 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                                     />
                                 ) : (
                                     <span className="flex gap-0.5 items-end h-4 shrink-0">
-                                        <span className="w-1 bg-violet-400 rounded-full animate-[bounce_0.8s_infinite]" style={{ height: '60%' }} />
-                                        <span className="w-1 bg-violet-400 rounded-full animate-[bounce_0.6s_infinite_0.2s]" style={{ height: '100%' }} />
-                                        <span className="w-1 bg-violet-400 rounded-full animate-[bounce_0.9s_infinite_0.4s]" style={{ height: '75%' }} />
+                                        <span className={`w-1 bg-violet-400 rounded-full ${nowPlayingMusic.isPlaying ? 'animate-[bounce_0.8s_infinite]' : 'h-3'}`} style={{ height: nowPlayingMusic.isPlaying ? '60%' : '50%' }} />
+                                        <span className={`w-1 bg-violet-400 rounded-full ${nowPlayingMusic.isPlaying ? 'animate-[bounce_0.6s_infinite_0.2s]' : 'h-4'}`} style={{ height: nowPlayingMusic.isPlaying ? '100%' : '80%' }} />
+                                        <span className={`w-1 bg-violet-400 rounded-full ${nowPlayingMusic.isPlaying ? 'animate-[bounce_0.9s_infinite_0.4s]' : 'h-3'}`} style={{ height: nowPlayingMusic.isPlaying ? '75%' : '60%' }} />
                                     </span>
                                 )}
                                 <div className="min-w-0 flex-1">
@@ -1692,19 +1681,47 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                                             {nowPlayingMusic.trackName}
                                         </span>
                                         <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-emerald-500/30 text-emerald-300 font-mono">
-                                            {nowPlayingMusic.isFullSong ? '✨ Full Song (320kbps)' : 'Preview'}
+                                            {nowPlayingMusic.isFullSong ? '✨ Full Song (320kbps)' : 'Music Track'}
                                         </span>
                                     </div>
                                     <p className="text-slate-300 text-[11px] truncate">
                                         {nowPlayingMusic.artistName || 'Playing Music'}
                                     </p>
+                                    {nowPlayingMusic.hasError && (
+                                        <p className="text-rose-400 text-[10px] truncate font-medium mt-0.5">
+                                            ⚠️ Direct stream unavailable — open on Spotify below
+                                        </p>
+                                    )}
                                 </div>
-                                <button
-                                    onClick={stopMusicPlayback}
-                                    className="px-2.5 py-1 rounded-xl bg-violet-700 hover:bg-violet-600 text-white font-semibold text-[11px] transition-colors shadow-sm shrink-0"
-                                >
-                                    ⏹ Band Karo
-                                </button>
+
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                    {musicAudioRef.current && !nowPlayingMusic.hasError && (
+                                        <button
+                                            onClick={toggleMusicPlayPause}
+                                            className="px-2 py-1 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-semibold text-[11px] transition-colors shadow-sm"
+                                            title={nowPlayingMusic.isPlaying ? "Pause" : "Play"}
+                                        >
+                                            {nowPlayingMusic.isPlaying ? '⏸ Pause' : '▶ Play'}
+                                        </button>
+                                    )}
+                                    {nowPlayingMusic.spotifyUrl && (
+                                        <a
+                                            href={nowPlayingMusic.spotifyUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="px-2 py-1 rounded-xl bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-500/50 text-emerald-200 text-[11px] font-semibold transition-all"
+                                        >
+                                            Spotify ↗
+                                        </a>
+                                    )}
+                                    <button
+                                        onClick={stopMusicPlayback}
+                                        className="p-1 rounded-lg bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white transition-colors"
+                                        title="Close music player"
+                                    >
+                                        <X className="w-3.5 h-3.5" />
+                                    </button>
+                                </div>
                             </motion.div>
                         )}
                     </AnimatePresence>
@@ -1824,7 +1841,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                             <span>Jawab Do</span>
                         </button>
                     )}
-
 
                     <button
                         onClick={handleInterrupt}
