@@ -5,6 +5,7 @@ import AgentFace from './AgentFace';
 import ChatHistoryModal from './ChatHistoryModal';
 import WhatsAppPairModal from './WhatsAppPairModal';
 import CodeAgentPage from './CodeAgentPage';
+import { FridayMessenger } from './FridayMessenger';
 import { getWsUrl } from '@/utils/api';
 import { wakeWordManager } from '@/utils/wakeWord';
 
@@ -593,6 +594,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const [showChatHistory, setShowChatHistory] = useState(false);
     const [showCodeAgent, setShowCodeAgent] = useState(false);
     const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+    const [showFridayMessenger, setShowFridayMessenger] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const captionBoxRef = useRef<HTMLDivElement>(null);
     const userScrolledUpRef = useRef(false);
@@ -1449,7 +1451,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         <button onClick={() => setShowCaptions(!showCaptions)} className={showCaptions ? 'text-green-500' : 'text-white'}>
                             <Captions className="h-6 w-6" />
                         </button>
-                        <button onClick={() => setShowChatHistory(true)} className="text-white">
+                        <button onClick={() => setShowChatHistory(true)} className="text-white" title="Chat History">
                             <MessageSquare className="h-6 w-6" />
                         </button>
                         <button onClick={() => setShowCodeAgent(true)} className="text-white hover:text-cyan-400 transition-colors" title="Coding Agent & Diagnostics Logs">
@@ -1964,6 +1966,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
             {showChatHistory && <ChatHistoryModal onClose={() => setShowChatHistory(false)} />}
             {showCodeAgent && <CodeAgentPage onClose={() => setShowCodeAgent(false)} />}
             <WhatsAppPairModal isOpen={showWhatsAppModal} onClose={() => setShowWhatsAppModal(false)} />
+            {showFridayMessenger && <FridayMessenger onClose={() => setShowFridayMessenger(false)} />}
 
             {/* Deep Research Report Modal */}
             <AnimatePresence>

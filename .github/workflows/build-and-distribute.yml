@@ -1,0 +1,66 @@
+name: Build & Package FRIDAY AI Distribution Bundle
+
+on:
+  push:
+    branches: [main, master]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build-and-package:
+    name: Build & Package Distribution
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js (v20)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: 📦 Install Dependencies
+        run: npm install
+
+      - name: ⚡ Build Full Production Bundle (Client + Server)
+        run: npm run build
+
+      - name: 🗂️ Assemble Standalone Distribution Package
+        run: |
+          mkdir -p release-bundle/dist
+          cp -r dist/* release-bundle/dist/
+          cp package.json package-lock.json release-bundle/
+          cp .env.example release-bundle/
+          cp start-friday.bat release-bundle/
+          cp start-friday.sh release-bundle/
+          cp README.md release-bundle/
+          chmod +x release-bundle/start-friday.sh
+
+      - name: 📤 Upload Downloadable GitHub Artifact (ZIP)
+        uses: actions/upload-artifact@v4
+        with:
+          name: friday-ai-app-dist
+          path: release-bundle/
+          retention-days: 30
+
+      - name: 📦 Create Release Zip Archive
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          cd release-bundle && zip -r ../friday-ai-app-${{ github.ref_name }}.zip ./* && cd ..
+
+      - name: 🚀 Publish GitHub Release Asset
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: friday-ai-app-*.zip
+          name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

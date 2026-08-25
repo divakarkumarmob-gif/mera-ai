@@ -383,6 +383,30 @@ class ToolsEngine {
     const { productivityDigestService } = await import("./productivityDigestService");
     return await productivityDigestService.generateDailyWorkDigest();
   }
+
+  /**
+   * Friday Messenger AI Operations
+   */
+  public async sendMessengerMessage(
+    chatId: string,
+    text: string,
+    mediaType: any = "text",
+    mediaUrl?: string,
+    mediaTitle?: string
+  ) {
+    const { fridayMessengerService } = await import("./fridayMessengerService");
+    return await fridayMessengerService.sendMediaOrDocument(chatId, text, mediaType, mediaUrl || "", mediaTitle);
+  }
+
+  public async getMessengerInbox() {
+    const { fridayMessengerService } = await import("./fridayMessengerService");
+    return await fridayMessengerService.getContacts();
+  }
+
+  public async setMessengerContactRole(contactId: string, role: any) {
+    const { fridayMessengerService } = await import("./fridayMessengerService");
+    return await fridayMessengerService.setContactRole(contactId, role);
+  }
 }
 
 export const toolsEngine = new ToolsEngine();

@@ -941,6 +941,9 @@ ADVANCED AUTONOMOUS & IRON MAN SYSTEM TOOLS:
 - 'analyze_document': Document & PDF Voice Copilot. Analyzes contracts, research papers, resumes, or specifications. Call when DK asks to analyze or summarize a document.
 - 'query_document': Ask specific questions or extract clauses from a document. Call when DK asks questions about document contents.
 - 'get_daily_work_digest': Daily Work, Coding & Productivity Digest. Compiles daily accomplishments, schedule, health, and expenses into an executive summary with grade. Call when DK says "aaj ka work report batao", "daily productivity digest do".
+- 'send_messenger_chat': FRIDAY Autonomous Messenger. Sends texts, photos, videos, PDF documents, or links to any contact in Friday Messenger. Call when DK says "Friday Messenger me message bhejo", "GF / friend ko Messenger par photo/PDF bhejo".
+- 'get_messenger_inbox': View Friday Messenger chats, recent messages, and role badges.
+- 'set_messenger_contact_role': Change contact role in Friday Messenger ('boss' | 'girlfriend' | 'friend' | 'unknown').
 
 SELF-HEALING & AUTOMATIC BUG DELEGATION TO CODING AGENT:
 - When ANY tool, API, service, or feature fails or throws an error, or when DK gives commands about build failure, broken code, or last changes (e.g. "build failed ho gaya", "last change theek karo", "jo last changes kiya tha usko acche se coding karo taki build success ho", "code me error aa raha hai", "bina syntax error ke fix karo"):
@@ -2469,6 +2472,42 @@ HOW TO READ MESSAGES:
             type: "OBJECT",
             properties: {},
             required: [],
+          },
+        },
+        {
+          name: "send_messenger_chat",
+          description: "Send text messages, photos, videos, PDF documents, or web links to any contact in Friday Messenger. Use when DK says 'Friday Messenger me message bhejo', 'GF/friend ko Messenger par photo/PDF bhejo'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              chatId: { type: "STRING", description: "Contact ID in Friday Messenger (e.g. 'boss_dk', 'special_gf', 'best_friend_aman', 'unknown_client')" },
+              text: { type: "STRING", description: "Message text or caption" },
+              mediaType: { type: "STRING", description: "Type of media: 'text', 'image', 'video', 'pdf', 'link', 'audio'" },
+              mediaUrl: { type: "STRING", description: "Optional URL for image, video, or link" },
+              mediaTitle: { type: "STRING", description: "Optional title for document/PDF" },
+            },
+            required: ["chatId", "text"],
+          },
+        },
+        {
+          name: "get_messenger_inbox",
+          description: "Get all Friday Messenger chats, contacts, unread counts, and assigned roles. Use when DK asks 'Friday Messenger inbox check karo'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+            required: [],
+          },
+        },
+        {
+          name: "set_messenger_contact_role",
+          description: "Set or change a contact's role in Friday Messenger ('boss' | 'girlfriend' | 'friend' | 'unknown').",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              contactId: { type: "STRING", description: "Contact ID or name" },
+              role: { type: "STRING", description: "New role: 'boss', 'girlfriend', 'friend', 'unknown'" },
+            },
+            required: ["contactId", "role"],
           },
         },
         {
@@ -4028,6 +4067,32 @@ HOW TO READ MESSAGES:
                     result = await toolsEngine.generateDailyWorkDigest();
                   } catch (e: any) {
                     result = { success: false, message: `Daily work digest fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "send_messenger_chat") {
+                  const { chatId, text, mediaType, mediaUrl, mediaTitle } = call.args || {};
+                  try {
+                    result = await toolsEngine.sendMessengerMessage(
+                      String(chatId || "boss_dk"),
+                      String(text || ""),
+                      mediaType || "text",
+                      mediaUrl ? String(mediaUrl) : undefined,
+                      mediaTitle ? String(mediaTitle) : undefined
+                    );
+                  } catch (e: any) {
+                    result = { success: false, message: `Messenger send fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_messenger_inbox") {
+                  try {
+                    result = await toolsEngine.getMessengerInbox();
+                  } catch (e: any) {
+                    result = { success: false, message: `Messenger inbox check fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "set_messenger_contact_role") {
+                  const { contactId, role } = call.args || {};
+                  try {
+                    result = await toolsEngine.setMessengerContactRole(String(contactId || ""), role);
+                  } catch (e: any) {
+                    result = { success: false, message: `Messenger role update fail hua: ${e?.message || e}` };
                   }
                 } else if (call.name === "play_music") {
                   const { songName } = call.args || {};
