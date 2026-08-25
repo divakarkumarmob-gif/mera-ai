@@ -1,4 +1,5 @@
 import { db } from "./firebaseAdmin";
+import { publicApisService } from "./publicApisService";
 
 export interface ReminderItem {
   id: string;
@@ -73,6 +74,10 @@ class ToolsEngine {
   public async getNotes(): Promise<NoteItem[]> {
     const snap = await notesCollection().orderBy("timestamp", "desc").get();
     return snap.docs.map((d) => d.data() as NoteItem);
+  }
+
+  public async searchSongByLyrics(lyricsSnippet: string): Promise<any> {
+    return await publicApisService.searchSongByLyrics(lyricsSnippet);
   }
 }
 

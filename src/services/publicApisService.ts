@@ -3345,6 +3345,78 @@ class PublicApisService {
     };
   }
 
+  // 51.3 Search songs by lyrics with exact and partial fallback matching
+  public async searchSongsByLyrics(lyricsQuery: string): Promise<any> {
+    const query = String(lyricsQuery || "").trim().toLowerCase();
+    if (!query) {
+      return { success: false, message: "Lyrics query zaroori hai." };
+    }
+
+    try {
+      const data = await fetchJson(
+        `https://api.lyrics.ovh/suggest/${encodeURIComponent(query)}`
+      );
+      const dataTracks = data?.data || [];
+
+      if (dataTracks.length > 0) {
+        const exactMatches = dataTracks.filter((track: any) => {
+          const title = (track.title || "").toLowerCase();
+          const artist = (track.artist?.name || "").toLowerCase();
+          return title.includes(query) || artist.includes(query);
+        });
+
+        const chosenTracks = exactMatches.length > 0 ? exactMatches : dataTracks;
+        const matches = chosenTracks.slice(0, 5).map((t: any) => ({
+          title: t.title,
+          artist: t.artist?.name,
+          album: t.album?.title,
+          previewUrl: t.preview,
+          link: t.link,
+          albumArt: t.album?.cover_medium,
+        }));
+
+        return {
+          success: true,
+          query,
+          exactMatchFound: exactMatches.length > 0,
+          count: matches.length,
+          matches,
+          message: exactMatches.length > 0
+            ? `Exact/Close matches mil gaye hain!`
+            : `Exact match nahi mila, lekin ye closest partial matches hain:`,
+        };
+      }
+    } catch {
+      // Fallback if lyrics.ovh fails
+    }
+
+    // Fallback search via general music search
+    const fallbackRes = await this.searchMusic(query);
+    if (fallbackRes.success && fallbackRes.tracks?.length > 0) {
+      return {
+        success: true,
+        query,
+        exactMatchFound: false,
+        count: fallbackRes.tracks.length,
+        matches: fallbackRes.tracks.slice(0, 5).map((t: any) => ({
+          title: t.trackName,
+          artist: t.artistName,
+          album: t.albumName,
+          previewUrl: t.previewUrl,
+          link: t.spotifyUrl,
+          albumArt: t.albumArt,
+        })),
+        message: `Exact lyrics match nahi mila, par ye closest tracks match kar rahe hain:`,
+      };
+    }
+
+    return {
+      success: false,
+      query,
+      message: `"${lyricsQuery}" lyrics ke liye koi song nahi mila.`,
+    };
+  }
+
   // 52. LinkedIn Company & Jobs Hub
   public async getLinkedInInsights(query: string): Promise<any> {
     const q = query.trim();
