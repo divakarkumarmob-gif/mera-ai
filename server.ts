@@ -31,6 +31,7 @@ import { backgroundTasksService } from "./src/services/backgroundTasksService";
 import { appSecurityService } from "./src/services/appSecurityService";
 import { webCrawlerService } from "./src/services/webCrawlerService";
 import { railRadarService } from "./src/services/railRadarService";
+import { weatherService } from "./src/services/weatherService";
 
 const PORT = Number(process.env.PORT) || 3000;
 const isProduction = process.env.NODE_ENV === "production";
@@ -794,6 +795,58 @@ async function startServer() {
       res.json(data);
     } catch (e: any) {
       res.status(500).json({ success: false, error: e?.message || "seat_availability_failed" });
+    }
+  });
+
+  // ── WeatherAPI.com Intelligence Endpoints ─────────────────────────────────
+  app.get("/api/weather/current", async (req, res) => {
+    try {
+      const q = String(req.query.q || "Patna");
+      const data = await weatherService.getCurrentWeather(q);
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || "weather_fetch_failed" });
+    }
+  });
+
+  app.get("/api/weather/forecast", async (req, res) => {
+    try {
+      const q = String(req.query.q || "Patna");
+      const days = Number(req.query.days || 3);
+      const data = await weatherService.getForecast(q, days);
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || "forecast_fetch_failed" });
+    }
+  });
+
+  app.get("/api/weather/astronomy", async (req, res) => {
+    try {
+      const q = String(req.query.q || "Patna");
+      const data = await weatherService.getAstronomy(q);
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || "astronomy_fetch_failed" });
+    }
+  });
+
+  app.get("/api/weather/marine", async (req, res) => {
+    try {
+      const q = String(req.query.q || "Mumbai");
+      const data = await weatherService.getMarineWeather(q);
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || "marine_fetch_failed" });
+    }
+  });
+
+  app.get("/api/weather/sports", async (req, res) => {
+    try {
+      const q = String(req.query.q || "London");
+      const data = await weatherService.getSportsWeather(q);
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || "sports_fetch_failed" });
     }
   });
 

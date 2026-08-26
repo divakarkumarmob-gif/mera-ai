@@ -24,76 +24,63 @@ async function fetchJson(url: string, timeoutMs = 8000): Promise<any> {
   }
 }
 
+import { weatherService } from "./weatherService";
+
 class PublicApisService {
-  // 1. Weather — Open-Meteo (free, no key)
-  // Needs lat/lon. Geocodes the place name first via Open-Meteo's free
-  // geocoding endpoint, then fetches current + short forecast.
+  // 1. Weather — Powered by WeatherAPI.com (with Open-Meteo fallback)
   public async getWeather(place: string): Promise<any> {
-    const geo = await fetchJson(
-      `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(place)}&count=1&language=en&format=json`
-    );
-    const loc = geo?.results?.[0];
-    if (!loc) return { success: false, message: `"${place}" ke liye location nahi mili.` };
-
-    const w = await fetchJson(
-      `https://api.open-meteo.com/v1/forecast?latitude=${loc.latitude}&longitude=${loc.longitude}` +
-        `&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m` +
-        `&daily=temperature_2m_max,temperature_2m_min&timezone=auto`
-    );
-
+    const res = await weatherService.getCurrentWeather(place);
+    if (!res.success) return { success: false, message: res.message };
+    const cur = res.current;
     return {
       success: true,
-      place: loc.name,
-      country: loc.country,
-      currentTempC: w.current?.temperature_2m,
-      humidityPct: w.current?.relative_humidity_2m,
-      windKmh: w.current?.wind_speed_10m,
-      weatherCode: w.current?.weather_code,
-      todayMaxC: w.daily?.temperature_2m_max?.[0],
-      todayMinC: w.daily?.temperature_2m_min?.[0],
+      place: res.location?.name || place,
+      country: res.location?.country || "India",
+      currentTempC: cur?.temp_c,
+      feelsLikeC: cur?.feelslike_c,
+      humidityPct: cur?.humidity,
+      windKmh: cur?.wind_kph,
+      weatherCode: cur?.condition?.code || 0,
+      conditionText: cur?.condition?.text || "Clear",
+      uvIndex: cur?.uv,
+      visibilityKm: cur?.vis_km,
+      airQuality: cur?.air_quality,
+      message: res.message,
     };
   }
 
-  // 2. Air Quality Index — Open-Meteo Air Quality (free, no key)
+  // 2. Air Quality Index — Powered by WeatherAPI.com / Open-Meteo
   public async getAirQuality(place: string): Promise<any> {
-    const geo = await fetchJson(
-      `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(place)}&count=1&language=en&format=json`
-    );
-    const loc = geo?.results?.[0];
-    if (!loc) return { success: false, message: `"${place}" ke liye location nahi mili.` };
-
-    const aq = await fetchJson(
-      `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${loc.latitude}&longitude=${loc.longitude}` +
-        `&current=us_aqi,pm2_5,pm10`
-    );
-
+    const res = await weatherService.getCurrentWeather(place);
+    if (!res.success) return { success: false, message: res.message };
+    const aqi = res.current?.air_quality;
     return {
       success: true,
-      place: loc.name,
-      usAqi: aq.current?.us_aqi,
-      pm2_5: aq.current?.pm2_5,
-      pm10: aq.current?.pm10,
+      place: res.location?.name || place,
+      usAqi: aqi?.us_epa_index,
+      pm2_5: aqi?.pm2_5,
+      pm10: aqi?.pm10,
+      co: aqi?.co,
+      no2: aqi?.no2,
+      o3: aqi?.o3,
+      so2: aqi?.so2,
+      message: `🍃 **Air Quality in ${res.location?.name}:** PM2.5: ${Math.round(aqi?.pm2_5 || 25)} µg/m³, PM10: ${Math.round(aqi?.pm10 || 45)} µg/m³`,
     };
   }
 
-  // 3. Sunrise/Sunset — sunrise-sunset.org (free, no key)
+  // 3. Sunrise/Sunset & Astronomy — Powered by WeatherAPI.com / Astronomy API
   public async getSunriseSunset(place: string): Promise<any> {
-    const geo = await fetchJson(
-      `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(place)}&count=1&language=en&format=json`
-    );
-    const loc = geo?.results?.[0];
-    if (!loc) return { success: false, message: `"${place}" ke liye location nahi mili.` };
-
-    const s = await fetchJson(
-      `https://api.sunrise-sunset.org/json?lat=${loc.latitude}&lng=${loc.longitude}&formatted=0`
-    );
-
+    const res = await weatherService.getAstronomy(place);
     return {
       success: true,
-      place: loc.name,
-      sunriseUtc: s.results?.sunrise,
-      sunsetUtc: s.results?.sunset,
-      dayLength: s.results?.day_length,
+      place: res.location || place,
+      sunriseUtc: res.sunrise,
+      sunsetUtc: res.sunset,
+      moonrise: res.moonrise,
+      moonset: res.moonset,
+      moonPhase: res.moonPhase,
+      moonIllumination: res.moonIllumination,
+      message: res.message,
     };
   }
 
