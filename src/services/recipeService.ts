@@ -1,13 +1,15 @@
 /**
  * Recipe & Food Intelligence Service
  * Powered by Spoonacular API (https://spoonacular.com/food-api/docs)
- * with robust TheMealDB & AI Fallbacks for zero-downtime cooking assistance.
+ * with robust TheMealDB & Friday's Internal Master Chef AI Learning Skill Fallback.
  */
+
+import { GoogleGenAI } from "@google/genai";
 
 export interface RecipeSearchResult {
   success: boolean;
   count: number;
-  source: "spoonacular" | "themealdb" | "fallback";
+  source: "spoonacular" | "themealdb" | "friday_ai_master_chef";
   recipes: RecipeSummary[];
   message?: string;
 }
@@ -37,6 +39,7 @@ export interface DetailedRecipe {
   title: string;
   image?: string;
   readyInMinutes?: number;
+  prepTimeMinutes?: number;
   servings?: number;
   sourceUrl?: string;
   summary?: string;
@@ -66,6 +69,7 @@ export interface DetailedRecipe {
       equipment?: { id: number; name: string }[];
     }[];
   }[];
+  chefTips?: string[];
   nutrition?: {
     calories?: string;
     protein?: string;
@@ -76,13 +80,19 @@ export interface DetailedRecipe {
 }
 
 export class RecipeService {
-  private getApiKey(): string | undefined {
+  private getSpoonacularApiKey(): string | undefined {
     return (
       process.env.SPOONACULAR_API_KEY ||
       process.env.SPOONACULAR_KEY ||
       process.env.RECIPE_API_KEY ||
       process.env.FOOD_API_KEY
     );
+  }
+
+  private getGenAI(): GoogleGenAI | null {
+    const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+    if (!key) return null;
+    return new GoogleGenAI({ apiKey: key });
   }
 
   /**
@@ -98,9 +108,10 @@ export class RecipeService {
     maxCalories?: number;
     number?: number;
   }): Promise<RecipeSearchResult> {
-    const apiKey = this.getApiKey();
+    const apiKey = this.getSpoonacularApiKey();
     const limit = options.number || 5;
 
+    // 1. Try Spoonacular API
     if (apiKey) {
       try {
         const params = new URLSearchParams({
@@ -166,24 +177,31 @@ export class RecipeService {
       }
     }
 
-    // Fallback: TheMealDB
-    return this.searchTheMealDb(options.query || options.cuisine || "chicken");
+    // 2. Try TheMealDB
+    const mealDbRes = await this.searchTheMealDb(options.query || options.cuisine || "Paneer");
+    if (mealDbRes.success && mealDbRes.recipes.length > 0) {
+      return mealDbRes;
+    }
+
+    // 3. Fallback: Friday's AI Master Chef Learning Skill
+    return this.synthesizeFridayChefSearch(options.query || options.cuisine || "Special Dish", options);
   }
 
   /**
    * 2. Search Recipes by Ingredients in Kitchen / Fridge
    */
   public async searchByIngredients(ingredients: string | string[], number = 5): Promise<RecipeSearchResult> {
-    const apiKey = this.getApiKey();
+    const apiKey = this.getSpoonacularApiKey();
     const ingList = Array.isArray(ingredients) ? ingredients.join(",") : ingredients;
 
+    // 1. Try Spoonacular findByIngredients
     if (apiKey) {
       try {
         const params = new URLSearchParams({
           apiKey,
           ingredients: ingList,
           number: String(number),
-          ranking: "1", // Maximize used ingredients
+          ranking: "1",
           ignorePantry: "true",
         });
 
@@ -217,17 +235,24 @@ export class RecipeService {
       }
     }
 
-    // Fallback: TheMealDB filter by main ingredient
+    // 2. Try TheMealDB
     const primaryIng = (Array.isArray(ingredients) ? ingredients[0] : ingredients.split(",")[0]).trim();
-    return this.searchTheMealDbByIngredient(primaryIng);
+    const mealDbRes = await this.searchTheMealDbByIngredient(primaryIng);
+    if (mealDbRes.success && mealDbRes.recipes.length > 0) {
+      return mealDbRes;
+    }
+
+    // 3. Fallback: Friday's AI Master Chef Learning Skill
+    return this.synthesizeFridayIngredientsRecipe(ingList);
   }
 
   /**
    * 3. Get Full Recipe Details, Ingredients List, and Step-by-Step Cooking Guide
    */
   public async getRecipeDetails(recipeIdOrTitle: string | number): Promise<{ success: boolean; recipe?: DetailedRecipe; message: string }> {
-    const apiKey = this.getApiKey();
+    const apiKey = this.getSpoonacularApiKey();
 
+    // 1. Try Spoonacular if ID is numeric
     if (apiKey && typeof recipeIdOrTitle === "number") {
       try {
         const res = await fetch(
@@ -289,15 +314,21 @@ export class RecipeService {
       }
     }
 
-    // Search by title or fallback to TheMealDB
-    return this.getTheMealDbDetails(String(recipeIdOrTitle));
+    // 2. Try TheMealDB search
+    const mealDbRes = await this.getTheMealDbDetails(String(recipeIdOrTitle));
+    if (mealDbRes.success && mealDbRes.recipe) {
+      return mealDbRes;
+    }
+
+    // 3. Fallback: Friday's AI Master Chef Learning Skill
+    return this.synthesizeFridayChefRecipe(String(recipeIdOrTitle));
   }
 
   /**
    * 4. Get Random Recipes / Dish Recommendations (e.g. Vegetarian, Indian, Quick Dinner)
    */
   public async getRandomRecipes(tags?: string, number = 3): Promise<RecipeSearchResult> {
-    const apiKey = this.getApiKey();
+    const apiKey = this.getSpoonacularApiKey();
 
     if (apiKey) {
       try {
@@ -339,14 +370,20 @@ export class RecipeService {
       }
     }
 
-    return this.getRandomTheMealDb();
+    const mealDbRes = await this.getRandomTheMealDb();
+    if (mealDbRes.success && mealDbRes.recipes.length > 0) {
+      return mealDbRes;
+    }
+
+    // Friday AI Chef fallback
+    return this.synthesizeFridayChefSearch(tags ? `${tags} special dish` : "Indian dinner ideas");
   }
 
   /**
    * 5. Ingredient Substitutes (e.g. "What can I replace butter with?")
    */
   public async getIngredientSubstitutes(ingredientName: string): Promise<{ success: boolean; ingredient: string; substitutes: string[]; message: string }> {
-    const apiKey = this.getApiKey();
+    const apiKey = this.getSpoonacularApiKey();
     const cleanIng = ingredientName.trim();
 
     if (apiKey) {
@@ -372,33 +409,8 @@ export class RecipeService {
       }
     }
 
-    // Common smart culinary substitutes lookup
-    const commonSubs: Record<string, string[]> = {
-      butter: ["Oil (1:1)", "Ghee (1:1)", "Mashed Banana (for baking)", "Greek Yogurt"],
-      egg: ["Mashed Banana (1/2 banana = 1 egg)", "Chia seeds with water", "Flaxseed meal with water", "Yogurt (1/4 cup = 1 egg)"],
-      sugar: ["Honey (3/4 cup per 1 cup sugar)", "Jaggery (Gud)", "Maple Syrup", "Stevia"],
-      milk: ["Almond Milk", "Soy Milk", "Oat Milk", "Coconut Milk"],
-      cream: ["Milk + Butter", "Coconut Cream", "Greek Yogurt", "Silken Tofu"],
-      paneer: ["Tofu", "Ricotta Cheese", "Feta Cheese"],
-      curd: ["Yogurt", "Sour Cream", "Lemon Juice in Warm Milk (Buttermilk)"],
-    };
-
-    const key = Object.keys(commonSubs).find(k => cleanIng.toLowerCase().includes(k));
-    if (key) {
-      return {
-        success: true,
-        ingredient: cleanIng,
-        substitutes: commonSubs[key],
-        message: `Boss, ${cleanIng} ke substitutes:\n• ` + commonSubs[key].join("\n• "),
-      };
-    }
-
-    return {
-      success: false,
-      ingredient: cleanIng,
-      substitutes: [],
-      message: `Boss, "${cleanIng}" ka direct substitute exact match nahi mila.`,
-    };
+    // Friday AI Chef dynamic substitutes
+    return this.synthesizeFridaySubstitutes(cleanIng);
   }
 
   /**
@@ -410,7 +422,7 @@ export class RecipeService {
     diet?: string;
     exclude?: string;
   }): Promise<any> {
-    const apiKey = this.getApiKey();
+    const apiKey = this.getSpoonacularApiKey();
     const timeFrame = options.timeFrame || "day";
     const targetCalories = options.targetCalories || 2000;
 
@@ -445,21 +457,335 @@ export class RecipeService {
       }
     }
 
-    // High quality default Indian / Balanced diet plan
+    // Friday AI Chef meal planner
+    return this.synthesizeFridayMealPlan(targetCalories, timeFrame, options.diet);
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Friday's AI Master Chef Learning Skill (Deep AI Recipe Synthesizer)
+  // ──────────────────────────────────────────────────────────────────────────
+
+  private async synthesizeFridayChefRecipe(dishName: string): Promise<{ success: boolean; recipe?: DetailedRecipe; message: string }> {
+    const ai = this.getGenAI();
+    if (!ai) {
+      return {
+        success: false,
+        message: `Boss, "${dishName}" ki details fetch karne ke liye connection temporarily busy hai.`,
+      };
+    }
+
+    try {
+      const prompt = `You are Chef Friday, an expert Master Chef with deep culinary expertise in Indian, Asian, and Global cuisines.
+Generate an authentic, gourmet, step-by-step recipe for the dish: "${dishName}".
+
+Respond ONLY with valid JSON in this exact structure:
+{
+  "title": "${dishName}",
+  "cuisine": "Indian / Mughlai / Continental / etc",
+  "prepTimeMinutes": 15,
+  "readyInMinutes": 30,
+  "servings": 3,
+  "summary": "Short 2-line delicious description of the dish",
+  "vegetarian": true/false,
+  "extendedIngredients": [
+    {"name": "Paneer", "original": "250g Paneer (cubed)"},
+    {"name": "Tomato Puree", "original": "2 medium Tomatoes (pureed)"},
+    {"name": "Kasuri Methi", "original": "1 tsp Kasuri Methi (crushed)"}
+  ],
+  "steps": [
+    "Step 1: Pan me 2 tbsp ghee garam karein aur jeera tadkayein.",
+    "Step 2: Pyaaz aur adrak-lahsun paste daal kar golden brown hone tak bhunein.",
+    "Step 3: Tamatar puree aur masale daal kar tel chhootne tak pakayein.",
+    "Step 4: Paneer cubes daal kar 5 minute dheemi aanch par simmer karein aur hara dhaniya se garnish karein."
+  ],
+  "chefTips": [
+    "Kasuri methi ko haath se crush karke aakhri me daalne se hotel jaisa aroma aata hai."
+  ],
+  "nutrition": {
+    "calories": "320 kcal per serving",
+    "protein": "16g",
+    "carbs": "12g",
+    "fat": "22g"
+  }
+}`;
+
+      const res = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        config: {
+          responseMimeType: "application/json",
+          temperature: 0.3,
+        },
+      });
+
+      const parsed = JSON.parse(res.text || "{}");
+      if (parsed.title) {
+        const recipe: DetailedRecipe = {
+          id: `friday_chef_${Date.now()}`,
+          title: parsed.title,
+          readyInMinutes: parsed.readyInMinutes || 30,
+          prepTimeMinutes: parsed.prepTimeMinutes || 15,
+          servings: parsed.servings || 3,
+          summary: parsed.summary,
+          cuisines: parsed.cuisine ? [parsed.cuisine] : ["Gourmet"],
+          vegetarian: parsed.vegetarian ?? true,
+          extendedIngredients: (parsed.extendedIngredients || []).map((i: any) => ({
+            name: i.name,
+            original: i.original,
+          })),
+          instructions: (parsed.steps || []).join("\n"),
+          analyzedInstructions: [
+            {
+              name: "Cooking Steps",
+              steps: (parsed.steps || []).map((s: string, idx: number) => ({
+                number: idx + 1,
+                step: s,
+              })),
+            },
+          ],
+          chefTips: parsed.chefTips || [],
+          nutrition: parsed.nutrition,
+        };
+
+        return {
+          success: true,
+          recipe,
+          message: `Boss, Friday ke Master Chef AI Skill ne "${parsed.title}" ki authentic recipe तैयार kar di hai! 👨‍🍳✨`,
+        };
+      }
+    } catch (e) {
+      console.warn("[RecipeService] Friday AI chef recipe synthesis failed:", e);
+    }
+
     return {
-      success: true,
-      source: "fallback",
-      timeFrame: "day",
-      targetCalories,
-      nutrients: { calories: targetCalories, protein: "80g", carbs: "220g", fat: "60g" },
-      meals: [
-        { slot: 1, title: "Healthy Oats / Poha with Sprouted Moong & Tea", readyInMinutes: 15 },
-        { slot: 2, title: "Dal Tadka, Roti, Paneer Bhurji / Grilled Chicken with Green Salad", readyInMinutes: 30 },
-        { slot: 3, title: "Roasted Makhana / Green Tea / Fruit Bowl", readyInMinutes: 5 },
-        { slot: 4, title: "Light Khichdi / Vegetable Stir Fry with Soup", readyInMinutes: 25 },
-      ],
-      message: `Boss, ${targetCalories} kcal ka balanced daily meal plan prepare ho gaya hai!`,
+      success: false,
+      message: `Boss, "${dishName}" ki recipe banate waqt connection timeout ho gaya.`,
     };
+  }
+
+  private async synthesizeFridayChefSearch(query: string, options?: any): Promise<RecipeSearchResult> {
+    const ai = this.getGenAI();
+    if (!ai) {
+      return { success: false, count: 0, source: "friday_ai_master_chef", recipes: [] };
+    }
+
+    try {
+      const prompt = `You are Chef Friday. Give 3 delicious recipe recommendations matching query: "${query}".
+Cuisine/Diet filter: ${options?.cuisine || options?.diet || "any"}.
+
+Respond ONLY with valid JSON in this structure:
+{
+  "recipes": [
+    {
+      "title": "Dish Name",
+      "readyInMinutes": 25,
+      "servings": 3,
+      "cuisines": ["Indian"],
+      "summary": "Delicious spicy dish...",
+      "calories": 280,
+      "protein": "14g"
+    }
+  ]
+}`;
+
+      const res = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        config: {
+          responseMimeType: "application/json",
+          temperature: 0.4,
+        },
+      });
+
+      const parsed = JSON.parse(res.text || "{}");
+      const list: RecipeSummary[] = (parsed.recipes || []).map((r: any, idx: number) => ({
+        id: `friday_rec_${Date.now()}_${idx}`,
+        title: r.title,
+        readyInMinutes: r.readyInMinutes || 30,
+        servings: r.servings || 3,
+        summary: r.summary,
+        cuisines: r.cuisines || ["Delicious"],
+        calories: r.calories,
+        protein: r.protein,
+      }));
+
+      return {
+        success: list.length > 0,
+        count: list.length,
+        source: "friday_ai_master_chef",
+        recipes: list,
+        message: `Boss, Friday ke Master Chef AI Skill ne "${query}" ke liye ${list.length} top recipes suggest ki hain!`,
+      };
+    } catch {
+      return { success: false, count: 0, source: "friday_ai_master_chef", recipes: [] };
+    }
+  }
+
+  private async synthesizeFridayIngredientsRecipe(ingredients: string): Promise<RecipeSearchResult> {
+    const ai = this.getGenAI();
+    if (!ai) return { success: false, count: 0, source: "friday_ai_master_chef", recipes: [] };
+
+    try {
+      const prompt = `You are Chef Friday. A user has these ingredients in their kitchen: "${ingredients}".
+Suggest 3 fantastic dishes they can cook right now with these ingredients, plus basic spices.
+
+Respond ONLY with valid JSON:
+{
+  "recipes": [
+    {
+      "title": "Dish Name",
+      "usedIngredientsCount": 3,
+      "missedIngredientsCount": 1,
+      "missedIngredients": ["optional coriander"],
+      "summary": "Quick tasty dish you can make in 20 mins"
+    }
+  ]
+}`;
+
+      const res = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        config: {
+          responseMimeType: "application/json",
+          temperature: 0.3,
+        },
+      });
+
+      const parsed = JSON.parse(res.text || "{}");
+      const list = (parsed.recipes || []).map((r: any, idx: number) => ({
+        id: `friday_ing_${Date.now()}_${idx}`,
+        title: r.title,
+        usedIngredientsCount: r.usedIngredientsCount,
+        missedIngredientsCount: r.missedIngredientsCount,
+        missedIngredients: r.missedIngredients,
+        summary: r.summary,
+      }));
+
+      return {
+        success: list.length > 0,
+        count: list.length,
+        source: "friday_ai_master_chef",
+        recipes: list,
+        message: `Boss, aapke maujood ingredients (${ingredients}) se Friday AI ne ${list.length} recipes banayi hain!`,
+      };
+    } catch {
+      return { success: false, count: 0, source: "friday_ai_master_chef", recipes: [] };
+    }
+  }
+
+  private async synthesizeFridaySubstitutes(ingredient: string): Promise<{ success: boolean; ingredient: string; substitutes: string[]; message: string }> {
+    const ai = this.getGenAI();
+    if (!ai) {
+      return {
+        success: false,
+        ingredient,
+        substitutes: [],
+        message: `Boss, "${ingredient}" ka substitute find nahi ho paya.`,
+      };
+    }
+
+    try {
+      const prompt = `You are Chef Friday. Give 3-4 exact cooking/baking substitutes for the ingredient: "${ingredient}". Include ratio/quantity (e.g. 1 cup butter = 3/4 cup oil or 1/2 cup Greek yogurt).
+
+Respond ONLY with valid JSON:
+{
+  "substitutes": [
+    "Refined Oil / Ghee (1:1 ratio for cooking/baking)",
+    "Greek Yogurt / Curd (1/2 cup per 1 cup butter for moisture in cakes)",
+    "Mashed Banana / Applesauce (for healthy eggless baking)"
+  ]
+}`;
+
+      const res = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        config: {
+          responseMimeType: "application/json",
+          temperature: 0.2,
+        },
+      });
+
+      const parsed = JSON.parse(res.text || "{}");
+      const subs: string[] = parsed.substitutes || [];
+
+      return {
+        success: subs.length > 0,
+        ingredient,
+        substitutes: subs,
+        message: `Boss, Friday Chef AI ke mutabiq "${ingredient}" ke best substitutes:\n• ` + subs.join("\n• "),
+      };
+    } catch {
+      return {
+        success: false,
+        ingredient,
+        substitutes: [],
+        message: `Boss, "${ingredient}" ka direct substitute exact match nahi mila.`,
+      };
+    }
+  }
+
+  private async synthesizeFridayMealPlan(targetCalories: number, timeFrame: string, diet?: string): Promise<any> {
+    const ai = this.getGenAI();
+    if (!ai) {
+      return {
+        success: true,
+        source: "friday_ai_master_chef",
+        timeFrame,
+        targetCalories,
+        nutrients: { calories: targetCalories, protein: "75g", carbs: "220g", fat: "55g" },
+        meals: [
+          { slot: 1, title: "Healthy Oats / Poha with Sprouted Moong & Green Tea", readyInMinutes: 15 },
+          { slot: 2, title: "Dal Tadka, Roti, Paneer Bhurji with Green Salad", readyInMinutes: 30 },
+          { slot: 3, title: "Roasted Makhana & Fresh Fruit Bowl", readyInMinutes: 5 },
+          { slot: 4, title: "Light Khichdi / Vegetable Stir Fry with Soup", readyInMinutes: 25 },
+        ],
+        message: `Boss, ${targetCalories} kcal ka healthy meal plan ready hai!`,
+      };
+    }
+
+    try {
+      const prompt = `You are Chef Friday. Create a high-nutrition, delicious ${timeFrame} meal plan with target calories: ${targetCalories} kcal. Diet preference: ${diet || "Indian Balanced"}.
+
+Respond ONLY with valid JSON:
+{
+  "nutrients": {"calories": ${targetCalories}, "protein": "85g", "carbs": "210g", "fat": "60g"},
+  "meals": [
+    {"slot": 1, "name": "Breakfast", "title": "...", "readyInMinutes": 15, "calories": 400},
+    {"slot": 2, "name": "Lunch", "title": "...", "readyInMinutes": 30, "calories": 700},
+    {"slot": 3, "name": "Snack", "title": "...", "readyInMinutes": 10, "calories": 250},
+    {"slot": 4, "name": "Dinner", "title": "...", "readyInMinutes": 25, "calories": 650}
+  ]
+}`;
+
+      const res = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        config: {
+          responseMimeType: "application/json",
+          temperature: 0.3,
+        },
+      });
+
+      const parsed = JSON.parse(res.text || "{}");
+      return {
+        success: true,
+        source: "friday_ai_master_chef",
+        timeFrame,
+        targetCalories,
+        nutrients: parsed.nutrients || { calories: targetCalories },
+        meals: parsed.meals || [],
+        message: `Boss, Friday ke Master Chef AI Skill ne ${targetCalories} kcal ka customized ${diet || "balanced"} meal plan prepare kar diya hai! 🥗✨`,
+      };
+    } catch {
+      return {
+        success: true,
+        source: "friday_ai_master_chef",
+        timeFrame,
+        targetCalories,
+        nutrients: { calories: targetCalories },
+        meals: [],
+      };
+    }
   }
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -469,7 +795,7 @@ export class RecipeService {
   private async searchTheMealDb(query: string): Promise<RecipeSearchResult> {
     try {
       const res = await fetch(`https://www.themealdb.com/api/json/v1/1/search.php?s=${encodeURIComponent(query)}`, {
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(4000),
       });
       if (res.ok) {
         const data = await res.json();
@@ -501,7 +827,7 @@ export class RecipeService {
     return {
       success: false,
       count: 0,
-      source: "fallback",
+      source: "friday_ai_master_chef",
       recipes: [],
       message: `Boss, "${query}" ke liye koi recipe nahi mili.`,
     };
@@ -510,7 +836,7 @@ export class RecipeService {
   private async searchTheMealDbByIngredient(ingredient: string): Promise<RecipeSearchResult> {
     try {
       const res = await fetch(`https://www.themealdb.com/api/json/v1/1/filter.php?i=${encodeURIComponent(ingredient)}`, {
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(4000),
       });
       if (res.ok) {
         const data = await res.json();
@@ -536,7 +862,12 @@ export class RecipeService {
       console.warn("[RecipeService] TheMealDB ingredient fallback:", e);
     }
 
-    return this.searchTheMealDb(ingredient);
+    return {
+      success: false,
+      count: 0,
+      source: "friday_ai_master_chef",
+      recipes: [],
+    };
   }
 
   private async getTheMealDbDetails(queryOrId: string): Promise<{ success: boolean; recipe?: DetailedRecipe; message: string }> {
@@ -545,7 +876,7 @@ export class RecipeService {
         ? `https://www.themealdb.com/api/json/v1/1/lookup.php?i=${queryOrId}`
         : `https://www.themealdb.com/api/json/v1/1/search.php?s=${encodeURIComponent(queryOrId)}`;
 
-      const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+      const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
       if (res.ok) {
         const data = await res.json();
         const m = data.meals?.[0];
@@ -593,7 +924,7 @@ export class RecipeService {
 
   private async getRandomTheMealDb(): Promise<RecipeSearchResult> {
     try {
-      const res = await fetch("https://www.themealdb.com/api/json/v1/1/random.php", { signal: AbortSignal.timeout(5000) });
+      const res = await fetch("https://www.themealdb.com/api/json/v1/1/random.php", { signal: AbortSignal.timeout(4000) });
       if (res.ok) {
         const data = await res.json();
         const m = data.meals?.[0];
@@ -624,7 +955,7 @@ export class RecipeService {
     return {
       success: false,
       count: 0,
-      source: "fallback",
+      source: "friday_ai_master_chef",
       recipes: [],
       message: "Random recipe fetch nahi ho payi.",
     };
