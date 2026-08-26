@@ -1379,6 +1379,22 @@ Kripya neeche se mode choose karein ya direct message type karein:`;
       return;
     }
 
+    // 5.1 Handle Videos & Video Notes (Gemini Multimodal Video Analysis)
+    if (msg.video || msg.video_note) {
+      const fileId = msg.video?.file_id || msg.video_note?.file_id;
+      if (fileId) {
+        try {
+          await this.sendMessage(chatId, "🎬 *Video analyze ho rahi hai (Actions, Text & Audio)...*");
+          const { buffer } = await this.downloadFile(fileId);
+          const analysisRes = await visionMemoryService.processIncomingMedia(buffer, "video/mp4", senderName, text || "Analyze this video");
+          await this.sendMessage(chatId, `🎥 *Video Analysis Breakdown:*\n\n${analysisRes.analysis}`);
+        } catch (e: any) {
+          await this.sendMessage(chatId, `❌ Video process karne me error: ${e?.message || e}`);
+        }
+        return;
+      }
+    }
+
     // 6. Handle Coding Agent Approvals ("yes" / "ok" / "approve")
     const normalized = text.toLowerCase();
     if (["yes", "ok", "approve", "haan", "theek hai"].includes(normalized)) {

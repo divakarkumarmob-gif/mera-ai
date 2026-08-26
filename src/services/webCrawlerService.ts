@@ -35,6 +35,13 @@ const SEARCH_GROUNDING_CHAIN = [
   "gemini-2.0-flash",
 ];
 
+// Vector Embedding Model Chain: Gemini Embedding 1 -> Gemini Embedding 2 -> Legacy 001
+const EMBEDDING_MODEL_CHAIN = [
+  "text-embedding-004", // Gemini Embedding 1 (768/1536 dim SOTA)
+  "text-embedding-002", // Gemini Embedding 2 (High-accuracy fallback)
+  "embedding-001",      // Legacy Fallback
+];
+
 export interface CrawledPageMeta {
   title: string;
   description?: string;
@@ -791,6 +798,33 @@ Provide a detailed, precise location guide including:
       }
     }
     throw new Error("Map Grounding failed across all fallback models.");
+  }
+
+  /**
+   * Vector Embedding Generator with robust fallback chain:
+   * text-embedding-004 -> text-embedding-002 -> embedding-001
+   */
+  public async generateEmbedding(text: string): Promise<number[] | null> {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) return null;
+
+    const ai = new GoogleGenAI({ apiKey });
+
+    for (const model of EMBEDDING_MODEL_CHAIN) {
+      try {
+        const resp = await ai.models.embedContent({
+          model,
+          contents: text,
+        });
+        const vector = resp.embedding?.values;
+        if (vector && vector.length > 0) {
+          return vector;
+        }
+      } catch (err: any) {
+        console.warn(`[Embedding] Model ${model} failed: ${err?.message || err}`);
+      }
+    }
+    return null;
   }
 
   private stripTags(html: string): string {

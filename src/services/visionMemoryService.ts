@@ -105,25 +105,42 @@ ${caption ? `User caption: "${caption}"` : ""}`;
           ? (lowerMime.includes("ogg") ? "audio/ogg" : "audio/mp3")
           : (lowerMime.includes("png") ? "image/png" : lowerMime.includes("webp") ? "image/webp" : "image/jpeg");
 
-        const response = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
-          contents: [
-            {
-              role: "user",
-              parts: [
-                { text: prompt },
+        const VISION_FALLBACK_MODELS = [
+          "gemini-2.5-flash",
+          "gemini-2.0-flash",
+          "gemini-1.5-pro",
+          "gemini-1.5-flash",
+        ];
+
+        for (const model of VISION_FALLBACK_MODELS) {
+          try {
+            const response = await ai.models.generateContent({
+              model,
+              contents: [
                 {
-                  inlineData: {
-                    mimeType: normalizedMime,
-                    data: base64Data,
-                  },
+                  role: "user",
+                  parts: [
+                    { text: prompt },
+                    {
+                      inlineData: {
+                        mimeType: normalizedMime,
+                        data: base64Data,
+                      },
+                    },
+                  ],
                 },
               ],
-            },
-          ],
-        });
+            });
 
-        analysis = response.text || "Media received and analyzed.";
+            if (response.text && response.text.trim()) {
+              analysis = response.text;
+              break;
+            }
+          } catch (modelErr: any) {
+            console.warn(`[VisionMemoryService] Model ${model} failed: ${modelErr?.message || modelErr}`);
+          }
+        }
+
         if (isDoc || analysis.toLowerCase().includes("text:") || analysis.toLowerCase().includes("ocr")) {
           ocrText = analysis;
         }
