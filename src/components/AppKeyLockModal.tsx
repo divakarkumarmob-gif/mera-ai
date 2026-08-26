@@ -303,21 +303,24 @@ export default function AppKeyLockModal({ onUnlocked }: AppKeyLockModalProps) {
                     </button>
                 </form>
 
-                {/* Owner Key Guide (WhatsApp / Telegram) */}
+                {/* Owner Key & Unblock Guide (WhatsApp / Telegram) */}
                 <div className="w-full p-2.5 rounded-2xl bg-slate-900/60 border border-white/5 flex flex-col gap-1 text-[11px] text-slate-400">
                     <div className="flex items-center gap-1.5 text-cyan-400 font-semibold">
                         <MessageSquare className="w-3.5 h-3.5" />
-                        <span>Owner Access Key Commands:</span>
+                        <span>Owner Security Commands (WhatsApp / Telegram):</span>
                     </div>
                     <p className="leading-relaxed text-[10px]">
-                        App Key sirf <b>WhatsApp Owner</b> ya <b>Telegram Owner</b> change/create kar sakte hain:
+                        Owner WhatsApp ya Telegram se key change aur block hone par IP unblock kar sakte hain:
                     </p>
                     <div className="flex flex-wrap gap-1.5 mt-0.5">
                         <code className="px-2 py-0.5 rounded bg-slate-800 text-cyan-300 font-mono text-[10px] border border-cyan-500/20">
-                            app key - 123456
+                            app key 123456
                         </code>
-                        <code className="px-2 py-0.5 rounded bg-slate-800 text-cyan-300 font-mono text-[10px] border border-cyan-500/20">
-                            app pass 987654
+                        <code className="px-2 py-0.5 rounded bg-slate-800 text-emerald-300 font-mono text-[10px] border border-emerald-500/20">
+                            unblock all
+                        </code>
+                        <code className="px-2 py-0.5 rounded bg-slate-800 text-emerald-300 font-mono text-[10px] border border-emerald-500/20">
+                            unblock &lt;IP&gt;
                         </code>
                     </div>
                 </div>

@@ -1241,13 +1241,15 @@ Kripya neeche se mode choose karein ya direct message type karein:`;
       return;
     }
 
-    // 3.1 Handle App Access Key updates (e.g. "app key - 123456", "app pass 987654", "app password: mypass")
+    // 3.1 Handle App Security & Access Key updates (e.g. "app key 123456", "unblock 192.168.1.1", "unblock all", "list blocked")
     const telegramOwnerChatId = process.env.TELEGRAM_OWNER_CHAT_ID;
-    const isTelegramOwner = !!telegramOwnerChatId && (String(chatId) === String(telegramOwnerChatId) || (from?.id && String(from.id) === String(telegramOwnerChatId)));
+    const isTelegramOwner = telegramOwnerChatId
+      ? String(chatId) === String(telegramOwnerChatId) || (from?.id && String(from.id) === String(telegramOwnerChatId))
+      : !isGroup;
     const { appSecurityService } = await import("./appSecurityService");
-    const keyRes = await appSecurityService.handleOwnerAppKeyMessage(text, isTelegramOwner, senderName, "telegram");
+    const keyRes = await appSecurityService.handleOwnerSecurityMessage(text, isTelegramOwner, senderName, "telegram");
     if (keyRes.handled && keyRes.replyText) {
-      await this.sendMessage(chatId, `🔑 *App Access Key Update:*\n\n${keyRes.replyText}`);
+      await this.sendMessage(chatId, keyRes.replyText);
       return;
     }
 

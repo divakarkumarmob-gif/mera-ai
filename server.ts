@@ -66,6 +66,17 @@ async function startServer() {
   // Even if a hacker modifies the client/DOM, the server strictly refuses all requests.
   app.use(async (req, res, next) => {
     const path = req.path;
+    const clientIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0].trim() || req.socket.remoteAddress || "127.0.0.1";
+
+    // Immediate block for IPs with 3 failed password attempts
+    if (appSecurityService.isIpBlocked(clientIp)) {
+      return res.status(403).json({
+        ok: false,
+        error: "ACCESS_BLOCKED",
+        message: "🚨 Access Blocked: 3 failed attempts ke baad aapka device/IP block kar diya gaya hai. Boss ko unblock karne ke liye kahein.",
+      });
+    }
+
     if (
       path.startsWith("/api/app-key/") ||
       path.startsWith("/api/instagram/webhook") ||
@@ -387,7 +398,18 @@ async function startServer() {
   app.post("/api/app-key/verify", async (req, res) => {
     try {
       const { key } = req.body || {};
-      const verifyRes = await appSecurityService.verifyAppKey(String(key || ""));
+      const clientIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0].trim() || req.socket.remoteAddress || "127.0.0.1";
+      const userAgent = (req.headers["user-agent"] as string) || "Unknown Device";
+
+      const verifyRes = await appSecurityService.verifyAppKey(String(key || ""), clientIp, userAgent);
+
+      if (verifyRes.blocked) {
+        return res.status(403).json(verifyRes);
+      }
+      if (verifyRes.rateLimited) {
+        return res.status(429).json(verifyRes);
+      }
+
       res.json(verifyRes);
     } catch (e: any) {
       res.status(500).json({ success: false, message: e?.message || "Verification failed" });
