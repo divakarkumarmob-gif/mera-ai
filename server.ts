@@ -513,6 +513,88 @@ async function startServer() {
     }
   });
 
+  // ── Spoonacular Recipe & Food Intelligence Endpoints ──────────────────────
+  app.get("/api/recipes/search", async (req, res) => {
+    try {
+      const { query, cuisine, diet, type, maxCalories, minProtein, number } = req.query;
+      const result = await publicApisService.searchRecipe(
+        query ? String(query) : undefined,
+        cuisine ? String(cuisine) : undefined,
+        diet ? String(diet) : undefined,
+        type ? String(type) : undefined,
+        maxCalories ? Number(maxCalories) : undefined,
+        minProtein ? Number(minProtein) : undefined
+      );
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e?.message || "Recipe search failed" });
+    }
+  });
+
+  app.get("/api/recipes/by-ingredients", async (req, res) => {
+    try {
+      const { ingredients, count } = req.query;
+      if (!ingredients) return res.status(400).json({ success: false, message: "ingredients query param required" });
+      const result = await publicApisService.searchRecipesByIngredients(
+        String(ingredients),
+        count ? Number(count) : 5
+      );
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e?.message || "Ingredients search failed" });
+    }
+  });
+
+  app.get("/api/recipes/details", async (req, res) => {
+    try {
+      const { id, title } = req.query;
+      const target = id ? (isNaN(Number(id)) ? String(id) : Number(id)) : String(title || "");
+      if (!target) return res.status(400).json({ success: false, message: "id or title query param required" });
+      const result = await publicApisService.getRecipeDetails(target);
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e?.message || "Recipe details failed" });
+    }
+  });
+
+  app.get("/api/recipes/random", async (req, res) => {
+    try {
+      const { tags, count } = req.query;
+      const result = await publicApisService.getRandomRecipes(
+        tags ? String(tags) : undefined,
+        count ? Number(count) : 3
+      );
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e?.message || "Random recipe failed" });
+    }
+  });
+
+  app.get("/api/recipes/substitutes", async (req, res) => {
+    try {
+      const { ingredient } = req.query;
+      if (!ingredient) return res.status(400).json({ success: false, message: "ingredient query param required" });
+      const result = await publicApisService.getIngredientSubstitutes(String(ingredient));
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e?.message || "Substitute lookup failed" });
+    }
+  });
+
+  app.get("/api/recipes/meal-plan", async (req, res) => {
+    try {
+      const { calories, timeFrame, diet } = req.query;
+      const result = await publicApisService.generateMealPlan(
+        calories ? Number(calories) : 2000,
+        timeFrame ? (String(timeFrame) as any) : "day",
+        diet ? String(diet) : undefined
+      );
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e?.message || "Meal plan generation failed" });
+    }
+  });
+
   // ── Friday Cyber Security & OSINT Recon Endpoints ─────────────────────────
   app.post("/api/cyber/scan-url", async (req, res) => {
     const { url } = req.body || {};
@@ -2415,13 +2497,77 @@ HOW TO READ MESSAGES:
         },
         {
           name: "search_recipe",
-          description: "Search for a recipe — cook time, servings, summary, source link.",
+          description: "Search for cooking recipes by dish name, cuisine, diet, or nutrition goals using Spoonacular API. Use for 'Butter Chicken ki recipe batao', 'Italian pasta kaise banate hain', 'high protein vegetarian dinner'.",
           parameters: {
             type: "OBJECT",
             properties: {
-              query: { type: "STRING", description: "Dish name to search a recipe for" },
+              query: { type: "STRING", description: "Dish name or food query (e.g. 'Biryani', 'Pasta', 'Paneer Tikka')" },
+              cuisine: { type: "STRING", description: "Optional cuisine (e.g. 'Indian', 'Italian', 'Mexican', 'Chinese')" },
+              diet: { type: "STRING", description: "Optional diet restriction (e.g. 'vegetarian', 'vegan', 'gluten free', 'ketogenic')" },
+              type: { type: "STRING", description: "Optional meal type (e.g. 'main course', 'dessert', 'breakfast', 'snack', 'soup')" },
+              maxCalories: { type: "NUMBER", description: "Optional maximum calories per serving" },
+              minProtein: { type: "NUMBER", description: "Optional minimum protein in grams" },
             },
             required: ["query"],
+          },
+        },
+        {
+          name: "search_recipes_by_ingredients",
+          description: "Find delicious recipes based on available ingredients at home / fridge using Spoonacular API. Use for 'Ghar pe paneer, tamatar aur shimla mirch hai, kya banau?', 'fridge me chicken aur pyaaz hai'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              ingredients: { type: "STRING", description: "Comma-separated list of ingredients available (e.g. 'paneer, tomato, onion, capsicum')" },
+              count: { type: "NUMBER", description: "Number of recipes to find (default 5)" },
+            },
+            required: ["ingredients"],
+          },
+        },
+        {
+          name: "get_recipe_details",
+          description: "Get full detailed recipe, exact ingredient measurements, and step-by-step cooking instructions using Spoonacular API. Use for 'Shahi Paneer banane ka poora step by step tarika batao'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              recipeIdOrTitle: { type: "STRING", description: "Recipe ID (number) or dish title name" },
+            },
+            required: ["recipeIdOrTitle"],
+          },
+        },
+        {
+          name: "get_random_recipes",
+          description: "Get random recipe recommendations and dish inspiration (e.g. 'aaj dinner me kya banau?', 'kuch tasty vegetarian suggest karo').",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              tags: { type: "STRING", description: "Optional tags (e.g. 'vegetarian', 'indian', 'dessert', 'breakfast')" },
+              count: { type: "NUMBER", description: "Number of recipes (default 3)" },
+            },
+            required: [],
+          },
+        },
+        {
+          name: "get_ingredient_substitutes",
+          description: "Find culinary ingredient replacements and substitutes using Spoonacular API. Use for 'Butter ki jagah kya daalu?', 'dahi nahi hai to kya use karein?', 'egg substitute batao'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              ingredientName: { type: "STRING", description: "Ingredient name to substitute (e.g. 'butter', 'egg', 'buttermilk', 'paneer')" },
+            },
+            required: ["ingredientName"],
+          },
+        },
+        {
+          name: "generate_meal_plan",
+          description: "Generate structured daily or weekly meal plan with calorie targets and dietary preferences using Spoonacular API. Use for '2000 calorie ka vegetarian daily meal plan banao', 'weekly healthy diet plan'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              targetCalories: { type: "NUMBER", description: "Target daily calories (e.g. 1800, 2000, 2500)" },
+              timeFrame: { type: "STRING", description: "'day' or 'week' (default 'day')" },
+              diet: { type: "STRING", description: "Diet preference (e.g. 'vegetarian', 'vegan', 'ketogenic', 'pescetarian')" },
+            },
+            required: [],
           },
         },
         {
@@ -4438,11 +4584,63 @@ HOW TO READ MESSAGES:
                     result = { success: false, message: `Nutrition info fetch fail hui: ${e?.message || e}` };
                   }
                 } else if (call.name === "search_recipe") {
-                  const { query } = call.args || {};
+                  const { query, cuisine, diet, type, maxCalories, minProtein } = call.args || {};
                   try {
-                    result = await publicApisService.searchRecipe(String(query || ""));
+                    result = await publicApisService.searchRecipe(
+                      String(query || ""),
+                      cuisine ? String(cuisine) : undefined,
+                      diet ? String(diet) : undefined,
+                      type ? String(type) : undefined,
+                      maxCalories ? Number(maxCalories) : undefined,
+                      minProtein ? Number(minProtein) : undefined
+                    );
                   } catch (e: any) {
                     result = { success: false, message: `Recipe search fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "search_recipes_by_ingredients") {
+                  const { ingredients, count } = call.args || {};
+                  try {
+                    result = await publicApisService.searchRecipesByIngredients(
+                      String(ingredients || ""),
+                      count ? Number(count) : 5
+                    );
+                  } catch (e: any) {
+                    result = { success: false, message: `Ingredients recipe search fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_recipe_details") {
+                  const { recipeIdOrTitle } = call.args || {};
+                  try {
+                    result = await publicApisService.getRecipeDetails(String(recipeIdOrTitle || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Recipe details fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_random_recipes") {
+                  const { tags, count } = call.args || {};
+                  try {
+                    result = await publicApisService.getRandomRecipes(
+                      tags ? String(tags) : undefined,
+                      count ? Number(count) : 3
+                    );
+                  } catch (e: any) {
+                    result = { success: false, message: `Random recipes fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_ingredient_substitutes") {
+                  const { ingredientName } = call.args || {};
+                  try {
+                    result = await publicApisService.getIngredientSubstitutes(String(ingredientName || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Substitute lookup fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "generate_meal_plan") {
+                  const { targetCalories, timeFrame, diet } = call.args || {};
+                  try {
+                    result = await publicApisService.generateMealPlan(
+                      targetCalories ? Number(targetCalories) : 2000,
+                      timeFrame ? (String(timeFrame) as any) : "day",
+                      diet ? String(diet) : undefined
+                    );
+                  } catch (e: any) {
+                    result = { success: false, message: `Meal plan generation fail hui: ${e?.message || e}` };
                   }
                 } else if (call.name === "get_flight_status") {
                   const { flightNumber } = call.args || {};

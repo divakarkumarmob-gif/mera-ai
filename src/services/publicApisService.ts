@@ -26,6 +26,7 @@ async function fetchJson(url: string, timeoutMs = 8000): Promise<any> {
 
 import { weatherService } from "./weatherService";
 import { newsService } from "./newsService";
+import { recipeService } from "./recipeService";
 
 class PublicApisService {
   // 1. Weather — Powered by WeatherAPI.com (with Open-Meteo fallback)
@@ -1377,27 +1378,36 @@ class PublicApisService {
     }
   }
 
-  // 36. Recipe/food — Spoonacular
-  public async searchRecipe(query: string): Promise<any> {
-    const key = process.env.SPOONACULAR_API_KEY;
-    if (!key) return { success: false, message: "SPOONACULAR_API_KEY .env me set nahi hai." };
-    try {
-      const data = await fetchJson(
-        `https://api.spoonacular.com/recipes/complexSearch?apiKey=${key}&query=${encodeURIComponent(query)}&number=1&addRecipeInformation=true`
-      );
-      const recipe = data?.results?.[0];
-      if (!recipe) return { success: false, message: `"${query}" ke liye koi recipe nahi mili.` };
-      return {
-        success: true,
-        title: recipe.title,
-        readyInMinutes: recipe.readyInMinutes,
-        servings: recipe.servings,
-        sourceUrl: recipe.sourceUrl,
-        summary: recipe.summary?.replace(/<[^>]*>/g, "").slice(0, 300),
-      };
-    } catch (e: any) {
-      return { success: false, message: `Recipe search fail hui: ${e?.message || e}` };
-    }
+  // 36. Recipe & Food Intelligence — Powered by Spoonacular API + TheMealDB fallback
+  public async searchRecipe(
+    query?: string,
+    cuisine?: string,
+    diet?: string,
+    type?: string,
+    maxCalories?: number,
+    minProtein?: number
+  ): Promise<any> {
+    return recipeService.searchRecipes({ query, cuisine, diet, type, maxCalories, minProtein });
+  }
+
+  public async searchRecipesByIngredients(ingredients: string | string[], count = 5): Promise<any> {
+    return recipeService.searchByIngredients(ingredients, count);
+  }
+
+  public async getRecipeDetails(recipeIdOrTitle: string | number): Promise<any> {
+    return recipeService.getRecipeDetails(recipeIdOrTitle);
+  }
+
+  public async getRandomRecipes(tags?: string, count = 3): Promise<any> {
+    return recipeService.getRandomRecipes(tags, count);
+  }
+
+  public async getIngredientSubstitutes(ingredientName: string): Promise<any> {
+    return recipeService.getIngredientSubstitutes(ingredientName);
+  }
+
+  public async generateMealPlan(targetCalories?: number, timeFrame: "day" | "week" = "day", diet?: string): Promise<any> {
+    return recipeService.generateMealPlan({ targetCalories, timeFrame, diet });
   }
 
   // 37. Flight status — AviationStack
