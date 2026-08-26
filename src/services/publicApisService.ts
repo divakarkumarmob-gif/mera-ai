@@ -618,9 +618,14 @@ class PublicApisService {
   // instead of crashing.
   // ---------------------------------------------------------------------
 
-  // 27. News — Powered by NewsData.io + Google News Live Stream
-  public async getNews(topic?: string, country = "in", count = 10): Promise<any> {
-    const res = await newsService.getLatestNews(topic, undefined, country, "en", count);
+  // 27. News — Powered by NewsData.io + Google News Live Stream + NewsAPI.org
+  public async getNews(
+    topic?: string,
+    country = "in",
+    count = 10,
+    engine: "auto" | "newsdata" | "newsapi" | "google" = "auto"
+  ): Promise<any> {
+    const res = await newsService.getLatestNews(topic, undefined, country, "en", count, engine);
     return {
       success: res.success,
       category: res.category || topic || "Top Headlines",

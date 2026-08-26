@@ -4333,12 +4333,13 @@ HOW TO READ MESSAGES:
                     result = { success: false, message: `Translation fail hui: ${e?.message || e}` };
                   }
                 } else if (call.name === "get_news") {
-                  const { topic, country, count } = call.args || {};
+                  const { topic, country, count, engine } = call.args || {};
                   try {
                     result = await publicApisService.getNews(
                       topic ? String(topic) : undefined,
                       country ? String(country) : undefined,
-                      typeof count === "number" ? count : 10
+                      typeof count === "number" ? count : 10,
+                      engine ? (String(engine) as any) : "auto"
                     );
                   } catch (e: any) {
                     result = { success: false, message: `News fetch fail hui: ${e?.message || e}` };

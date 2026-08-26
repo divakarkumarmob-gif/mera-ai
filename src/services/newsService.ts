@@ -63,7 +63,7 @@ export class NewsService {
   }
 
   /**
-   * 1. Real-Time Latest Breaking News (Multi-Engine: Auto / NewsData.io / NewsAPI.org / Google News)
+   * 1. Real-Time Latest Breaking News (Multi-Engine: Auto / News 1 (Google) / News 2 (NewsData.io) / News 3 (NewsAPI.org))
    */
   public async getLatestNews(
     topicOrQuery?: string,
@@ -73,39 +73,48 @@ export class NewsService {
     count: number = 10,
     engine: "auto" | "newsdata" | "newsapi" | "google" = "auto"
   ): Promise<NewsResult> {
-    if (engine === "newsdata") {
-      return this.getNewsDataLatest(topicOrQuery, category, country, language, count);
-    }
-    if (engine === "newsapi") {
-      return this.getNewsApiOrgLatest(topicOrQuery, category, country, count);
-    }
-    if (engine === "google") {
-      const cat = category || this.detectCategory(topicOrQuery);
-      return this.getGoogleNewsFallback(topicOrQuery, cat, count);
+    let rawQ = (topicOrQuery || "").trim();
+    let selectedEngine = engine;
+
+    // Detect voice shortcut patterns:
+    if (/\bnews\s*2\b|newsdata/i.test(rawQ)) {
+      selectedEngine = "newsdata";
+      rawQ = rawQ.replace(/\bnews\s*2\b|newsdata(\.io)?/gi, "").trim();
+    } else if (/\bnews\s*3\b|newsapi/i.test(rawQ)) {
+      selectedEngine = "newsapi";
+      rawQ = rawQ.replace(/\bnews\s*3\b|newsapi(\.org)?/gi, "").trim();
+    } else if (/\bnews\s*1\b|google\s*news/i.test(rawQ)) {
+      selectedEngine = "google";
+      rawQ = rawQ.replace(/\bnews\s*1\b|google\s*news/gi, "").trim();
     }
 
-    // Auto Mode: Try NewsData.io -> NewsAPI.org -> Google News Live
-    const apiKey = this.getApiKey();
+    const cleanQuery = rawQ || undefined;
+    const cat = category || this.detectCategory(cleanQuery);
     const requestedCount = Math.min(Math.max(count || 10, 1), 15);
-    const cat = category || this.detectCategory(topicOrQuery);
 
-    if (apiKey) {
-      const ndRes = await this.getNewsDataLatest(topicOrQuery, cat, country, language, requestedCount);
-      if (ndRes.success && ndRes.articles.length > 0) {
-        return ndRes;
+    if (selectedEngine === "newsdata") {
+      return this.getNewsDataLatest(cleanQuery, cat, country, language, requestedCount);
+    }
+    if (selectedEngine === "newsapi") {
+      return this.getNewsApiOrgLatest(cleanQuery, cat, country, requestedCount);
+    }
+    if (selectedEngine === "google" || selectedEngine === "auto") {
+      // Default: Google News Live Stream (100% Free & Real-Time)
+      const gRes = await this.getGoogleNewsFallback(cleanQuery, cat, requestedCount);
+      if (gRes.success && gRes.articles.length > 0) {
+        return gRes;
       }
+      // If Google News fails, fallback to NewsData.io then NewsAPI.org
+      const ndRes = await this.getNewsDataLatest(cleanQuery, cat, country, language, requestedCount);
+      if (ndRes.success && ndRes.articles.length > 0) return ndRes;
+
+      const naRes = await this.getNewsApiOrgLatest(cleanQuery, cat, country, requestedCount);
+      if (naRes.success && naRes.articles.length > 0) return naRes;
+
+      return gRes;
     }
 
-    const newsApiKey = process.env.NEWS_API_KEY || process.env.NEWSAPI_KEY;
-    if (newsApiKey) {
-      const naRes = await this.getNewsApiOrgLatest(topicOrQuery, cat, country, requestedCount);
-      if (naRes.success && naRes.articles.length > 0) {
-        return naRes;
-      }
-    }
-
-    // High-precision Real-Time Google News Live RSS Fallback
-    return this.getGoogleNewsFallback(topicOrQuery, cat, requestedCount);
+    return this.getGoogleNewsFallback(cleanQuery, cat, requestedCount);
   }
 
   /**
