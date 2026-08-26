@@ -3238,12 +3238,13 @@ class PublicApisService {
     if (!q) return { success: false, message: "Song ya artist ka naam zaroori hai." };
 
     try {
-      const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(q + " audio")}`;
+      const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(q + " audio song")}`;
       const htmlRes = await fetch(searchUrl, {
         headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
           "Accept-Language": "en-US,en;q=0.9,hi;q=0.8",
         },
+        signal: AbortSignal.timeout(5000),
       });
 
       if (htmlRes.ok) {
@@ -3252,22 +3253,35 @@ class PublicApisService {
         if (videoIdMatch) {
           const videoId = videoIdMatch[1];
           const titleMatch = html.match(/"title":\s*\{\s*"runs":\s*\[\s*\{\s*"text":\s*"([^"]+)"/);
+          const channelMatch = html.match(/"ownerText":\s*\{\s*"runs":\s*\[\s*\{\s*"text":\s*"([^"]+)"/);
           const title = titleMatch ? titleMatch[1] : q;
+          const artist = channelMatch ? channelMatch[1] : "YouTube Music Artist";
+
+          // Concurrently probe JioSaavn for direct audio stream fallback
+          let directAudioUrl: string | undefined = undefined;
+          try {
+            const saavnFallback = await this.searchMusic(q);
+            if (saavnFallback?.success && saavnFallback?.tracks?.[0]?.audioUrl) {
+              directAudioUrl = saavnFallback.tracks[0].audioUrl;
+            }
+          } catch {}
 
           return {
             success: true,
             trackName: title,
-            artistName: "YouTube Music",
+            artistName: artist,
             videoId,
             youtubeMusicUrl: `https://music.youtube.com/watch?v=${videoId}`,
             youtubeUrl: `https://www.youtube.com/watch?v=${videoId}`,
             embedUrl: `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&enablejsapi=1&controls=1&modestbranding=1`,
             albumArt: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
+            audioUrl: directAudioUrl,
+            streamUrl: directAudioUrl || `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&enablejsapi=1`,
             isFullSong: true,
             isYouTubeMusic: true,
-            quality: "YouTube Music HD",
+            quality: "YouTube Music HD 1080p",
             source: "youtube_music",
-            message: `Boss, "${title}" YouTube Music par mil gaya hai! Gana baj raha hai 🎵✨`,
+            message: `Boss, "${title}" (${artist}) YouTube Music par mil gaya hai! Gana baj raha hai 🎵✨`,
           };
         }
       }
