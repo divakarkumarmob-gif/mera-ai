@@ -3152,7 +3152,9 @@ class PublicApisService {
 
   // 50.1 YouTube Music Embed Search — Free, Embedded, Ad-Free YouTube Music Streaming
   public async searchYouTubeMusic(songOrArtist: string): Promise<any> {
-    const q = songOrArtist.trim();
+    let cleanQ = (songOrArtist || "").trim();
+    cleanQ = cleanQ.replace(/\b(gana|gaana|baja|bajao|baji|chalao|play|song|music|sunao|laga|lagao)\b/gi, "").trim();
+    const q = cleanQ || (songOrArtist || "").trim() || "Chammak Challo";
     if (!q) return { success: false, message: "Song ya artist ka naam zaroori hai." };
 
     try {

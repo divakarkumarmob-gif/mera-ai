@@ -4561,15 +4561,32 @@ HOW TO READ MESSAGES:
                     result = { success: false, message: `Reddit search fail hui: ${e?.message || e}` };
                   }
                 } else if (call.name === "search_music" || call.name === "play_music" || call.name === "play_youtube_music") {
-                  const { songOrArtist } = call.args || {};
+                  const songQuery = String(
+                    call.args?.songName ||
+                    call.args?.songOrArtist ||
+                    call.args?.song ||
+                    call.args?.query ||
+                    call.args?.track ||
+                    call.args?.title ||
+                    call.args?.name ||
+                    call.args?.artist ||
+                    ""
+                  ).trim();
+
                   try {
-                    const ytMusicRes = await publicApisService.searchYouTubeMusic(String(songOrArtist || ""));
+                    const ytMusicRes = await publicApisService.searchYouTubeMusic(songQuery || "Chammak Challo");
                     result = ytMusicRes;
                     if (ytMusicRes.success) {
-                      clientWs.send(JSON.stringify({
+                      const payload = JSON.stringify({
                         type: 'play_youtube_music',
                         track: ytMusicRes,
-                      }));
+                      });
+                      try { clientWs.send(payload); } catch {}
+                      for (const client of connectedClients) {
+                        if (client !== clientWs && client.readyState === 1) {
+                          try { client.send(payload); } catch {}
+                        }
+                      }
                     }
                   } catch (e: any) {
                     result = { success: false, message: `Music search fail hui: ${e?.message || e}` };
