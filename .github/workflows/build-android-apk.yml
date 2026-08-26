@@ -67,6 +67,10 @@ jobs:
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           if [ -f "$MANIFEST" ]; then
+            # Ensure INTERNET & NETWORK permissions are present
+            if ! grep -q "android.permission.INTERNET" "$MANIFEST"; then
+              sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />' "$MANIFEST"
+            fi
             # Add RECORD_AUDIO and MODIFY_AUDIO_SETTINGS if not already present
             if ! grep -q "RECORD_AUDIO" "$MANIFEST"; then
               sed -i '/<application/i \    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />' "$MANIFEST"

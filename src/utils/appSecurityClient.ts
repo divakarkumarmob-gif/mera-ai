@@ -1,6 +1,4 @@
-/**
- * Client-Side Zero-Trust App Key Security Manager & Anti-Tamper Shield
- */
+import { getBackendBaseUrl } from './api';
 
 const STORAGE_KEY = 'app_access_session';
 
@@ -52,17 +50,28 @@ export function clearAppSession() {
 
 /**
  * Initializes global fetch interceptor to automatically attach
- * cryptographically signed App Token to all /api/ requests.
+ * cryptographically signed App Token to all /api/ requests, and
+ * resolve relative /api/ URLs to the live backend server on mobile APK.
  */
 export function initGlobalFetchInterceptor() {
     if (typeof window === 'undefined') return;
 
     const originalFetch = window.fetch;
     window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-        let url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        const rawUrl = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
 
-        // Automatically attach token to all internal API routes except auth verification
-        if (url.startsWith('/api/') && !url.startsWith('/api/app-key/')) {
+        // In mobile APK (Capacitor/Cordova) or when backend URL is configured, resolve relative /api/
+        let resolvedUrl = rawUrl;
+        const backendBase = getBackendBaseUrl();
+        if (rawUrl.startsWith('/api/')) {
+            resolvedUrl = backendBase ? `${backendBase}${rawUrl}` : rawUrl;
+        }
+
+        const isInternalApi =
+            (rawUrl.startsWith('/api/') || (backendBase && rawUrl.startsWith(`${backendBase}/api/`))) &&
+            !rawUrl.includes('/api/app-key/');
+
+        if (isInternalApi) {
             const token = getAppToken();
             const headers = new Headers(init?.headers || (input instanceof Request ? input.headers : {}));
 
@@ -75,7 +84,7 @@ export function initGlobalFetchInterceptor() {
                 headers,
             };
 
-            const response = await originalFetch(input, modifiedInit);
+            const response = await originalFetch(resolvedUrl, modifiedInit);
 
             // If server returns 401 ACCESS_LOCKED, force lock immediately
             if (response.status === 401) {
@@ -90,6 +99,11 @@ export function initGlobalFetchInterceptor() {
             }
 
             return response;
+        }
+
+        // If it was /api/app-key/* with relative path, send to resolved URL
+        if (rawUrl.startsWith('/api/')) {
+            return originalFetch(resolvedUrl, init);
         }
 
         return originalFetch(input, init);
