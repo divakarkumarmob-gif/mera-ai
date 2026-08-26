@@ -1189,6 +1189,8 @@ ADVANCED AUTONOMOUS & IRON MAN SYSTEM TOOLS:
 - 'analyze_document': Document & PDF Voice Copilot. Analyzes contracts, research papers, resumes, or specifications. Call when DK asks to analyze or summarize a document.
 - 'query_document': Ask specific questions or extract clauses from a document. Call when DK asks questions about document contents.
 - 'get_daily_work_digest': Daily Work, Coding & Productivity Digest. Compiles daily accomplishments, schedule, health, and expenses into an executive summary with grade. Call when DK says "aaj ka work report batao", "daily productivity digest do".
+- 'crawl_and_extract_webpage': High-Fidelity Webpage Crawler & AI Extractor. Crawls any website URL, strips ads/scripts/banners, converts into clean LLM Markdown, and extracts insights, answers questions, or summarizes content. Call when DK says "is website ko crawl karo", "is link ka data dekho", "is webpage ko padhkar batao kya likha hai", "URL crawl karo".
+- 'deep_crawl_website': Multi-Page BFS Deep Crawler. Traverses an entire domain/website hierarchy, discovers internal links, and synthesizes a multi-page intelligence digest. Call when DK says "puri website deep crawl karo", "is domain ke sare pages crawl karke report do".
 - 'send_messenger_chat': FRIDAY Autonomous Messenger. Sends texts, photos, videos, PDF documents, or links to any contact in Friday Messenger. Call when DK says "Friday Messenger me message bhejo", "GF / friend ko Messenger par photo/PDF bhejo".
 - 'get_messenger_inbox': View Friday Messenger chats, recent messages, and role badges.
 - 'set_messenger_contact_role': Change contact role in Friday Messenger ('boss' | 'girlfriend' | 'friend' | 'unknown').
