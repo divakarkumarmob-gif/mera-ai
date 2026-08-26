@@ -6,12 +6,25 @@ interface AgentFaceProps {
   volume: number;
   size?: number;
   colorIndex: number;
+  onDoubleClick?: () => void;
 }
 
-const AgentFace: React.FC<AgentFaceProps> = ({ status, volume, size = 120, colorIndex }) => {
+const AgentFace: React.FC<AgentFaceProps> = ({ status, volume, size = 120, colorIndex, onDoubleClick }) => {
   const isListening = status === "Listening...";
   const isSpeaking = status === "Speaking...";
   const isThinking = status === "Thinking...";
+  const lastTapRef = React.useRef<number>(0);
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    const now = Date.now();
+    if (now - lastTapRef.current < 350) {
+      e.preventDefault();
+      onDoubleClick?.();
+      lastTapRef.current = 0;
+    } else {
+      lastTapRef.current = now;
+    }
+  };
   
   const colors = ["#3b82f6", "#ef4444", "#22c55e", "#f59e0b", "#a855f7", "#ec4899", "#06b6d4", "#f97316", "#84cc16", "#d946ef", "#14b8a6", "#e11d48"];
   const color = colors[colorIndex % colors.length];
@@ -102,7 +115,12 @@ const AgentFace: React.FC<AgentFaceProps> = ({ status, volume, size = 120, color
 
       {/* Face Circle */}
       <motion.div
-        className="rounded-full bg-slate-950/80 backdrop-blur-xl border-2 flex items-center justify-center agent-face-circle relative z-10"
+        onDoubleClick={onDoubleClick}
+        onTouchEnd={handleTouchEnd}
+        whileHover={{ scale: 1.05 }}
+        whileTap={{ scale: 0.94 }}
+        title="Continuous double-click / double-tap to interrupt and start listening immediately!"
+        className="rounded-full bg-slate-950/80 backdrop-blur-xl border-2 flex items-center justify-center agent-face-circle relative z-10 cursor-pointer select-none transition-transform"
         style={{ 
           width: size * 0.75, 
           height: size * 0.75, 

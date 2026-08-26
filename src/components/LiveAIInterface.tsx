@@ -1018,6 +1018,18 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         setStatus("Listening...");
     };
 
+    const handleFaceDoubleTap = useCallback(() => {
+        console.log("[LiveAIInterface] 🎯 Double clicked face -> Force immediate Listening Mode!");
+        handleInterrupt();
+        stopAudio();
+        if (!isRecording) {
+            setStatus("Connecting AI...");
+            ensureConnection(true);
+        } else {
+            setStatus("Listening...");
+        }
+    }, [isRecording]);
+
     useEffect(() => {
         return () => { stopRecording(); };
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1832,7 +1844,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                             Welcome
                         </span>
                     </div>
-                    <AgentFace status={status} volume={volume} size={160} colorIndex={colorIndex} />
+                    <AgentFace status={status} volume={volume} size={160} colorIndex={colorIndex} onDoubleClick={handleFaceDoubleTap} />
                     <p className="text-slate-300 text-sm font-medium">{status}</p>
 
                     {!isRecording && wakeWordActive && (

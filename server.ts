@@ -5954,8 +5954,8 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
             automaticActivityDetection: {
               startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_HIGH,
               endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_LOW,
-              silenceDurationMs: 600,
-              prefixPaddingMs: 200,
+              silenceDurationMs: 380,
+              prefixPaddingMs: 120,
             },
           },
           tools: [
