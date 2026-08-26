@@ -3168,52 +3168,55 @@ class PublicApisService {
     if (!q) return { success: false, message: "Song ya artist ka naam zaroori hai." };
 
     try {
-      const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(q + " audio song")}`;
-      const htmlRes = await fetch(searchUrl, {
+      // 1. Concurrently run YouTube Scraping and Direct 320kbps Audio Stream probe
+      const ytPromise = fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(q + " audio song")}`, {
         headers: {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
           "Accept-Language": "en-US,en;q=0.9,hi;q=0.8",
         },
         signal: AbortSignal.timeout(5000),
-      });
+      }).then(r => r.ok ? r.text() : "").catch(() => "");
 
-      if (htmlRes.ok) {
-        const html = await htmlRes.text();
+      const saavnPromise = this.searchMusic(q).catch(() => null);
+
+      const [html, saavnRes] = await Promise.all([ytPromise, saavnPromise]);
+
+      let videoId = "";
+      let title = q;
+      let artist = "YouTube Music Artist";
+
+      if (html) {
         const videoIdMatch = html.match(/"videoId":\s*"([a-zA-Z0-9_-]{11})"/);
-        if (videoIdMatch) {
-          const videoId = videoIdMatch[1];
-          const titleMatch = html.match(/"title":\s*\{\s*"runs":\s*\[\s*\{\s*"text":\s*"([^"]+)"/);
-          const channelMatch = html.match(/"ownerText":\s*\{\s*"runs":\s*\[\s*\{\s*"text":\s*"([^"]+)"/);
-          const title = titleMatch ? titleMatch[1] : q;
-          const artist = channelMatch ? channelMatch[1] : "YouTube Music Artist";
+        if (videoIdMatch) videoId = videoIdMatch[1];
+        const titleMatch = html.match(/"title":\s*\{\s*"runs":\s*\[\s*\{\s*"text":\s*"([^"]+)"/);
+        if (titleMatch) title = titleMatch[1];
+        const channelMatch = html.match(/"ownerText":\s*\{\s*"runs":\s*\[\s*\{\s*"text":\s*"([^"]+)"/);
+        if (channelMatch) artist = channelMatch[1];
+      }
 
-          // Concurrently probe JioSaavn for direct audio stream fallback
-          let directAudioUrl: string | undefined = undefined;
-          try {
-            const saavnFallback = await this.searchMusic(q);
-            if (saavnFallback?.success && saavnFallback?.tracks?.[0]?.audioUrl) {
-              directAudioUrl = saavnFallback.tracks[0].audioUrl;
-            }
-          } catch {}
+      const directAudioUrl = saavnRes?.tracks?.[0]?.audioUrl;
+      const saavnTitle = saavnRes?.tracks?.[0]?.trackName;
+      const saavnArtist = saavnRes?.tracks?.[0]?.artistName;
+      const albumArt = saavnRes?.tracks?.[0]?.albumArt || (videoId ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` : undefined);
 
-          return {
-            success: true,
-            trackName: title,
-            artistName: artist,
-            videoId,
-            youtubeMusicUrl: `https://music.youtube.com/watch?v=${videoId}`,
-            youtubeUrl: `https://www.youtube.com/watch?v=${videoId}`,
-            embedUrl: `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&enablejsapi=1&controls=1&modestbranding=1`,
-            albumArt: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
-            audioUrl: directAudioUrl,
-            streamUrl: directAudioUrl || `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&enablejsapi=1`,
-            isFullSong: true,
-            isYouTubeMusic: true,
-            quality: "YouTube Music HD 1080p",
-            source: "youtube_music",
-            message: `Boss, "${title}" (${artist}) YouTube Music par mil gaya hai! Gana baj raha hai 🎵✨`,
-          };
-        }
+      if (videoId || directAudioUrl) {
+        return {
+          success: true,
+          trackName: saavnTitle || title,
+          artistName: saavnArtist || artist,
+          videoId: videoId || undefined,
+          youtubeMusicUrl: videoId ? `https://music.youtube.com/watch?v=${videoId}` : undefined,
+          youtubeUrl: videoId ? `https://www.youtube.com/watch?v=${videoId}` : undefined,
+          embedUrl: videoId ? `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&enablejsapi=1&controls=1&modestbranding=1` : undefined,
+          albumArt,
+          audioUrl: directAudioUrl,
+          streamUrl: directAudioUrl || (videoId ? `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&enablejsapi=1` : undefined),
+          isFullSong: true,
+          isYouTubeMusic: true,
+          quality: directAudioUrl ? "HD 320kbps Audio (Background & Screen-Off Ready)" : "YouTube Music HD",
+          source: "youtube_music",
+          message: `Boss, "${saavnTitle || title}" (${saavnArtist || artist}) mil gaya hai! Gana background aur screen-off me bhi bajta rahega 🎵✨`,
+        };
       }
     } catch (e) {
       console.warn("[PublicApis] YouTube Music scraping fallback:", e);

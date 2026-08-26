@@ -1527,18 +1527,46 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 } else if (msg.type === 'play_youtube_music' && msg.track) {
                     stopMusicPlayback();
                     const track = msg.track;
-                    setNowPlayingMusic({
+                    const directAudio = track.audioUrl || (track.streamUrl && !track.streamUrl.includes('youtube-nocookie.com') ? track.streamUrl : undefined);
+
+                    const trackState = {
                         trackName: track.trackName || 'YouTube Music Track',
                         artistName: track.artistName || 'YouTube Music',
                         albumArt: track.albumArt || (track.videoId ? `https://img.youtube.com/vi/${track.videoId}/hqdefault.jpg` : undefined),
-                        embedUrl: track.embedUrl || (track.videoId ? `https://www.youtube-nocookie.com/embed/${track.videoId}?autoplay=1&enablejsapi=1&controls=1&modestbranding=1` : undefined),
+                        embedUrl: directAudio ? undefined : (track.embedUrl || (track.videoId ? `https://www.youtube-nocookie.com/embed/${track.videoId}?autoplay=1&enablejsapi=1&controls=1&modestbranding=1` : undefined)),
                         videoId: track.videoId,
-                        isYouTubeMusic: true,
+                        isYouTubeMusic: !directAudio,
                         isFullSong: true,
                         isPlaying: true,
-                        quality: 'YouTube Music HD',
+                        quality: directAudio ? 'HD 320kbps Audio' : 'YouTube Music HD',
                         youtubeMusicUrl: track.youtubeMusicUrl || (track.videoId ? `https://music.youtube.com/watch?v=${track.videoId}` : undefined),
-                    });
+                        audioUrl: directAudio,
+                    };
+
+                    // Start background HTML5 Audio stream (works 24/7 with Screen OFF & App Minimized)
+                    if (directAudio) {
+                        try {
+                            const audio = new Audio();
+                            audio.crossOrigin = 'anonymous';
+                            audio.src = directAudio;
+                            audio.volume = 0.85;
+                            audio.onended = () => {
+                                setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: false } : null);
+                            };
+                            audio.onerror = () => {
+                                console.warn('[Music] Direct stream error, falling back to embedded player');
+                                setNowPlayingMusic(prev => prev ? { ...prev, isYouTubeMusic: true, embedUrl: track.embedUrl } : null);
+                            };
+                            musicAudioRef.current = audio;
+                            audio.play().catch(err => {
+                                console.warn('[Music] Auto-play background audio warning:', err);
+                            });
+                        } catch (e) {
+                            console.warn('[Music] Background audio setup error:', e);
+                        }
+                    }
+
+                    setNowPlayingMusic(trackState);
                 } else if (msg.type === 'stop_music') {
                     stopMusicPlayback();
                 }
