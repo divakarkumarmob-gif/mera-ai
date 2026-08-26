@@ -684,9 +684,9 @@ class PublicApisService {
     }
 
     // 2. NewsData.io Fallback (if key is set)
-    const key = process.env.NEWSDATA_API_KEY;
-    if (key) {
-      const params = new URLSearchParams({ apikey: key, country, language: "en" });
+    const newsDataKey = process.env.NEWSDATA_API_KEY || process.env.NEWS_DATA_API_KEY;
+    if (newsDataKey) {
+      const params = new URLSearchParams({ apikey: newsDataKey, country, language: "en" });
       if (topic) params.set("q", topic);
       try {
         const data = await fetchJson(`https://newsdata.io/api/1/latest?${params.toString()}`);
@@ -696,10 +696,29 @@ class PublicApisService {
           link: a.link,
           pubDate: a.pubDate,
         }));
-        return { success: true, count: articles.length, articles, source: "newsdata" };
-      } catch (e: any) {
-        return { success: false, message: `News fetch fail hui: ${e?.message || e}` };
-      }
+        if (articles.length > 0) {
+          return { success: true, count: articles.length, articles, source: "newsdata" };
+        }
+      } catch (e) {}
+    }
+
+    // 3. NewsAPI.org Fallback (if key is set)
+    const newsApiKey = process.env.NEWS_API_KEY || process.env.NEWSAPI_KEY || process.env.NEWSAPI_API_KEY;
+    if (newsApiKey) {
+      const params = new URLSearchParams({ apiKey: newsApiKey, country: country || "in", pageSize: String(requestedCount) });
+      if (topic) params.set("q", topic);
+      try {
+        const data = await fetchJson(`https://newsapi.org/v2/top-headlines?${params.toString()}`);
+        const articles = (data.articles || []).slice(0, requestedCount).map((a: any) => ({
+          title: a.title,
+          source: a.source?.name || "NewsAPI",
+          link: a.url,
+          pubDate: a.publishedAt,
+        }));
+        if (articles.length > 0) {
+          return { success: true, count: articles.length, articles, source: "newsapi_org" };
+        }
+      } catch (e) {}
     }
 
     return { success: false, message: "Latest news fetch nahi ho saki." };
