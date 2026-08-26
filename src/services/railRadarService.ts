@@ -1,15 +1,10 @@
 // ---------------------------------------------------------------------------
 // railRadarService.ts
 //
-// RailRadar Indian Railways Developer API Client & Live Train Intelligence
-// - Real-Time Live Train Running Status (GPS, Delay, Current/Next Station)
-// - Route Track Geometry (GIS Polyline / GeoJSON)
+// RailRadar Indian Railways API Client & Live Train Intelligence
+// - Real-Time Live Train Running Status (GPS, Delay, Current & Next Halt, Platform)
 // - 10-Digit PNR Status Enquiry & Confirmation Predictions
 // - Live Station Board (Arrivals, Departures, Platform Numbers)
-// - Trains Between Stations & Timetable Schedules
-//
-// Base URL: https://api.railradar.in/v1
-// Fallback: Public Indian Railways NTES & telemetry endpoints
 // ---------------------------------------------------------------------------
 
 export interface LiveTrainStatusResult {
@@ -122,7 +117,7 @@ const STATION_CODE_MAP: Record<string, string> = {
 };
 
 export class RailRadarService {
-  private baseUrl = "https://api.railradar.in/v1";
+  private baseUrl = "https://railradar.in/api/v1";
 
   private getApiKey(): string | undefined {
     return process.env.RAILRADAR_API_KEY || process.env.RAILRADAR_KEY || process.env.RAIL_RADAR_API_KEY || process.env.RAIL_RADAR_KEY;
@@ -131,7 +126,6 @@ export class RailRadarService {
   public resolveStationCode(stationQuery: string): string {
     const clean = stationQuery.trim().toLowerCase();
     if (STATION_CODE_MAP[clean]) return STATION_CODE_MAP[clean];
-    // If it's already an uppercase 3-5 letter station code
     if (/^[a-zA-Z]{2,5}$/.test(clean)) return clean.toUpperCase();
     return clean.toUpperCase();
   }
@@ -145,7 +139,7 @@ export class RailRadarService {
   }
 
   /**
-   * 1. Live Train Running Status (GPS, Delay, Next Halt, Platform)
+   * 1. Live Train Running Status (Exact GPS Location, Current Station, Next Halt, Platform & ETA)
    */
   public async getLiveTrainStatus(trainQuery: string): Promise<LiveTrainStatusResult> {
     const trainNumber = this.extractTrainNumber(trainQuery);
@@ -156,125 +150,115 @@ export class RailRadarService {
         trainName: "",
         delayMinutes: 0,
         delayStatus: "on_time",
-        message: "Train number specify karein (e.g. 12309, 12952).",
+        message: "Train number specify karein (e.g. 12309, 12952, 12423).",
       };
     }
 
-    const apiKey = this.getApiKey();
+    // ── Primary: RailRadar Live Engine ────────────────────────────────────────
+    try {
+      const url = `${this.baseUrl}/trains/${trainNumber}/live`;
+      const res = await fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Accept": "application/json, text/plain, */*",
+        },
+        signal: AbortSignal.timeout(8000),
+      });
 
-    // Strategy 1: RailRadar Official REST API
-    if (apiKey) {
-      try {
-        const res = await fetch(`${this.baseUrl}/trains/${trainNumber}/live`, {
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json",
-          },
-          signal: AbortSignal.timeout(6000),
-        });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.data) {
+          const d = json.data;
+          const trainName = d.trainName || d.train?.name || `Train #${trainNumber}`;
+          
+          // Current Station & GPS Location
+          const curLoc = d.currentLocation || {};
+          const currentStation = curLoc.stationName || "In Transit";
+          const currentStationCode = curLoc.stationCode;
+          const curStatus = curLoc.status === "at-station" ? "Station par ruki hui hai" : curLoc.status === "departed" ? "Depart ho chuki hai" : "En route";
 
-        if (res.ok) {
-          const json = await res.json();
-          const d = json.data || json;
-          const delay = Number(d.delayMinutes || d.delay || 0);
+          // Next Halt Station
+          const nextHalt = d.nextHalt || {};
+          const nextStation = nextHalt.stationName || "Upcoming destination";
+          const nextStationCode = nextHalt.stationCode;
 
+          // Find next halt in route for Platform & ETA
+          let platformNumber: string | undefined = undefined;
+          let etaNextStation: string | undefined = undefined;
+          let upcomingStations: LiveTrainStatusResult["upcomingStations"] = [];
+
+          if (Array.isArray(d.route)) {
+            const nextRouteItem = d.route.find(
+              (r: any) => r.stationCode === nextHalt.stationCode || (r.isHalt && r.status === "upcoming")
+            );
+            if (nextRouteItem) {
+              platformNumber = nextRouteItem.platform || undefined;
+              if (nextRouteItem.expectedArrival || nextRouteItem.scheduledArrival) {
+                try {
+                  const arrivalDate = new Date(nextRouteItem.expectedArrival || nextRouteItem.scheduledArrival);
+                  etaNextStation = arrivalDate.toLocaleTimeString("en-IN", {
+                    timeZone: "Asia/Kolkata",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  });
+                } catch {
+                  etaNextStation = String(nextRouteItem.expectedArrival || nextRouteItem.scheduledArrival);
+                }
+              }
+            }
+
+            // Extract upcoming halts for detailed board
+            upcomingStations = d.route
+              .filter((r: any) => r.isHalt && (r.status === "upcoming" || r.status === "at-station"))
+              .slice(0, 5)
+              .map((s: any) => ({
+                stationName: s.stationName || s.name,
+                stationCode: s.stationCode || s.code,
+                scheduledArrival: s.scheduledArrival || s.sta || "--",
+                expectedArrival: s.expectedArrival || s.eta || "--",
+                delayMinutes: Number(s.delayArrival || s.delayMinutes || s.delay || 0),
+                platform: s.platform,
+              }));
+          }
+
+          const delayMinutes = Number(d.delayMinutes ?? curLoc.delayMinutes ?? 0);
           let delayStatus: LiveTrainStatusResult["delayStatus"] = "on_time";
-          if (delay >= 60) delayStatus = "heavily_delayed";
-          else if (delay >= 30) delayStatus = "delayed";
-          else if (delay > 5) delayStatus = "slightly_delayed";
-
-          const currentStn = d.currentStation || d.currentHalt || d.lastHalt || "In Transit";
-          const nextStn = d.nextStation || d.upcomingStation || "Approaching destination";
+          if (delayMinutes >= 60) delayStatus = "heavily_delayed";
+          else if (delayMinutes >= 30) delayStatus = "delayed";
+          else if (delayMinutes > 5) delayStatus = "slightly_delayed";
 
           return {
             success: true,
             trainNumber: String(d.trainNumber || trainNumber),
-            trainName: d.trainName || `Train #${trainNumber}`,
-            sourceStation: d.sourceStation || d.from,
-            destStation: d.destStation || d.to,
-            currentStation: currentStn,
-            currentStationCode: d.currentStationCode,
-            nextStation: nextStn,
-            nextStationCode: d.nextStationCode,
-            delayMinutes: delay,
+            trainName,
+            sourceStation: d.train?.source?.name || d.sourceStation,
+            destStation: d.train?.destination?.name || d.destStation,
+            currentStation: `${currentStation}${currentStationCode ? ` (${currentStationCode})` : ""}`,
+            currentStationCode,
+            nextStation: `${nextStation}${nextStationCode ? ` (${nextStationCode})` : ""}`,
+            nextStationCode,
+            delayMinutes,
             delayStatus,
-            speedKmh: d.speedKmh || d.currentSpeed || undefined,
-            platformNumber: d.platformNumber || d.platform || undefined,
-            etaNextStation: d.etaNextStation || d.expectedTime || undefined,
-            lastUpdated: d.lastUpdated || "Live Just Now",
+            platformNumber,
+            etaNextStation,
+            lastUpdated: d.lastUpdatedAt || "Live Just Now",
             mapTrackingUrl: `https://railradar.in/train-status/${trainNumber}`,
-            upcomingStations: Array.isArray(d.upcomingStations)
-              ? d.upcomingStations.slice(0, 5).map((s: any) => ({
-                  stationName: s.stationName || s.name,
-                  stationCode: s.stationCode || s.code,
-                  scheduledArrival: s.scheduledArrival || s.sta,
-                  expectedArrival: s.expectedArrival || s.eta,
-                  delayMinutes: Number(s.delayMinutes || s.delay || 0),
-                  platform: s.platform,
-                }))
-              : [],
+            upcomingStations,
             message: this.formatLiveStatusMessage({
               trainNumber: String(d.trainNumber || trainNumber),
-              trainName: d.trainName || `Train #${trainNumber}`,
-              currentStation: currentStn,
-              nextStation: nextStn,
-              delayMinutes: delay,
-              platformNumber: d.platformNumber || d.platform,
-              speedKmh: d.speedKmh,
-            }),
-          };
-        }
-      } catch (err) {
-        console.warn("[RailRadar] API fetch fallback:", err);
-      }
-    }
-
-    // Strategy 2: Indian Railways Public Telemetry & ConfirmTkt/NTES Live Pipeline
-    try {
-      const publicUrl = `https://www.confirmtkt.com/api/platform/trainstatus/getstatus?trainno=${trainNumber}&source=search`;
-      const pRes = await fetch(publicUrl, {
-        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
-        signal: AbortSignal.timeout(5000),
-      });
-
-      if (pRes.ok) {
-        const pData = await pRes.json();
-        if (pData.success || pData.CurrentStationName || pData.TrainName) {
-          const delay = Number(pData.DelayInMinutes || pData.delay || 0);
-          let delayStatus: LiveTrainStatusResult["delayStatus"] = "on_time";
-          if (delay >= 60) delayStatus = "heavily_delayed";
-          else if (delay >= 30) delayStatus = "delayed";
-          else if (delay > 5) delayStatus = "slightly_delayed";
-
-          const currentStn = pData.CurrentStationName || pData.LastStationName || "En route";
-          const nextStn = pData.NextStationName || "Upcoming station";
-
-          return {
-            success: true,
-            trainNumber,
-            trainName: pData.TrainName || `Train ${trainNumber}`,
-            sourceStation: pData.Source,
-            destStation: pData.Destination,
-            currentStation: currentStn,
-            nextStation: nextStn,
-            delayMinutes: delay,
-            delayStatus,
-            platformNumber: pData.Platform || undefined,
-            mapTrackingUrl: `https://railradar.in/train-status/${trainNumber}`,
-            lastUpdated: pData.LastUpdated || "Live Just Now",
-            message: this.formatLiveStatusMessage({
-              trainNumber,
-              trainName: pData.TrainName || `Train ${trainNumber}`,
-              currentStation: currentStn,
-              nextStation: nextStn,
-              delayMinutes: delay,
-              platformNumber: pData.Platform,
+              trainName,
+              currentStation: `${currentStation}${currentStationCode ? ` (${currentStationCode})` : ""}`,
+              currentMovementStatus: curStatus,
+              nextStation: `${nextStation}${nextStationCode ? ` (${nextStationCode})` : ""}`,
+              delayMinutes,
+              platformNumber,
+              etaNextStation,
             }),
           };
         }
       }
-    } catch (e) {
-      console.warn("[RailRadar] Public NTES fallback error:", e);
+    } catch (err) {
+      console.warn("[RailRadar] Live telemetry error:", err);
     }
 
     // Fallback response with web link
@@ -285,7 +269,7 @@ export class RailRadarService {
       delayMinutes: 0,
       delayStatus: "on_time",
       mapTrackingUrl: `https://railradar.in/train-status/${trainNumber}`,
-      message: `Boss, Train #${trainNumber} ka live radar link ready hai: https://railradar.in/train-status/${trainNumber}`,
+      message: `Boss, Train #${trainNumber} ka live radar link: https://railradar.in/train-status/${trainNumber}`,
     };
   }
 
@@ -302,53 +286,13 @@ export class RailRadarService {
       };
     }
 
-    const apiKey = this.getApiKey();
-
-    if (apiKey) {
-      try {
-        const res = await fetch(`${this.baseUrl}/pnr/${cleanPnr}`, {
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json",
-          },
-          signal: AbortSignal.timeout(6000),
-        });
-
-        if (res.ok) {
-          const json = await res.json();
-          const d = json.data || json;
-
-          return {
-            success: true,
-            pnr: cleanPnr,
-            trainNumber: d.trainNumber,
-            trainName: d.trainName,
-            doj: d.doj || d.dateOfJourney,
-            boardingStation: d.boardingStation || d.from,
-            destinationStation: d.destinationStation || d.to,
-            chartPrepared: !!(d.chartPrepared || d.chartStatus === "CHART PREPARED"),
-            passengers: Array.isArray(d.passengers)
-              ? d.passengers.map((p: any, i: number) => ({
-                  passengerNo: i + 1,
-                  bookingStatus: p.bookingStatus || "CNF",
-                  currentStatus: p.currentStatus || "CNF",
-                  coach: p.coach,
-                  berth: p.berth || p.berthNumber,
-                  berthType: p.berthType || p.berthPosition,
-                }))
-              : [],
-            message: this.formatPnrMessage(d, cleanPnr),
-          };
-        }
-      } catch (err) {
-        console.warn("[RailRadar] PNR API fallback:", err);
-      }
-    }
-
-    // Public PNR status lookup fallback
+    // Public PNR status lookup
     try {
       const pnrUrl = `https://www.confirmtkt.com/api/pnr/status/${cleanPnr}`;
-      const pRes = await fetch(pnrUrl, { signal: AbortSignal.timeout(5000) });
+      const pRes = await fetch(pnrUrl, {
+        headers: { "User-Agent": "Mozilla/5.0" },
+        signal: AbortSignal.timeout(6000),
+      });
       if (pRes.ok) {
         const pData = await pRes.json();
         if (pData.TrainNo || pData.PassengerStatus) {
@@ -388,12 +332,14 @@ export class RailRadarService {
           };
         }
       }
-    } catch {}
+    } catch (e) {
+      console.warn("[RailRadar] PNR status error:", e);
+    }
 
     return {
       success: true,
       pnr: cleanPnr,
-      message: `Boss, PNR ${cleanPnr} enquiry link: https://railradar.in/pnr-status/${cleanPnr}`,
+      message: `Boss, PNR ${cleanPnr} live enquiry link: https://railradar.in/pnr-status/${cleanPnr}`,
     };
   }
 
@@ -402,23 +348,19 @@ export class RailRadarService {
    */
   public async getLiveStationBoard(stationQuery: string): Promise<StationLiveBoardResult> {
     const stationCode = this.resolveStationCode(stationQuery);
-    const apiKey = this.getApiKey();
 
-    if (apiKey) {
-      try {
-        const res = await fetch(`${this.baseUrl}/stations/${stationCode}/live`, {
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json",
-          },
-          signal: AbortSignal.timeout(6000),
-        });
+    try {
+      const res = await fetch(`${this.baseUrl}/stations/${stationCode}/live`, {
+        headers: { "User-Agent": "Mozilla/5.0" },
+        signal: AbortSignal.timeout(6000),
+      });
 
-        if (res.ok) {
-          const json = await res.json();
-          const d = json.data || json;
-          const trainList = Array.isArray(d.trains) ? d.trains : [];
+      if (res.ok) {
+        const json = await res.json();
+        const d = json.data || json;
+        const trainList = Array.isArray(d.trains) ? d.trains : Array.isArray(d.route) ? d.route : [];
 
+        if (trainList.length > 0) {
           return {
             success: true,
             stationCode,
@@ -438,9 +380,9 @@ export class RailRadarService {
             message: `Boss, ${stationCode} station par agle kuch ghanto me ${trainList.length} trains aane/jane wali hain.`,
           };
         }
-      } catch (e) {
-        console.warn("[RailRadar] Station board error:", e);
       }
+    } catch (e) {
+      console.warn("[RailRadar] Station board error:", e);
     }
 
     return {
@@ -459,14 +401,15 @@ export class RailRadarService {
   private formatLiveStatusMessage(info: {
     trainNumber: string;
     trainName: string;
-    currentStation?: string;
+    currentStation: string;
+    currentMovementStatus?: string;
     nextStation?: string;
     delayMinutes: number;
     platformNumber?: string | number;
-    speedKmh?: number;
+    etaNextStation?: string;
   }): string {
-    const { trainNumber, trainName, currentStation, nextStation, delayMinutes, platformNumber, speedKmh } = info;
-    let delayText = "Right Time (0 delay) chal rahi hai";
+    const { trainNumber, trainName, currentStation, currentMovementStatus, nextStation, delayMinutes, platformNumber, etaNextStation } = info;
+    let delayText = "Right Time (0 delay) par hai";
     if (delayMinutes > 0) {
       const hrs = Math.floor(delayMinutes / 60);
       const mins = delayMinutes % 60;
@@ -474,11 +417,14 @@ export class RailRadarService {
     }
 
     let msg = `🚆 **${trainName} (#${trainNumber})**\n`;
-    msg += `📍 **Current Location:** ${currentStation || "En Route"}\n`;
-    if (nextStation) msg += `⏩ **Next Stop:** ${nextStation}\n`;
-    msg += `⏱️ **Status:** ${delayText}\n`;
-    if (platformNumber) msg += `🏢 **Platform:** Platform #${platformNumber}\n`;
-    if (speedKmh) msg += `⚡ **Speed:** ${speedKmh} km/h\n`;
+    msg += `📍 **Current Location:** ${currentStation} (${currentMovementStatus || "En route"})\n`;
+    if (nextStation) {
+      msg += `⏩ **Next Halt:** ${nextStation}${platformNumber ? ` | 🏢 Platform #${platformNumber}` : ""}\n`;
+    }
+    msg += `⏱️ **Live Status:** ${delayText}\n`;
+    if (etaNextStation) {
+      msg += `🕒 **Expected Arrival at Next Halt:** ${etaNextStation}\n`;
+    }
     msg += `🗺️ **Live Radar Map:** https://railradar.in/train-status/${trainNumber}`;
 
     return msg;
