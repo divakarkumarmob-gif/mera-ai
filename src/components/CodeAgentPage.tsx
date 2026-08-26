@@ -23,7 +23,9 @@ import {
     Sparkles,
     FileCode,
     Copy,
-    Send
+    Send,
+    Trash2,
+    CheckSquare
 } from 'lucide-react';
 import { getApiUrl } from '@/utils/api';
 
@@ -156,6 +158,10 @@ export default function CodeAgentPage({ onClose }: { onClose: () => void }) {
     // 1-Click Rollback State
     const [isRollingBack, setIsRollingBack] = useState<boolean>(false);
     const [rollbackMsg, setRollbackMsg] = useState<string | null>(null);
+
+    // Task History Management & Selection State
+    const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
+    const [isDeleting, setIsDeleting] = useState<boolean>(false);
 
     // Derived active log request - cleanly updates on every poll, never gets stuck in closures
     const viewingLogReq = requests.find((r) => r.id === selectedLogReqId) || null;
@@ -329,6 +335,81 @@ export default function CodeAgentPage({ onClose }: { onClose: () => void }) {
         }
     };
 
+    // ── Feature: Task History Deletion Handlers ─────────────────────────────
+    const toggleSelectTask = (id: string, e?: React.MouseEvent) => {
+        if (e) e.stopPropagation();
+        setSelectedTaskIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    };
+
+    const toggleSelectAll = () => {
+        if (selectedTaskIds.size === requests.length && requests.length > 0) {
+            setSelectedTaskIds(new Set());
+        } else {
+            setSelectedTaskIds(new Set(requests.map((r) => r.id)));
+        }
+    };
+
+    const handleDeleteSingle = async (id: string, e?: React.MouseEvent) => {
+        if (e) e.stopPropagation();
+        if (!window.confirm('Kya aap is task ko history se delete karna chahte hain?')) return;
+        setIsDeleting(true);
+        try {
+            await fetch(getApiUrl(`/api/code-agent/history/${id}`), { method: 'DELETE' });
+            setSelectedTaskIds((prev) => {
+                const next = new Set(prev);
+                next.delete(id);
+                return next;
+            });
+            await load();
+        } catch (err) {
+            console.error('Failed to delete task:', err);
+        } finally {
+            setIsDeleting(false);
+        }
+    };
+
+    const handleBatchDelete = async () => {
+        const ids = Array.from(selectedTaskIds);
+        if (ids.length === 0) return;
+        if (!window.confirm(`Kya aap selected ${ids.length} tasks ko delete karna chahte hain?`)) return;
+        setIsDeleting(true);
+        try {
+            await fetch(getApiUrl('/api/code-agent/history/batch-delete'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ids }),
+            });
+            setSelectedTaskIds(new Set());
+            await load();
+        } catch (err) {
+            console.error('Failed to batch delete tasks:', err);
+        } finally {
+            setIsDeleting(false);
+        }
+    };
+
+    const handleClearAllHistory = async (onlyInactive = false) => {
+        const msg = onlyInactive
+            ? 'Kya aap saare completed/cancelled tasks clean karna chahte hain?'
+            : 'Kya aap poori task history delete karna chahte hain?';
+        if (!window.confirm(msg)) return;
+        setIsDeleting(true);
+        try {
+            await fetch(getApiUrl(`/api/code-agent/history?onlyInactive=${onlyInactive}`), { method: 'DELETE' });
+            setSelectedTaskIds(new Set());
+            await load();
+        } catch (err) {
+            console.error('Failed to clear history:', err);
+        } finally {
+            setIsDeleting(false);
+        }
+    };
+
     // Active file diff calculation for modal
     const activeFileDiff = useMemo(() => {
         if (!viewingDiffReq?.generatedChanges || viewingDiffReq.generatedChanges.length === 0) return null;
@@ -451,54 +532,132 @@ export default function CodeAgentPage({ onClose }: { onClose: () => void }) {
                                 <p className="text-xs text-slate-600">Ask Friday via voice or type your instructions above.</p>
                             </div>
                         ) : (
-                            requests.map((r) => (
-                                <div key={r.id} className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3 shadow-sm hover:border-white/20 transition-colors">
-                                    <div className="flex items-start justify-between gap-3">
-                                        <span className="text-sm text-white font-medium line-clamp-2">{r.instruction}</span>
-                                        <div className="flex items-center gap-1.5 shrink-0">
-                                            {/* Status Badge */}
-                                            <span className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border ${STATUS_COLOR[r.status]}`}>
-                                                {STATUS_LABEL[r.status]}
-                                            </span>
-
-                                            {/* Stop Button (if task is active/running) */}
-                                            {(r.status === 'analyzing' || r.status === 'applying' || r.status === 'pending_approval') && (
-                                                <button
-                                                    onClick={(e) => handleStop(r.id, e)}
-                                                    disabled={actingOn === `${r.id}_stop`}
-                                                    title="Stop / Cancel this task"
-                                                    className="p-1.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/25 transition-colors flex items-center gap-1 text-[11px] font-medium"
-                                                >
-                                                    <Square className="w-3.5 h-3.5 text-red-400 fill-red-400/20" />
-                                                    <span className="text-[10px]">Stop</span>
-                                                </button>
-                                            )}
-
-                                            {/* Anticlockwise Retry Button */}
-                                            <button
-                                                onClick={(e) => handleRetry(r.id, e)}
-                                                disabled={retryingId === r.id}
-                                                title="Retry this coding task (Anticlockwise rerun)"
-                                                className={`p-1.5 rounded-lg border transition-all ${
-                                                    r.status === 'failed'
-                                                        ? 'bg-red-500/20 border-red-500/40 text-red-300 hover:bg-red-500/30 animate-pulse'
-                                                        : 'bg-white/5 border-white/10 text-slate-400 hover:text-cyan-300 hover:bg-cyan-500/15 hover:border-cyan-500/30'
-                                                }`}
-                                            >
-                                                <RotateCcw className={`w-3.5 h-3.5 ${retryingId === r.id ? 'animate-spin' : ''}`} />
-                                            </button>
-
-                                            {/* Log Icon Button */}
-                                            <button
-                                                onClick={() => setSelectedLogReqId(r.id)}
-                                                title="View Execution Steps & Live Diagnostics Log"
-                                                className="p-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/25 transition-colors flex items-center gap-1 text-[11px] font-medium"
-                                            >
-                                                <Terminal className="w-3.5 h-3.5 text-cyan-400" />
-                                                <span className="text-[10px]">Log</span>
-                                            </button>
-                                        </div>
+                            <div className="space-y-3">
+                                {/* Task Management Toolbar */}
+                                <div className="flex items-center justify-between pb-1 border-b border-white/5 text-xs text-slate-400">
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            onClick={toggleSelectAll}
+                                            className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 text-[11px] font-medium transition-colors"
+                                        >
+                                            <CheckSquare className="w-3.5 h-3.5 text-cyan-400" />
+                                            <span>{selectedTaskIds.size === requests.length ? 'Deselect All' : 'Select All'}</span>
+                                        </button>
+                                        <span className="text-[11px] text-slate-500">
+                                            {requests.length} task{requests.length > 1 ? 's' : ''}
+                                        </span>
                                     </div>
+
+                                    <div className="flex items-center gap-1.5">
+                                        {selectedTaskIds.size > 0 && (
+                                            <button
+                                                onClick={handleBatchDelete}
+                                                disabled={isDeleting}
+                                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-red-500/20 border border-red-500/40 text-red-300 hover:bg-red-500/30 text-[11px] font-semibold transition-all"
+                                            >
+                                                <Trash2 className="w-3 h-3 text-red-400" />
+                                                <span>Delete Selected ({selectedTaskIds.size})</span>
+                                            </button>
+                                        )}
+
+                                        <button
+                                            onClick={() => handleClearAllHistory(true)}
+                                            disabled={isDeleting}
+                                            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800/60 border border-white/10 text-slate-400 hover:text-slate-200 hover:bg-slate-800 text-[11px] transition-colors"
+                                            title="Clear completed and cancelled tasks"
+                                        >
+                                            <Trash2 className="w-3 h-3 text-slate-400" />
+                                            <span>Clean Inactive</span>
+                                        </button>
+
+                                        <button
+                                            onClick={() => handleClearAllHistory(false)}
+                                            disabled={isDeleting}
+                                            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 text-[11px] transition-colors"
+                                            title="Clear all task history"
+                                        >
+                                            <span>Clear All</span>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {requests.map((r) => {
+                                    const isSelected = selectedTaskIds.has(r.id);
+                                    return (
+                                        <div
+                                            key={r.id}
+                                            className={`rounded-2xl border p-4 space-y-3 shadow-sm transition-colors ${
+                                                isSelected
+                                                    ? 'border-cyan-500/50 bg-cyan-500/10'
+                                                    : 'border-white/10 bg-white/5 hover:border-white/20'
+                                            }`}
+                                        >
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div className="flex items-start gap-2.5 flex-1 min-w-0">
+                                                    {/* Selection Checkbox */}
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={isSelected}
+                                                        onChange={() => toggleSelectTask(r.id)}
+                                                        className="mt-1 rounded bg-black/40 border-white/20 text-cyan-500 focus:ring-cyan-500/30 cursor-pointer"
+                                                    />
+                                                    <span className="text-sm text-white font-medium line-clamp-2">{r.instruction}</span>
+                                                </div>
+
+                                                <div className="flex items-center gap-1.5 shrink-0">
+                                                    {/* Status Badge */}
+                                                    <span className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border ${STATUS_COLOR[r.status]}`}>
+                                                        {STATUS_LABEL[r.status]}
+                                                    </span>
+
+                                                    {/* Stop Button (if task is active/running) */}
+                                                    {(r.status === 'analyzing' || r.status === 'applying' || r.status === 'pending_approval') && (
+                                                        <button
+                                                            onClick={(e) => handleStop(r.id, e)}
+                                                            disabled={actingOn === `${r.id}_stop`}
+                                                            title="Stop / Cancel this task"
+                                                            className="p-1.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/25 transition-colors flex items-center gap-1 text-[11px] font-medium"
+                                                        >
+                                                            <Square className="w-3.5 h-3.5 text-red-400 fill-red-400/20" />
+                                                            <span className="text-[10px]">Stop</span>
+                                                        </button>
+                                                    )}
+
+                                                    {/* Anticlockwise Retry Button */}
+                                                    <button
+                                                        onClick={(e) => handleRetry(r.id, e)}
+                                                        disabled={retryingId === r.id}
+                                                        title="Retry this coding task (Anticlockwise rerun)"
+                                                        className={`p-1.5 rounded-lg border transition-all ${
+                                                            r.status === 'failed'
+                                                                ? 'bg-red-500/20 border-red-500/40 text-red-300 hover:bg-red-500/30 animate-pulse'
+                                                                : 'bg-white/5 border-white/10 text-slate-400 hover:text-cyan-300 hover:bg-cyan-500/15 hover:border-cyan-500/30'
+                                                        }`}
+                                                    >
+                                                        <RotateCcw className={`w-3.5 h-3.5 ${retryingId === r.id ? 'animate-spin' : ''}`} />
+                                                    </button>
+
+                                                    {/* Log Icon Button */}
+                                                    <button
+                                                        onClick={() => setSelectedLogReqId(r.id)}
+                                                        title="View Execution Steps & Live Diagnostics Log"
+                                                        className="p-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/25 transition-colors flex items-center gap-1 text-[11px] font-medium"
+                                                    >
+                                                        <Terminal className="w-3.5 h-3.5 text-cyan-400" />
+                                                        <span className="text-[10px]">Log</span>
+                                                    </button>
+
+                                                    {/* Individual Delete Button */}
+                                                    <button
+                                                        onClick={(e) => handleDeleteSingle(r.id, e)}
+                                                        disabled={isDeleting}
+                                                        title="Delete task from history"
+                                                        className="p-1.5 rounded-lg bg-white/5 border border-white/10 text-slate-400 hover:text-red-400 hover:bg-red-500/15 hover:border-red-500/30 transition-colors"
+                                                    >
+                                                        <Trash2 className="w-3.5 h-3.5" />
+                                                    </button>
+                                                </div>
+                                            </div>
 
                                     {/* Plan / Root Cause */}
                                     {r.plan && (
@@ -682,11 +841,13 @@ export default function CodeAgentPage({ onClose }: { onClose: () => void }) {
                                                 <GitBranch className="w-3 h-3" /> View PR <ExternalLink className="w-3 h-3" />
                                             </a>
                                         )}
+                                        </div>
                                     </div>
-                                </div>
-                            ))
-                        )}
-                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
 
                     {/* FEATURE 2: VISUAL CODE DIFF VIEWER MODAL */}
                     {viewingDiffReq && (

@@ -945,6 +945,67 @@ Provide a concise, direct answer in friendly conversational Hindi/Hinglish:
 
     return { commitUrl, commitSha, baseBranch };
   }
+
+  /**
+   * Delete a single task by ID from Firestore
+   */
+  public async deleteTask(id: string): Promise<boolean> {
+    const cleanId = String(id || "").trim();
+    if (!cleanId) throw new Error("Task ID is required for deletion");
+    await requestsCol().doc(cleanId).delete();
+    return true;
+  }
+
+  /**
+   * Batch delete multiple tasks by IDs
+   */
+  public async batchDeleteTasks(ids: string[]): Promise<{ deletedCount: number }> {
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return { deletedCount: 0 };
+    }
+
+    const batch = db.batch();
+    let count = 0;
+
+    for (const id of ids) {
+      const cleanId = String(id || "").trim();
+      if (cleanId) {
+        batch.delete(requestsCol().doc(cleanId));
+        count++;
+      }
+    }
+
+    if (count > 0) {
+      await batch.commit();
+    }
+
+    return { deletedCount: count };
+  }
+
+  /**
+   * Clear all task history or all completed/denied/failed tasks
+   */
+  public async clearHistory(onlyInactive = false): Promise<{ deletedCount: number }> {
+    const snapshot = await requestsCol().get();
+    if (snapshot.empty) return { deletedCount: 0 };
+
+    const batch = db.batch();
+    let count = 0;
+
+    snapshot.forEach((doc: any) => {
+      const data = doc.data();
+      if (!onlyInactive || ["completed", "denied", "error", "failed"].includes(data?.status)) {
+        batch.delete(doc.ref);
+        count++;
+      }
+    });
+
+    if (count > 0) {
+      await batch.commit();
+    }
+
+    return { deletedCount: count };
+  }
 }
 
 export const codeAgentService = new CodeAgentService();

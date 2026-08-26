@@ -692,6 +692,35 @@ async function startServer() {
     }
   });
 
+  app.delete("/api/code-agent/history/:id", async (req, res) => {
+    try {
+      await codeAgentService.deleteTask(req.params.id);
+      res.json({ ok: true, message: "Task deleted successfully" });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "failed_to_delete_task" });
+    }
+  });
+
+  app.post("/api/code-agent/history/batch-delete", async (req, res) => {
+    try {
+      const { ids } = req.body || {};
+      const result = await codeAgentService.batchDeleteTasks(ids);
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "failed_to_batch_delete" });
+    }
+  });
+
+  app.delete("/api/code-agent/history", async (req, res) => {
+    try {
+      const { onlyInactive } = req.query;
+      const result = await codeAgentService.clearHistory(onlyInactive === "true");
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "failed_to_clear_history" });
+    }
+  });
+
   // ── RailRadar Indian Railways Live Train Intelligence Endpoints ──────────
   app.get("/api/railradar/train/:number/live", async (req, res) => {
     try {
