@@ -1,12 +1,19 @@
 /**
- * Screen Wake Lock Manager — Keeps device display permanently ON (no sleep / no auto-dimming).
- * Works across desktop, mobile Chrome, Safari, Edge, Firefox, and PWA WebViews.
+ * Screen Wake Lock & Background Audio Task Manager
+ * Keeps device display and background audio threads permanently ON.
+ * Powered by @capacitor-community/keep-awake, @capawesome/capacitor-background-task,
+ * Native Screen Wake Lock API, and hidden micro-video loop fallback.
  */
+
+import { KeepAwake } from '@capacitor-community/keep-awake';
+import { BackgroundTask } from '@capawesome/capacitor-background-task';
 
 class ScreenWakeLockManager {
   private wakeLock: any = null;
   private isRequested: boolean = false;
   private fallbackVideo: HTMLVideoElement | null = null;
+  private backgroundTaskId: string | null = null;
+  private keepAliveInterval: any = null;
 
   constructor() {
     if (typeof window !== "undefined") {
@@ -29,45 +36,88 @@ class ScreenWakeLockManager {
   }
 
   /**
-   * Request and acquire continuous screen wake lock.
+   * Request and acquire continuous screen wake lock and background CPU task.
    */
   public async requestLock(): Promise<boolean> {
     this.isRequested = true;
     if (typeof window === "undefined") return false;
 
-    // 1. Try Native Screen Wake Lock API
+    // 1. Try Capacitor Native KeepAwake & BackgroundTask (For Mobile APK)
+    try {
+      if (KeepAwake?.keepAwake) {
+        await KeepAwake.keepAwake();
+        console.log("[ScreenWakeLock] 💡 Capacitor Native KeepAwake activated! Screen will NOT sleep.");
+      }
+      if (BackgroundTask?.beforeExit) {
+        BackgroundTask.beforeExit(async () => {
+          try {
+            this.backgroundTaskId = await BackgroundTask.start();
+            if (!this.keepAliveInterval) {
+              this.keepAliveInterval = setInterval(() => {
+                // Keep-alive ping for background audio engine
+              }, 5000);
+            }
+            console.log("[ScreenWakeLock] 🚀 Capacitor BackgroundTask started! ID:", this.backgroundTaskId);
+          } catch (e) {
+            console.warn("[ScreenWakeLock] BackgroundTask start error:", e);
+          }
+        });
+      }
+    } catch {
+      // Running in standard web browser
+    }
+
+    // 2. Try Web Standard Screen Wake Lock API
     if ("wakeLock" in navigator && (navigator as any).wakeLock?.request) {
       try {
         this.wakeLock = await (navigator as any).wakeLock.request("screen");
         this.wakeLock.addEventListener("release", () => {
           this.wakeLock = null;
-          // Re-acquire if still requested and page is visible
           if (this.isRequested && document.visibilityState === "visible") {
             setTimeout(() => this.requestLock(), 1000);
           }
         });
-        console.log("[ScreenWakeLock] 💡 Native Screen Wake Lock active. Screen will NOT sleep.");
+        console.log("[ScreenWakeLock] 💡 Web Native Screen Wake Lock active.");
         return true;
       } catch (err) {
         console.warn("[ScreenWakeLock] Native wakeLock request failed, trying fallback:", err);
       }
     }
 
-    // 2. Fallback: Hidden silent micro-video loop for browsers without native wakeLock (iOS Safari / WebViews)
+    // 3. Fallback: Hidden silent micro-video loop for browsers / WebViews
     return this.startFallbackVideoWakeLock();
   }
 
   /**
-   * Release wake lock if needed.
+   * Release wake lock and finish background task when music stops.
    */
-  public releaseLock(): void {
+  public async releaseLock(): Promise<void> {
     this.isRequested = false;
+
+    // 1. Release Capacitor Native KeepAwake & BackgroundTask
+    try {
+      if (KeepAwake?.allowSleep) {
+        await KeepAwake.allowSleep();
+      }
+      if (this.backgroundTaskId && BackgroundTask?.finish) {
+        await BackgroundTask.finish({ taskId: this.backgroundTaskId });
+        this.backgroundTaskId = null;
+      }
+      if (this.keepAliveInterval) {
+        clearInterval(this.keepAliveInterval);
+        this.keepAliveInterval = null;
+      }
+    } catch {}
+
+    // 2. Release Web Wake Lock
     if (this.wakeLock) {
       try {
         this.wakeLock.release();
       } catch {}
       this.wakeLock = null;
     }
+
+    // 3. Pause fallback video
     if (this.fallbackVideo) {
       try {
         this.fallbackVideo.pause();
@@ -76,11 +126,12 @@ class ScreenWakeLockManager {
       } catch {}
       this.fallbackVideo = null;
     }
+
     console.log("[ScreenWakeLock] 💤 Screen Wake Lock released.");
   }
 
   public isLocked(): boolean {
-    return !!this.wakeLock || !!this.fallbackVideo;
+    return !!this.wakeLock || !!this.fallbackVideo || !!this.backgroundTaskId;
   }
 
   private startFallbackVideoWakeLock(): boolean {
