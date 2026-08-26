@@ -3584,17 +3584,29 @@ HOW TO READ MESSAGES:
         },
         {
           name: "execute_service",
-          description: "Execute Indian Railways live train status, 10-digit PNR enquiry, and live station board via RailRadar.",
+          description: "MANDATORY Indian Railways Intelligence via RailRadar: Get ticket prices & class-wise fares (SL, 3A, 2A, 1A, CC), real-time seat availability & Tatkal seats, coach layout (General/Sleeper aage ya peeche), live running status & GPS delay, 10-digit PNR status, train stoppage check, upcoming trains between any 2 stations (e.g. Jamui to Dholi/Patna), and cancellation refund rules. NEVER refuse ticket price or seat queries — ALWAYS call this tool.",
           parameters: {
             type: "OBJECT",
             properties: {
               action: {
                 type: "STRING",
-                description: "Service action: 'train_status' (live running status/delay/GPS), 'pnr_status' (10-digit PNR details), or 'station_board' (station arrivals/platforms)",
+                description: "Action type: 'ticket_price' (for fare/ticket prices/kiraya), 'seat_availability' (for seats/tatkal quota), 'coach_position' (for General/Sleeper/AC bogey position), 'stoppage_check' (to check if train stops at station), 'trains_between' (to search trains from one station/city to another), 'train_status' (live running status/delay/GPS), 'pnr_status' (10-digit PNR), 'schedule' (timetable), or 'cancellation_refund' (refund calculator)",
               },
               query: {
                 type: "STRING",
-                description: "Train number (e.g. '12309'), 10-digit PNR (e.g. '2847291048'), or station name/code (e.g. 'PNBE', 'New Delhi')",
+                description: "Train number (e.g. '12309', '12393'), 10-digit PNR (e.g. '2847291048'), station name (e.g. 'Jamui', 'Patna', 'Dholi'), or city query",
+              },
+              fromStation: {
+                type: "STRING",
+                description: "Origin / From station name or code (e.g. 'Jamui', 'JMU', 'Patna', 'PNBE')",
+              },
+              toStation: {
+                type: "STRING",
+                description: "Destination / To station name or code (e.g. 'Dholi', 'DOL', 'Delhi', 'NDLS')",
+              },
+              targetStation: {
+                type: "STRING",
+                description: "Target station to check stoppage for (e.g. 'Prayagraj', 'Kanpur')",
               },
             },
             required: ["action", "query"],
@@ -5670,7 +5682,11 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                   const toStation = String(call.args?.toStation || call.args?.to || "");
                   
                   try {
-                    if (action.includes("seat") || action.includes("availab") || action.includes("tatkal") || action.includes("quota")) {
+                    if (action.includes("schedule") || action.includes("timetable")) {
+                      result = await railRadarService.getTrainSchedule(query);
+                    } else if (action.includes("refund") || action.includes("cancel")) {
+                      result = railRadarService.calculateCancellationRefund("3A", "CNF", 48);
+                    } else if (action.includes("seat") || action.includes("availab") || action.includes("tatkal") || action.includes("quota")) {
                       result = await railRadarService.getSeatAvailability(query, fromStation, toStation);
                     } else if (action.includes("coach") || action.includes("layout") || action.includes("general") || action.includes("composition")) {
                       result = await railRadarService.getCoachPosition(query);
@@ -5678,7 +5694,7 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                       result = await railRadarService.checkTrainStoppage(query, targetStation || "PNBE");
                     } else if (action.includes("between") || action.includes("search_trains") || action.includes("journey")) {
                       result = await railRadarService.searchTrainsBetweenStations(fromStation || query, toStation || "PNBE");
-                    } else if (action.includes("fare") || action.includes("price") || action.includes("ticket")) {
+                    } else if (action.includes("fare") || action.includes("price") || action.includes("ticket") || action.includes("kiraya")) {
                       const fareRes = await railRadarService.getTrainFares(query, fromStation, toStation);
                       result = fareRes;
                       if (fareRes.success) {
