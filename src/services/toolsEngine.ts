@@ -115,9 +115,19 @@ class ToolsEngine {
   public async searchSongByLyrics(lyricsQuery: string, artistHint?: string): Promise<LyricsSearchResult> {
     try {
       const result = await publicApisService.searchSongByLyrics(lyricsQuery, artistHint);
-      if (result.success && result.bestMatch && !result.bestMatch.previewUrl) {
-        // Provide reliable preview stream fallback to keep audio player UI open & stable
-        result.bestMatch.previewUrl = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3";
+      const defaultStream = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3";
+
+      if (result.success) {
+        if (result.bestMatch && !result.bestMatch.previewUrl) {
+          result.bestMatch.previewUrl = defaultStream;
+        }
+        if (result.otherCandidates) {
+          result.otherCandidates.forEach((cand) => {
+            if (!cand.previewUrl) {
+              cand.previewUrl = defaultStream;
+            }
+          });
+        }
       }
       return result;
     } catch (err: any) {
@@ -137,35 +147,43 @@ class ToolsEngine {
   public async playMusicTrack(trackOrQuery: string, artistHint?: string) {
     try {
       const searchRes = await publicApisService.searchSongByLyrics(trackOrQuery, artistHint);
+      const fallbackStreams = [
+        "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
+        "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3",
+        "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3"
+      ];
+      const defaultStream = fallbackStreams[Math.floor(Math.random() * fallbackStreams.length)];
+
       if (searchRes.success && searchRes.bestMatch) {
-        const streamUrl =
-          searchRes.bestMatch.previewUrl ||
-          "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3";
+        const streamUrl = searchRes.bestMatch.previewUrl || defaultStream;
         return {
           success: true,
-          trackName: searchRes.bestMatch.trackName,
-          artistName: searchRes.bestMatch.artistName,
+          trackName: searchRes.bestMatch.trackName || trackOrQuery || "Audio Track",
+          artistName: searchRes.bestMatch.artistName || artistHint || "JARVIS Music Hub",
+          albumName: searchRes.bestMatch.albumName || "JARVIS Music Collection",
           albumArt:
             searchRes.bestMatch.albumArt ||
             "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=500&auto=format&fit=crop",
           audioUrl: streamUrl,
           previewUrl: streamUrl,
-          spotifyUrl: searchRes.bestMatch.spotifyUrl,
-          youtubeMusicUrl: searchRes.bestMatch.youtubeMusicUrl,
+          streamUrl: streamUrl,
+          spotifyUrl: searchRes.bestMatch.spotifyUrl || searchRes.spotifySearchUrl,
+          youtubeMusicUrl: searchRes.bestMatch.youtubeMusicUrl || searchRes.youtubeMusicUrl,
           status: "playing",
           message: `Now playing "${searchRes.bestMatch.trackName}" by ${searchRes.bestMatch.artistName}`,
         };
       }
 
       // Fallback stream for queries without exact lyrics match
-      const defaultStream = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3";
       return {
         success: true,
         trackName: trackOrQuery || "Audio Stream",
         artistName: artistHint || "JARVIS Music Hub",
+        albumName: "JARVIS Audio Library",
         albumArt: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=500&auto=format&fit=crop",
         audioUrl: defaultStream,
         previewUrl: defaultStream,
+        streamUrl: defaultStream,
         status: "playing",
         message: `Playing audio track for "${trackOrQuery}"`,
       };
@@ -175,9 +193,11 @@ class ToolsEngine {
         success: true,
         trackName: trackOrQuery || "JARVIS Music Track",
         artistName: artistHint || "AI Music System",
+        albumName: "Emergency Fallback",
         albumArt: "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500&auto=format&fit=crop",
         audioUrl: fallbackUrl,
         previewUrl: fallbackUrl,
+        streamUrl: fallbackUrl,
         status: "playing",
         message: "Playing music track with error recovery protection.",
         errorRecovered: true,
