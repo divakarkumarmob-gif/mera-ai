@@ -8,8 +8,11 @@ export interface AppAccessKeyData {
   source: "whatsapp" | "telegram" | "system";
 }
 
+const SESSION_TTL = 48 * 60 * 60 * 1000; // 48 Hours
+
 class AppSecurityService {
   private cachedKey: string | null = null;
+  private cachedUpdatedAt: number | null = null;
 
   private getSigningSecret(): string {
     return (
@@ -21,12 +24,14 @@ class AppSecurityService {
 
   /**
    * Generates a tamper-proof cryptographically signed session token (HMAC-SHA256).
+   * Embeds keyUpdatedAt so changing the App Key instantly invalidates all active tokens.
    */
-  public generateSessionToken(): string {
+  public generateSessionToken(keyUpdatedAt: number = Date.now()): string {
     const payload = {
-      v: 1,
+      v: 2,
       iat: Date.now(),
-      exp: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 days
+      exp: Date.now() + SESSION_TTL, // 48 Hours
+      keyUpdatedAt,
       nonce: crypto.randomBytes(8).toString("hex"),
     };
     const dataStr = Buffer.from(JSON.stringify(payload)).toString("base64url");
@@ -35,7 +40,8 @@ class AppSecurityService {
   }
 
   /**
-   * Verifies the cryptographic signature and expiration of a session token.
+   * Verifies cryptographic signature, 48-hour expiration, and key version.
+   * If Boss updated the password, all tokens issued under the old password FAIL instantly.
    */
   public verifySessionToken(token: string): boolean {
     if (!token || typeof token !== "string") return false;
@@ -52,9 +58,17 @@ class AppSecurityService {
       }
 
       const payload = JSON.parse(Buffer.from(dataStr, "base64url").toString("utf8"));
+
+      // 1. Check 48-hour expiration
       if (payload.exp && Date.now() > payload.exp) {
         return false;
       }
+
+      // 2. Check if password was changed after token was issued
+      if (this.cachedUpdatedAt && payload.keyUpdatedAt && payload.keyUpdatedAt !== this.cachedUpdatedAt) {
+        return false;
+      }
+
       return true;
     } catch {
       return false;
@@ -62,20 +76,38 @@ class AppSecurityService {
   }
 
   /**
-   * Retrieves the active App Access Key from Firestore (doc: systemSecurity/appAccessKey).
+   * Retrieves the active App Access Key and its update timestamp from Firestore (doc: systemSecurity/appAccessKey).
    */
-  public async getAppKey(): Promise<string | null> {
+  public async getAppKeyData(): Promise<AppAccessKeyData | null> {
     try {
       const doc = await db.collection("systemSecurity").doc("appAccessKey").get();
       if (doc.exists && doc.data()?.appKey) {
-        const key = String(doc.data()?.appKey).trim();
+        const data = doc.data() as AppAccessKeyData;
+        const key = String(data.appKey).trim();
         this.cachedKey = key;
-        return key;
+        this.cachedUpdatedAt = data.updatedAt || 0;
+        return data;
       }
     } catch (e) {
       console.warn("[AppSecurity] Failed to fetch appAccessKey from Firestore:", e);
     }
-    return this.cachedKey;
+    if (this.cachedKey) {
+      return {
+        appKey: this.cachedKey,
+        updatedAt: this.cachedUpdatedAt || 0,
+        updatedBy: "system",
+        source: "system",
+      };
+    }
+    return null;
+  }
+
+  /**
+   * Retrieves the active App Access Key from Firestore.
+   */
+  public async getAppKey(): Promise<string | null> {
+    const data = await this.getAppKeyData();
+    return data ? data.appKey : null;
   }
 
   /**
@@ -87,16 +119,16 @@ class AppSecurityService {
       return { success: false, message: "Kripya App Key enter karein." };
     }
 
-    const activeKey = await this.getAppKey();
-    if (!activeKey) {
+    const keyData = await this.getAppKeyData();
+    if (!keyData || !keyData.appKey) {
       return {
         success: false,
         message: "App Access Key abhi Firestore me set nahi hai. WhatsApp ya Telegram par Boss se 'app key <password>' bhej kar set karein.",
       };
     }
 
-    if (raw === activeKey) {
-      const token = this.generateSessionToken();
+    if (raw === keyData.appKey) {
+      const token = this.generateSessionToken(keyData.updatedAt);
       return { success: true, token, message: "App Access Granted! ✅" };
     }
 

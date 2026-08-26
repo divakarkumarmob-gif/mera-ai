@@ -12,8 +12,8 @@ export function getStoredAppSession(): AppSession | null {
         const raw = localStorage.getItem(STORAGE_KEY) || sessionStorage.getItem(STORAGE_KEY);
         if (!raw) return null;
         const session: AppSession = JSON.parse(raw);
-        // Valid for 7 days
-        if (session.unlockedAt && Date.now() - session.unlockedAt < 7 * 24 * 60 * 60 * 1000 && session.token) {
+        // Valid for 48 hours (2 days)
+        if (session.unlockedAt && Date.now() - session.unlockedAt < 48 * 60 * 60 * 1000 && session.token) {
             return session;
         }
     } catch {
