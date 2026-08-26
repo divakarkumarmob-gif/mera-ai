@@ -2723,22 +2723,22 @@ HOW TO READ MESSAGES:
         },
         {
           name: "get_train_live_status",
-          description: "Get IRCTC live train running status, delay minutes, platform number, and route status. Use when DK asks 'Train ka running status batao', 'Rajdhani express kitni late hai'.",
+          description: "Get real-time live Indian Railways train running status, exact current GPS location, delay minutes, and platform number via RailRadar. Use when DK asks '12309 train kahan hai', 'Train ka live running status batao', 'Train kitni late hai'.",
           parameters: {
             type: "OBJECT",
             properties: {
-              trainNumberOrName: { type: "STRING", description: "Train number or name (e.g. '12309', 'Rajdhani Express', 'Vande Bharat')" },
+              trainNumberOrName: { type: "STRING", description: "Train number or name (e.g. '12309', '12952', 'Rajdhani Express')" },
             },
             required: ["trainNumberOrName"],
           },
         },
         {
           name: "check_pnr_status",
-          description: "Check IRCTC 10-digit PNR booking status, coach, and berth confirmation. Use when DK asks to check a PNR number.",
+          description: "Check real-time Indian Railways 10-digit PNR status, coach, and berth confirmation via RailRadar. Use when DK asks to check a 10-digit PNR number.",
           parameters: {
             type: "OBJECT",
             properties: {
-              pnrNumber: { type: "STRING", description: "10-digit Indian Railways PNR number" },
+              pnrNumber: { type: "STRING", description: "10-digit Indian Railways PNR number (e.g. '2847291048')" },
             },
             required: ["pnrNumber"],
           },
@@ -4579,6 +4579,9 @@ HOW TO READ MESSAGES:
                   const { trainNumberOrName } = call.args || {};
                   try {
                     result = await toolsEngine.getTrainLiveStatus(String(trainNumberOrName || ""));
+                    if (result && result.success) {
+                      safeSend(JSON.stringify({ type: 'train_live_status', train: result }));
+                    }
                   } catch (e: any) {
                     result = { success: false, message: `Train status check fail hui: ${e?.message || e}` };
                   }
@@ -4586,6 +4589,9 @@ HOW TO READ MESSAGES:
                   const { pnrNumber } = call.args || {};
                   try {
                     result = await toolsEngine.checkPnrStatus(String(pnrNumber || ""));
+                    if (result && result.success) {
+                      safeSend(JSON.stringify({ type: 'pnr_live_status', pnr: result }));
+                    }
                   } catch (e: any) {
                     result = { success: false, message: `PNR check fail hui: ${e?.message || e}` };
                   }
