@@ -154,25 +154,112 @@ class TelegramBotService {
   }
 
   /**
+   * Transforms markdown text to clean plain text while keeping URLs 100% intact
+   * and making markdown links readable and copy-paste friendly for Telegram.
+   */
+  public formatPlainTextWithLinks(text: string): string {
+    if (!text) return "";
+
+    // 1. Convert markdown links [Label](URL) -> "Label: URL" (or just URL if label is identical or empty)
+    let clean = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/g, (_match, label, url) => {
+      const trimmedLabel = label.trim();
+      const trimmedUrl = url.trim();
+      if (!trimmedLabel || trimmedLabel.toLowerCase() === trimmedUrl.toLowerCase()) {
+        return trimmedUrl;
+      }
+      return `${trimmedLabel}: ${trimmedUrl}`;
+    });
+
+    // 2. Remove markdown header hashes at line starts (# Header -> Header)
+    clean = clean.replace(/^#{1,6}\s+/gm, "");
+
+    // 3. Remove code fence ticks (```ts or ```) while preserving code content
+    clean = clean.replace(/```[a-zA-Z0-9_-]*\n?/g, "");
+
+    return clean;
+  }
+
+  /**
    * Sends a text message to a Telegram chat.
+   * Automatically retries in plain text with clickable, copy-paste friendly link formatting
+   * if Markdown or special-character entity parsing fails.
    */
   public async sendMessage(
     chatId: number | string,
     text: string,
     replyMarkup?: any
   ): Promise<{ success: boolean; messageId?: number; error?: string }> {
+    if (!this.token) return { success: false, error: "TELEGRAM_BOT_TOKEN is not configured." };
+    if (!text || !text.trim()) return { success: false, error: "Empty message text." };
+
+    const rawText = text.trim();
+
+    // If text exceeds Telegram's 4096 character limit, chunk it
+    if (rawText.length > 4000) {
+      return this.sendLongMessage(chatId, rawText, replyMarkup);
+    }
+
     try {
+      // 1. First attempt: Markdown formatted
       const result = await this.callApi("sendMessage", {
         chat_id: chatId,
-        text,
+        text: rawText,
         parse_mode: "Markdown",
         reply_markup: replyMarkup,
       });
       return { success: true, messageId: result.message_id };
-    } catch (e: any) {
-      console.error(`[TelegramBot] Send failed to ${chatId}:`, e?.message);
-      return { success: false, error: e?.message || String(e) };
+    } catch (err: any) {
+      const errMsg = String(err?.message || err);
+      console.warn(`[TelegramBot] Markdown parse failed for ${chatId} (${errMsg}). Retrying in plain text...`);
+
+      // 2. Automatic Retry: Clean format with copy-pasteable URLs and no parse_mode
+      try {
+        const plainText = this.formatPlainTextWithLinks(rawText);
+        const plainResult = await this.callApi("sendMessage", {
+          chat_id: chatId,
+          text: plainText,
+          reply_markup: replyMarkup,
+        });
+        console.log(`[TelegramBot] Successfully delivered message to ${chatId} via plain text fallback.`);
+        return { success: true, messageId: plainResult.message_id };
+      } catch (fallbackErr: any) {
+        console.error(`[TelegramBot] Plain text fallback failed to ${chatId}:`, fallbackErr?.message || fallbackErr);
+        return { success: false, error: fallbackErr?.message || String(fallbackErr) };
+      }
     }
+  }
+
+  /**
+   * Handles splitting and delivering messages longer than Telegram's 4096 character limit.
+   */
+  private async sendLongMessage(
+    chatId: number | string,
+    text: string,
+    replyMarkup?: any
+  ): Promise<{ success: boolean; messageId?: number; error?: string }> {
+    const chunks: string[] = [];
+    let remaining = text;
+
+    while (remaining.length > 0) {
+      if (remaining.length <= 4000) {
+        chunks.push(remaining);
+        break;
+      }
+      let splitIdx = remaining.lastIndexOf("\n", 4000);
+      if (splitIdx < 1000) splitIdx = remaining.lastIndexOf(". ", 4000);
+      if (splitIdx < 1000) splitIdx = 4000;
+      chunks.push(remaining.substring(0, splitIdx).trim());
+      remaining = remaining.substring(splitIdx).trim();
+    }
+
+    let lastRes: { success: boolean; messageId?: number; error?: string } = { success: false };
+    for (let i = 0; i < chunks.length; i++) {
+      const isLast = i === chunks.length - 1;
+      lastRes = await this.sendMessage(chatId, chunks[i], isLast ? replyMarkup : undefined);
+      if (!lastRes.success) return lastRes;
+      if (!isLast) await new Promise((r) => setTimeout(r, 200));
+    }
+    return lastRes;
   }
 
   /**
