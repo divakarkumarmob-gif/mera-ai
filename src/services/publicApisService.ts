@@ -25,6 +25,7 @@ async function fetchJson(url: string, timeoutMs = 8000): Promise<any> {
 }
 
 import { weatherService } from "./weatherService";
+import { newsService } from "./newsService";
 
 class PublicApisService {
   // 1. Weather — Powered by WeatherAPI.com (with Open-Meteo fallback)
@@ -617,111 +618,17 @@ class PublicApisService {
   // instead of crashing.
   // ---------------------------------------------------------------------
 
-  // 27. News — Google News Live Feed + NewsData.io (100% Free, Top 10, Politics, Local, Viral)
+  // 27. News — Powered by NewsData.io + Google News Live Stream
   public async getNews(topic?: string, country = "in", count = 10): Promise<any> {
-    const requestedCount = Math.min(Math.max(count || 10, 1), 15);
-    const cat = (topic || "").toLowerCase().trim();
-
-    // 1. Google News Live RSS Feed (100% Free, Instant & Uncapped)
-    try {
-      let rssUrl = "https://news.google.com/rss?hl=en-IN&gl=IN&ceid=IN:en";
-
-      if (cat === "politics" || cat === "rajneeti" || cat === "political") {
-        rssUrl = "https://news.google.com/rss/headlines/section/topic/POLITICS?hl=en-IN&gl=IN&ceid=IN:en";
-      } else if (cat === "world" || cat === "international" || cat === "global") {
-        rssUrl = "https://news.google.com/rss/headlines/section/topic/WORLD?hl=en-IN&gl=IN&ceid=IN:en";
-      } else if (cat === "business" || cat === "finance" || cat === "economy") {
-        rssUrl = "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=en-IN&gl=IN&ceid=IN:en";
-      } else if (cat === "tech" || cat === "technology") {
-        rssUrl = "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=en-IN&gl=IN&ceid=IN:en";
-      } else if (cat === "entertainment" || cat === "viral" || cat === "trending") {
-        rssUrl = "https://news.google.com/rss/headlines/section/topic/ENTERTAINMENT?hl=en-IN&gl=IN&ceid=IN:en";
-      } else if (cat === "sports" || cat === "khel") {
-        rssUrl = "https://news.google.com/rss/headlines/section/topic/SPORTS?hl=en-IN&gl=IN&ceid=IN:en";
-      } else if (topic && topic !== "top 10" && topic !== "top news" && topic !== "latest" && topic !== "india") {
-        // Custom search topic or Local city (e.g. "Patna local", "Delhi", "Bihar", "Crime")
-        rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(topic)}&hl=en-IN&gl=IN&ceid=IN:en`;
-      }
-
-      const res = await fetch(rssUrl, {
-        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
-      });
-      const xml = await res.text();
-      const articles: any[] = [];
-      const itemRegex = /<item>(.*?)<\/item>/gs;
-      let match;
-      while ((match = itemRegex.exec(xml)) !== null && articles.length < requestedCount) {
-        const itemContent = match[1];
-        const rawTitle = itemContent.match(/<title>(.*?)<\/title>/)?.[1]?.replace(/<!\[CDATA\[(.*?)\]\]>/g, "$1") || "";
-        const source = itemContent.match(/<source[^>]*>(.*?)<\/source>/)?.[1]?.replace(/<!\[CDATA\[(.*?)\]\]>/g, "$1") || "News";
-        const pubDate = itemContent.match(/<pubDate>(.*?)<\/pubDate>/)?.[1] || "";
-        if (rawTitle) {
-          const cleanTitle = rawTitle
-            .replace(/&quot;/g, '"')
-            .replace(/&#39;/g, "'")
-            .replace(/&amp;/g, "&")
-            .replace(/&lt;/g, "<")
-            .replace(/&gt;/g, ">");
-          articles.push({
-            title: cleanTitle,
-            source,
-            pubDate,
-          });
-        }
-      }
-
-      if (articles.length) {
-        return {
-          success: true,
-          category: topic || "Top Headlines",
-          count: articles.length,
-          articles,
-          source: "google_news_live",
-        };
-      }
-    } catch {
-      // Fall through to NewsData.io if configured
-    }
-
-    // 2. NewsData.io Fallback (if key is set)
-    const newsDataKey = process.env.NEWSDATA_API_KEY || process.env.NEWS_DATA_API_KEY;
-    if (newsDataKey) {
-      const params = new URLSearchParams({ apikey: newsDataKey, country, language: "en" });
-      if (topic) params.set("q", topic);
-      try {
-        const data = await fetchJson(`https://newsdata.io/api/1/latest?${params.toString()}`);
-        const articles = (data.results || []).slice(0, requestedCount).map((a: any) => ({
-          title: a.title,
-          source: a.source_id,
-          link: a.link,
-          pubDate: a.pubDate,
-        }));
-        if (articles.length > 0) {
-          return { success: true, count: articles.length, articles, source: "newsdata" };
-        }
-      } catch (e) {}
-    }
-
-    // 3. NewsAPI.org Fallback (if key is set)
-    const newsApiKey = process.env.NEWS_API_KEY || process.env.NEWSAPI_KEY || process.env.NEWSAPI_API_KEY;
-    if (newsApiKey) {
-      const params = new URLSearchParams({ apiKey: newsApiKey, country: country || "in", pageSize: String(requestedCount) });
-      if (topic) params.set("q", topic);
-      try {
-        const data = await fetchJson(`https://newsapi.org/v2/top-headlines?${params.toString()}`);
-        const articles = (data.articles || []).slice(0, requestedCount).map((a: any) => ({
-          title: a.title,
-          source: a.source?.name || "NewsAPI",
-          link: a.url,
-          pubDate: a.publishedAt,
-        }));
-        if (articles.length > 0) {
-          return { success: true, count: articles.length, articles, source: "newsapi_org" };
-        }
-      } catch (e) {}
-    }
-
-    return { success: false, message: "Latest news fetch nahi ho saki." };
+    const res = await newsService.getLatestNews(topic, undefined, country, "en", count);
+    return {
+      success: res.success,
+      category: res.category || topic || "Top Headlines",
+      count: res.articles?.length || 0,
+      articles: res.articles || [],
+      source: res.sourceEngine,
+      message: res.message,
+    };
   }
 
   // 28. Cricket scores — Real-time Live Scores & Matches

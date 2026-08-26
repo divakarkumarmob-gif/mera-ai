@@ -32,6 +32,7 @@ import { appSecurityService } from "./src/services/appSecurityService";
 import { webCrawlerService } from "./src/services/webCrawlerService";
 import { railRadarService } from "./src/services/railRadarService";
 import { weatherService } from "./src/services/weatherService";
+import { newsService } from "./src/services/newsService";
 
 const PORT = Number(process.env.PORT) || 3000;
 const isProduction = process.env.NODE_ENV === "production";
@@ -847,6 +848,54 @@ async function startServer() {
       res.json(data);
     } catch (e: any) {
       res.status(500).json({ success: false, error: e?.message || "sports_fetch_failed" });
+    }
+  });
+
+  // ── NewsData.io & Live News Intelligence Endpoints ─────────────────────────
+  app.get("/api/news/latest", async (req, res) => {
+    try {
+      const q = req.query.q ? String(req.query.q) : undefined;
+      const category = req.query.category ? String(req.query.category) : undefined;
+      const country = String(req.query.country || "in");
+      const count = Number(req.query.count || 10);
+      const data = await newsService.getLatestNews(q, category, country, "en", count);
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || "news_fetch_failed" });
+    }
+  });
+
+  app.get("/api/news/crypto", async (req, res) => {
+    try {
+      const coin = String(req.query.coin || "Bitcoin");
+      const count = Number(req.query.count || 8);
+      const data = await newsService.getCryptoNews(coin, count);
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || "crypto_news_failed" });
+    }
+  });
+
+  app.get("/api/news/archive", async (req, res) => {
+    try {
+      const q = String(req.query.q || "India");
+      const fromDate = req.query.from ? String(req.query.from) : undefined;
+      const toDate = req.query.to ? String(req.query.to) : undefined;
+      const data = await newsService.getArchiveNews(q, fromDate, toDate);
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || "archive_news_failed" });
+    }
+  });
+
+  app.get("/api/news/sources", async (req, res) => {
+    try {
+      const country = String(req.query.country || "in");
+      const category = req.query.category ? String(req.query.category) : undefined;
+      const data = await newsService.getNewsSources(country, category);
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || "news_sources_failed" });
     }
   });
 
