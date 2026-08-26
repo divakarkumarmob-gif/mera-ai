@@ -720,6 +720,16 @@ async function startServer() {
     }
   });
 
+  app.get("/api/railradar/train/:number/fare", async (req, res) => {
+    try {
+      const { from, to, date } = req.query as { from?: string; to?: string; date?: string };
+      const data = await railRadarService.getTrainFares(req.params.number, from, to, date);
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || "train_fare_failed" });
+    }
+  });
+
   app.get("/api/background-tasks", (_req, res) => {
     res.json({
       ok: true,
@@ -5585,12 +5595,18 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                   } catch (e: any) {
                     result = { success: false, message: `Coding Agent command fail hui: ${e?.message || e}` };
                   }
-                } else if (call.name === "execute_service" || call.name === "get_live_train_status" || call.name === "get_pnr_status" || call.name === "get_live_station_board") {
+                } else if (call.name === "execute_service" || call.name === "get_live_train_status" || call.name === "get_pnr_status" || call.name === "get_live_station_board" || call.name === "get_train_fares") {
                   const action = String(call.args?.action || call.name);
                   const query = String(call.args?.query || call.args?.trainQuery || call.args?.pnr || call.args?.station || "");
                   
                   try {
-                    if (action.includes("pnr") || /^\d{10}$/.test(query)) {
+                    if (action.includes("fare") || action.includes("price") || action.includes("ticket")) {
+                      const fareRes = await railRadarService.getTrainFares(query);
+                      result = fareRes;
+                      if (fareRes.success) {
+                        safeSend(JSON.stringify({ type: "train_fare_info", fare: fareRes }));
+                      }
+                    } else if (action.includes("pnr") || /^\d{10}$/.test(query)) {
                       const pnrRes = await railRadarService.getPnrStatus(query);
                       result = pnrRes;
                       if (pnrRes.success) {

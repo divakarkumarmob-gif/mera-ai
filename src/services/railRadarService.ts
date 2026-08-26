@@ -74,6 +74,28 @@ export interface StationLiveBoardResult {
   message: string;
 }
 
+export interface TrainFareClass {
+  classCode: string;
+  className: string;
+  totalFare: number;
+  baseFare: number;
+  cateringCharge?: number;
+  dynamicFare?: number;
+  gst?: number;
+}
+
+export interface TrainFareResult {
+  success: boolean;
+  trainNumber: string;
+  trainName?: string;
+  fromStation?: string;
+  toStation?: string;
+  journeyDate?: string;
+  distanceKm?: number;
+  fares: TrainFareClass[];
+  message: string;
+}
+
 // Common Indian Railway Station Code Dictionary
 const STATION_CODE_MAP: Record<string, string> = {
   patna: "PNBE",
@@ -392,6 +414,143 @@ export class RailRadarService {
       trainsCount: 0,
       trains: [],
       message: `Boss, ${stationCode} station ka live board link: https://railradar.in/station-status/${stationCode}`,
+    };
+  }
+
+  /**
+   * 4. Train Ticket Price / Fare Breakdown by Class
+   */
+  public async getTrainFares(
+    trainQuery: string,
+    fromStation?: string,
+    toStation?: string,
+    journeyDate?: string
+  ): Promise<TrainFareResult> {
+    const trainNumber = this.extractTrainNumber(trainQuery);
+    if (!trainNumber) {
+      return {
+        success: false,
+        trainNumber: "",
+        fares: [],
+        message: "Train number specify karein (e.g. 12309, 12393).",
+      };
+    }
+
+    let src = fromStation ? this.resolveStationCode(fromStation) : undefined;
+    let dst = toStation ? this.resolveStationCode(toStation) : undefined;
+    let trainName: string | undefined = undefined;
+
+    // Auto-resolve source and destination from live route if not specified
+    if (!src || !dst) {
+      try {
+        const liveInfo = await this.getLiveTrainStatus(trainNumber);
+        if (liveInfo.success) {
+          trainName = liveInfo.trainName;
+          if (!src && liveInfo.sourceStation) src = this.resolveStationCode(liveInfo.sourceStation);
+          if (!dst && liveInfo.destStation) dst = this.resolveStationCode(liveInfo.destStation);
+        }
+      } catch {}
+    }
+
+    // Defaults if still not found
+    if (!src) src = "PNBE";
+    if (!dst) dst = "NDLS";
+
+    // Format date YYYY-MM-DD
+    const travelDate = journeyDate || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+    const CLASS_NAMES: Record<string, string> = {
+      "1A": "1st AC (1A)",
+      "2A": "2nd AC (2A)",
+      "3A": "3rd AC (3A)",
+      "3E": "3rd AC Economy (3E)",
+      SL: "Sleeper (SL)",
+      CC: "AC Chair Car (CC)",
+      EC: "Exec Chair Car (EC)",
+      "2S": "2nd Sitting (2S)",
+    };
+
+    const targetClasses = ["SL", "3E", "3A", "2A", "1A", "CC", "EC", "2S"];
+    const foundFares: TrainFareClass[] = [];
+    let distanceKm: number | undefined = undefined;
+
+    await Promise.allSettled(
+      targetClasses.map(async (cls) => {
+        try {
+          const url = `${this.baseUrl}/trains/${trainNumber}/fare?from=${src}&to=${dst}&date=${travelDate}&class=${cls}`;
+          const res = await fetch(url, {
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+              Accept: "application/json",
+            },
+            signal: AbortSignal.timeout(5000),
+          });
+
+          if (res.ok) {
+            const json = await res.json();
+            const d = json.data;
+            if (d && d.breakdown?.totalFare) {
+              if (!trainName && d.trainName) trainName = d.trainName;
+              if (!distanceKm && d.distance) distanceKm = d.distance;
+
+              foundFares.push({
+                classCode: cls,
+                className: CLASS_NAMES[cls] || cls,
+                totalFare: d.breakdown.totalFare,
+                baseFare: d.breakdown.baseFare || 0,
+                cateringCharge: d.breakdown.cateringCharge,
+                dynamicFare: d.breakdown.dynamicFare,
+                gst: d.breakdown.goodsServiceTax,
+              });
+            }
+          }
+        } catch {}
+      })
+    );
+
+    // Sort classes: SL -> 3E -> 3A -> 2A -> 1A -> CC -> EC -> 2S
+    const orderMap: Record<string, number> = { "2S": 1, SL: 2, "3E": 3, "3A": 4, CC: 5, "2A": 6, "1A": 7, EC: 8 };
+    foundFares.sort((a, b) => (orderMap[a.classCode] || 99) - (orderMap[b.classCode] || 99));
+
+    const finalTrainName = trainName || `Train #${trainNumber}`;
+
+    if (foundFares.length === 0) {
+      return {
+        success: true,
+        trainNumber,
+        trainName: finalTrainName,
+        fromStation: src,
+        toStation: dst,
+        journeyDate: travelDate,
+        fares: [],
+        message: `Boss, Train #${trainNumber} (${src} ➔ ${dst}) ka ticket fare check link: https://railradar.in/train-fare/${trainNumber}`,
+      };
+    }
+
+    let msg = `🎟️ **Ticket Price / Fares: ${finalTrainName} (#${trainNumber})**\n`;
+    msg += `🛤️ **Route:** ${src} ➔ ${dst} | 📅 **Date:** ${travelDate}\n`;
+    if (distanceKm) msg += `📏 **Distance:** ${distanceKm} KM\n\n`;
+    msg += `💰 **Class Fares (IRCTC Official):**\n`;
+
+    foundFares.forEach((f) => {
+      let extra = "";
+      if (f.cateringCharge && f.cateringCharge > 0) extra += ` (incl. ₹${f.cateringCharge} food)`;
+      if (f.dynamicFare && f.dynamicFare > 0) extra += ` (incl. Dynamic ₹${f.dynamicFare})`;
+      msg += `• **${f.className}:** ₹${f.totalFare}${extra}\n`;
+    });
+
+    msg += `\n🔗 **Book / Live Radar:** https://railradar.in/train-status/${trainNumber}`;
+
+    return {
+      success: true,
+      trainNumber,
+      trainName: finalTrainName,
+      fromStation: src,
+      toStation: dst,
+      journeyDate: travelDate,
+      distanceKm,
+      fares: foundFares,
+      message: msg,
     };
   }
 

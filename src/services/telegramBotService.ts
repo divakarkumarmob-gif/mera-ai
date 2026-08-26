@@ -1629,6 +1629,25 @@ INSTRUCTIONS FOR WHEN SENDER IS SOMEONE ELSE (NOT DK):
       }
     }
 
+    // 2.0H Handle RailRadar Train Ticket Price / Fare Enquiries ("/fare <number>" or "fare <number>" or "ticket price <number>")
+    const fareMatch = text.match(/^(?:\/fare|fare|ticket\s*price|kiraya|train\s*fare)\s+(\d{4,5}|\w+)(?:\s+(?:from\s+)?([a-zA-Z\s]{2,15}))?(?:\s+(?:to\s+)?([a-zA-Z\s]{2,15}))?/i) ||
+      text.match(/(\d{5})\s+(?:ka\s+)?(?:fare|ticket|kiraya|price)/i);
+
+    if (fareMatch) {
+      const trainQuery = fareMatch[1];
+      const fromStn = fareMatch[2]?.trim();
+      const toStn = fareMatch[3]?.trim();
+      try {
+        await this.sendMessage(chatId, `🎟️ *RailRadar Fare Engine:* Fetching IRCTC class-wise ticket prices for *#${trainQuery}*... 💰`);
+        const fareRes = await railRadarService.getTrainFares(trainQuery, fromStn, toStn);
+        await this.sendMessage(chatId, fareRes.message);
+        return;
+      } catch (e: any) {
+        await this.sendMessage(chatId, `❌ Ticket price enquiry failed: ${e?.message || e}`);
+        return;
+      }
+    }
+
     // 2.01 Handle Group Textual Role Setup: "User A @username" / "User B @username"
     const isGroupChat = msg.chat?.type === "group" || msg.chat?.type === "supergroup";
     if (isGroupChat) {
