@@ -3485,7 +3485,7 @@ HOW TO READ MESSAGES:
       let thisSessionRef: any;
 
       const newSession = await ai.live.connect({
-        model: "gemini-2.0-flash-exp",
+        model: "gemini-3.1-flash-live-preview",
         callbacks: {
           onopen: () => {
             console.log(`[Server] 🟢 Gemini Live session opened (session=${sessionId})`);
