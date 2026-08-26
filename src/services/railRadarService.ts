@@ -96,6 +96,49 @@ export interface TrainFareResult {
   message: string;
 }
 
+export interface CoachPositionResult {
+  success: boolean;
+  trainNumber: string;
+  trainName?: string;
+  rawPosition?: string;
+  totalCoaches?: number;
+  generalSummary?: string;
+  sleeperSummary?: string;
+  acSummary?: string;
+  coaches?: string[];
+  message: string;
+}
+
+export interface StoppageCheckResult {
+  success: boolean;
+  trainNumber: string;
+  trainName?: string;
+  targetStation: string;
+  stops: boolean;
+  stationName?: string;
+  stationCode?: string;
+  platform?: string | number;
+  scheduledArrival?: string;
+  scheduledDeparture?: string;
+  message: string;
+}
+
+export interface TrainsBetweenResult {
+  success: boolean;
+  fromStation: string;
+  toStation: string;
+  trainsCount: number;
+  trains: {
+    trainNumber: string;
+    trainName: string;
+    scheduledDeparture?: string;
+    expectedDeparture?: string;
+    delayMinutes?: number;
+    platform?: string | number;
+  }[];
+  message: string;
+}
+
 // Common Indian Railway Station Code Dictionary
 const STATION_CODE_MAP: Record<string, string> = {
   patna: "PNBE",
@@ -551,6 +594,247 @@ export class RailRadarService {
       distanceKm,
       fares: foundFares,
       message: msg,
+    };
+  }
+
+  /**
+   * 5. Coach Position & Composition (General aage hai ya peeche, Sleeper, AC sequence)
+   */
+  public async getCoachPosition(trainQuery: string): Promise<CoachPositionResult> {
+    const trainNumber = this.extractTrainNumber(trainQuery);
+    if (!trainNumber) {
+      return {
+        success: false,
+        trainNumber: "",
+        message: "Train number specify karein (e.g. 12393, 12309).",
+      };
+    }
+
+    try {
+      const url = `${this.baseUrl}/trains/${trainNumber}/live`;
+      const res = await fetch(url, {
+        headers: { "User-Agent": "Mozilla/5.0", Accept: "application/json" },
+        signal: AbortSignal.timeout(6000),
+      });
+
+      if (res.ok) {
+        const json = await res.json();
+        const d = json.data;
+        const trainName = d?.trainName || d?.train?.name || `Train #${trainNumber}`;
+        const rawPos: string | undefined = d?.route?.[0]?.coachPosition || d?.train?.coachPosition;
+
+        if (rawPos) {
+          const coaches = rawPos.split("-").map((c) => c.trim()).filter(Boolean);
+          const generalIndices: number[] = [];
+          const sleeperIndices: number[] = [];
+          const acIndices: number[] = [];
+          const pantryIndices: number[] = [];
+
+          coaches.forEach((c, idx) => {
+            const up = c.toUpperCase();
+            if (up.includes("GEN") || up.includes("GS") || up === "2S" || up.includes("UR")) {
+              generalIndices.push(idx + 1);
+            } else if (/^S\d+$/.test(up)) {
+              sleeperIndices.push(idx + 1);
+            } else if (/^[ABHM]\d+$/.test(up) || up.includes("BE") || up === "CC" || up === "EC") {
+              acIndices.push(idx + 1);
+            } else if (up === "PC" || up.includes("PANTRY")) {
+              pantryIndices.push(idx + 1);
+            }
+          });
+
+          // Compute friendly position explanation
+          let generalSummary = "General (Unreserved) coaches nahi mile";
+          if (generalIndices.length > 0) {
+            const frontGen = generalIndices.filter((pos) => pos <= 5);
+            const rearGen = generalIndices.filter((pos) => pos > 15);
+            if (frontGen.length > 0 && rearGen.length > 0) {
+              generalSummary = `Front (Engine ke theek peeche: ${frontGen.length} coaches) aur Rear (Guard dibbe ke aage: ${rearGen.length} coaches) dono side hain`;
+            } else if (frontGen.length > 0) {
+              generalSummary = `Sirf Engine side (Aage) me ${frontGen.length} General coaches hain`;
+            } else {
+              generalSummary = `Sirf Rear (Peeche) me ${generalIndices.length} General coaches hain`;
+            }
+          }
+
+          let sleeperSummary = sleeperIndices.length > 0 ? `S1 se S${sleeperIndices.length} (${sleeperIndices.length} Sleeper coaches middle me)` : "Sleeper coach nahi hai";
+          let acSummary = acIndices.length > 0 ? `${acIndices.length} AC coaches (${coaches.filter((c) => /^[ABHM]\d+$/.test(c) || c.includes("BE")).join(", ")})` : "AC coach nahi hai";
+
+          let msg = `🚃 **Coach Position & Layout: ${trainName} (#${trainNumber})**\n\n`;
+          msg += `🚆 **Engine (Front) ➔ Guard (Rear):**\n\`${rawPos}\`\n\n`;
+          msg += `📍 **Coach Breakdown:**\n`;
+          msg += `• 🟢 **General (Unreserved):** ${generalSummary}\n`;
+          if (sleeperIndices.length > 0) msg += `• 🟡 **Sleeper:** ${sleeperSummary}\n`;
+          if (acIndices.length > 0) msg += `• 🔵 **AC Coaches:** ${acSummary}\n`;
+          if (pantryIndices.length > 0) msg += `• 🍽️ **Pantry Car:** Position #${pantryIndices.join(", ")}\n`;
+          msg += `\n🔢 **Total Coaches:** ${coaches.length} dibbe`;
+
+          return {
+            success: true,
+            trainNumber,
+            trainName,
+            rawPosition: rawPos,
+            totalCoaches: coaches.length,
+            generalSummary,
+            sleeperSummary,
+            acSummary,
+            coaches,
+            message: msg,
+          };
+        }
+      }
+    } catch (e) {
+      console.warn("[RailRadar] Coach position error:", e);
+    }
+
+    return {
+      success: true,
+      trainNumber,
+      message: `Boss, Train #${trainNumber} ka coach layout link: https://railradar.in/train-status/${trainNumber}`,
+    };
+  }
+
+  /**
+   * 6. Train Stoppage Check (Kya ye train XYZ station jayegi/rukaegi?)
+   */
+  public async checkTrainStoppage(trainQuery: string, targetStation: string): Promise<StoppageCheckResult> {
+    const trainNumber = this.extractTrainNumber(trainQuery);
+    const targetCode = this.resolveStationCode(targetStation);
+
+    try {
+      const url = `${this.baseUrl}/trains/${trainNumber}/live`;
+      const res = await fetch(url, {
+        headers: { "User-Agent": "Mozilla/5.0", Accept: "application/json" },
+        signal: AbortSignal.timeout(6000),
+      });
+
+      if (res.ok) {
+        const json = await res.json();
+        const d = json.data;
+        const trainName = d?.trainName || d?.train?.name || `Train #${trainNumber}`;
+        const route = Array.isArray(d?.route) ? d.route : [];
+
+        const match = route.find(
+          (r: any) =>
+            r.stationCode === targetCode ||
+            r.stationName?.toLowerCase().includes(targetStation.toLowerCase())
+        );
+
+        if (match) {
+          let timeText = "";
+          if (match.scheduledArrival || match.scheduledDeparture) {
+            try {
+              const arr = match.scheduledArrival ? new Date(match.scheduledArrival).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "";
+              const dep = match.scheduledDeparture ? new Date(match.scheduledDeparture).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "";
+              timeText = ` (Arrival: ${arr || "--"}, Departure: ${dep || "--"})`;
+            } catch {}
+          }
+
+          const haltStatus = match.isHalt ? "✅ Scheduled Halt hai" : "⚠️ Station se pass hoti hai lekin halt nahi hai";
+          let msg = `🚆 **${trainName} (#${trainNumber})**\n`;
+          msg += `📍 **Station:** ${match.stationName} (${match.stationCode})\n`;
+          msg += `🏢 **Stoppage:** ${haltStatus}${timeText}\n`;
+          if (match.platform) msg += `🚪 **Platform:** Platform #${match.platform}\n`;
+
+          return {
+            success: true,
+            trainNumber,
+            trainName,
+            targetStation,
+            stops: !!match.isHalt,
+            stationName: match.stationName,
+            stationCode: match.stationCode,
+            platform: match.platform,
+            scheduledArrival: match.scheduledArrival,
+            scheduledDeparture: match.scheduledDeparture,
+            message: msg,
+          };
+        } else {
+          return {
+            success: true,
+            trainNumber,
+            trainName,
+            targetStation,
+            stops: false,
+            message: `❌ Boss, Train #${trainNumber} (${trainName}) ke route me **${targetStation}** station nahi aata. Ye train is station par nahi jayegi.`,
+          };
+        }
+      }
+    } catch (e) {
+      console.warn("[RailRadar] Stoppage check error:", e);
+    }
+
+    return {
+      success: true,
+      trainNumber,
+      targetStation,
+      stops: false,
+      message: `Boss, Train #${trainNumber} ka route & stoppage check karein: https://railradar.in/train-status/${trainNumber}`,
+    };
+  }
+
+  /**
+   * 7. Nearest Station Trains / Journey Planner (e.g. from GAYA to PNBE or CNB to NDLS)
+   */
+  public async searchTrainsBetweenStations(fromStation: string, toStation: string): Promise<TrainsBetweenResult> {
+    const fromCode = this.resolveStationCode(fromStation);
+    const toCode = this.resolveStationCode(toStation);
+
+    try {
+      const url = `${this.baseUrl}/stations/${fromCode}/live`;
+      const res = await fetch(url, {
+        headers: { "User-Agent": "Mozilla/5.0", Accept: "application/json" },
+        signal: AbortSignal.timeout(6000),
+      });
+
+      if (res.ok) {
+        const json = await res.json();
+        const allTrains = json.data?.trains || [];
+        const matching = allTrains.filter(
+          (t: any) =>
+            t.train?.destination === toCode ||
+            t.train?.destination?.includes(toCode) ||
+            t.train?.source === toCode
+        );
+
+        const targetList = matching.length > 0 ? matching : allTrains.slice(0, 6);
+
+        const formattedTrains = targetList.slice(0, 6).map((m: any) => ({
+          trainNumber: m.train?.number || m.number,
+          trainName: m.train?.name || m.name,
+          scheduledDeparture: m.stop?.departure || m.sta,
+          expectedDeparture: m.live?.expectedDepartureTime || m.eta,
+          delayMinutes: Number(m.live?.delayMinutes || m.delay || 0),
+          platform: m.stop?.platform || m.platform,
+        }));
+
+        let msg = `🚆 **Available Trains from ${fromCode} ➔ ${toCode}:**\n\n`;
+        formattedTrains.forEach((t: any) => {
+          const delayTxt = t.delayMinutes && t.delayMinutes > 0 ? `🔴 (${t.delayMinutes}m Late)` : `🟢 (On Time)`;
+          msg += `• **#${t.trainNumber}** ${t.trainName}\n  ⏱️ Dep Time: *${t.scheduledDeparture || "Soon"}* ${delayTxt}${t.platform ? ` | 🏢 Plat #${t.platform}` : ""}\n`;
+        });
+        msg += `\n🔗 **Live Station Board:** https://railradar.in/station-status/${fromCode}`;
+
+        return {
+          success: true,
+          fromStation: fromCode,
+          toStation: toCode,
+          trainsCount: formattedTrains.length,
+          trains: formattedTrains,
+          message: msg,
+        };
+      }
+    } catch (e) {
+      console.warn("[RailRadar] Trains between stations error:", e);
+    }
+
+    return {
+      success: true,
+      fromStation: fromCode,
+      toStation: toCode,
+      trainsCount: 0,
+      trains: [],
+      message: `Boss, ${fromCode} se ${toCode} ki trains check karein: https://railradar.in/station-status/${fromCode}`,
     };
   }
 

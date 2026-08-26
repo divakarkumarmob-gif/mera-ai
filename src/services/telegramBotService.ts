@@ -1648,6 +1648,60 @@ INSTRUCTIONS FOR WHEN SENDER IS SOMEONE ELSE (NOT DK):
       }
     }
 
+    // 2.0I Handle Coach Position & Composition ("/coach <number>" or "general coach <number>")
+    const coachMatch = text.match(/^(?:\/coach|coach|coach\s*position|general\s*coach|bogey)\s+(\d{4,5}|\w+)/i) ||
+      text.match(/(\d{5})\s+(?:ka\s+)?(?:coach|general|sleeper|dabba|dibba)/i);
+
+    if (coachMatch) {
+      const trainQuery = coachMatch[1];
+      try {
+        await this.sendMessage(chatId, `🚃 *RailRadar Coach Layout:* Fetching coach position & layout for *#${trainQuery}*... 🔍`);
+        const coachRes = await railRadarService.getCoachPosition(trainQuery);
+        await this.sendMessage(chatId, coachRes.message);
+        return;
+      } catch (e: any) {
+        await this.sendMessage(chatId, `❌ Coach position check failed: ${e?.message || e}`);
+        return;
+      }
+    }
+
+    // 2.0J Handle Stoppage Check ("kya train <number> <station> jayegi" or "/stops <number> <station>")
+    const stopMatch = text.match(/^(?:\/stops|\/stoppage|stops|halt)\s+(\d{4,5})\s+([a-zA-Z\s]{2,20})/i) ||
+      text.match(/(\d{5})\s+(?:train\s+)?(?:kya\s+)?([a-zA-Z\s]{2,15})\s+(?:jayegi|rukegi|stops)/i);
+
+    if (stopMatch) {
+      const trainQuery = stopMatch[1];
+      const targetStn = stopMatch[2].trim();
+      try {
+        await this.sendMessage(chatId, `📍 *RailRadar Stoppage Check:* Checking if *#${trainQuery}* stops at *${targetStn}*... 🔍`);
+        const stopRes = await railRadarService.checkTrainStoppage(trainQuery, targetStn);
+        await this.sendMessage(chatId, stopRes.message);
+        return;
+      } catch (e: any) {
+        await this.sendMessage(chatId, `❌ Stoppage check failed: ${e?.message || e}`);
+        return;
+      }
+    }
+
+    // 2.0K Handle Search Trains Between Stations ("/between <from> <to>" or "train from <from> to <to>")
+    const betweenMatch = text.match(/^(?:\/between|\/search_trains|between)\s+([a-zA-Z\s]{2,15})\s+(?:to\s+)?([a-zA-Z\s]{2,15})/i) ||
+      text.match(/train\s+(?:from\s+)?([a-zA-Z\s]{2,15})\s+to\s+([a-zA-Z\s]{2,15})/i) ||
+      text.match(/([a-zA-Z\s]{2,15})\s+se\s+([a-zA-Z\s]{2,15})\s+(?:ki\s+)?train/i);
+
+    if (betweenMatch) {
+      const fromStn = betweenMatch[1].trim();
+      const toStn = betweenMatch[2].trim();
+      try {
+        await this.sendMessage(chatId, `🚆 *RailRadar Journey Search:* Finding trains from *${fromStn}* ➔ *${toStn}*... 🔍`);
+        const betweenRes = await railRadarService.searchTrainsBetweenStations(fromStn, toStn);
+        await this.sendMessage(chatId, betweenRes.message);
+        return;
+      } catch (e: any) {
+        await this.sendMessage(chatId, `❌ Train search failed: ${e?.message || e}`);
+        return;
+      }
+    }
+
     // 2.01 Handle Group Textual Role Setup: "User A @username" / "User B @username"
     const isGroupChat = msg.chat?.type === "group" || msg.chat?.type === "supergroup";
     if (isGroupChat) {

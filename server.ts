@@ -730,6 +730,34 @@ async function startServer() {
     }
   });
 
+  app.get("/api/railradar/train/:number/coach", async (req, res) => {
+    try {
+      const data = await railRadarService.getCoachPosition(req.params.number);
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || "coach_position_failed" });
+    }
+  });
+
+  app.get("/api/railradar/train/:number/stops/:station", async (req, res) => {
+    try {
+      const data = await railRadarService.checkTrainStoppage(req.params.number, req.params.station);
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || "stoppage_check_failed" });
+    }
+  });
+
+  app.get("/api/railradar/between", async (req, res) => {
+    try {
+      const { from, to } = req.query as { from?: string; to?: string };
+      const data = await railRadarService.searchTrainsBetweenStations(String(from || "GAYA"), String(to || "PNBE"));
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || "between_stations_failed" });
+    }
+  });
+
   app.get("/api/background-tasks", (_req, res) => {
     res.json({
       ok: true,
@@ -5595,13 +5623,22 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                   } catch (e: any) {
                     result = { success: false, message: `Coding Agent command fail hui: ${e?.message || e}` };
                   }
-                } else if (call.name === "execute_service" || call.name === "get_live_train_status" || call.name === "get_pnr_status" || call.name === "get_live_station_board" || call.name === "get_train_fares") {
+                } else if (call.name === "execute_service" || call.name === "get_live_train_status" || call.name === "get_pnr_status" || call.name === "get_live_station_board" || call.name === "get_train_fares" || call.name === "get_coach_position") {
                   const action = String(call.args?.action || call.name);
                   const query = String(call.args?.query || call.args?.trainQuery || call.args?.pnr || call.args?.station || "");
+                  const targetStation = String(call.args?.targetStation || call.args?.station || "");
+                  const fromStation = String(call.args?.fromStation || call.args?.from || "");
+                  const toStation = String(call.args?.toStation || call.args?.to || "");
                   
                   try {
-                    if (action.includes("fare") || action.includes("price") || action.includes("ticket")) {
-                      const fareRes = await railRadarService.getTrainFares(query);
+                    if (action.includes("coach") || action.includes("layout") || action.includes("general") || action.includes("composition")) {
+                      result = await railRadarService.getCoachPosition(query);
+                    } else if (action.includes("stop") || action.includes("halt") || action.includes("route_check")) {
+                      result = await railRadarService.checkTrainStoppage(query, targetStation || "PNBE");
+                    } else if (action.includes("between") || action.includes("search_trains") || action.includes("journey")) {
+                      result = await railRadarService.searchTrainsBetweenStations(fromStation || query, toStation || "PNBE");
+                    } else if (action.includes("fare") || action.includes("price") || action.includes("ticket")) {
+                      const fareRes = await railRadarService.getTrainFares(query, fromStation, toStation);
                       result = fareRes;
                       if (fareRes.success) {
                         safeSend(JSON.stringify({ type: "train_fare_info", fare: fareRes }));
