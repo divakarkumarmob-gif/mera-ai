@@ -5,6 +5,7 @@ import AgentFace from './AgentFace';
 import ChatHistoryModal from './ChatHistoryModal';
 import WhatsAppPairModal from './WhatsAppPairModal';
 import CodeAgentPage from './CodeAgentPage';
+import WebCrawlerStudioModal from './WebCrawlerStudioModal';
 import { getWsUrl } from '@/utils/api';
 import { wakeWordManager } from '@/utils/wakeWord';
 import { getAppToken, clearAppSession } from '@/utils/appSecurityClient';
@@ -602,6 +603,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const [captionText, setCaptionText] = useState('');
     const [showChatHistory, setShowChatHistory] = useState(false);
     const [showCodeAgent, setShowCodeAgent] = useState(false);
+    const [showWebCrawler, setShowWebCrawler] = useState(false);
     const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const captionBoxRef = useRef<HTMLDivElement>(null);
@@ -1444,6 +1446,14 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                             <span>Link WhatsApp</span>
                         </button>
                         <button
+                            onClick={() => setShowWebCrawler(true)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/50 text-cyan-300 text-xs font-semibold shadow-[0_0_15px_rgba(6,182,212,0.25)] transition-all cursor-pointer hover:scale-105 active:scale-95"
+                            title="Web Crawler & AI Research Studio"
+                        >
+                            <span>🕷️</span>
+                            <span>Web Crawler</span>
+                        </button>
+                        <button
                             onClick={toggleScreenShare}
                             className={`px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 transition-all ${
                                 isScreenSharing
@@ -2012,6 +2022,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
 
             {showChatHistory && <ChatHistoryModal onClose={() => setShowChatHistory(false)} />}
             {showCodeAgent && <CodeAgentPage onClose={() => setShowCodeAgent(false)} />}
+            {showWebCrawler && <WebCrawlerStudioModal onClose={() => setShowWebCrawler(false)} />}
             <WhatsAppPairModal isOpen={showWhatsAppModal} onClose={() => setShowWhatsAppModal(false)} />
 
             {/* Deep Research Report Modal */}

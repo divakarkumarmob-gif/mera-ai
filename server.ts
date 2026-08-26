@@ -29,6 +29,7 @@ import { instagramBotService } from "./src/services/instagramBotService";
 import { cyberSecurityService } from "./src/services/cyberSecurityService";
 import { backgroundTasksService } from "./src/services/backgroundTasksService";
 import { appSecurityService } from "./src/services/appSecurityService";
+import { webCrawlerService } from "./src/services/webCrawlerService";
 
 const PORT = Number(process.env.PORT) || 3000;
 const isProduction = process.env.NODE_ENV === "production";
@@ -672,6 +673,68 @@ async function startServer() {
       unnotifiedTasks: backgroundTasksService.getUnnotifiedCompletedTasks(),
       recentTasks: backgroundTasksService.getAllRecentTasks(),
     });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Web Crawler & AI Intelligence Endpoints (Crawl, Deep Crawl, Query, Summarize, JSON)
+  // ---------------------------------------------------------------------------
+  app.post("/api/crawler/crawl", async (req, res) => {
+    try {
+      const { url, respectRobots } = req.body || {};
+      if (!url) return res.status(400).json({ error: "URL is required" });
+      const result = await webCrawlerService.crawlUrl(String(url), respectRobots !== false);
+      res.json({ ok: true, result });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "failed_to_crawl" });
+    }
+  });
+
+  app.post("/api/crawler/deep-crawl", async (req, res) => {
+    try {
+      const { url, maxPages, maxDepth, respectRobots } = req.body || {};
+      if (!url) return res.status(400).json({ error: "Root URL is required" });
+      const result = await webCrawlerService.deepCrawl(String(url), {
+        maxPages: maxPages ? Number(maxPages) : 5,
+        maxDepth: maxDepth ? Number(maxDepth) : 2,
+        respectRobotsTxt: respectRobots !== false,
+      });
+      res.json({ ok: true, result });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "failed_to_deep_crawl" });
+    }
+  });
+
+  app.post("/api/crawler/query", async (req, res) => {
+    try {
+      const { urlOrMarkdown, query } = req.body || {};
+      if (!urlOrMarkdown || !query) return res.status(400).json({ error: "urlOrMarkdown and query are required" });
+      const response = await webCrawlerService.queryCrawledContent(String(urlOrMarkdown), String(query));
+      res.json({ ok: true, response });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "failed_to_query_crawler" });
+    }
+  });
+
+  app.post("/api/crawler/summarize", async (req, res) => {
+    try {
+      const { urlOrMarkdown } = req.body || {};
+      if (!urlOrMarkdown) return res.status(400).json({ error: "urlOrMarkdown is required" });
+      const summary = await webCrawlerService.summarizeWebpage(String(urlOrMarkdown));
+      res.json({ ok: true, summary });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "failed_to_summarize" });
+    }
+  });
+
+  app.post("/api/crawler/extract-json", async (req, res) => {
+    try {
+      const { urlOrMarkdown, schema } = req.body || {};
+      if (!urlOrMarkdown || !schema) return res.status(400).json({ error: "urlOrMarkdown and schema are required" });
+      const extracted = await webCrawlerService.extractStructuredJSON(String(urlOrMarkdown), String(schema));
+      res.json({ ok: true, data: extracted });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "failed_to_extract_json" });
+    }
   });
 
   const distPath = path.resolve("dist");
@@ -2877,6 +2940,31 @@ HOW TO READ MESSAGES:
           },
         },
         {
+          name: "crawl_and_extract_webpage",
+          description: "Crawl and inspect any target website URL, convert the webpage into clean LLM-friendly Markdown, extract data, and answer questions or summarize it. Call when DK says 'Is website ko crawl karo', 'Is link ka data dekho', 'Is page ko padh kar batao kya likha hai', 'URL crawl karo'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              url: { type: "STRING", description: "The full website URL to crawl and read (e.g. 'https://example.com' or 'example.com')" },
+              query: { type: "STRING", description: "Optional question or extraction goal (e.g. 'What are the pricing tiers?', 'Summarize key features', 'Extract contact email')" },
+            },
+            required: ["url"],
+          },
+        },
+        {
+          name: "deep_crawl_website",
+          description: "Perform a multi-page deep crawl across an entire domain or website hierarchy, extracting combined markdown intelligence. Call when DK says 'Puri website deep crawl karo', 'Is domain ke sare pages crawl karke summary do'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              url: { type: "STRING", description: "The root website URL to deep crawl" },
+              maxPages: { type: "NUMBER", description: "Maximum pages to crawl (default 5, max 15)" },
+              query: { type: "STRING", description: "Optional research query to answer from the crawled site" },
+            },
+            required: ["url"],
+          },
+        },
+        {
           name: "get_whatsapp_photo_or_doc_info",
           description: "Analyze and explain what is inside the latest Photo, Image, or Document (PDF) received on WhatsApp (visual scene, people, objects, OCR text, key numbers). Call when DK says 'Photo me kya hai?', 'PDF me kya likha hai?', 'WhatsApp pe jo photo bheja hai dekho'.",
           parameters: {
@@ -4723,6 +4811,62 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                     };
                   } catch (e: any) {
                     result = { success: false, message: `Cleanup task start karne me error: ${e?.message || e}` };
+                  }
+                } else if (call.name === "crawl_and_extract_webpage") {
+                  const { url, query } = call.args || {};
+                  try {
+                    if (!url) {
+                      result = { success: false, message: "URL batana zaroori hai boss." };
+                    } else {
+                      const crawlRes = await webCrawlerService.crawlUrl(String(url));
+                      if (crawlRes.error) {
+                        result = { success: false, message: `Website crawl nahi ho payi: ${crawlRes.error}` };
+                      } else {
+                        let aiAnswer = "";
+                        if (query && String(query).trim()) {
+                          const queryRes = await webCrawlerService.queryCrawledContent(crawlRes.markdown, String(query));
+                          aiAnswer = queryRes.answer;
+                        } else {
+                          const summaryRes = await webCrawlerService.summarizeWebpage(crawlRes.markdown);
+                          aiAnswer = summaryRes.executiveSummary;
+                        }
+                        result = {
+                          success: true,
+                          title: crawlRes.metadata.title,
+                          url: crawlRes.finalUrl,
+                          tokens: crawlRes.estimatedTokens,
+                          answer: aiAnswer,
+                          message: `Boss, maine ${crawlRes.finalUrl} ko crawl kar liya hai (${crawlRes.metadata.title}):\n\n${aiAnswer}`,
+                        };
+                      }
+                    }
+                  } catch (e: any) {
+                    result = { success: false, message: `Crawling fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "deep_crawl_website") {
+                  const { url, maxPages, query } = call.args || {};
+                  try {
+                    if (!url) {
+                      result = { success: false, message: "Root URL batana zaroori hai boss." };
+                    } else {
+                      const deepRes = await webCrawlerService.deepCrawl(String(url), {
+                        maxPages: maxPages ? Number(maxPages) : 4,
+                      });
+                      const promptGoal = query
+                        ? String(query)
+                        : "Synthesize a multi-page deep intelligence report from this whole website.";
+                      const queryRes = await webCrawlerService.queryCrawledContent(deepRes.combinedMarkdown, promptGoal);
+                      result = {
+                        success: true,
+                        domain: deepRes.domain,
+                        pagesCrawled: deepRes.pagesCrawled,
+                        totalTokens: deepRes.totalTokens,
+                        analysis: queryRes.answer,
+                        message: `Boss, maine ${deepRes.domain} ke ${deepRes.pagesCrawled} pages deep crawl kar liye hain (${deepRes.totalTokens} tokens):\n\n${queryRes.answer}`,
+                      };
+                    }
+                  } catch (e: any) {
+                    result = { success: false, message: `Deep crawling fail hui: ${e?.message || e}` };
                   }
                 } else if (call.name === "get_whatsapp_photo_or_doc_info") {
                   const { query } = call.args || {};
