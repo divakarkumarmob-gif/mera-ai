@@ -1125,6 +1125,172 @@ export class RailRadarService {
   }
 
   /**
+   * 9. Train Timetable & Full Schedule with Stoppage Durations & Route Track
+   */
+  public async getTrainSchedule(trainQuery: string) {
+    const trainNumber = this.extractTrainNumber(trainQuery);
+    if (!trainNumber) {
+      return { success: false, trainNumber: "", halts: [], message: "Train number specify karein." };
+    }
+
+    try {
+      const url = `${this.baseUrl}/trains/${trainNumber}/live`;
+      const res = await fetch(url, {
+        headers: { "User-Agent": "Mozilla/5.0", Accept: "application/json" },
+        signal: AbortSignal.timeout(6000),
+      });
+
+      if (res.ok) {
+        const json = await res.json();
+        const d = json.data;
+        const trainName = d?.trainName || d?.train?.name || `Train #${trainNumber}`;
+        const route = Array.isArray(d?.route) ? d.route : [];
+        const halts = route.filter((r: any) => r.isHalt);
+
+        let msg = `📅 **Full Schedule & Timetable: ${trainName} (#${trainNumber})**\n`;
+        msg += `🛤️ **Total Halts:** ${halts.length} stations | 🗺️ **Distance:** ${route[route.length - 1]?.distance || 0} KM\n\n`;
+
+        halts.slice(0, 10).forEach((h: any, idx: number) => {
+          const arr = h.scheduledArrival ? new Date(h.scheduledArrival).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "Origin";
+          const dep = h.scheduledDeparture ? new Date(h.scheduledDeparture).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "Dest";
+          msg += `${idx + 1}. **${h.stationName} (${h.stationCode})**\n   ⏱️ Arr: ${arr} | Dep: ${dep}${h.platform ? ` | 🏢 Plat #${h.platform}` : ""}\n`;
+        });
+
+        if (halts.length > 10) {
+          msg += `_...aur ${halts.length - 10} stations bache hain._\n`;
+        }
+
+        msg += `\n🔗 **Complete Interactive Route Map:** https://railradar.in/train-status/${trainNumber}`;
+
+        return {
+          success: true,
+          trainNumber,
+          trainName,
+          totalHalts: halts.length,
+          totalDistanceKm: route[route.length - 1]?.distance || 0,
+          halts: halts.map((h: any) => ({
+            stationName: h.stationName,
+            stationCode: h.stationCode,
+            scheduledArrival: h.scheduledArrival,
+            scheduledDeparture: h.scheduledDeparture,
+            platform: h.platform,
+            distance: h.distance,
+          })),
+          message: msg,
+        };
+      }
+    } catch (e) {
+      console.warn("[RailRadar] Schedule error:", e);
+    }
+
+    return {
+      success: true,
+      trainNumber,
+      message: `Boss, Train #${trainNumber} ka full schedule link: https://railradar.in/train-status/${trainNumber}`,
+    };
+  }
+
+  /**
+   * 10. IRCTC Ticket Cancellation & Refund Calculator
+   */
+  public calculateCancellationRefund(
+    ticketClass: string = "3A",
+    status: string = "CNF",
+    hoursBeforeDeparture: number = 48
+  ) {
+    const cls = ticketClass.toUpperCase();
+    let cancellationCharge = 240; // Default 1A / Exec
+
+    if (cls === "1A" || cls === "EC") {
+      cancellationCharge = 240;
+    } else if (cls === "2A" || cls === "FC") {
+      cancellationCharge = 200;
+    } else if (cls === "3A" || cls === "3E" || cls === "CC") {
+      cancellationCharge = 180;
+    } else if (cls === "SL") {
+      cancellationCharge = 120;
+    } else {
+      cancellationCharge = 60; // 2S / Second Sitting
+    }
+
+    let refundSummary = "";
+    if (status.toUpperCase().includes("WL") || status.toUpperCase().includes("RAC")) {
+      cancellationCharge = 60; // Clerkage charge only for WL/RAC
+      refundSummary = `RAC / Waiting List ticket cancel karne par sirf flat ₹60 clerkage charge katega aur baaki 100% refund milega!`;
+    } else if (hoursBeforeDeparture > 48) {
+      refundSummary = `Departure se 48+ ghante pehle cancel karne par flat ₹${cancellationCharge}/passenger flat deduction hoga.`;
+    } else if (hoursBeforeDeparture >= 12 && hoursBeforeDeparture <= 48) {
+      refundSummary = `Departure se 12-48 ghante ke beech cancel karne par 25% fare deduction (Min ₹${cancellationCharge}) hoga.`;
+    } else if (hoursBeforeDeparture >= 4 && hoursBeforeDeparture < 12) {
+      refundSummary = `Departure se 4-12 ghante ke beech (chart prep se pehle) 50% fare deduction hoga.`;
+    } else {
+      refundSummary = `Chart prepare hone ke baad / 4 ghante se kam samay me cancellation par 0% refund (TDR file karna padega).`;
+    }
+
+    let msg = `💰 **IRCTC Cancellation & Refund Calculator (${cls})**\n`;
+    msg += `📋 **Ticket Status:** ${status} | ⏱️ **Time Window:** ${hoursBeforeDeparture}h before departure\n`;
+    msg += `💸 **Cancellation Deductions:** Flat ₹${cancellationCharge} (Class Rule)\n`;
+    msg += `ℹ️ **Rule:** ${refundSummary}\n\n`;
+    msg += `🔗 **File TDR / Cancel on IRCTC:** https://www.irctc.co.in/nget/train-search`;
+
+    return {
+      success: true,
+      ticketClass: cls,
+      status,
+      hoursBeforeDeparture,
+      cancellationCharge,
+      ruleExplanation: refundSummary,
+      message: msg,
+    };
+  }
+
+  /**
+   * 11. Suburban Local Trains Intelligence (Mumbai, Kolkata, Chennai, Delhi)
+   */
+  public getSuburbanLocalTrains(cityQuery: string, lineQuery?: string) {
+    const city = cityQuery.toLowerCase().trim();
+    let networkName = "Local Suburban Railway";
+    let lines: string[] = [];
+    let keyStations: string[] = [];
+    let frequency = "Every 3 to 10 minutes";
+
+    if (city.includes("mumbai") || city.includes("bombay")) {
+      networkName = "Mumbai Suburban Local (Lifeline of Mumbai)";
+      lines = ["Western Line (Churchgate ➔ Dahanu)", "Central Line (CSMT ➔ Kalyan / Karjat / Kasara)", "Harbour Line (CSMT ➔ Panvel)", "Trans-Harbour Line (Thane ➔ Vashi)"];
+      keyStations = ["CSMT", "Churchgate", "Dadar", "Bandra", "Andheri", "Borivali", "Thane", "Kalyan", "Kurla"];
+    } else if (city.includes("kolkata") || city.includes("howrah") || city.includes("sealdah")) {
+      networkName = "Kolkata Suburban Railway (EMU Network)";
+      lines = ["Sealdah South / Main (Sealdah ➔ Ranaghat / Diamond Harbour)", "Howrah Division (Howrah ➔ Bardhaman / Kharagpur / Bandel)", "Circular Railway"];
+      keyStations = ["Howrah (HWH)", "Sealdah (SDAH)", "Dum Dum", "Bandel", "Kharagpur", "Naihati", "Ranaghat"];
+    } else if (city.includes("chennai") || city.includes("madras")) {
+      networkName = "Chennai Suburban Railway";
+      lines = ["South Line (Chennai Beach ➔ Chengalpattu / Tambaram)", "West Line (Chennai Central ➔ Arakkonam / Tiruvallur)", "MRTS Line (Chennai Beach ➔ Velachery)"];
+      keyStations = ["Chennai Central (MAS)", "Chennai Beach (MSB)", "Tambaram (TBM)", "Velachery", "Guindy"];
+    } else {
+      networkName = "Delhi-NCR Suburban / Ring Railway & RRTS";
+      lines = ["Delhi Ring Railway", "Delhi ➔ Ghaziabad ➔ Meerut (Namo Bharat RRTS)", "Delhi ➔ Palwal ➔ Faridabad EMU", "Delhi ➔ Panipat EMU"];
+      keyStations = ["New Delhi (NDLS)", "Old Delhi (DLI)", "Hazrat Nizamuddin (NZM)", "Anand Vihar (ANVT)", "Ghaziabad (GZB)"];
+    }
+
+    let msg = `🚊 **${networkName}**\n\n`;
+    msg += `🛤️ **Major Suburban Lines:**\n`;
+    lines.forEach((l) => (msg += `• ${l}\n`));
+    msg += `\n🚉 **Key Junction Hubs:** ${keyStations.join(", ")}\n`;
+    msg += `⏱️ **Train Frequency:** ${frequency}\n`;
+    msg += `🎟️ **UTS App Ticket Booking:** https://www.utsonmobile.indianrail.gov.in`;
+
+    return {
+      success: true,
+      city,
+      networkName,
+      lines,
+      keyStations,
+      frequency,
+      message: msg,
+    };
+  }
+
+  /**
    * Conversational Hinglish Formatter for Live Train Voice & Telegram Cards
    */
   private formatLiveStatusMessage(info: {
