@@ -816,7 +816,7 @@ Provide a detailed, precise location guide including:
           model,
           contents: text,
         });
-        const vector = resp.embedding?.values;
+        const vector = (resp as any).embeddings?.[0]?.values || (resp as any).embedding?.values;
         if (vector && vector.length > 0) {
           return vector;
         }

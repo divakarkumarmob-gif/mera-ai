@@ -289,6 +289,31 @@ async function startServer() {
     res.json(result);
   });
 
+  // ── YouTube Intelligence & "Ask Gemini" Endpoints ────────────────────────
+  app.post("/api/youtube/analyze", async (req, res) => {
+    const { url } = req.body || {};
+    if (!url) return res.status(400).json({ success: false, error: "YouTube URL is required." });
+    try {
+      const { youtubeService } = await import("./src/services/youtubeService");
+      const analysis = await youtubeService.analyzeVideo(String(url));
+      res.json({ success: true, analysis });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || e });
+    }
+  });
+
+  app.post("/api/youtube/ask", async (req, res) => {
+    const { url, question } = req.body || {};
+    if (!url || !question) return res.status(400).json({ success: false, error: "URL and question required." });
+    try {
+      const { youtubeService } = await import("./src/services/youtubeService");
+      const qRes = await youtubeService.queryVideoTimestamp(String(url), String(question));
+      res.json({ success: true, ...qRes });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || e });
+    }
+  });
+
   // ── Boss Voice Biometrics & Recognition Endpoints ─────────────────────────
   app.get("/api/voice-biometrics/status", async (_req, res) => {
     try {
@@ -2991,6 +3016,29 @@ HOW TO READ MESSAGES:
           },
         },
         {
+          name: "analyze_youtube_video",
+          description: "Analyze, extract timestamps, and summarize any YouTube video URL or ID. Explains the entire narrative, lessons, and chapter timeline. Call when DK says 'Is YouTube video ki summary batao', 'Video me kya bataya gaya hai?', 'YouTube video analyze karo'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              url: { type: "STRING", description: "YouTube video URL or Video ID" },
+            },
+            required: ["url"],
+          },
+        },
+        {
+          name: "ask_youtube_video_timestamp",
+          description: "Ask Gemini for YouTube: Find exact timestamps and answers to specific questions about what happens, what code is written, or what was said at what minute in a YouTube video. Call when DK says 'Video me authentication kitne minute par samjhaya hai?', '05:30 par kya bola?', 'Pricing ke baare me kab baat hui?'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              url: { type: "STRING", description: "YouTube video URL or Video ID" },
+              question: { type: "STRING", description: "Specific question about the video contents" },
+            },
+            required: ["url", "question"],
+          },
+        },
+        {
           name: "get_whatsapp_photo_or_doc_info",
           description: "Analyze and explain what is inside the latest Photo, Image, or Document (PDF) received on WhatsApp (visual scene, people, objects, OCR text, key numbers). Call when DK says 'Photo me kya hai?', 'PDF me kya likha hai?', 'WhatsApp pe jo photo bheja hai dekho'.",
           parameters: {
@@ -4224,10 +4272,17 @@ HOW TO READ MESSAGES:
                   } catch (e: any) {
                     result = { success: false, message: `Reddit search fail hui: ${e?.message || e}` };
                   }
-                } else if (call.name === "search_music") {
+                } else if (call.name === "search_music" || call.name === "play_music" || call.name === "play_youtube_music") {
                   const { songOrArtist } = call.args || {};
                   try {
-                    result = await publicApisService.searchMusic(String(songOrArtist || ""));
+                    const ytMusicRes = await publicApisService.searchYouTubeMusic(String(songOrArtist || ""));
+                    result = ytMusicRes;
+                    if (ytMusicRes.success) {
+                      clientWs.send(JSON.stringify({
+                        type: 'play_youtube_music',
+                        track: ytMusicRes,
+                      }));
+                    }
                   } catch (e: any) {
                     result = { success: false, message: `Music search fail hui: ${e?.message || e}` };
                   }
@@ -4934,6 +4989,44 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                     }
                   } catch (e: any) {
                     result = { success: false, message: `Telegram summary fetch fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "analyze_youtube_video") {
+                  const { url } = call.args || {};
+                  try {
+                    const { youtubeService } = await import("./src/services/youtubeService");
+                    const analysis = await youtubeService.analyzeVideo(String(url || ""));
+                    let msg = `Boss, maine YouTube video "${analysis.title}" analyze kar li hai:\n\n${analysis.summary}`;
+                    if (analysis.chapters && analysis.chapters.length > 0) {
+                      msg += `\n\nKey Chapters:\n` + analysis.chapters.slice(0, 5).map(c => `• ${c.startFormatted} - ${c.title}`).join("\n");
+                    }
+                    result = {
+                      success: true,
+                      title: analysis.title,
+                      channel: analysis.channelName,
+                      summary: analysis.summary,
+                      keyTakeaways: analysis.keyTakeaways,
+                      chapters: analysis.chapters,
+                      message: msg,
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `YouTube video analysis fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "ask_youtube_video_timestamp") {
+                  const { url, question } = call.args || {};
+                  try {
+                    const { youtubeService } = await import("./src/services/youtubeService");
+                    const qRes = await youtubeService.queryVideoTimestamp(String(url || ""), String(question || ""));
+                    result = {
+                      success: qRes.contextFound,
+                      exactTimestamp: qRes.exactTimestamp,
+                      timestampUrl: qRes.timestampUrl,
+                      answer: qRes.answer,
+                      message: qRes.exactTimestamp
+                        ? `Boss, ${qRes.exactTimestamp} timestamp par:\n${qRes.answer}`
+                        : qRes.answer,
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `YouTube timestamp search fail hua: ${e?.message || e}` };
                   }
                 } else if (call.name === "get_whatsapp_photo_or_doc_info") {
                   const { query } = call.args || {};

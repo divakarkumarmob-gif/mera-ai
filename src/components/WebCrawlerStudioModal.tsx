@@ -422,11 +422,9 @@ export default function WebCrawlerStudioModal({ onClose }: { onClose: () => void
                       <div className="flex flex-wrap gap-2 text-zinc-500 text-[11px]">
                         <span>Domain: {crawledData.domain}</span>
                         <span>•</span>
-                        <span>Status: {crawledData.metadata.statusCode}</span>
+                        <span>Status: {crawledData.metadata?.statusCode || 200}</span>
                         <span>•</span>
-                        <span>Raw HTML: {crawledData.rawHtmlLength} bytes</span>
-                        <span>•</span>
-                        <span>Clean Markdown: {crawledData.markdownLength} bytes</span>
+                        <span>Clean Markdown: {crawledData.markdown?.length || 0} characters</span>
                       </div>
                     </div>
                     <pre className="whitespace-pre-wrap font-mono text-xs text-zinc-300 selection:bg-cyan-500/30">

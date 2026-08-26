@@ -970,71 +970,6 @@ Provide a 2-4 sentence executive digest of main topics, project updates, member 
   }
 
   /**
-   * Sends a message with realistic typing presence.
-   */
-  public async sendHumanLikeMessage(chatId: number | string, text: string): Promise<any> {
-    try {
-      await this.sendChatAction(chatId, "typing");
-      await new Promise((r) => setTimeout(r, 400));
-    } catch {}
-    return this.sendMessage(chatId, text);
-  }
-
-  /**
-   * Generates intelligent, contextual smart AI replies via the Gemini model fallback chain.
-   */
-  public async generateSmartAiReply(
-    senderName: string,
-    userText: string,
-    isOwner: boolean = false,
-    groupContext?: { isGroup: boolean; groupTitle?: string }
-  ): Promise<string> {
-    const customBusy = await this.getCustomBusyReply();
-    if (!isOwner && customBusy) {
-      return `Haanji ${senderName} ji! Main Friday hoon — DK Boss ka AI assistant. ${customBusy} 👍`;
-    }
-
-    const key = process.env.GEMINI_API_KEY;
-    if (!key) {
-      if (isOwner) {
-        return `Haanji Boss! Main Friday hoon. Kahiye kya madad kar sakti hoon? 🚀`;
-      }
-      return `Haanji ${senderName} ji! Main Friday hoon — DK Boss ka AI Assistant. Aapka message receive ho gaya hai 👍`;
-    }
-
-    const ai = new GoogleGenAI({ apiKey: key });
-
-    const systemPrompt = isOwner
-      ? `You are FRIDAY — Boss Divakar Kumar's (DK's) elite, loyal, intelligent personal AI companion and super-assistant.
-Divakar (DK) has sent you a direct message on Telegram.
-Reply warmly, concisely, and intelligently in your signature respectful conversational Hinglish. Be proactive, action-oriented, and address him as "Boss" or "DK".
-Sender Name: "${senderName}"
-User Message: "${userText}"`
-      : groupContext?.isGroup
-      ? `You are FRIDAY — Boss Divakar Kumar's (DK's) AI Assistant participating in Telegram Group "${groupContext.groupTitle || "Workspace Group"}".
-A group member named "${senderName}" wrote: "${userText}".
-Reply politely, concisely, and helpfully in friendly conversational Hinglish/English. If they ask about project status or tasks, explain clearly.`
-      : `You are FRIDAY — Boss Divakar Kumar's (DK's) AI Assistant managing his direct Telegram.
-A user named "${senderName}" wrote: "${userText}".
-Reply politely, warmly, and concisely in friendly Hinglish/English as Boss DK's assistant.`;
-
-    for (const model of TelegramBotService.MODEL_FALLBACK_CHAIN) {
-      try {
-        const resp = await ai.models.generateContent({
-          model,
-          contents: systemPrompt,
-        });
-        const reply = resp.text?.trim();
-        if (reply) return reply;
-      } catch (err: any) {
-        console.warn(`[TelegramBot] Reply model ${model} failed: ${err?.message || err}`);
-      }
-    }
-
-    return `Haanji ${senderName}! Main Friday hoon. Aapka message receive ho gaya hai 👍`;
-  }
-
-  /**
    * Updates a logged message with Friday's reply text.
    */
   public async updateBotReplyInLog(docId: string, replyText: string): Promise<void> {
@@ -1572,6 +1507,66 @@ INSTRUCTIONS FOR WHEN SENDER IS SOMEONE ELSE (NOT DK):
         await this.sendMessage(chatId, searchRes.summary);
       }
       return;
+    }
+
+    // 2.0C Handle YouTube Video Analysis & Timestamps ("https://youtube.com/..." / "https://youtu.be/..." / "yt ...")
+    const { youtubeService } = await import("./youtubeService");
+    const ytVideoId = youtubeService.extractVideoId(text);
+    if (ytVideoId && !/^(media\s*search|vault\s*search|user\s*a|user\s*b)/i.test(text)) {
+      try {
+        await this.sendMessage(chatId, "🎬 *YouTube Video analyze ho raha hai... (Transcripts & Timestamps)* ⚡");
+        const analysis = await youtubeService.analyzeVideo(ytVideoId);
+
+        let card = `🎬 *YouTube Video Intelligence:* **${analysis.title}**\n`;
+        card += `• 👤 Channel: *${analysis.channelName}*\n`;
+        card += `• 📝 Subtitles / Timed Cues: *${analysis.hasTranscript ? `✅ ${analysis.totalCues} cues extracted` : "⚠️ Auto estimated"}*\n\n`;
+        card += `📌 *Executive Summary:*\n${analysis.summary}\n\n`;
+
+        if (analysis.keyTakeaways && analysis.keyTakeaways.length > 0) {
+          card += `💡 *Key Takeaways & Lessons:*\n`;
+          analysis.keyTakeaways.forEach((t) => {
+            card += `• ${t}\n`;
+          });
+          card += `\n`;
+        }
+
+        if (analysis.chapters && analysis.chapters.length > 0) {
+          card += `⏱️ *Timeline & Chapters (Clickable Timestamps):*\n`;
+          analysis.chapters.slice(0, 8).forEach((ch) => {
+            card += `• [⏱️ ${ch.startFormatted}](${ch.timestampUrl}) — *${ch.title}*\n  _${ch.summary}_\n`;
+          });
+          card += `\n`;
+        }
+
+        card += `👉 _Kisi bhi topic ke baare me poochhein: \`yt ask ${ytVideoId} <aapka sawal>\`_`;
+
+        await this.sendMessage(chatId, card);
+        return;
+      } catch (e: any) {
+        await this.sendMessage(chatId, `❌ YouTube video analysis fail hui: ${e?.message || e}`);
+        return;
+      }
+    }
+
+    // 2.0D Handle "Ask Gemini" YouTube Specific Questions ("yt ask <videoId/url> <question>")
+    const ytAskMatch = text.match(/^(?:yt\s*ask|youtube\s*ask|ask\s*yt)\s+(\S+)\s+(.+)/i);
+    if (ytAskMatch) {
+      const targetUrlOrId = ytAskMatch[1];
+      const question = ytAskMatch[2];
+      try {
+        await this.sendMessage(chatId, `🔍 *Searching Video Timestamps for:* "${question}"...`);
+        const queryRes = await youtubeService.queryVideoTimestamp(targetUrlOrId, question);
+        let respText = `🎬 *YouTube Video Timestamp Q&A:*\n\n`;
+        if (queryRes.exactTimestamp) {
+          respText += `⏱️ *Exact Timestamp:* [${queryRes.exactTimestamp}](${queryRes.timestampUrl})\n\n`;
+        }
+        respText += `📝 *Answer:*\n${queryRes.answer}`;
+        await this.sendMessage(chatId, respText);
+        return;
+      } catch (e: any) {
+        await this.sendMessage(chatId, `❌ YouTube question error: ${e?.message || e}`);
+        return;
+      }
     }
 
     // 2.01 Handle Group Textual Role Setup: "User A @username" / "User B @username"

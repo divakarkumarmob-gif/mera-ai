@@ -6,6 +6,7 @@ import ChatHistoryModal from './ChatHistoryModal';
 import WhatsAppPairModal from './WhatsAppPairModal';
 import CodeAgentPage from './CodeAgentPage';
 import WebCrawlerStudioModal from './WebCrawlerStudioModal';
+import { YouTubeStudioModal } from './YouTubeStudioModal';
 import { getWsUrl } from '@/utils/api';
 import { wakeWordManager } from '@/utils/wakeWord';
 import { getAppToken, clearAppSession } from '@/utils/appSecurityClient';
@@ -604,6 +605,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const [showChatHistory, setShowChatHistory] = useState(false);
     const [showCodeAgent, setShowCodeAgent] = useState(false);
     const [showWebCrawler, setShowWebCrawler] = useState(false);
+    const [showYouTubeStudio, setShowYouTubeStudio] = useState(false);
     const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const captionBoxRef = useRef<HTMLDivElement>(null);
@@ -616,6 +618,10 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         artistName?: string;
         albumArt?: string;
         spotifyUrl?: string;
+        youtubeMusicUrl?: string;
+        embedUrl?: string;
+        videoId?: string;
+        isYouTubeMusic?: boolean;
         isFullSong?: boolean;
         quality?: string;
         durationSec?: number;
@@ -649,6 +655,64 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
             });
         }
     }, [nowPlayingMusic?.isPlaying]);
+
+    // ── MediaSession API for Background / Lockscreen Playback ─────────────────
+    useEffect(() => {
+        if (!nowPlayingMusic) {
+            if ('mediaSession' in navigator) {
+                navigator.mediaSession.playbackState = 'none';
+            }
+            return;
+        }
+
+        if ('mediaSession' in navigator) {
+            try {
+                navigator.mediaSession.metadata = new MediaMetadata({
+                    title: nowPlayingMusic.trackName || 'Music Track',
+                    artist: nowPlayingMusic.artistName || 'Friday Music',
+                    album: nowPlayingMusic.isYouTubeMusic ? 'YouTube Music HD' : 'Friday Audio Stream',
+                    artwork: nowPlayingMusic.albumArt ? [
+                        { src: nowPlayingMusic.albumArt, sizes: '512x512', type: 'image/jpeg' },
+                        { src: nowPlayingMusic.albumArt, sizes: '256x256', type: 'image/jpeg' },
+                    ] : [],
+                });
+
+                navigator.mediaSession.playbackState = nowPlayingMusic.isPlaying ? 'playing' : 'paused';
+
+                navigator.mediaSession.setActionHandler('play', () => {
+                    if (musicAudioRef.current) {
+                        musicAudioRef.current.play();
+                        setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: true } : null);
+                    }
+                });
+
+                navigator.mediaSession.setActionHandler('pause', () => {
+                    if (musicAudioRef.current) {
+                        musicAudioRef.current.pause();
+                        setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: false } : null);
+                    }
+                });
+
+                navigator.mediaSession.setActionHandler('stop', () => {
+                    stopMusicPlayback();
+                });
+            } catch (e) {
+                console.warn('[MediaSession] Setup error:', e);
+            }
+        }
+    }, [nowPlayingMusic, stopMusicPlayback]);
+
+    // ── Smooth Audio Ducking when Friday is speaking ──────────────────────────
+    useEffect(() => {
+        if (!musicAudioRef.current) return;
+        try {
+            if (status === 'Speaking...') {
+                musicAudioRef.current.volume = 0.2; // Duck music volume to 20% while Friday talks
+            } else {
+                musicAudioRef.current.volume = 0.85; // Full volume when listening or idle
+            }
+        } catch {}
+    }, [status]);
 
     const toggleScreenShare = useCallback(async () => {
         if (isScreenSharing) {
@@ -1376,6 +1440,21 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         // If no direct stream URL is available, display track card with Spotify button!
                         setNowPlayingMusic(trackInfo);
                     }
+                } else if (msg.type === 'play_youtube_music' && msg.track) {
+                    stopMusicPlayback();
+                    const track = msg.track;
+                    setNowPlayingMusic({
+                        trackName: track.trackName || 'YouTube Music Track',
+                        artistName: track.artistName || 'YouTube Music',
+                        albumArt: track.albumArt || (track.videoId ? `https://img.youtube.com/vi/${track.videoId}/hqdefault.jpg` : undefined),
+                        embedUrl: track.embedUrl || (track.videoId ? `https://www.youtube-nocookie.com/embed/${track.videoId}?autoplay=1&enablejsapi=1&controls=1&modestbranding=1` : undefined),
+                        videoId: track.videoId,
+                        isYouTubeMusic: true,
+                        isFullSong: true,
+                        isPlaying: true,
+                        quality: 'YouTube Music HD',
+                        youtubeMusicUrl: track.youtubeMusicUrl || (track.videoId ? `https://music.youtube.com/watch?v=${track.videoId}` : undefined),
+                    });
                 } else if (msg.type === 'stop_music') {
                     stopMusicPlayback();
                 }
@@ -1452,6 +1531,14 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         >
                             <span>🕷️</span>
                             <span>Web Crawler</span>
+                        </button>
+                        <button
+                            onClick={() => setShowYouTubeStudio(true)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 text-red-300 text-xs font-semibold shadow-[0_0_15px_rgba(239,68,68,0.25)] transition-all cursor-pointer hover:scale-105 active:scale-95"
+                            title="YouTube Intelligence & Ask Gemini Studio"
+                        >
+                            <span>🎬</span>
+                            <span>YouTube AI</span>
                         </button>
                         <button
                             onClick={toggleScreenShare}
@@ -1728,14 +1815,25 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                                 </div>
 
                                 <div className="flex items-center gap-1.5 shrink-0">
-                                    {musicAudioRef.current && !nowPlayingMusic.hasError && (
+                                    {musicAudioRef.current && !nowPlayingMusic.hasError && !nowPlayingMusic.isYouTubeMusic && (
                                         <button
                                             onClick={toggleMusicPlayPause}
-                                            className="px-2 py-1 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-semibold text-[11px] transition-colors shadow-sm"
+                                            className="px-2 py-1 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-semibold text-[11px] transition-colors shadow-sm cursor-pointer"
                                             title={nowPlayingMusic.isPlaying ? "Pause" : "Play"}
                                         >
                                             {nowPlayingMusic.isPlaying ? '⏸ Pause' : '▶ Play'}
                                         </button>
+                                    )}
+                                    {nowPlayingMusic.youtubeMusicUrl && (
+                                        <a
+                                            href={nowPlayingMusic.youtubeMusicUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="px-2.5 py-1 rounded-xl bg-red-600/40 hover:bg-red-600/60 border border-red-500/50 text-red-200 text-[11px] font-semibold transition-all flex items-center gap-1"
+                                        >
+                                            <span>▶</span>
+                                            <span>YT Music</span>
+                                        </a>
                                     )}
                                     {nowPlayingMusic.spotifyUrl && (
                                         <a
@@ -1747,23 +1845,42 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                                             Spotify ↗
                                         </a>
                                     )}
-                                    {nowPlayingMusic.youtubeMusicUrl && (
-                                        <a
-                                            href={nowPlayingMusic.youtubeMusicUrl}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="px-2 py-1 rounded-xl bg-rose-600/30 hover:bg-rose-600/50 border border-rose-500/50 text-rose-200 text-[11px] font-semibold transition-all"
-                                        >
-                                            YouTube ↗
-                                        </a>
-                                    )}
                                     <button
                                         onClick={stopMusicPlayback}
-                                        className="p-1 rounded-lg bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white transition-colors"
+                                        className="p-1 rounded-lg bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white transition-colors cursor-pointer"
                                         title="Close music player"
                                     >
                                         <X className="w-3.5 h-3.5" />
                                     </button>
+                                </div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+
+                    {/* ── Embedded YouTube Music Ad-Free Player Card ── */}
+                    <AnimatePresence>
+                        {nowPlayingMusic?.isYouTubeMusic && nowPlayingMusic.embedUrl && (
+                            <motion.div
+                                initial={{ opacity: 0, scale: 0.9, y: 15 }}
+                                animate={{ opacity: 1, scale: 1, y: 0 }}
+                                exit={{ opacity: 0, scale: 0.9, y: 15 }}
+                                className="w-full max-w-md rounded-2xl overflow-hidden bg-slate-950/90 border border-red-500/40 shadow-[0_0_35px_rgba(239,68,68,0.25)] backdrop-blur-md p-3 space-y-2"
+                            >
+                                <div className="flex items-center justify-between px-1">
+                                    <div className="flex items-center gap-2">
+                                        <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
+                                        <span className="text-xs font-bold text-red-400">YouTube Music HD Live</span>
+                                    </div>
+                                    <span className="text-[10px] text-slate-400 font-mono">Ad-Free Stream</span>
+                                </div>
+                                <div className="aspect-video w-full rounded-xl overflow-hidden bg-black border border-slate-800">
+                                    <iframe
+                                        src={nowPlayingMusic.embedUrl}
+                                        title={nowPlayingMusic.trackName}
+                                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                        allowFullScreen
+                                        className="w-full h-full border-0"
+                                    />
                                 </div>
                             </motion.div>
                         )}
@@ -2023,6 +2140,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
             {showChatHistory && <ChatHistoryModal onClose={() => setShowChatHistory(false)} />}
             {showCodeAgent && <CodeAgentPage onClose={() => setShowCodeAgent(false)} />}
             {showWebCrawler && <WebCrawlerStudioModal onClose={() => setShowWebCrawler(false)} />}
+            <YouTubeStudioModal isOpen={showYouTubeStudio} onClose={() => setShowYouTubeStudio(false)} />
             <WhatsAppPairModal isOpen={showWhatsAppModal} onClose={() => setShowWhatsAppModal(false)} />
 
             {/* Deep Research Report Modal */}

@@ -3232,6 +3232,53 @@ class PublicApisService {
     return { success: false, message: `"${q}" ka YouTube link nahi mila.` };
   }
 
+  // 50.1 YouTube Music Embed Search — Free, Embedded, Ad-Free YouTube Music Streaming
+  public async searchYouTubeMusic(songOrArtist: string): Promise<any> {
+    const q = songOrArtist.trim();
+    if (!q) return { success: false, message: "Song ya artist ka naam zaroori hai." };
+
+    try {
+      const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(q + " audio")}`;
+      const htmlRes = await fetch(searchUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Accept-Language": "en-US,en;q=0.9,hi;q=0.8",
+        },
+      });
+
+      if (htmlRes.ok) {
+        const html = await htmlRes.text();
+        const videoIdMatch = html.match(/"videoId":\s*"([a-zA-Z0-9_-]{11})"/);
+        if (videoIdMatch) {
+          const videoId = videoIdMatch[1];
+          const titleMatch = html.match(/"title":\s*\{\s*"runs":\s*\[\s*\{\s*"text":\s*"([^"]+)"/);
+          const title = titleMatch ? titleMatch[1] : q;
+
+          return {
+            success: true,
+            trackName: title,
+            artistName: "YouTube Music",
+            videoId,
+            youtubeMusicUrl: `https://music.youtube.com/watch?v=${videoId}`,
+            youtubeUrl: `https://www.youtube.com/watch?v=${videoId}`,
+            embedUrl: `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&enablejsapi=1&controls=1&modestbranding=1`,
+            albumArt: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
+            isFullSong: true,
+            isYouTubeMusic: true,
+            quality: "YouTube Music HD",
+            source: "youtube_music",
+            message: `Boss, "${title}" YouTube Music par mil gaya hai! Gana baj raha hai 🎵✨`,
+          };
+        }
+      }
+    } catch (e) {
+      console.warn("[PublicApis] YouTube Music scraping fallback:", e);
+    }
+
+    // Fallback to JioSaavn full search
+    return this.searchMusic(q);
+  }
+
   // 51. Music Search — JioSaavn (100% Free Full-Length 320kbps Songs) + Deezer + iTunes fallback
   public async searchMusic(songOrArtist: string): Promise<any> {
     const q = songOrArtist.trim();
