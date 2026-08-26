@@ -30,6 +30,7 @@ import { cyberSecurityService } from "./src/services/cyberSecurityService";
 import { backgroundTasksService } from "./src/services/backgroundTasksService";
 import { appSecurityService } from "./src/services/appSecurityService";
 import { webCrawlerService } from "./src/services/webCrawlerService";
+import { railRadarService } from "./src/services/railRadarService";
 
 const PORT = Number(process.env.PORT) || 3000;
 const isProduction = process.env.NODE_ENV === "production";
@@ -688,6 +689,34 @@ async function startServer() {
       res.json({ ok: true, ...result });
     } catch (e: any) {
       res.status(500).json({ error: e?.message || "failed_to_clean" });
+    }
+  });
+
+  // ── RailRadar Indian Railways Live Train Intelligence Endpoints ──────────
+  app.get("/api/railradar/train/:number/live", async (req, res) => {
+    try {
+      const data = await railRadarService.getLiveTrainStatus(req.params.number);
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || "train_status_failed" });
+    }
+  });
+
+  app.get("/api/railradar/pnr/:pnr", async (req, res) => {
+    try {
+      const data = await railRadarService.getPnrStatus(req.params.pnr);
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || "pnr_status_failed" });
+    }
+  });
+
+  app.get("/api/railradar/station/:code/live", async (req, res) => {
+    try {
+      const data = await railRadarService.getLiveStationBoard(req.params.code);
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || "station_board_failed" });
     }
   });
 
@@ -3476,6 +3505,24 @@ HOW TO READ MESSAGES:
           description: "Disconnect from the current WiFi network.",
           parameters: { type: "OBJECT", properties: {}, required: [] },
         },
+        {
+          name: "execute_service",
+          description: "Execute Indian Railways live train status, 10-digit PNR enquiry, and live station board via RailRadar.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              action: {
+                type: "STRING",
+                description: "Service action: 'train_status' (live running status/delay/GPS), 'pnr_status' (10-digit PNR details), or 'station_board' (station arrivals/platforms)",
+              },
+              query: {
+                type: "STRING",
+                description: "Train number (e.g. '12309'), 10-digit PNR (e.g. '2847291048'), or station name/code (e.g. 'PNBE', 'New Delhi')",
+              },
+            },
+            required: ["action", "query"],
+          },
+        },
       ];
 
       // Closure ref so onopen/onerror/onclose below can tell whether THIS
@@ -5531,6 +5578,34 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                     };
                   } catch (e: any) {
                     result = { success: false, message: `Coding Agent command fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "execute_service" || call.name === "get_live_train_status" || call.name === "get_pnr_status" || call.name === "get_live_station_board") {
+                  const action = String(call.args?.action || call.name);
+                  const query = String(call.args?.query || call.args?.trainQuery || call.args?.pnr || call.args?.station || "");
+                  
+                  try {
+                    if (action.includes("pnr") || /^\d{10}$/.test(query)) {
+                      const pnrRes = await railRadarService.getPnrStatus(query);
+                      result = pnrRes;
+                      if (pnrRes.success) {
+                        safeSend(JSON.stringify({ type: "pnr_live_status", pnr: pnrRes }));
+                      }
+                    } else if (action.includes("station") || action.includes("board")) {
+                      const stnRes = await railRadarService.getLiveStationBoard(query);
+                      result = stnRes;
+                      if (stnRes.success) {
+                        safeSend(JSON.stringify({ type: "station_live_board", station: stnRes }));
+                      }
+                    } else {
+                      // Default to Live Train Running Status
+                      const statusRes = await railRadarService.getLiveTrainStatus(query);
+                      result = statusRes;
+                      if (statusRes.success) {
+                        safeSend(JSON.stringify({ type: "train_live_status", train: statusRes }));
+                      }
+                    }
+                  } catch (e: any) {
+                    result = { success: false, message: `RailRadar service execution fail hui: ${e?.message || e}` };
                   }
                 }
 

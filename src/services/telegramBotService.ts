@@ -7,6 +7,7 @@ import { codeAgentService } from "./codeAgentService";
 import { dailyUpdateService } from "./dailyUpdateService";
 import { publicApisService } from "./publicApisService";
 import { voiceBridgeService, VoiceBridgeService } from "./voiceBridgeService";
+import { railRadarService } from "./railRadarService";
 
 export interface TelegramStatus {
   isConfigured: boolean;
@@ -1565,6 +1566,65 @@ INSTRUCTIONS FOR WHEN SENDER IS SOMEONE ELSE (NOT DK):
         return;
       } catch (e: any) {
         await this.sendMessage(chatId, `❌ YouTube question error: ${e?.message || e}`);
+        return;
+      }
+    }
+
+    // 2.0E Handle RailRadar Live Train Running Status ("/train <number>" or "<number> train status" or "train <number>")
+    const trainMatch = text.match(/^(?:\/train|train|live\s*train|railradar)\s+(\d{4,5}|\w+)/i) ||
+      text.match(/\b(\d{5})\b(?:\s+train|\s+running|\s+status|\s+kahan)/i) ||
+      text.match(/train\s+(?:status|kahan\s*hai|live|no|number)?\s*[:=-]?\s*(\d{4,5})/i);
+
+    if (trainMatch) {
+      const trainQuery = trainMatch[1];
+      try {
+        await this.sendMessage(chatId, `🚆 *RailRadar Live Train Status:* Fetching telemetry for *#${trainQuery}*... 🛰️`);
+        const trainStatus = await railRadarService.getLiveTrainStatus(trainQuery);
+        await this.sendMessage(chatId, trainStatus.message);
+        return;
+      } catch (e: any) {
+        await this.sendMessage(chatId, `❌ Train status check failed: ${e?.message || e}`);
+        return;
+      }
+    }
+
+    // 2.0F Handle RailRadar 10-Digit PNR Status ("/pnr <10-digits>" or "pnr status <10-digits>")
+    const pnrMatch = text.match(/^(?:\/pnr|pnr|pnr\s*status)\s+(\d{10})/i) ||
+      text.match(/\b(\d{10})\b/i);
+
+    if (pnrMatch && (/pnr/i.test(text) || pnrMatch[0].startsWith("/pnr") || text.length === 10)) {
+      const pnrNum = pnrMatch[1];
+      try {
+        await this.sendMessage(chatId, `🎫 *RailRadar PNR Enquiry:* Fetching booking & chart status for *${pnrNum}*... 🔍`);
+        const pnrRes = await railRadarService.getPnrStatus(pnrNum);
+        await this.sendMessage(chatId, pnrRes.message);
+        return;
+      } catch (e: any) {
+        await this.sendMessage(chatId, `❌ PNR status check failed: ${e?.message || e}`);
+        return;
+      }
+    }
+
+    // 2.0G Handle Live Station Board ("/station <code/name>")
+    const stationMatch = text.match(/^(?:\/station|station|station\s*board|live\s*station)\s+([a-zA-Z\s]{2,20})/i);
+    if (stationMatch) {
+      const stnQuery = stationMatch[1].trim();
+      try {
+        await this.sendMessage(chatId, `🏢 *RailRadar Station Board:* Fetching live arrivals for *${stnQuery}*... 📋`);
+        const stnRes = await railRadarService.getLiveStationBoard(stnQuery);
+        let stnMsg = `🏢 *Live Station Board: ${stnRes.stationCode}*\n\n`;
+        if (stnRes.trains && stnRes.trains.length > 0) {
+          stnRes.trains.forEach((t) => {
+            const delayTxt = t.delayMinutes > 0 ? `🔴 +${t.delayMinutes}m` : `🟢 On Time`;
+            stnMsg += `• *#${t.trainNumber}* ${t.trainName}\n  📍 Plat: *#${t.platform}* | ⏱️ ETA: *${t.expectedArrival}* (${delayTxt})\n`;
+          });
+        } else {
+          stnMsg += stnRes.message;
+        }
+        await this.sendMessage(chatId, stnMsg);
+        return;
+      } catch (e: any) {
+        await this.sendMessage(chatId, `❌ Station board check failed: ${e?.message || e}`);
         return;
       }
     }
