@@ -112,12 +112,19 @@ class TelegramBotService {
 
   private async callApi(method: string, body?: any): Promise<any> {
     if (!this.token) throw new Error("TELEGRAM_BOT_TOKEN is not configured.");
-    const url = `https://api.telegram.org/bot${this.token}/${method}`;
+    
+    // Robustly construct and validate the Telegram API URL to prevent parsing issues
+    const baseUrl = "https://api.telegram.org";
+    const cleanToken = this.token.trim();
+    const cleanMethod = method.replace(/^\/+/, "");
+    const url = new URL(`/bot${cleanToken}/${cleanMethod}`, baseUrl).toString();
+
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: body ? JSON.stringify(body) : undefined,
     });
+    
     const json = await res.json();
     if (!json.ok) {
       throw new Error(json.description || `Telegram API ${method} failed`);
@@ -185,7 +192,9 @@ class TelegramBotService {
   ): Promise<{ success: boolean; messageId?: number; error?: string }> {
     if (!this.token) return { success: false, error: "TELEGRAM_BOT_TOKEN is not configured." };
     try {
-      const url = `https://api.telegram.org/bot${this.token}/sendVoice`;
+      const baseUrl = "https://api.telegram.org";
+      const url = new URL(`/bot${this.token.trim()}/sendVoice`, baseUrl).toString();
+      
       const formData = new FormData();
       formData.append("chat_id", String(chatId));
       const blob = new Blob([audioBuffer], { type: "audio/mpeg" });
@@ -215,7 +224,9 @@ class TelegramBotService {
   ): Promise<{ success: boolean; messageId?: number; error?: string }> {
     if (!this.token) return { success: false, error: "TELEGRAM_BOT_TOKEN is not configured." };
     try {
-      const url = `https://api.telegram.org/bot${this.token}/sendAudio`;
+      const baseUrl = "https://api.telegram.org";
+      const url = new URL(`/bot${this.token.trim()}/sendAudio`, baseUrl).toString();
+
       const formData = new FormData();
       formData.append("chat_id", String(chatId));
       const blob = new Blob([audioBuffer], { type: "audio/mpeg" });
@@ -651,7 +662,12 @@ class TelegramBotService {
   private async downloadFile(fileId: string): Promise<{ buffer: Buffer; filePath: string }> {
     const fileInfo = await this.callApi("getFile", { file_id: fileId });
     const filePath = fileInfo.file_path;
-    const fileUrl = `https://api.telegram.org/file/bot${this.token}/${filePath}`;
+    
+    const baseUrl = "https://api.telegram.org";
+    const cleanToken = this.token.trim();
+    const cleanFilePath = filePath.replace(/^\/+/, "");
+    const fileUrl = new URL(`/file/bot${cleanToken}/${cleanFilePath}`, baseUrl).toString();
+
     const res = await fetch(fileUrl);
     const arrayBuffer = await res.arrayBuffer();
     return { buffer: Buffer.from(arrayBuffer), filePath };
