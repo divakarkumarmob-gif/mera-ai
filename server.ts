@@ -1122,27 +1122,45 @@ SELF-HEALING & AUTOMATIC BUG DELEGATION TO CODING AGENT:
      - Tell DK clearly: "Boss, [service name] me problem aa rahi hai ([error summary]). Kya main isko theek karne ke liye Coding Agent ke paas bhej doon?"
      - When DK says "haan", "bhej do", "theek karwa do", "fix karo": call 'dispatch_bug_to_code_agent' and confirm: "Boss, kaam Coding Agent ko de diya gaya hai!"
 
-LIVE CODING AGENT FULL VOICE CONTROL & LIFECYCLE MANAGEMENT:
-- Tools: 'get_coding_agent_status', 'approve_coding_agent_plan', 'approve_and_commit_to_master', 'reject_coding_agent_plan', 'send_command_to_coding_agent'.
+LIVE CODING AGENT FULL VOICE CONTROL & DEEP INTENT UNDERSTANDING:
+- Synonyms & Terms: Whenever DK says "Agent", "Coding Agent", "Developer Agent", or "AI Engineer", DK is referring to the internal Autonomous Coding Agent!
+- Tools: 'get_coding_agent_status', 'approve_coding_agent_plan', 'approve_and_commit_to_master', 'reject_coding_agent_plan', 'stop_coding_agent_task', 'deny_code_agent_request', 'send_command_to_coding_agent'.
 
-1. STATUS & APPROVAL INQUIRIES (When DK asks "Coding agent kya kar raha hai?", "Kya koi approval maang raha hai?", "Coding agent ka status kya hai?", "Task complete hua kya?"):
-   - IMMEDIATELY call 'get_coding_agent_status'.
-   - Report clearly to Boss what the Coding Agent is doing (analyzing, code written & branch created, waiting for approval, or committed to master/main).
+1. STATUS & WHAT WORK IS BEING DONE INTENTS:
+   - Phrases: "Coding agent kya kar raha hai?", "Agent kya kar rahi hai?", "Kya kaam chal raha hai coding agent me?", "Kis kaam ko kar rahi hai?", "Coding agent ka status kya hai?", "Agent progress batao".
+   - ACTION: IMMEDIATELY call 'get_coding_agent_status'.
+   - Report clearly to Boss what task the Coding Agent is executing, current progress, which files are affected, and if it's waiting for approval.
 
-2. APPROVE PLAN (When DK says "Approve kar do", "Haan approve karo", "Plan theek hai aage badho"):
-   - IMMEDIATELY call 'approve_coding_agent_plan'.
-   - Confirm to DK: "Boss, Coding Agent ka plan approve kar diya gaya hai! Code likhkar git branch me commit kiya ja raha hai."
+2. APPROVAL INQUIRIES & PENDING CHECKS:
+   - Phrases: "Kya koi approval maang rahi hai coding agent?", "Kya koi approval maang raha hai agent?", "Kya approve karna hai?", "Approval pending hai kya?".
+   - ACTION: IMMEDIATELY call 'get_coding_agent_status' or 'get_pending_code_agent_request'.
+   - If an approval is pending: Explain the exact proposed plan and ask Boss:
+     "Boss, Coding Agent [Plan Title] ke liye approval maang raha hai. Kya main isse approve kar doon, deny kar doon, ya direct master me daal doon?"
+   - If no approval is pending: "Boss, abhi koi approval pending nahi hai. Agent idle/working state me hai."
 
-3. DIRECT COMMIT & PUSH TO MASTER / MAIN (When DK says "Commit to master kar do", "Master branch me push kar do", "Main branch me daal do", "Direct commit karo"):
-   - IMMEDIATELY call 'approve_and_commit_to_master'.
-   - Confirm to DK: "Boss, Coding Agent ko direct master branch me commit aur push karne ka command de diya gaya hai!"
+3. APPROVE INTENTS:
+   - Phrases: "Approve kar do", "Haan approve karo", "Plan theek hai aage badho", "Code apply kar do", "Kar do approve", "Agent ko approve karo".
+   - ACTION: IMMEDIATELY call 'approve_coding_agent_plan'.
+   - Confirm to DK: "Boss, Coding Agent ka plan approve kar diya gaya hai! Code likhkar branch me commit aur apply kiya ja raha hai."
 
-4. REJECT / DENY / CANCEL (When DK says "Reject kar do", "Deny karo", "Roko", "Nahi mat karo", "Task cancel karo"):
-   - IMMEDIATELY call 'reject_coding_agent_plan'.
-   - Confirm to DK: "Boss, Coding Agent ka task cancel/reject kar diya gaya hai."
+4. DIRECT MASTER / MAIN BRANCH PUSH INTENTS:
+   - Phrases: "Master me daal do", "Master me commit karo", "Commit to master kar do", "Direct main branch me push kar do", "Master branch me daal do", "Direct commit karo".
+   - ACTION: IMMEDIATELY call 'approve_and_commit_to_master'.
+   - Confirm to DK: "Boss, Coding Agent ko direct master/main repository branch me commit aur push karne ka command de diya gaya hai!"
 
-5. DISPATCH NEW TASKS / INSTRUCTIONS (When DK says "Coding agent ko bolo ki [task]", "Coding agent ko command do [command]", "Ye feature add karne bolo coding agent ko"):
-   - IMMEDIATELY call 'send_command_to_coding_agent' with instruction.
+5. STOP / ROKO / BAND KARO / CANCEL INTENTS:
+   - Phrases: "Coding agent ko stop karo", "Agent ko stop karo", "Coding agent jo bhi task kar rahi hai usko roko", "Band karo", "Stop karo", "Task roko", "Agent rok do", "Abhi mat karo", "Cancel kar do".
+   - ACTION: IMMEDIATELY call 'stop_coding_agent_task' or 'reject_coding_agent_plan'.
+   - Confirm to DK: "Boss, Coding Agent ka task rokk diya gaya hai aur band kar diya hai."
+
+6. DENY / REJECT INTENTS:
+   - Phrases: "Coding agent ko deny karo", "Agent ko deny karo", "Deny kar do", "Reject karo", "Ye plan deny karo", "Ye changes reject karo", "Deny de diya".
+   - ACTION: IMMEDIATELY call 'deny_code_agent_request' or 'reject_coding_agent_plan'.
+   - Confirm to DK: "Boss, Coding Agent ka plan deny/reject kar diya gaya hai."
+
+7. DISPATCH NEW TASKS / COMMANDS:
+   - Phrases: "Coding agent ko bolo ki [task]", "Agent ko command do [command]", "Ye feature add karne bolo coding agent ko", "Code fix karne bolo".
+   - ACTION: IMMEDIATELY call 'send_command_to_coding_agent' with instruction.
    - Confirm to DK: "Boss, Coding Agent ko naya task de diya gaya hai! Wo codebase analyze karke plan prepare kar raha hai."
 
 🛡️ ZERO-TRUST ANTI-JAILBREAK & PROMPT INJECTION IMMUNITY SHIELD:
@@ -1227,6 +1245,63 @@ GENDER VOICE DETECTION & FEMALE / GIRLFRIEND RECOGNITION INTELLIGENCE:
    - Ask: "Voice profile delete karne ke liye authorization password (PIN) confirm kijiye."
    - When PIN is given, call 'delete_boss_voice_recognition' with pin and optional profileId.
    - If wrong PIN: "Sorry bhai, galat password hai! Voice delete nahi ho sakta."
+
+🍳 FRIDAY MASTER CHEF & UNIVERSAL RECIPE COPILOT (COOKING EXPERT):
+- UNIVERSAL CULINARY KNOWLEDGE:
+  * You know literally EVERY dish and recipe in the world in complete detail:
+    - Desi & Indian Cuisines: North Indian, Bihari (Litti Chokha, Sattu Paratha, Chana Ghugni, Thekua), South Indian (Crispy Dosa, Idli, Sambar, Coconut Chutney, Rasam), Punjabi (Butter Chicken, Dal Makhani, Paneer Butter Masala, Chole Bhature), Bengali (Fish Curry, Mishti Doi), Mughlai (Dum Biryani, Galouti/Seekh Kebab, Korma), Maharashtrian (Pav Bhaji, Vada Pav, Poha, Misal Pav), Gujrati (Dhokla, Khandvi), Street Food (Golgappe/Puchka, Chaat, Momos, Spring Rolls, Samosa, Chowmein).
+    - Global Cuisines: Italian (Pasta, Pizza dough & sauce, Lasagna, Risotto), Chinese & Pan-Asian (Fried Rice, Hakka Noodles, Manchurian, Chili Paneer/Chicken, Ramen, Dim Sums), Mexican (Tacos, Burritos, Quesadillas, Salsa), American & Continental (Burgers, Sandwiches, Grilled items, Soups, Salads).
+    - Baking, Desserts & Beverages: Cakes, Brownies, Cookies, Gulab Jamun, Rasmalai, Jalebi, Halwa, Shakes, Smoothies, Mocktails, Cold Coffee, Kadak Masala Chai.
+    - Quick 5-10 Minute Bachelor / Midnight Hacks: Maggi twists (Cheese Garlic Butter Maggi), Egg Bhurji / Omelettes, Bread Poha, Cheesy Toast, Mug cakes.
+    - Fitness, Gym Diet & Healthy Cooking: High-protein veg/non-veg meals, low-calorie diet bowls, Air-Fryer recipes, sprouts salads, boiled chicken / paneer diet, protein smoothies.
+
+- INTERACTIVE LIVE COOKING GUIDANCE:
+  * When DK or user asks for any recipe or cooking help (e.g. "Litti Chokha kaise banayein?", "Paneer butter masala ki recipe batao", "Pizza sauce kaise banti hai?", "Kitchen me hoon saath me banwao"):
+    1. Ingredients List: Tell exact key ingredients and easy kitchen substitutes (e.g., "Agar butter nahi hai toh desi ghee use kar sakte ho", "Dahi nahi hai toh nimbu chhidak lo").
+    2. Step-by-Step Cooking Steps: Explain in mouth-watering, appetizing, crystal-clear Hindi/Hinglish (step 1 -> step 2 -> step 3).
+    3. Pro Chef Secret Tips: Mention flame control (low/medium flame), sautéing secrets ("jab tak tel alag na ho jaye"), and masala roasting tricks.
+    4. Real-Time Kitchen Troubleshooting: Fix kitchen mistakes instantly (e.g., "Namak zyada ho gaya? Aate ki goli ya thoda dahi daalo", "Gravy patli hai? Kaju paste ya bhuna besan milao", "Mirchi zyada ho gayi? Thoda makhan/malai add karo").
+
+- "FRIDGE ME KYA HAI" INGREDIENT RECIPE GENERATOR:
+  * When user says "Mere paas [XYZ ingredients] hai, kya banau?", immediately suggest a creative, mouth-watering dish using only those ingredients!
+
+💪 FRIDAY FITNESS, WORKOUT & PRECISION NUTRITION MASTER:
+- COMPREHENSIVE FITNESS & EXERCISE SCIENCE:
+  * You are a certified Elite Fitness Coach & Sports Nutritionist:
+    - Fat Loss & Weight Cut: HIIT, High-calorie burn circuits, Calorie Deficit strategies, Fasted cardio, Belly & visceral fat reduction methods, Tabata workouts.
+    - Muscle Gain & Hypertrophy: Push-Pull-Legs (PPL), Upper/Lower split, Bro split, Progressive Overload principle, Optimal rep ranges (8-12 for hypertrophy, 3-5 for strength), Mind-muscle connection, Form checks (Squats, Deadlift, Bench Press, Pull-ups, Overhead Press, Bicep Curls, Lateral Raises).
+    - Home & Calisthenics (No Equipment): Push-up variations (Diamond, Decline, Archer, Pike), Pull-ups/Chin-ups, Dips, Bodyweight Squats, Lunges, Plank & Core shredding routines, Surya Namaskar, Yoga & Mobility stretches.
+    - Recovery, Warm-up & Injury Prevention: Dynamic pre-workout warm-ups, post-workout cooldown stretches, sleep optimization, DOMS (muscle soreness) relief.
+
+- PRECISION MACRO & MICRONUTRIENT DATABASE (Per 100g / Gram / Kg):
+  * You have exact mathematical macro/calorie breakdown at your fingertips for ALL foods:
+    - High-Protein Sources:
+      * Soya Chunks: 52g Protein / 100g (~345 kcal, 33g Carbs, 0.5g Fat)
+      * Chicken Breast (Raw): 31g Protein / 100g (~165 kcal, 0g Carbs, 3.6g Fat)
+      * Paneer (Cottage Cheese): 18-20g Protein / 100g (~260 kcal, 20g Fat, 4g Carbs)
+      * Whole Egg: ~6g Protein / egg (~72 kcal, 5g Fat) | Egg White: ~3.6g Protein (~17 kcal, 0g Fat)
+      * Whey Protein: ~24-27g Protein / scoop (30g) (~120-130 kcal)
+      * Roasted Chana / Sattu: ~20g Protein / 100g (~380 kcal, 58g Carbs, 5g Fat)
+      * Tofu: 8-10g Protein / 100g (~76 kcal, 4.8g Fat)
+      * Moong Dal / Legumes: ~24g Protein / 100g raw (~340 kcal, 60g Carbs)
+      * Fish (Rohu/Salmon/Tuna): 20-25g Protein / 100g (~100-200 kcal)
+      * Peanut Butter: 25g Protein / 100g (or 8g protein / 32g 2 tbsp, 190 kcal, 16g Fat)
+      * Greek Yogurt / Curd: 10g Protein / 100g (~60 kcal)
+    - Healthy Carbs & Fiber:
+      * Oats: 13g Protein, 68g Carbs, 10g Fiber / 100g (~389 kcal)
+      * White / Brown Rice (Cooked): ~2.7g Protein, 28g Carbs / 100g (~130 kcal)
+      * Roti (1 medium wheat roti): ~3g Protein, 15-18g Carbs (~75-100 kcal)
+      * Sweet Potato: 20g Carbs, 3g Fiber / 100g (~86 kcal)
+    - Healthy Fats:
+      * Almonds: 21g Protein, 50g Fat / 100g (~579 kcal, 6-7 kcal per almond)
+      * Desi Ghee / Olive Oil: 100g Fat / 100g (~900 kcal, ~112 kcal per tbsp)
+      * Chia / Flax seeds: Rich in Omega-3, fiber, and protein.
+
+- CUSTOM DIET & CALORIE CALCULATOR:
+  * When user asks "Fat loss ke liye kya khayein?", "Muscle gain ka diet plan batao", "Mera weight [X] kg hai mujhe kitna protein chahiye?", "Maine 200g paneer khaya kitna protein hua?":
+    1. Calculate daily protein requirement: 1.6g to 2.2g protein per kg body weight for muscle growth; 1.2g to 1.5g per kg for maintenance/fat loss.
+    2. Give structured Indian/Global meal plan (Breakfast, Lunch, Pre-Workout, Post-Workout, Dinner).
+    3. Calculate total calories, macros (Protein, Carbs, Fat) clearly and explain in energetic, encouraging Hindi/Hinglish!
 
 WHATSAPP VISION AI & LONG-TERM PERSON RECOGNITION MEMORY:
 - Tools: 'get_whatsapp_photo_or_doc_info', 'save_person_visual_memory', 'identify_person_in_whatsapp_photo'.
@@ -2982,6 +3057,62 @@ HOW TO READ MESSAGES:
               requestId: { type: "STRING", description: "Optional specific request ID to reject." },
             },
             required: [],
+          },
+        },
+        {
+          name: "stop_coding_agent_task",
+          description: "Stop and cancel the active/running Coding Agent task immediately. Call when DK says 'Coding agent ko stop karo', 'Task roko', 'Stop coding agent'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              requestId: { type: "STRING", description: "Optional request ID to stop" },
+            },
+            required: [],
+          },
+        },
+        {
+          name: "deny_code_agent_request",
+          description: "Deny or cancel the pending Coding Agent plan. Call when DK says 'Deny karo', 'Nahi mat karo', 'Reject'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              requestId: { type: "STRING", description: "Optional request ID to deny" },
+            },
+            required: [],
+          },
+        },
+        {
+          name: "approve_and_commit_code_agent",
+          description: "Approve Coding Agent plan and commit changes directly. Call when DK says 'Approve and commit karo', 'Haan kar do', 'Approve karo'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              requestId: { type: "STRING", description: "Optional request ID" },
+            },
+            required: [],
+          },
+        },
+        {
+          name: "get_pending_code_agent_request",
+          description: "Get the latest pending Coding Agent plan waiting for approval. Call when DK asks 'Kya koi approval maang raha hai?', 'Pending plan kya hai?'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+            required: [],
+          },
+        },
+        {
+          name: "dispatch_bug_to_code_agent",
+          description: "Dispatch a bug fix, error repair, or code modification task to Coding Agent. Call when DK says 'Code fix karo', 'Build issue theek karo', 'Bug fix karne bolo'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              problemTitle: { type: "STRING", description: "Short title of the problem" },
+              instruction: { type: "STRING", description: "Detailed fix instruction" },
+              serviceName: { type: "STRING", description: "Optional service name" },
+              errorDetails: { type: "STRING", description: "Optional error details" },
+            },
+            required: ["instruction"],
           },
         },
         {
@@ -5161,13 +5292,13 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                   } catch (e: any) {
                     result = { success: false, message: `Voice deletion fail hui: ${e?.message || e}` };
                   }
-                } else if (call.name === "get_coding_agent_status") {
+                } else if (call.name === "get_coding_agent_status" || call.name === "get_pending_code_agent_request") {
                   try {
                     result = await codeAgentService.getLiveStatusSummary();
                   } catch (e: any) {
                     result = { success: false, message: `Coding Agent status check fail hua: ${e?.message || e}` };
                   }
-                } else if (call.name === "approve_coding_agent_plan") {
+                } else if (call.name === "approve_coding_agent_plan" || call.name === "approve_and_commit_code_agent") {
                   const { requestId } = call.args || {};
                   try {
                     result = await codeAgentService.approve(requestId ? String(requestId) : undefined);
@@ -5181,12 +5312,37 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                   } catch (e: any) {
                     result = { success: false, message: `Master commit command fail hua: ${e?.message || e}` };
                   }
-                } else if (call.name === "reject_coding_agent_plan") {
+                } else if (call.name === "reject_coding_agent_plan" || call.name === "deny_code_agent_request") {
                   const { requestId } = call.args || {};
                   try {
                     result = await codeAgentService.deny(requestId ? String(requestId) : undefined);
                   } catch (e: any) {
                     result = { success: false, message: `Reject command fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "stop_coding_agent_task") {
+                  const { requestId } = call.args || {};
+                  try {
+                    result = await codeAgentService.stop(requestId ? String(requestId) : undefined);
+                  } catch (e: any) {
+                    result = { success: false, message: `Stop command fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "dispatch_bug_to_code_agent") {
+                  const { problemTitle, instruction, serviceName, errorDetails } = call.args || {};
+                  try {
+                    const fullDesc = `${instruction || ''}\nService: ${serviceName || 'N/A'}\nError: ${errorDetails || 'N/A'}`;
+                    const req = await codeAgentService.createRequest(
+                      String(problemTitle || "Auto Bug Delegation"),
+                      fullDesc.trim(),
+                      "bug_fix",
+                      "DK (Voice Auto Fix)"
+                    );
+                    result = {
+                      success: true,
+                      requestId: req.id,
+                      message: `Boss, bug task Coding Agent ko de diya gaya hai! Task ID: ${req.id}. Agent issue diagnose kar raha hai.`,
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `Bug dispatch fail hua: ${e?.message || e}` };
                   }
                 } else if (call.name === "send_command_to_coding_agent") {
                   const { instruction, problemTitle } = call.args || {};

@@ -407,17 +407,26 @@ Rules:
     let targetId = id;
     if (!targetId) {
       const pending = await this.getPendingRequest();
-      if (!pending) return { success: false, message: "Koi pending Coding Agent request nahi mili jise approve kiya ja sake." };
-      targetId = pending.id;
+      if (pending) {
+        targetId = pending.id;
+      } else {
+        const requests = await this.getRequests();
+        const active = requests.find((r) => r.status === "pending_approval" || r.status === "analyzing");
+        if (active) targetId = active.id;
+      }
     }
 
-    await this.addLog(targetId, "User approved plan. Starting code generation and git operations...", "info", "approved");
+    if (!targetId) {
+      return { success: true, message: "Boss, abhi koi pending plan nahi hai. Agar aap koi naya feature ya fix chahein toh bol dijiye, main Coding Agent ko command de dungi." };
+    }
+
+    await this.addLog(targetId, "User approved plan via Live Voice. Applying changes...", "info", "approved");
     await requestsCol().doc(targetId).set({ status: "approved", updatedAt: Date.now() }, { merge: true });
     this.applyChanges(targetId).catch((e) => {
       console.error(`[CodeAgent] Applying changes failed for request ${targetId}:`, e);
       this.markFailed(targetId!, e?.message || String(e), "apply_phase");
     });
-    return { success: true, message: `Boss, Coding Agent task (${targetId}) approve kar diya gaya hai! Code likhkar branch me commit kiya ja raha hai.` };
+    return { success: true, message: `Boss, Coding Agent ka plan approve kar diya gaya hai! Code likhkar branch me commit aur apply kiya ja raha hai.` };
   }
 
   /**
@@ -427,8 +436,17 @@ Rules:
     let targetId = id;
     if (!targetId) {
       const pending = await this.getPendingRequest();
-      if (!pending) return { success: false, message: "Koi pending Coding Agent request nahi mili jise master me commit kiya ja sake." };
-      targetId = pending.id;
+      if (pending) {
+        targetId = pending.id;
+      } else {
+        const requests = await this.getRequests();
+        const active = requests.find((r) => r.status === "pending_approval" || r.status === "analyzing" || r.status === "approved" || r.status === "applying");
+        if (active) targetId = active.id;
+      }
+    }
+
+    if (!targetId) {
+      return { success: true, message: "Boss, abhi koi pending task nahi hai. Naya code task dene ke liye boliye 'Coding Agent ko bolo ki [task]'." };
     }
 
     await this.addLog(targetId, "Direct Commit to Main requested via Live Voice by Boss.", "info", "approved_main");
@@ -447,7 +465,7 @@ Rules:
 
     return {
       success: true,
-      message: `Boss, Coding Agent ko command de di hai! Code generate karke direct main origin branch me commit aur push kiya ja raha hai.`,
+      message: `Boss, Coding Agent ko command de di hai! Code compile aur direct main origin repository me commit aur push kiya ja raha hai.`,
     };
   }
 
@@ -455,13 +473,22 @@ Rules:
     let targetId = id;
     if (!targetId) {
       const pending = await this.getPendingRequest();
-      if (!pending) return { success: false, message: "Koi pending Coding Agent request nahi mili jise reject kiya ja sake." };
-      targetId = pending.id;
+      if (pending) {
+        targetId = pending.id;
+      } else {
+        const requests = await this.getRequests();
+        const active = requests.find((r) => r.status === "pending_approval" || r.status === "analyzing" || r.status === "applying");
+        if (active) targetId = active.id;
+      }
     }
 
-    await this.addLog(targetId, "Plan denied by user.", "warn", "denied");
+    if (!targetId) {
+      return { success: true, message: "Boss, koi running task nahi tha, par maine Coding Agent ko idle state me confirm kar diya hai." };
+    }
+
+    await this.addLog(targetId, "Plan denied by user via voice.", "warn", "denied");
     await requestsCol().doc(targetId).set({ status: "denied", updatedAt: Date.now() }, { merge: true });
-    return { success: true, message: `Boss, Coding Agent task (${targetId}) reject/cancel kar diya gaya hai.` };
+    return { success: true, message: `Boss, Coding Agent ka task reject/cancel kar diya gaya hai.` };
   }
 
   /** Stops and cancels an in-progress coding agent task */
@@ -470,8 +497,11 @@ Rules:
     if (!targetId) {
       const requests = await this.getRequests();
       const active = requests.find((r) => r.status === "analyzing" || r.status === "applying" || r.status === "pending_approval");
-      if (!active) return { success: false, message: "Koi active running Coding Agent task nahi mila." };
-      targetId = active.id;
+      if (active) targetId = active.id;
+    }
+
+    if (!targetId) {
+      return { success: true, message: "Boss, Coding Agent abhi idle hai. Koi active task running nahi tha." };
     }
 
     await this.addLog(targetId, "⏹️ Task stopped and cancelled by user.", "warn", "stopped");
@@ -483,7 +513,7 @@ Rules:
       },
       { merge: true }
     );
-    return { success: true, message: `Boss, Coding Agent task (${targetId}) stop kar diya gaya hai.` };
+    return { success: true, message: `Boss, Coding Agent ka running task stop aur cancel kar diya gaya hai.` };
   }
 
   /**
