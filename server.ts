@@ -576,8 +576,8 @@ async function startServer() {
       if (!instruction || !String(instruction).trim()) {
         return res.status(400).json({ error: "instruction_required" });
       }
-      const id = await codeAgentService.createRequest(String(instruction));
-      res.json({ ok: true, id });
+      const created = await codeAgentService.createRequest(String(instruction));
+      res.json({ ok: true, id: created.id });
     } catch (e: any) {
       res.status(500).json({ error: e?.message || "failed_to_create_request" });
     }
@@ -4623,7 +4623,8 @@ ${instruction}
 
 Please review the codebase, diagnose the root cause, fix the issue with proper error handling/fallbacks, and propose the changes.`;
 
-                    const reqId = await codeAgentService.createRequest(fullInstruction);
+                    const req = await codeAgentService.createRequest(fullInstruction, problemTitle || "Bug Fix Request");
+                    const reqId = req.id;
                     if (errorDetails) {
                       await codeAgentService.addLog(reqId, `Bug Report Context: ${errorDetails}`, "warn", "bug_report");
                     }

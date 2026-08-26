@@ -1,7 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import { db } from "./firebaseAdmin";
 import { githubService } from "./githubService";
-import { sendWhatsAppUnified } from "./whatsappService";
 
 // ---------------------------------------------------------------------------
 // Coding agent: DK gives an instruction (voice or dashboard) → agent analyzes
@@ -159,6 +158,9 @@ export interface CodeAgentLog {
 export interface CodeAgentRequest {
   id: string;
   instruction: string;
+  problemTitle?: string;
+  type?: string;
+  createdBy?: string;
   status: RequestStatus;
   createdAt: number;
   updatedAt: number;
@@ -220,6 +222,8 @@ async function callModel(prompt: string, id?: string, service?: CodeAgentService
 }
 
 class CodeAgentService {
+  private inMemoryCache = new Map<string, CodeAgentRequest>();
+
   /** Appends a structured log event to the request document */
   public async addLog(id: string, message: string, level: "info" | "warn" | "error" | "success" = "info", stage?: string) {
     try {
@@ -240,35 +244,59 @@ class CodeAgentService {
   }
 
   /** Kicks off a new request: creates the Firestore doc, then analyzes in the background. */
-  public async createRequest(instruction: string): Promise<string> {
+  public async createRequest(
+    instructionOrTitle: string,
+    instructionText?: string,
+    type: string = "feature",
+    createdBy: string = "DK"
+  ): Promise<CodeAgentRequest> {
     const id = `req_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    let title = "Coding Task";
+    let finalInstruction = instructionOrTitle;
+
+    if (instructionText && instructionText.trim()) {
+      title = instructionOrTitle.trim();
+      finalInstruction = instructionText.trim();
+    } else if (instructionOrTitle.length > 60) {
+      title = instructionOrTitle.slice(0, 60) + "...";
+    } else {
+      title = instructionOrTitle;
+    }
+
     const initialLog: CodeAgentLog = {
       timestamp: Date.now(),
       level: "info",
-      message: `Request created for task: "${instruction}"`,
+      message: `Request created for task: "${title}"`,
       stage: "init",
     };
     const request: CodeAgentRequest = {
       id,
-      instruction,
+      instruction: finalInstruction,
+      problemTitle: title,
+      type,
+      createdBy,
       status: "analyzing",
       createdAt: Date.now(),
       updatedAt: Date.now(),
       logs: [initialLog],
     };
-    await requestsCol().doc(id).set(request);
-    this.analyzeAndPlan(id, instruction).catch((e) => {
+
+    this.inMemoryCache.set(id, request);
+    await requestsCol().doc(id).set(request).catch((err) => {
+      console.warn("[CodeAgent] Firestore initial save error, using in-memory cache:", err?.message || err);
+    });
+
+    this.analyzeAndPlan(id, finalInstruction).catch((e) => {
       console.error(`[CodeAgent] Analysis failed for request ${id}:`, e);
       this.markFailed(id, e?.message || String(e), "analysis_phase");
     });
-    return id;
+    return request;
   }
 
   /** Retries a failed or stalled request from scratch */
   public async retry(id: string): Promise<CodeAgentRequest> {
-    const doc = await requestsCol().doc(id).get();
-    if (!doc.exists) throw new Error("Request not found");
-    const request = doc.data() as CodeAgentRequest;
+    const request = await this.getRequest(id);
+    if (!request) throw new Error("Request not found");
 
     await this.addLog(id, "🔄 Retry initiated by user. Restarting codebase analysis...", "info", "retry");
     await requestsCol().doc(id).set(
@@ -278,7 +306,7 @@ class CodeAgentService {
         updatedAt: Date.now(),
       },
       { merge: true }
-    );
+    ).catch(() => {});
 
     this.analyzeAndPlan(id, request.instruction).catch((e) => {
       console.error(`[CodeAgent] Retry analysis failed for request ${id}:`, e);
@@ -291,9 +319,8 @@ class CodeAgentService {
 
   /** Stage 1: analyze and generate a plan. */
   private async analyzeAndPlan(id: string, instruction: string) {
-    const doc = await requestsCol().doc(id).get();
-    if (!doc.exists) return;
-    const request = doc.data() as CodeAgentRequest;
+    const request = await this.getRequest(id);
+    if (!request) return;
 
     await this.addLog(id, "Scanning GitHub repository tree for candidate code files...", "info", "repo_scan");
     const allFiles = await githubService.listRepoFiles();
@@ -351,10 +378,11 @@ Rules:
       "plan_ready"
     );
 
-    await requestsCol().doc(id).set(
-      { plan, status: "pending_approval", updatedAt: Date.now() },
-      { merge: true }
-    );
+    const updatedData = { plan, status: "pending_approval" as RequestStatus, updatedAt: Date.now() };
+    if (this.inMemoryCache.has(id)) {
+      Object.assign(this.inMemoryCache.get(id)!, updatedData);
+    }
+    await requestsCol().doc(id).set(updatedData, { merge: true }).catch(() => {});
 
     await this.notifyOwner(id, plan, request.instruction);
   }
@@ -371,6 +399,7 @@ Rules:
       `Files:\n${fileLines}\n\n` +
       `Approve karne ke liye "yes" ya "ok" reply karo. Kuch aur likha to deny ho jayega.`;
     try {
+      const { sendWhatsAppUnified } = await import("./whatsappService");
       const res = await sendWhatsAppUnified(ownerPhone, text);
       if (res.success) {
         await this.addLog(id, `Notification sent to owner's WhatsApp (${res.via || "WhatsApp"}).`, "info", "whatsapp_notice");
@@ -383,24 +412,97 @@ Rules:
   }
 
   private async markFailed(id: string, error: string, stage?: string) {
+    const current = this.inMemoryCache.get(id);
+    if (current && (current.status === "denied" || current.status === "completed")) {
+      return;
+    }
     await this.addLog(id, `❌ Task failed: ${error}`, "error", stage || "failed");
-    await requestsCol().doc(id).set({ status: "failed", error, updatedAt: Date.now() }, { merge: true });
+    const failedData = { status: "failed" as RequestStatus, error, updatedAt: Date.now() };
+    if (this.inMemoryCache.has(id)) {
+      Object.assign(this.inMemoryCache.get(id)!, failedData);
+    }
+    await requestsCol().doc(id).set(failedData, { merge: true }).catch(() => {});
   }
 
   public async getRequests(): Promise<CodeAgentRequest[]> {
-    const snap = await requestsCol().orderBy("createdAt", "desc").limit(30).get();
-    return snap.docs.map((d) => d.data() as CodeAgentRequest);
+    try {
+      const snap = await requestsCol().orderBy("createdAt", "desc").limit(30).get();
+      const list = snap.docs.map((d) => d.data() as CodeAgentRequest);
+      list.forEach((r) => this.inMemoryCache.set(r.id, r));
+      return list;
+    } catch (err: any) {
+      console.warn("[CodeAgent] getRequests index query failed, falling back to memory sort:", err?.message || err);
+      try {
+        const snap = await requestsCol().limit(50).get();
+        const list = snap.docs
+          .map((d) => d.data() as CodeAgentRequest)
+          .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        list.forEach((r) => this.inMemoryCache.set(r.id, r));
+        return list;
+      } catch (fallbackErr) {
+        return Array.from(this.inMemoryCache.values()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      }
+    }
   }
 
   public async getRequest(id: string): Promise<CodeAgentRequest | null> {
-    const doc = await requestsCol().doc(id).get();
-    return doc.exists ? (doc.data() as CodeAgentRequest) : null;
+    try {
+      const doc = await requestsCol().doc(id).get();
+      if (doc.exists) {
+        const req = doc.data() as CodeAgentRequest;
+        this.inMemoryCache.set(req.id, req);
+        return req;
+      }
+    } catch (err) {
+      console.warn("[CodeAgent] getRequest Firestore error:", err);
+    }
+    return this.inMemoryCache.get(id) || null;
   }
 
   public async getPendingRequest(): Promise<CodeAgentRequest | null> {
-    const snap = await requestsCol().where("status", "==", "pending_approval").orderBy("createdAt", "desc").limit(1).get();
-    if (snap.empty) return null;
-    return snap.docs[0].data() as CodeAgentRequest;
+    try {
+      const snap = await requestsCol()
+        .where("status", "==", "pending_approval")
+        .orderBy("createdAt", "desc")
+        .limit(1)
+        .get();
+      if (!snap.empty) {
+        const req = snap.docs[0].data() as CodeAgentRequest;
+        this.inMemoryCache.set(req.id, req);
+        return req;
+      }
+      return null;
+    } catch (err: any) {
+      console.warn("[CodeAgent] getPendingRequest query failed (composite index missing). Self-healing with fallback query:", err?.message || err);
+      try {
+        const snap = await requestsCol().where("status", "==", "pending_approval").limit(10).get();
+        if (!snap.empty) {
+          const sorted = snap.docs
+            .map((d) => d.data() as CodeAgentRequest)
+            .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+          this.inMemoryCache.set(sorted[0].id, sorted[0]);
+          return sorted[0];
+        }
+      } catch {
+        try {
+          const snap = await requestsCol().limit(30).get();
+          const pending = snap.docs
+            .map((d) => d.data() as CodeAgentRequest)
+            .filter((r) => r.status === "pending_approval")
+            .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+          if (pending.length > 0) {
+            this.inMemoryCache.set(pending[0].id, pending[0]);
+            return pending[0];
+          }
+        } catch {
+          const cached = Array.from(this.inMemoryCache.values())
+            .filter((r) => r.status === "pending_approval")
+            .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+          if (cached.length > 0) return cached[0];
+        }
+      }
+      return null;
+    }
   }
 
   public async approve(id?: string): Promise<{ success: boolean; message: string }> {
@@ -412,7 +514,11 @@ Rules:
     }
 
     await this.addLog(targetId, "User approved plan. Starting code generation and git operations...", "info", "approved");
-    await requestsCol().doc(targetId).set({ status: "approved", updatedAt: Date.now() }, { merge: true });
+    const updatedData = { status: "approved" as RequestStatus, updatedAt: Date.now() };
+    if (this.inMemoryCache.has(targetId)) {
+      Object.assign(this.inMemoryCache.get(targetId)!, updatedData);
+    }
+    await requestsCol().doc(targetId).set(updatedData, { merge: true }).catch(() => {});
     this.applyChanges(targetId).catch((e) => {
       console.error(`[CodeAgent] Applying changes failed for request ${targetId}:`, e);
       this.markFailed(targetId!, e?.message || String(e), "apply_phase");
@@ -432,11 +538,14 @@ Rules:
     }
 
     await this.addLog(targetId, "Direct Commit to Main requested via Live Voice by Boss.", "info", "approved_main");
-    await requestsCol().doc(targetId).set({ status: "applying", updatedAt: Date.now() }, { merge: true });
+    const updatedData = { status: "applying" as RequestStatus, updatedAt: Date.now() };
+    if (this.inMemoryCache.has(targetId)) {
+      Object.assign(this.inMemoryCache.get(targetId)!, updatedData);
+    }
+    await requestsCol().doc(targetId).set(updatedData, { merge: true }).catch(() => {});
 
     (async () => {
       try {
-        await this.generateDiffPreview(targetId!);
         const result = await this.pushToMain(targetId!);
         await this.addLog(targetId!, `Successfully committed directly to main origin: ${result.commitUrl}`, "success", "completed");
       } catch (err: any) {
@@ -460,7 +569,11 @@ Rules:
     }
 
     await this.addLog(targetId, "Plan denied by user.", "warn", "denied");
-    await requestsCol().doc(targetId).set({ status: "denied", updatedAt: Date.now() }, { merge: true });
+    const updatedData = { status: "denied" as RequestStatus, updatedAt: Date.now() };
+    if (this.inMemoryCache.has(targetId)) {
+      Object.assign(this.inMemoryCache.get(targetId)!, updatedData);
+    }
+    await requestsCol().doc(targetId).set(updatedData, { merge: true }).catch(() => {});
     return { success: true, message: `Boss, Coding Agent task (${targetId}) reject/cancel kar diya gaya hai.` };
   }
 
@@ -475,14 +588,15 @@ Rules:
     }
 
     await this.addLog(targetId, "⏹️ Task stopped and cancelled by user.", "warn", "stopped");
-    await requestsCol().doc(targetId).set(
-      {
-        status: "denied",
-        error: "Task was manually stopped by user.",
-        updatedAt: Date.now(),
-      },
-      { merge: true }
-    );
+    const updatedData = {
+      status: "denied" as RequestStatus,
+      error: "Task was manually stopped by user.",
+      updatedAt: Date.now(),
+    };
+    if (this.inMemoryCache.has(targetId)) {
+      Object.assign(this.inMemoryCache.get(targetId)!, updatedData);
+    }
+    await requestsCol().doc(targetId).set(updatedData, { merge: true }).catch(() => {});
     return { success: true, message: `Boss, Coding Agent task (${targetId}) stop kar diya gaya hai.` };
   }
 
@@ -661,6 +775,7 @@ Return ONLY the complete updated source code.`;
 
     const ownerPhone = process.env.OWNER_WHATSAPP_NUMBER;
     if (ownerPhone) {
+      const { sendWhatsAppUnified } = await import("./whatsappService");
       await sendWhatsAppUnified(ownerPhone, `✅ Changes ready for review:\n${prUrl}\n\nClick "Push to main origin" in Dashboard to commit directly.`)
         .catch((e) => console.error("[CodeAgent] Failed to send completion WhatsApp message:", e));
     }
@@ -696,7 +811,7 @@ ${original ? `Current Code:\n${original}` : "New File"}`;
       });
     }
 
-    await requestsCol().doc(id).set({ generatedChanges: changes, updatedAt: Date.now() }, { merge: true });
+    await requestsCol().doc(id).set({ generatedChanges: changes, updatedAt: Date.now() }, { merge: true }).catch(() => {});
     return changes;
   }
 
@@ -718,7 +833,7 @@ ${original ? `Current Code:\n${original}` : "New File"}`;
         updatedAt: Date.now(),
       },
       { merge: true }
-    );
+    ).catch(() => {});
 
     // Re-run background analysis with refinement
     this.analyzeAndPlan(id, updatedInstruction).catch(async (e) => {
@@ -773,10 +888,10 @@ Provide a concise, direct answer in friendly conversational Hindi/Hinglish:
    * Cleans unused imports, dead comments, and formats codebase.
    */
   public async runCodebaseCleanup(): Promise<{ success: boolean; taskId: string; summary: string }> {
-    const taskId = await this.createRequest("Run full codebase health cleanup: optimize imports, remove dead debugging debris, ensure clean formatting and syntax safety.");
+    const task = await this.createRequest("Run full codebase health cleanup: optimize imports, remove dead debugging debris, ensure clean formatting and syntax safety.");
     return {
       success: true,
-      taskId,
+      taskId: task.id,
       summary: "Autonomous codebase cleanup task created and initiated.",
     };
   }
@@ -819,10 +934,11 @@ Provide a concise, direct answer in friendly conversational Hindi/Hinglish:
         updatedAt: Date.now(),
       },
       { merge: true }
-    );
+    ).catch(() => {});
 
     const ownerPhone = process.env.OWNER_WHATSAPP_NUMBER;
     if (ownerPhone) {
+      const { sendWhatsAppUnified } = await import("./whatsappService");
       await sendWhatsAppUnified(ownerPhone, `🚀 Successfully committed changes directly to origin/${baseBranch}:\n${commitUrl}`)
         .catch((e) => console.error("[CodeAgent] Failed to send pushToMain WhatsApp message:", e));
     }
