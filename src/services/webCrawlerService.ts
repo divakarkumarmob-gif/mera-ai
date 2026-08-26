@@ -8,12 +8,32 @@ import { db } from "./firebaseAdmin";
 // 1. Robots.txt compliance checker & rate limiter.
 // 2. High-fidelity HTML-to-Markdown cleaner (strips ads, cookies, nav, footers).
 // 3. Multi-page deep crawler (BFS queue, same-domain filter, max-depth).
-// 4. AI LLM Q&A & Insight Engine (Gemini 2.5/3.5/3.6 Flash fallback chain).
+// 4. AI LLM Q&A & Insight Engine (Gemini 3.6/3.5/3.1 Flash fallback chain).
 // 5. Structured JSON extraction for e-commerce, articles, contacts, specs.
 // 6. RAG Semantic Chunking for large sites.
 // ---------------------------------------------------------------------------
 
-const MODEL_CHAIN = ["gemini-2.5-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro"];
+const MODEL_CHAIN = [
+  "gemini-3.6-flash",
+  "gemini-3.5-flash",
+  "gemini-3.5-flash-lite",
+  "gemini-3.1-flash-lite",
+  "gemini-2.5-flash",
+];
+
+// Map Grounding Chain: 3.1 flash lite -> 2.5 flash -> 2.5 flash lite -> 2.0 flash
+const MAP_GROUNDING_CHAIN = [
+  "gemini-3.1-flash-lite",
+  "gemini-2.5-flash",
+  "gemini-2.5-flash-lite",
+  "gemini-2.0-flash",
+];
+
+// Search Grounding Chain: 2.5 flash -> 2.0 flash
+const SEARCH_GROUNDING_CHAIN = [
+  "gemini-2.5-flash",
+  "gemini-2.0-flash",
+];
 
 export interface CrawledPageMeta {
   title: string;
@@ -664,7 +684,8 @@ RETURN ONLY VALID JSON (no backticks, no explanatory text, just raw JSON):`;
 
     const ai = new GoogleGenAI({ apiKey });
 
-    for (const model of MODEL_CHAIN) {
+    for (let i = 0; i < MODEL_CHAIN.length; i++) {
+      const model = MODEL_CHAIN[i];
       try {
         const resp = await ai.models.generateContent({
           model,
@@ -672,11 +693,104 @@ RETURN ONLY VALID JSON (no backticks, no explanatory text, just raw JSON):`;
         });
         const text = resp.text;
         if (text && text.trim()) return text;
+        console.warn(`[WebCrawler] ${model} returned empty response, trying next in fallback chain...`);
       } catch (err: any) {
-        console.warn(`[WebCrawler] Model ${model} failed: ${err?.message || err}`);
+        const errMsg = err?.message || String(err);
+        const is503 = errMsg.includes("503") || errMsg.includes("UNAVAILABLE") || errMsg.includes("high demand");
+        console.warn(`[WebCrawler] Model ${model} failed (${errMsg}). Switching to next fallback...`);
+        if (i < MODEL_CHAIN.length - 1) {
+          const delayMs = is503 ? 1500 : 300;
+          await new Promise((r) => setTimeout(r, delayMs));
+        }
       }
     }
+    console.error("[WebCrawler] ❌ All models in the fallback chain failed.");
     return null;
+  }
+
+  /**
+   * Google Search Grounding with Live Citations & Facts
+   * Chain: gemini-2.5-flash -> gemini-2.0-flash
+   */
+  public async executeSearchGrounding(query: string): Promise<{
+    answer: string;
+    sources: Array<{ title: string; url: string }>;
+    modelUsed: string;
+  }> {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) throw new Error("GEMINI_API_KEY not configured in environment");
+
+    const ai = new GoogleGenAI({ apiKey });
+
+    for (const model of SEARCH_GROUNDING_CHAIN) {
+      try {
+        const resp = await ai.models.generateContent({
+          model,
+          contents: query,
+          config: {
+            tools: [{ googleSearch: {} }],
+          },
+        });
+        const text = resp.text;
+        if (text && text.trim()) {
+          const sources: Array<{ title: string; url: string }> = [];
+          const groundingMetadata = (resp as any).candidates?.[0]?.groundingMetadata;
+          if (groundingMetadata?.groundingChunks) {
+            for (const chunk of groundingMetadata.groundingChunks) {
+              if (chunk.web?.uri) {
+                sources.push({
+                  title: chunk.web.title || "Web Source",
+                  url: chunk.web.uri,
+                });
+              }
+            }
+          }
+          return { answer: text, sources, modelUsed: model };
+        }
+      } catch (err: any) {
+        console.warn(`[SearchGrounding] Model ${model} failed: ${err?.message || err}`);
+      }
+    }
+    throw new Error("Search Grounding failed across all fallback models.");
+  }
+
+  /**
+   * Google Map & Location Grounding (Places, Directions & Geo-Intelligence)
+   * Chain: gemini-3.1-flash-lite -> gemini-2.5-flash -> gemini-2.5-flash-lite -> gemini-2.0-flash
+   */
+  public async executeMapGrounding(locationQuery: string): Promise<{
+    answer: string;
+    modelUsed: string;
+  }> {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) throw new Error("GEMINI_API_KEY not configured in environment");
+
+    const ai = new GoogleGenAI({ apiKey });
+
+    const prompt = `You are Friday's Location, Maps & Geospatial Intelligence Specialist.
+Target Location Query: "${locationQuery}"
+
+Provide a detailed, precise location guide including:
+1. Exact area/coordinates context & landmarks.
+2. Route guidance, navigation tips, and distances.
+3. Operating hours, popular spots, and nearby essentials.
+4. Clean bullet summary in friendly Hinglish/English.`;
+
+    for (const model of MAP_GROUNDING_CHAIN) {
+      try {
+        const resp = await ai.models.generateContent({
+          model,
+          contents: prompt,
+        });
+        const text = resp.text;
+        if (text && text.trim()) {
+          return { answer: text, modelUsed: model };
+        }
+      } catch (err: any) {
+        console.warn(`[MapGrounding] Model ${model} failed: ${err?.message || err}`);
+      }
+    }
+    throw new Error("Map Grounding failed across all fallback models.");
   }
 
   private stripTags(html: string): string {
