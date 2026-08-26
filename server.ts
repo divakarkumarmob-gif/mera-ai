@@ -1974,6 +1974,17 @@ HOW TO READ MESSAGES:
         // Public API tools — Batch 1 (no API key required)
         // ---------------------------------------------------------------
         {
+          name: "get_current_time",
+          description: "MANDATORY Real-Time Live Clock: Get the exact current Indian Standard Time (IST), exact hour, minute, second, day of the week, date, month, and year. ALWAYS call this tool whenever DK asks 'abhi time kya hua', 'kya time ho raha hai', 'kya baj raha hai', 'aaj kaun sa din hai', 'date kya hai', 'time batao', or asks the current time in any city/timezone. NEVER refuse time questions.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              timezoneOrCity: { type: "STRING", description: "Optional city or timezone (default 'Asia/Kolkata' for Indian Standard Time)" },
+            },
+            required: [],
+          },
+        },
+        {
           name: "get_weather",
           description: "Get current weather and today's forecast for any place. Use for 'aaj mausam kaisa hai', 'weather batao', etc.",
           parameters: {
@@ -4200,6 +4211,18 @@ HOW TO READ MESSAGES:
                   } catch (e: any) {
                     result = { success: false, message: `Wikipedia fetch fail hui: ${e?.message || e}` };
                   }
+                } else if (call.name === "get_current_time" || call.name === "get_time" || call.name === "get_live_clock") {
+                  const now = new Date();
+                  const istTime = now.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true });
+                  const istDate = now.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", weekday: "long", day: "numeric", month: "long", year: "numeric" });
+                  result = {
+                    success: true,
+                    currentTime: istTime,
+                    currentDate: istDate,
+                    timezone: "Asia/Kolkata (Indian Standard Time)",
+                    timestamp: now.getTime(),
+                    message: `Boss, abhi theek ${istTime} ho rahe hain, aaj ${istDate} hai.`,
+                  };
                 } else if (call.name === "get_wikiquote_summary") {
                   const { person } = call.args || {};
                   try {
