@@ -2967,6 +2967,30 @@ HOW TO READ MESSAGES:
           },
         },
         {
+          name: "search_telegram_media_vault",
+          description: "Search and retrieve full intelligence about any photo, video, PDF document, voice recording, or file shared in Telegram Media Groups or chats (finds exact date, group location, file size, duration, OCR text, and visual breakdown). Call when DK says 'Media group me jo invoice/photo aayi thi wo kahan hai?', 'Kal ka video kitne MB ka tha?', 'Voice note me kya bola gaya tha?', 'Telegram media search karo'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              query: { type: "STRING", description: "Search query (e.g. 'electricity bill', 'React video', '24 august invoice', 'voice recording')" },
+              mediaType: { type: "STRING", description: "Optional media type filter: 'photo', 'video', 'document', 'voice', 'audio', or 'all'" },
+            },
+            required: ["query"],
+          },
+        },
+        {
+          name: "get_telegram_user_or_group_summary",
+          description: "Retrieve comprehensive conversational history, username profile, and summary of what was discussed with a specific Telegram user (1v1 chat) or inside a Telegram group. Call when DK says 'Rahul ke sath Telegram pe kya baat hui thi?', 'DK Project group me kya chal raha hai?', 'Telegram group summary batao', 'Telegram user ka update do'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              target: { type: "STRING", description: "Username (e.g. '@rahul_dev'), Person Name (e.g. 'Rahul'), or Group Name (e.g. 'DK Project Group')" },
+              isGroup: { type: "BOOLEAN", description: "Set to true if target is a group, false if user" },
+            },
+            required: ["target"],
+          },
+        },
+        {
           name: "get_whatsapp_photo_or_doc_info",
           description: "Analyze and explain what is inside the latest Photo, Image, or Document (PDF) received on WhatsApp (visual scene, people, objects, OCR text, key numbers). Call when DK says 'Photo me kya hai?', 'PDF me kya likha hai?', 'WhatsApp pe jo photo bheja hai dekho'.",
           parameters: {
@@ -4869,6 +4893,47 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                     }
                   } catch (e: any) {
                     result = { success: false, message: `Deep crawling fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "search_telegram_media_vault") {
+                  const { query, mediaType } = call.args || {};
+                  try {
+                    const { telegramBotService } = await import("./src/services/telegramBotService");
+                    const searchRes = await telegramBotService.searchMediaVault(String(query || ""), {
+                      mediaType: mediaType ? String(mediaType) : undefined,
+                    });
+                    result = {
+                      success: searchRes.totalCount > 0,
+                      totalFound: searchRes.totalCount,
+                      summary: searchRes.summary,
+                      message: searchRes.summary,
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `Telegram media vault search fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_telegram_user_or_group_summary") {
+                  const { target, isGroup } = call.args || {};
+                  try {
+                    const { telegramBotService } = await import("./src/services/telegramBotService");
+                    const targetStr = String(target || "");
+                    const isGroupTarget = isGroup === true || /group|grp/i.test(targetStr);
+                    
+                    if (isGroupTarget) {
+                      const grpRes = await telegramBotService.getTelegramGroupSummary(targetStr);
+                      result = {
+                        success: grpRes.found,
+                        summary: grpRes.summary,
+                        message: grpRes.summary,
+                      };
+                    } else {
+                      const userRes = await telegramBotService.getTelegramUserSummary(targetStr);
+                      result = {
+                        success: userRes.found,
+                        summary: userRes.summary,
+                        message: userRes.summary,
+                      };
+                    }
+                  } catch (e: any) {
+                    result = { success: false, message: `Telegram summary fetch fail hua: ${e?.message || e}` };
                   }
                 } else if (call.name === "get_whatsapp_photo_or_doc_info") {
                   const { query } = call.args || {};

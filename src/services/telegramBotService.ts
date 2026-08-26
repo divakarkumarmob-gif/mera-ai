@@ -19,23 +19,32 @@ export interface TelegramUserProfile {
   userId?: number;
   chatId: number;
   username?: string;
+  name?: string;
   firstName?: string;
   lastName?: string;
   fullName: string;
   customAlias?: string;
   customNotes?: string;
   lastSeenAt: number;
+  lastSeenStr?: string;
   lastMessage?: string;
+  chatSummary?: string;
+  recentMessages?: Array<{ text: string; sender: string; timestamp: number; timeStr: string }>;
   groups?: string[];
 }
 
 export interface TelegramGroupProfile {
   groupId: number;
+  groupName?: string;
   title: string;
   type: "group" | "supergroup" | "channel";
   username?: string;
   lastSeenAt: number;
+  lastSeenStr?: string;
   lastMessage?: string;
+  groupSummary?: string;
+  topicHighlights?: string[];
+  recentMessages?: Array<{ text: string; sender: string; timestamp: number; timeStr: string }>;
   activeMembers?: Array<{ id: number; name: string; username?: string }>;
 }
 
@@ -55,6 +64,32 @@ export interface TelegramMessageLog {
   botReply?: string;
 }
 
+export interface TelegramMediaRecord {
+  id: string;
+  fileId: string;
+  fileName?: string;
+  mediaType: "photo" | "video" | "audio" | "voice" | "document" | "note";
+  chatId: number;
+  chatTitle?: string;
+  isGroup: boolean;
+  senderId: number;
+  senderName: string;
+  senderUsername?: string;
+  fileSizeFormatted: string; // e.g. "4.2 MB", "850 KB"
+  fileSizeBytes: number;
+  durationFormatted?: string; // e.g. "2m 15s"
+  durationSeconds?: number;
+  dimensions?: string; // e.g. "1920x1080"
+  mimeType: string;
+  caption?: string;
+  analysisSummary: string;
+  ocrText?: string;
+  keyTopics: string[];
+  timestamp: number;
+  dateStr: string; // e.g. "26 Aug 2026, 12:05 PM"
+  messageId: number;
+}
+
 class TelegramBotService {
   private token: string = "";
   private botUsername: string | null = null;
@@ -63,6 +98,9 @@ class TelegramBotService {
   private offset: number = 0;
   private lastActive: number | null = null;
   private messageCallback: ((msg: { sender: string; text: string; time: string; chatId: number }) => void) | null = null;
+  private mediaVaultCache: Map<string, TelegramMediaRecord> = new Map();
+  private userProfileCache: Map<number, TelegramUserProfile> = new Map();
+  private groupProfileCache: Map<number, TelegramGroupProfile> = new Map();
 
   // Multi-tier model fallback chain
   private static readonly MODEL_FALLBACK_CHAIN = [
@@ -138,10 +176,178 @@ class TelegramBotService {
       const me = await this.callApi("getMe");
       this.botUsername = me.username;
       console.log(`[TelegramBot] Connected as @${this.botUsername} (ID: ${me.id})`);
+      await this.registerBotCommands();
       this.startPolling();
     } catch (e: any) {
       console.error("[TelegramBot] Failed to connect to Telegram API:", e?.message || e);
     }
+  }
+
+  /**
+   * Registers the bot Menu commands with Telegram so clicking the left Menu button (/)
+   * shows all modes and commands cleanly.
+   */
+  public async registerBotCommands(): Promise<void> {
+    try {
+      await this.callApi("setMyCommands", {
+        commands: [
+          { command: "start", description: "⚡ Start Friday Bot & Control Dashboard" },
+          { command: "1v1", description: "👤 Switch to 1v1 Private Direct Mode" },
+          { command: "private_group", description: "🔒 Private Secured Group Workspace" },
+          { command: "media_group", description: "📁 Media Vault & File Search Index" },
+          { command: "voice_group", description: "🎙️ Voice Notes & Audio Transcripts Hub" },
+          { command: "media_search", description: "🔍 Instant Search Photos, Videos & Files" },
+          { command: "vault_stats", description: "📊 View Media Vault Statistics" },
+        ],
+      });
+      console.log("[TelegramBot] ✅ Bot Menu Commands registered successfully with Telegram API.");
+    } catch (e: any) {
+      console.warn("[TelegramBot] Failed to register bot commands:", e?.message || e);
+    }
+  }
+
+  public formatBytes(bytes?: number): string {
+    if (!bytes || bytes <= 0) return "Unknown size";
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  }
+
+  public formatDuration(seconds?: number): string {
+    if (!seconds || seconds <= 0) return "0s";
+    const mins = Math.floor(seconds / 60);
+    const remSecs = seconds % 60;
+    if (mins === 0) return `${remSecs}s`;
+    return `${mins}m ${remSecs}s`;
+  }
+
+  /**
+   * Indexes an incoming media item (Photo, Video, Audio, Document, Note) into
+   * Firestore collection `telegram_media_vault` and in-memory cache for sub-second search.
+   */
+  public async indexMediaItem(record: Omit<TelegramMediaRecord, "id">): Promise<TelegramMediaRecord> {
+    const id = `media_${record.chatId}_${record.messageId}_${Date.now()}`;
+    const fullRecord: TelegramMediaRecord = { ...record, id };
+
+    // Update in-memory cache
+    this.mediaVaultCache.set(id, fullRecord);
+
+    // Save to Firestore with timeout fallback
+    try {
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Firestore timeout")), 800));
+      await Promise.race([
+        db.collection("telegram_media_vault").doc(id).set(fullRecord),
+        timeoutPromise,
+      ]);
+    } catch (e) {
+      // In-memory cache is already updated
+    }
+    return fullRecord;
+  }
+
+  /**
+   * Searches the Media Vault for any photo, video, PDF, audio, or note by keyword, topic, or date.
+   */
+  public async searchMediaVault(
+    query: string,
+    options?: { mediaType?: string; chatId?: number; limit?: number }
+  ): Promise<{
+    results: TelegramMediaRecord[];
+    summary: string;
+    totalCount: number;
+  }> {
+    const qLower = query.toLowerCase().trim();
+    const limit = options?.limit || 5;
+
+    let items: TelegramMediaRecord[] = Array.from(this.mediaVaultCache.values());
+
+    // If cache has few items, query Firestore with timeout
+    if (items.length < 5) {
+      try {
+        let snapQuery: any = db.collection("telegram_media_vault").orderBy("timestamp", "desc").limit(100);
+        if (options?.chatId) {
+          snapQuery = snapQuery.where("chatId", "==", options.chatId);
+        }
+        const timeoutPromise = new Promise<any>((_, reject) => setTimeout(() => reject(new Error("Firestore timeout")), 800));
+        const snap = await Promise.race([snapQuery.get(), timeoutPromise]);
+        snap.docs.forEach((doc: any) => {
+          const rec = doc.data() as TelegramMediaRecord;
+          this.mediaVaultCache.set(rec.id, rec);
+        });
+        items = Array.from(this.mediaVaultCache.values());
+      } catch (e) {
+        // Fall back gracefully to in-memory items
+      }
+    }
+
+    // Filter by mediaType if specified
+    if (options?.mediaType && options.mediaType !== "all") {
+      items = items.filter((item) => item.mediaType === options.mediaType);
+    }
+
+    // Filter by query keywords (File name, analysis summary, OCR text, key topics, sender)
+    if (qLower) {
+      const tokens = qLower.split(/\s+/).filter(Boolean);
+      items = items.filter((item) => {
+        const fullSearchBlob = `${item.fileName || ""} ${item.analysisSummary} ${item.ocrText || ""} ${item.caption || ""} ${item.senderName} ${item.mediaType} ${item.keyTopics.join(" ")} ${item.dateStr}`.toLowerCase();
+        return tokens.some((t) => fullSearchBlob.includes(t));
+      });
+    }
+
+    // Sort by most recent
+    items.sort((a, b) => b.timestamp - a.timestamp);
+    const topResults = items.slice(0, limit);
+
+    if (topResults.length === 0) {
+      return {
+        results: [],
+        summary: `Boss, "${query}" se match karta hua koi media (photo, video, PDF ya audio) nahi mila.`,
+        totalCount: 0,
+      };
+    }
+
+    let summaryText = `📁 *Media Vault Search Results for:* "${query}" (${topResults.length} found)\n\n`;
+    topResults.forEach((item, idx) => {
+      const typeIcon = item.mediaType === "photo" ? "🖼️" : item.mediaType === "video" ? "🎬" : item.mediaType === "document" ? "📄" : item.mediaType === "voice" ? "🎙️" : "🎵";
+      summaryText += `${idx + 1}. ${typeIcon} *${item.fileName || item.mediaType.toUpperCase()}*\n`;
+      summaryText += `   • 📍 Location: *${item.chatTitle || "Private Chat"}* (Sender: ${item.senderName})\n`;
+      summaryText += `   • 📅 Date: *${item.dateStr}*\n`;
+      summaryText += `   • 📏 Size: *${item.fileSizeFormatted}*${item.durationFormatted ? ` | ⏱️ Duration: *${item.durationFormatted}*` : ""}${item.dimensions ? ` | 📐 ${item.dimensions}` : ""}\n`;
+      summaryText += `   • 📝 Content / OCR: _${item.analysisSummary.slice(0, 180)}_\n\n`;
+    });
+
+    return {
+      results: topResults,
+      summary: summaryText.trim(),
+      totalCount: items.length,
+    };
+  }
+
+  /**
+   * Retrieves overall stats for the media vault.
+   */
+  public async getMediaVaultStats(chatId?: number): Promise<string> {
+    const items = Array.from(this.mediaVaultCache.values());
+    const filtered = chatId ? items.filter((i) => i.chatId === chatId) : items;
+
+    let photoCount = 0;
+    let videoCount = 0;
+    let docCount = 0;
+    let voiceCount = 0;
+    let audioCount = 0;
+    let totalBytes = 0;
+
+    filtered.forEach((i) => {
+      totalBytes += i.fileSizeBytes || 0;
+      if (i.mediaType === "photo") photoCount++;
+      else if (i.mediaType === "video") videoCount++;
+      else if (i.mediaType === "document") docCount++;
+      else if (i.mediaType === "voice") voiceCount++;
+      else if (i.mediaType === "audio") audioCount++;
+    });
+
+    return `📊 *Friday Media Vault Statistics:* ⚡\n\n• 🖼️ Photos / Images: *${photoCount}*\n• 🎬 Videos & Video Notes: *${videoCount}*\n• 📄 Documents & PDFs: *${docCount}*\n• 🎙️ Voice Recordings: *${voiceCount}*\n• 🎵 Audio Songs: *${audioCount}*\n• 💾 Total Media Size: *${this.formatBytes(totalBytes)}*\n• 📁 Total Items Cataloged: *${filtered.length}*\n\n_Aap kisi bhi photo, video ya PDF ke bare me Friday se bolkar ya likhkar poochh sakte hain!_`;
   }
 
   public stop(): void {
@@ -358,38 +564,63 @@ class TelegramBotService {
     try {
       const userId = Number(from.id);
       const fullName = `${from.first_name || ""} ${from.last_name || ""}`.trim() || "Telegram User";
-      const docRef = db.collection("telegramUsers").doc(String(userId));
-      const existing = await docRef.get();
-      const existingData = existing.exists ? (existing.data() as TelegramUserProfile) : null;
+      
+      let existingData: TelegramUserProfile | null = this.userProfileCache.get(userId) || null;
+      if (!existingData) {
+        try {
+          const docRef = db.collection("telegramUsers").doc(String(userId));
+          const snap = await Promise.race([docRef.get(), new Promise<any>((_, r) => setTimeout(() => r(new Error("Timeout")), 500))]);
+          if (snap?.exists) existingData = snap.data() as TelegramUserProfile;
+        } catch {}
+      }
 
       const groupsSet = new Set<string>(existingData?.groups || []);
       if (groupTitle) groupsSet.add(groupTitle);
 
-      const profile: Partial<TelegramUserProfile> = {
+      const recent = (existingData?.recentMessages || []).slice(-14);
+      if (lastText) {
+        recent.push({
+          text: lastText,
+          sender: fullName,
+          timestamp: Date.now(),
+          timeStr: new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
+        });
+      }
+
+      const cleanUsername = from.username ? String(from.username).toLowerCase().replace(/^@/, "") : existingData?.username || "";
+
+      const profile: TelegramUserProfile = {
         userId,
         chatId: directChatId || existingData?.chatId || userId,
+        username: cleanUsername,
+        name: fullName,
         firstName: from.first_name || existingData?.firstName || "",
         lastName: from.last_name || existingData?.lastName || "",
-        fullName: fullName || existingData?.fullName || "Telegram User",
+        fullName,
         lastSeenAt: Date.now(),
+        lastSeenStr: new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
         lastMessage: lastText ? lastText.substring(0, 300) : (existingData?.lastMessage || ""),
+        recentMessages: recent,
+        chatSummary: existingData?.chatSummary || `Conversation active with ${fullName} (@${cleanUsername || "user"}).`,
         groups: Array.from(groupsSet),
       };
 
-      if (from.username) {
-        profile.username = String(from.username).toLowerCase().replace(/^@/, "");
-      } else if (existingData?.username) {
-        profile.username = existingData.username;
-      }
+      if (existingData?.customAlias) profile.customAlias = existingData.customAlias;
+      if (existingData?.customNotes) profile.customNotes = existingData.customNotes;
 
-      if (existingData?.customAlias) {
-        profile.customAlias = existingData.customAlias;
-      }
-      if (existingData?.customNotes) {
-        profile.customNotes = existingData.customNotes;
-      }
+      // Update in-memory cache instantly
+      this.userProfileCache.set(userId, profile);
 
-      await docRef.set(profile, { merge: true });
+      // Persist with timeout
+      try {
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 800));
+        await Promise.race([db.collection("telegramUsers").doc(String(userId)).set(profile, { merge: true }), timeoutPromise]);
+      } catch {}
+
+      // Background AI Summary update when messages accumulate
+      if (recent.length >= 3 && (!existingData?.chatSummary || recent.length % 3 === 0)) {
+        this.updateUserChatSummaryBackground(userId, fullName, cleanUsername, recent).catch(() => {});
+      }
     } catch (e) {
       console.warn("[TelegramBot] Failed to save telegram user:", e);
     }
@@ -399,27 +630,49 @@ class TelegramBotService {
     if (!chat || !chat.id) return;
     try {
       const groupId = Number(chat.id);
-      const docRef = db.collection("telegramGroups").doc(String(groupId));
-      const existing = await docRef.get();
-      const existingData = existing.exists ? (existing.data() as TelegramGroupProfile) : null;
+      let existingData: TelegramGroupProfile | null = this.groupProfileCache.get(groupId) || null;
+      if (!existingData) {
+        try {
+          const docRef = db.collection("telegramGroups").doc(String(groupId));
+          const snap = await Promise.race([docRef.get(), new Promise<any>((_, r) => setTimeout(() => r(new Error("Timeout")), 500))]);
+          if (snap?.exists) existingData = snap.data() as TelegramGroupProfile;
+        } catch {}
+      }
 
       const membersMap = new Map<number, { id: number; name: string; username?: string }>();
       (existingData?.activeMembers || []).forEach((m) => membersMap.set(m.id, m));
 
+      const senderName = from?.first_name ? `${from.first_name || ""} ${from.last_name || ""}`.trim() : "Member";
       if (from && from.id) {
         membersMap.set(Number(from.id), {
           id: Number(from.id),
-          name: `${from.first_name || ""} ${from.last_name || ""}`.trim() || "Telegram User",
+          name: senderName,
           username: from.username ? String(from.username).toLowerCase().replace(/^@/, "") : undefined,
         });
       }
 
+      const recent = (existingData?.recentMessages || []).slice(-14);
+      if (lastText) {
+        recent.push({
+          text: lastText,
+          sender: senderName,
+          timestamp: Date.now(),
+          timeStr: new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
+        });
+      }
+
+      const groupTitle = chat.title || existingData?.title || "Telegram Group";
+
       const groupProfile: TelegramGroupProfile = {
         groupId,
-        title: chat.title || existingData?.title || "Telegram Group",
+        groupName: groupTitle,
+        title: groupTitle,
         type: chat.type || existingData?.type || "group",
         lastSeenAt: Date.now(),
+        lastSeenStr: new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
         lastMessage: lastText ? lastText.substring(0, 300) : (existingData?.lastMessage || ""),
+        recentMessages: recent,
+        groupSummary: existingData?.groupSummary || `Active group workspace: "${groupTitle}" with ${membersMap.size} members.`,
         activeMembers: Array.from(membersMap.values()).slice(0, 100),
       };
 
@@ -427,10 +680,220 @@ class TelegramBotService {
         groupProfile.username = String(chat.username).toLowerCase().replace(/^@/, "");
       }
 
-      await docRef.set(groupProfile, { merge: true });
+      // Update in-memory cache instantly
+      this.groupProfileCache.set(groupId, groupProfile);
+
+      // Persist with timeout
+      try {
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 800));
+        await Promise.race([db.collection("telegramGroups").doc(String(groupId)).set(groupProfile, { merge: true }), timeoutPromise]);
+      } catch {}
+
+      // Background AI Group Summary update
+      if (recent.length >= 3 && (!existingData?.groupSummary || recent.length % 3 === 0)) {
+        this.updateGroupSummaryBackground(groupId, groupTitle, recent).catch(() => {});
+      }
     } catch (e) {
       console.warn("[TelegramBot] Failed to save telegram group:", e);
     }
+  }
+
+  /**
+   * Background AI summarizer for 1v1 conversations.
+   */
+  private async updateUserChatSummaryBackground(
+    userId: number,
+    fullName: string,
+    username: string,
+    messages: Array<{ text: string; sender: string; timeStr: string }>
+  ): Promise<void> {
+    const key = process.env.GEMINI_API_KEY;
+    if (!key) return;
+    try {
+      const ai = new GoogleGenAI({ apiKey: key });
+      const prompt = `Summarize this 1-on-1 Telegram conversation between DK (Boss) and ${fullName} (@${username || "user"}).
+Recent Messages:
+${messages.map((m) => `[${m.timeStr}] ${m.sender}: ${m.text}`).join("\n")}
+
+Provide a clear 2-3 sentence executive summary of what was discussed, any decisions, questions asked, or action items:`;
+
+      const resp = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
+      });
+
+      const summary = resp.text?.trim();
+      if (summary) {
+        const user = this.userProfileCache.get(userId);
+        if (user) {
+          user.chatSummary = summary;
+          this.userProfileCache.set(userId, user);
+        }
+        await db.collection("telegramUsers").doc(String(userId)).set(
+          { chatSummary: summary, updatedAt: Date.now() },
+          { merge: true }
+        ).catch(() => {});
+      }
+    } catch (e) {
+      console.warn("[TelegramBot] Background user summary error:", e);
+    }
+  }
+
+  /**
+   * Background AI summarizer for Groups.
+   */
+  private async updateGroupSummaryBackground(
+    groupId: number,
+    groupTitle: string,
+    messages: Array<{ text: string; sender: string; timeStr: string }>
+  ): Promise<void> {
+    const key = process.env.GEMINI_API_KEY;
+    if (!key) return;
+    try {
+      const ai = new GoogleGenAI({ apiKey: key });
+      const prompt = `Summarize current activity in Telegram Group "${groupTitle}".
+Recent Messages:
+${messages.map((m) => `[${m.timeStr}] ${m.sender}: ${m.text}`).join("\n")}
+
+Provide a 2-4 sentence executive digest of main topics, project updates, member discussions, and decisions in this group:`;
+
+      const resp = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
+      });
+
+      const summary = resp.text?.trim();
+      if (summary) {
+        const grp = this.groupProfileCache.get(groupId);
+        if (grp) {
+          grp.groupSummary = summary;
+          this.groupProfileCache.set(groupId, grp);
+        }
+        await db.collection("telegramGroups").doc(String(groupId)).set(
+          { groupSummary: summary, updatedAt: Date.now() },
+          { merge: true }
+        ).catch(() => {});
+      }
+    } catch (e) {
+      console.warn("[TelegramBot] Background group summary error:", e);
+    }
+  }
+
+  /**
+   * Retrieves full intelligence and chat summary for a specific user by username or name.
+   */
+  public async getTelegramUserSummary(usernameOrName: string): Promise<{
+    found: boolean;
+    user?: TelegramUserProfile;
+    summary: string;
+  }> {
+    const clean = usernameOrName.toLowerCase().replace(/^@/, "").trim();
+    let users = Array.from(this.userProfileCache.values());
+
+    try {
+      const timeoutPromise = new Promise<any>((_, reject) => setTimeout(() => reject(new Error("Timeout")), 500));
+      const snap = await Promise.race([db.collection("telegramUsers").get(), timeoutPromise]);
+      if (snap && snap.docs) {
+        snap.docs.forEach((d: any) => {
+          const u = d.data() as TelegramUserProfile;
+          if (u.userId) this.userProfileCache.set(u.userId, u);
+        });
+        users = Array.from(this.userProfileCache.values());
+      }
+    } catch {}
+
+    const matched = users.find(
+      (u) =>
+        (u.username && u.username.toLowerCase() === clean) ||
+        (u.fullName && u.fullName.toLowerCase().includes(clean)) ||
+        (u.name && u.name.toLowerCase().includes(clean)) ||
+        (u.customAlias && u.customAlias.toLowerCase().includes(clean))
+    );
+
+    if (!matched) {
+      return {
+        found: false,
+        summary: `Boss, "${usernameOrName}" naam ka koi Telegram user record nahi mila.`,
+      };
+    }
+
+    let summaryText = `👤 *Telegram User Profile:* **${matched.fullName}**\n`;
+    summaryText += `• 🏷️ Username: \`@${matched.username || "Not Set"}\`\n`;
+    summaryText += `• 🆔 Chat ID: \`${matched.chatId}\`\n`;
+    summaryText += `• 🕒 Last Active: *${matched.lastSeenStr || "Recently"}*\n`;
+    summaryText += `• 💬 Latest Message: _"${matched.lastMessage || "N/A"}"_\n\n`;
+    summaryText += `📝 *Conversation Summary:*\n${matched.chatSummary || "No detailed summary available yet."}\n\n`;
+
+    if (matched.recentMessages && matched.recentMessages.length > 0) {
+      summaryText += `📜 *Recent Discussion History:*\n`;
+      matched.recentMessages.slice(-5).forEach((m) => {
+        summaryText += `• [${m.timeStr}] *${m.sender}:* ${m.text}\n`;
+      });
+    }
+
+    return {
+      found: true,
+      user: matched,
+      summary: summaryText.trim(),
+    };
+  }
+
+  /**
+   * Retrieves full intelligence and group summary for a specific group by name or ID.
+   */
+  public async getTelegramGroupSummary(groupNameOrId: string): Promise<{
+    found: boolean;
+    group?: TelegramGroupProfile;
+    summary: string;
+  }> {
+    const clean = groupNameOrId.toLowerCase().trim();
+    let groups = Array.from(this.groupProfileCache.values());
+
+    try {
+      const timeoutPromise = new Promise<any>((_, reject) => setTimeout(() => reject(new Error("Timeout")), 500));
+      const snap = await Promise.race([db.collection("telegramGroups").get(), timeoutPromise]);
+      if (snap && snap.docs) {
+        snap.docs.forEach((d: any) => {
+          const g = d.data() as TelegramGroupProfile;
+          if (g.groupId) this.groupProfileCache.set(g.groupId, g);
+        });
+        groups = Array.from(this.groupProfileCache.values());
+      }
+    } catch {}
+
+    const matched = groups.find(
+      (g) =>
+        String(g.groupId) === clean ||
+        (g.title && g.title.toLowerCase().includes(clean)) ||
+        (g.groupName && g.groupName.toLowerCase().includes(clean))
+    );
+
+    if (!matched) {
+      return {
+        found: false,
+        summary: `Boss, "${groupNameOrId}" naam ka koi Telegram Group record nahi mila.`,
+      };
+    }
+
+    let summaryText = `👥 *Telegram Group Intelligence:* **${matched.title}**\n`;
+    summaryText += `• 🆔 Group ID: \`${matched.groupId}\`\n`;
+    summaryText += `• 👥 Active Members: *${matched.activeMembers?.length || 0} members*\n`;
+    summaryText += `• 🕒 Last Activity: *${matched.lastSeenStr || "Recently"}*\n`;
+    summaryText += `• 💬 Latest Group Text: _"${matched.lastMessage || "N/A"}"_\n\n`;
+    summaryText += `📋 *Group Activity Summary:*\n${matched.groupSummary || "Group activity summary is updating."}\n\n`;
+
+    if (matched.recentMessages && matched.recentMessages.length > 0) {
+      summaryText += `📜 *Recent In-Group Messages:*\n`;
+      matched.recentMessages.slice(-5).forEach((m) => {
+        summaryText += `• [${m.timeStr}] *${m.sender}:* ${m.text}\n`;
+      });
+    }
+
+    return {
+      found: true,
+      group: matched,
+      summary: summaryText.trim(),
+    };
   }
 
   public async getAllTelegramUsers(): Promise<TelegramUserProfile[]> {
@@ -504,6 +967,71 @@ class TelegramBotService {
       console.warn("[TelegramBot] Failed to log message to Firestore:", e);
       return null;
     }
+  }
+
+  /**
+   * Sends a message with realistic typing presence.
+   */
+  public async sendHumanLikeMessage(chatId: number | string, text: string): Promise<any> {
+    try {
+      await this.sendChatAction(chatId, "typing");
+      await new Promise((r) => setTimeout(r, 400));
+    } catch {}
+    return this.sendMessage(chatId, text);
+  }
+
+  /**
+   * Generates intelligent, contextual smart AI replies via the Gemini model fallback chain.
+   */
+  public async generateSmartAiReply(
+    senderName: string,
+    userText: string,
+    isOwner: boolean = false,
+    groupContext?: { isGroup: boolean; groupTitle?: string }
+  ): Promise<string> {
+    const customBusy = await this.getCustomBusyReply();
+    if (!isOwner && customBusy) {
+      return `Haanji ${senderName} ji! Main Friday hoon — DK Boss ka AI assistant. ${customBusy} 👍`;
+    }
+
+    const key = process.env.GEMINI_API_KEY;
+    if (!key) {
+      if (isOwner) {
+        return `Haanji Boss! Main Friday hoon. Kahiye kya madad kar sakti hoon? 🚀`;
+      }
+      return `Haanji ${senderName} ji! Main Friday hoon — DK Boss ka AI Assistant. Aapka message receive ho gaya hai 👍`;
+    }
+
+    const ai = new GoogleGenAI({ apiKey: key });
+
+    const systemPrompt = isOwner
+      ? `You are FRIDAY — Boss Divakar Kumar's (DK's) elite, loyal, intelligent personal AI companion and super-assistant.
+Divakar (DK) has sent you a direct message on Telegram.
+Reply warmly, concisely, and intelligently in your signature respectful conversational Hinglish. Be proactive, action-oriented, and address him as "Boss" or "DK".
+Sender Name: "${senderName}"
+User Message: "${userText}"`
+      : groupContext?.isGroup
+      ? `You are FRIDAY — Boss Divakar Kumar's (DK's) AI Assistant participating in Telegram Group "${groupContext.groupTitle || "Workspace Group"}".
+A group member named "${senderName}" wrote: "${userText}".
+Reply politely, concisely, and helpfully in friendly conversational Hinglish/English. If they ask about project status or tasks, explain clearly.`
+      : `You are FRIDAY — Boss Divakar Kumar's (DK's) AI Assistant managing his direct Telegram.
+A user named "${senderName}" wrote: "${userText}".
+Reply politely, warmly, and concisely in friendly Hinglish/English as Boss DK's assistant.`;
+
+    for (const model of TelegramBotService.MODEL_FALLBACK_CHAIN) {
+      try {
+        const resp = await ai.models.generateContent({
+          model,
+          contents: systemPrompt,
+        });
+        const reply = resp.text?.trim();
+        if (reply) return reply;
+      } catch (err: any) {
+        console.warn(`[TelegramBot] Reply model ${model} failed: ${err?.message || err}`);
+      }
+    }
+
+    return `Haanji ${senderName}! Main Friday hoon. Aapka message receive ho gaya hai 👍`;
   }
 
   /**
@@ -962,36 +1490,87 @@ INSTRUCTIONS FOR WHEN SENDER IS SOMEONE ELSE (NOT DK):
     }
 
     // 2. Handle /start, "start bot", and greeting commands
-    if (
+    // 2. Handle /start, "start bot", menu commands and interactive selector
+    const isStartCmd =
       text === "/start" ||
       text === "/help" ||
-      /^(\/start@|start\s*bot|hi\s*friday|hello\s*friday)/i.test(text)
-    ) {
-      const isGroup = msg.chat?.type === "group" || msg.chat?.type === "supergroup";
-      if (isGroup) {
-        const welcomeGroup = `👋 *Namaste! Main Friday hoon — DK Boss (Divakar Kumar) ka AI Assistant.* 🚀⚡\n\nKripya neeche se option choose karein:`;
-        await this.sendMessage(chatId, welcomeGroup, {
-          inline_keyboard: [
-            [
-              { text: "💬 Personal Chat", callback_data: `mode_personal_${chatId}` },
-              { text: "👥 Group Voice Bridge Call", callback_data: `mode_group_bridge_${chatId}` },
-            ],
-          ],
-        });
-        return;
-      }
+      /^(\/start@|start\s*bot|hi\s*friday|hello\s*friday)/i.test(text);
 
-      const welcome = `👋 *Namaste ${senderName}! Main Friday AI Assistant hoon.* 🚀⚡
-
-Kripya neeche se mode choose karein ya direct message type karein:`;
-      await this.sendMessage(chatId, welcome, {
-        inline_keyboard: [
-          [
-            { text: "💬 Personal Chat", callback_data: `mode_personal_${chatId}` },
-            { text: "👥 Group Voice Bridge Call", callback_data: `mode_group_bridge_${chatId}` },
-          ],
+    const getMasterMenuMarkup = (targetChatId: number) => ({
+      inline_keyboard: [
+        [
+          { text: "👤 1v1 Private Direct", callback_data: `mode_1v1_${targetChatId}` },
+          { text: "🔒 Private Workspace", callback_data: `mode_private_grp_${targetChatId}` },
         ],
-      });
+        [
+          { text: "📁 Media Vault Indexer", callback_data: `mode_media_grp_${targetChatId}` },
+          { text: "🎙️ Voice & Audio Hub", callback_data: `mode_voice_grp_${targetChatId}` },
+        ],
+        [
+          { text: "🔍 Search Media & Files", callback_data: `action_search_media_${targetChatId}` },
+          { text: "📊 Media Vault Stats", callback_data: `action_vault_stats_${targetChatId}` },
+        ],
+      ],
+    });
+
+    if (isStartCmd) {
+      const welcomeCard = `👋 *Namaste ${senderName}! Main Friday AI hoon — DK Boss (Divakar Kumar) ka Assistant.* 🚀⚡\n\nMain is chat / group me live tasks, voice translation, media cataloging aur autonomous AI execution sambhalti hoon.\n\n👇 *Neeche se apna mode ya workspace action choose karein:*`;
+      await this.sendMessage(chatId, welcomeCard, getMasterMenuMarkup(chatId));
+      return;
+    }
+
+    // 2.0A Handle Menu Commands (/1v1, /private_group, /media_group, /voice_group, /media_search, /vault_stats)
+    if (text === "/1v1" || /^(\/1v1@|1v1\s*mode|private\s*chat)/i.test(text)) {
+      await this.sendMessage(
+        chatId,
+        `👤 *1v1 Direct Mode Active!* 💬\n\nNamaste ${senderName}! Main direct 1-on-1 private mode me switch ho gayi hoon. Mujhse koi bhi sawal poochiye ya task assign karein.`
+      );
+      return;
+    }
+
+    if (text === "/private_group" || /^(\/private_group@|private\s*group)/i.test(text)) {
+      await this.sendMessage(
+        chatId,
+        `🔒 *Private Workspace Group Active!* 🛡️\n\nIs group me DK Boss ke private commands, app lock authorization, aur secured diagnostics enable kar diye gaye hain.`
+      );
+      return;
+    }
+
+    if (text === "/media_group" || /^(\/media_group@|media\s*group|media\s*vault)/i.test(text)) {
+      const stats = await this.getMediaVaultStats(isGroup ? chatId : undefined);
+      await this.sendMessage(
+        chatId,
+        `📁 *Media Vault & Media Group Mode Active!* ⚡\n\nIs group me aane wali har **Photo, Video, Voice Note, PDF Document aur Notes** ko automatic catalog aur OCR scan kiya ja raha hai.\n\n${stats}\n\n👉 _Search karne ke liye likhein: \`media search <naam ya topic>\`_`
+      );
+      return;
+    }
+
+    if (text === "/voice_group" || /^(\/voice_group@|voice\s*group)/i.test(text)) {
+      const introText = `🎙️ *Voice & Audio Hub Active!* ⚡\n\n• *User A (Text Mode):* Text likhega to Friday direct Voice Note bolegi.\n• *User B (Voice Mode):* Voice bolega to transcribed text milega.\n\n👇 *Call controls live below:*`;
+      await this.sendMessage(chatId, introText, this.getGroupControlPanelMarkup(chatId));
+      return;
+    }
+
+    if (text === "/vault_stats" || /^(\/vault_stats@|media\s*stats|vault\s*stats)/i.test(text)) {
+      const stats = await this.getMediaVaultStats(isGroup ? chatId : undefined);
+      await this.sendMessage(chatId, stats);
+      return;
+    }
+
+    // 2.0B Handle Natural Language Media Search (e.g. "media search invoice", "search media 24 august video", "kahan hai file ...")
+    const mediaSearchMatch = text.match(/^(?:media\s*search|search\s*media|vault\s*search|\/media_search)\s*(.*)/i);
+    if (mediaSearchMatch) {
+      const query = mediaSearchMatch[1]?.trim();
+      if (!query) {
+        await this.sendMessage(
+          chatId,
+          `🔍 *Media Search Guide:*\n\nKisi bhi photo, video, PDF ya audio ko search karne ke liye likhein:\n• \`media search electricity bill\`\n• \`media search video tutorial\`\n• \`media search invoice 26 aug\`\n• \`media search audio note\``
+        );
+      } else {
+        await this.sendMessage(chatId, `🔍 *Searching Media Vault for:* "${query}"...`);
+        const searchRes = await this.searchMediaVault(query, { chatId: isGroup ? chatId : undefined });
+        await this.sendMessage(chatId, searchRes.summary);
+      }
       return;
     }
 
@@ -1358,6 +1937,29 @@ Kripya neeche se mode choose karein ya direct message type karein:`;
         } else {
           const analysisRes = await visionMemoryService.processIncomingMedia(buffer, "image/jpeg", senderName, text);
           await this.sendMessage(chatId, `🖼️ *Photo Breakdown & OCR:*\n\n${analysisRes.analysis}`);
+
+          // Index in Media Vault
+          await this.indexMediaItem({
+            fileId: highestResPhoto.file_id,
+            mediaType: "photo",
+            chatId,
+            chatTitle: isGroup ? msg.chat?.title : undefined,
+            isGroup,
+            senderId: from.id,
+            senderName,
+            senderUsername: from.username ? `@${from.username}` : undefined,
+            fileSizeFormatted: this.formatBytes(buffer.length),
+            fileSizeBytes: buffer.length,
+            dimensions: highestResPhoto.width && highestResPhoto.height ? `${highestResPhoto.width}x${highestResPhoto.height}` : undefined,
+            mimeType: "image/jpeg",
+            caption: text,
+            analysisSummary: analysisRes.analysis,
+            ocrText: analysisRes.ocrText,
+            keyTopics: ["photo", "image", senderName],
+            timestamp: Date.now(),
+            dateStr: new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
+            messageId: msg.message_id,
+          });
         }
       } catch (e: any) {
         await this.sendMessage(chatId, `❌ Photo process karne me error: ${e?.message || e}`);
@@ -1365,29 +1967,81 @@ Kripya neeche se mode choose karein ya direct message type karein:`;
       return;
     }
 
-    // 5. Handle Documents / PDFs (Vision OCR)
+    // 5. Handle Documents / PDFs (Vision OCR & Vault Indexing)
     if (msg.document) {
       try {
         await this.sendMessage(chatId, "📄 *Document / PDF analyze ho raha hai...*");
         const mimeType = msg.document.mime_type || "application/pdf";
+        const fileName = msg.document.file_name || "document.pdf";
         const { buffer } = await this.downloadFile(msg.document.file_id);
-        const analysisRes = await visionMemoryService.processIncomingMedia(buffer, mimeType, senderName, text);
-        await this.sendMessage(chatId, `📑 *Document OCR & Summary:*\n\n${analysisRes.analysis}`);
+        const analysisRes = await visionMemoryService.processIncomingMedia(buffer, mimeType, senderName, text, fileName);
+        await this.sendMessage(chatId, `📑 *Document OCR & Summary (${fileName}):*\n\n${analysisRes.analysis}`);
+
+        // Index in Media Vault
+        await this.indexMediaItem({
+          fileId: msg.document.file_id,
+          fileName,
+          mediaType: "document",
+          chatId,
+          chatTitle: isGroup ? msg.chat?.title : undefined,
+          isGroup,
+          senderId: from.id,
+          senderName,
+          senderUsername: from.username ? `@${from.username}` : undefined,
+          fileSizeFormatted: this.formatBytes(buffer.length),
+          fileSizeBytes: buffer.length,
+          mimeType,
+          caption: text,
+          analysisSummary: analysisRes.analysis,
+          ocrText: analysisRes.ocrText,
+          keyTopics: ["pdf", "document", fileName, senderName],
+          timestamp: Date.now(),
+          dateStr: new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
+          messageId: msg.message_id,
+        });
       } catch (e: any) {
         await this.sendMessage(chatId, `❌ Document process karne me error: ${e?.message || e}`);
       }
       return;
     }
 
-    // 5.1 Handle Videos & Video Notes (Gemini Multimodal Video Analysis)
+    // 5.1 Handle Videos & Video Notes (Gemini Multimodal Video Analysis & Vault Indexing)
     if (msg.video || msg.video_note) {
-      const fileId = msg.video?.file_id || msg.video_note?.file_id;
+      const videoObj = msg.video || msg.video_note;
+      const fileId = videoObj?.file_id;
       if (fileId) {
         try {
           await this.sendMessage(chatId, "🎬 *Video analyze ho rahi hai (Actions, Text & Audio)...*");
           const { buffer } = await this.downloadFile(fileId);
-          const analysisRes = await visionMemoryService.processIncomingMedia(buffer, "video/mp4", senderName, text || "Analyze this video");
+          const fileName = msg.video?.file_name || "video.mp4";
+          const analysisRes = await visionMemoryService.processIncomingMedia(buffer, "video/mp4", senderName, text || "Analyze this video", fileName);
           await this.sendMessage(chatId, `🎥 *Video Analysis Breakdown:*\n\n${analysisRes.analysis}`);
+
+          // Index in Media Vault
+          await this.indexMediaItem({
+            fileId,
+            fileName,
+            mediaType: "video",
+            chatId,
+            chatTitle: isGroup ? msg.chat?.title : undefined,
+            isGroup,
+            senderId: from.id,
+            senderName,
+            senderUsername: from.username ? `@${from.username}` : undefined,
+            fileSizeFormatted: this.formatBytes(buffer.length),
+            fileSizeBytes: buffer.length,
+            durationFormatted: this.formatDuration(videoObj.duration),
+            durationSeconds: videoObj.duration,
+            dimensions: videoObj.width && videoObj.height ? `${videoObj.width}x${videoObj.height}` : undefined,
+            mimeType: "video/mp4",
+            caption: text,
+            analysisSummary: analysisRes.analysis,
+            ocrText: analysisRes.ocrText,
+            keyTopics: ["video", "clip", senderName],
+            timestamp: Date.now(),
+            dateStr: new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
+            messageId: msg.message_id,
+          });
         } catch (e: any) {
           await this.sendMessage(chatId, `❌ Video process karne me error: ${e?.message || e}`);
         }
@@ -1496,24 +2150,59 @@ Kripya neeche se mode choose karein ya direct message type karein:`;
     try {
       await this.callApi("answerCallbackQuery", { callback_query_id: query.id });
 
-      // 1. Mode Selection: Personal Chat
-      if (data.startsWith("mode_personal_")) {
+      // 1. Mode Selection: 1v1 Personal Chat
+      if (data.startsWith("mode_1v1_") || data.startsWith("mode_personal_")) {
         await this.sendMessage(
           chatId,
-          `✨ *Personal Chat Mode Active!* 💬\n\nNamaste ${senderName}! Main Friday hoon — DK Boss ka AI assistant. Mujhse koi bhi sawal poochiye ya task karwaiye.`
+          `✨ *1v1 Direct Mode Active!* 💬\n\nNamaste ${senderName}! Main Friday hoon — DK Boss (Divakar Kumar) ka AI Assistant. Mujhse direct sawal poochhein ya tasks assign karein.`
         );
         return;
       }
 
-      // 2. Mode Selection: Group Voice Bridge Call
-      if (data.startsWith("mode_group_bridge_")) {
-        const targetGroupId = Number(data.replace("mode_group_bridge_", "")) || chatId;
-        const introText = `🎉 *Thank you! Main Group Voice Bridge Call activate kar rahi hoon.* ⚡\n\n👑 *DK Boss ne mujhe is group me live call & voice bridge sambhalne ke liye banaya hai.*\nMain live call & voice ko real-time *TTS (Text-to-Speech)* aur *STT (Speech-to-Text)* kar sakti hoon.\n\n📋 *Rules samajh lijiye:*\n• ✍️ *User A (Text Mode):* User A jo bhi text likhega, uski aawaz direct Voice Note bankar group me User B ko sunai degi.\n• 🎙️ *User B (Voice Mode):* User B group me voice bolega to User A ko uska transcribed text milega.\n\n👇 *Neeche diye gaye buttons ya text format se User A & B set karein:*`;
+      // 2. Mode Selection: Private Workspace Group
+      if (data.startsWith("mode_private_grp_")) {
+        await this.sendMessage(
+          chatId,
+          `🔒 *Private Workspace Group Mode Active!* 🛡️\n\nIs group me DK Boss ke private coding tasks, security alerts, aur app management commands enable hain.`
+        );
+        return;
+      }
+
+      // 3. Mode Selection: Media Vault Group
+      if (data.startsWith("mode_media_grp_")) {
+        const stats = await this.getMediaVaultStats(chatId);
+        await this.sendMessage(
+          chatId,
+          `📁 *Media Vault Group Mode Active!* ⚡\n\nIs group me aane wali har Photo, Video, Voice Note, PDF Document aur Note ko automatically OCR aur Vision scan karke catalog kiya ja raha hai.\n\n${stats}\n\n👉 _Search karne ke liye likhein: \`media search <naam ya topic>\`_`
+        );
+        return;
+      }
+
+      // 4. Mode Selection: Voice & Audio Hub (Group Voice Bridge)
+      if (data.startsWith("mode_voice_grp_") || data.startsWith("mode_group_bridge_")) {
+        const targetGroupId = Number(data.replace("mode_voice_grp_", "").replace("mode_group_bridge_", "")) || chatId;
+        const introText = `🎙️ *Live Voice & Audio Hub Active!* ⚡\n\n• ✍️ *User A (Text Mode):* Text likhega to Friday direct Voice Note bolegi.\n• 🎙️ *User B (Voice Mode):* Voice bolega to transcribed text milega.\n\n👇 *Neeche diye gaye buttons se User A & B set karein:*`;
         await this.sendMessage(targetGroupId, introText, this.getGroupControlPanelMarkup(targetGroupId));
         return;
       }
 
-      // 3. Group Set User A Prompt
+      // 5. Action: Search Vault Media
+      if (data.startsWith("action_search_media_")) {
+        await this.sendMessage(
+          chatId,
+          `🔍 *Media Vault Search:* \n\nKisi bhi file/media ko search karne ke liye chat me likhein:\n• \`media search invoice\`\n• \`media search video tutorial\`\n• \`media search bill 26 aug\`\n• \`media search voice note\``
+        );
+        return;
+      }
+
+      // 6. Action: Media Vault Stats
+      if (data.startsWith("action_vault_stats_")) {
+        const stats = await this.getMediaVaultStats(chatId);
+        await this.sendMessage(chatId, stats);
+        return;
+      }
+
+      // 7. Group Set User A Prompt
       if (data.startsWith("grp_set_a_")) {
         const targetGroupId = Number(data.replace("grp_set_a_", "")) || chatId;
         await this.sendMessage(
