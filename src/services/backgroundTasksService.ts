@@ -339,7 +339,7 @@ class BackgroundTasksService {
           this.updateTaskProgress(task.id, `Amazon, Flipkart aur Meesho par ${targetOrQuery} ke live prices check ho rahe hain...`);
           await new Promise((r) => setTimeout(r, 2500));
 
-          const deals = await publicApisService.searchProductDeals(targetOrQuery, "all", "high_to_low", 1);
+          const deals = await publicApisService.searchProductDeals(targetOrQuery, { platform: "all", sortBy: "high_to_low", page: 1 });
           let summary = `${targetOrQuery} ke prices check ho gaye.`;
           if (deals && deals.products && deals.products.length > 0) {
             const topP = deals.products[0];
@@ -347,12 +347,40 @@ class BackgroundTasksService {
           }
           this.completeTask(task.id, summary, deals);
         } else if (cleanType === "security_scan" || cleanType === "security") {
-          this.updateTaskProgress(task.id, "Security headers, DNS records aur link safety audit ki ja rahi hai...");
-          await new Promise((r) => setTimeout(r, 2500));
+          this.updateTaskProgress(task.id, "Security scan initialize ho raha hai...");
+          const { cyberSecurityService } = await import("./cyberSecurityService");
+          const target = (targetOrQuery || "").trim();
 
+          let summary = "Security scan complete ho gaya.";
+          let rawData: any = null;
+
+          if (target.startsWith("http://") || target.startsWith("https://")) {
+            this.updateTaskProgress(task.id, `URL "${target}" ke SSL certificate, redirects aur threat databases check ho rahe hain...`);
+            rawData = await cyberSecurityService.scanUrlSafety(target);
+            summary = `URL scan complete: ${rawData.explanation} (Risk Score: ${rawData.riskScore}/100)`;
+          } else if (target.includes("@")) {
+            this.updateTaskProgress(task.id, `Email "${target}" ke breach records public databases me scan ho rahe hain...`);
+            rawData = await cyberSecurityService.checkDataBreach(target);
+            summary = rawData.recommendation;
+          } else if (target && target.includes(".") && !target.includes(" ") && !target.includes("/")) {
+            this.updateTaskProgress(task.id, `Domain "${target}" ke DNS, SPF, DMARC aur security headers audit kiye ja rahe hain...`);
+            rawData = await cyberSecurityService.auditWebsiteSecurity(target);
+            summary = `Domain "${target}" security audit (Grade: ${rawData.grade}, Score: ${rawData.score}/100): ${rawData.summary}`;
+          } else {
+            this.updateTaskProgress(task.id, "Local project codebase me security vulnerabilities, leaked API keys aur hardcoded secrets scan ho rahe hain...");
+            rawData = await cyberSecurityService.scanCodeSecurityAudit();
+            summary = `Code security scan: ${rawData.summary} (Total files checked: ${rawData.scannedFilesCount}, issues found: ${rawData.totalIssuesFound})`;
+          }
+
+          this.completeTask(task.id, summary, rawData);
+        } else if (cleanType === "code_fix" || cleanType === "code_agent") {
+          this.updateTaskProgress(task.id, "Coding Agent task initialize kiya ja raha hai...");
+          const { codeAgentService } = await import("./codeAgentService");
+          const req = await codeAgentService.createRequest(targetOrQuery || taskName);
           this.completeTask(
             task.id,
-            "Security scan complete ho gaya hai: Koi critical vulnerability ya breach detect nahi hua, sab safe hai."
+            `Coding Agent task create ho gaya hai (ID: ${req.id}). Codebase analysis start ho chuka hai, plan taiyar hote hi approval notification aayegi.`,
+            req
           );
         } else if (cleanType === "wifi_scan" || cleanType === "wifi") {
           this.updateTaskProgress(task.id, "Nearby WiFi hotspots aur signal strengths scan ho rahe hain...");

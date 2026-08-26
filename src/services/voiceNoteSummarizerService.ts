@@ -1,3 +1,5 @@
+import { GoogleGenAI } from "@google/genai";
+
 export interface VoiceNoteSummaryResult {
   success: boolean;
   senderName: string;
@@ -28,6 +30,51 @@ class VoiceNoteSummarizerService {
       };
     }
 
+    // 1. Semantic Gemini AI Analysis
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (apiKey) {
+      try {
+        const ai = new GoogleGenAI({ apiKey });
+        const prompt = `You are Friday AI, DK's voice note executive summarizer.
+Sender: "${senderName}"
+Voice Note Transcript:
+"${rawText.slice(0, 4000)}"
+
+Return ONLY valid JSON matching this schema:
+{
+  "intentCategory": "urgent" | "work_meeting" | "payment" | "personal" | "general",
+  "twoLineSummary": "Fast, crisp 2-line conversational summary in Hinglish for Boss DK",
+  "actionItems": ["Actionable task 1", "Actionable task 2"],
+  "spokenBriefing": "Natural spoken sentence Friday will say out loud to DK summarizing what sender wants"
+}`;
+
+        const models = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash"];
+        for (const model of models) {
+          try {
+            const res = await ai.models.generateContent({
+              model,
+              contents: [{ role: "user", parts: [{ text: prompt }] }],
+              config: { responseMimeType: "application/json" },
+            });
+            const parsed = JSON.parse(res.text || "{}");
+            if (parsed.twoLineSummary) {
+              return {
+                success: true,
+                senderName,
+                intentCategory: parsed.intentCategory || "general",
+                twoLineSummary: parsed.twoLineSummary,
+                actionItems: parsed.actionItems || [],
+                spokenBriefing: parsed.spokenBriefing || `Boss, ${senderName} ne message bheja hai.`,
+              };
+            }
+          } catch {}
+        }
+      } catch (err) {
+        console.warn("[VoiceNoteSummarizer] Gemini summarizer note:", err);
+      }
+    }
+
+    // 2. Heuristic Regex Fallback
     const lower = rawText.toLowerCase();
 
     let category: "urgent" | "work_meeting" | "payment" | "personal" | "general" = "general";

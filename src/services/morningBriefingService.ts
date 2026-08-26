@@ -56,12 +56,12 @@ class MorningBriefingService {
     };
     try {
       const w = await publicApisService.getWeather(city);
-      if (w.success && w.data) {
+      if (w.success) {
         weatherInfo = {
-          city: w.data.location || weatherInfo.city,
-          temp: `${w.data.temp_c || w.data.temperature || "28"}°C`,
-          condition: w.data.condition || w.data.description || "Clear",
-          humidity: `${w.data.humidity || "60"}%`,
+          city: w.place || weatherInfo.city,
+          temp: `${w.currentTempC ?? "28"}°C`,
+          condition: w.conditionText || "Clear",
+          humidity: `${w.humidityPct ?? "60"}%`,
         };
       }
     } catch { /* weather fallback */ }
@@ -74,7 +74,7 @@ class MorningBriefingService {
         headlines = newsRes.articles.slice(0, 3).map((a: any) => ({
           title: a.title,
           source: a.source?.name || a.source || "News",
-          url: a.url,
+          url: a.link || a.url,
         }));
       }
     } catch { /* news fallback */ }

@@ -106,6 +106,8 @@ ${caption ? `User caption: "${caption}"` : ""}`;
           : (lowerMime.includes("png") ? "image/png" : lowerMime.includes("webp") ? "image/webp" : "image/jpeg");
 
         const VISION_FALLBACK_MODELS = [
+          "gemini-3.6-flash",
+          "gemini-3.5-flash",
           "gemini-2.5-flash",
           "gemini-2.0-flash",
           "gemini-1.5-pro",

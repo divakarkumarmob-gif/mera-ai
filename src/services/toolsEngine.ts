@@ -55,10 +55,13 @@ const remindersCollection = () => db.collection("reminders");
 const notesCollection = () => db.collection("notes");
 
 class ToolsEngine {
+  private inMemoryReminders = new Map<string, ReminderItem>();
+  private inMemoryNotes = new Map<string, NoteItem>();
+
   public async addReminder(title: string, timeString = "soon", durationMinutes = 0): Promise<ReminderItem> {
     const now = Date.now();
     const due = durationMinutes > 0 ? now + durationMinutes * 60 * 1000 : now + 60 * 60 * 1000;
-    const id = Math.random().toString(36).substring(2, 9);
+    const id = "rem_" + Math.random().toString(36).substring(2, 9);
     const item: ReminderItem = {
       id,
       title: title.trim(),
@@ -67,13 +70,18 @@ class ToolsEngine {
       createdDate: new Date(now).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
       isCompleted: false,
     };
-    await remindersCollection().doc(id).set(item);
+    this.inMemoryReminders.set(id, item);
+
+    try {
+      await remindersCollection().doc(id).set(item);
+    } catch {}
+
     return item;
   }
 
   public async addNote(title: string, content: string): Promise<NoteItem> {
     const now = Date.now();
-    const id = Math.random().toString(36).substring(2, 9);
+    const id = "not_" + Math.random().toString(36).substring(2, 9);
     const item: NoteItem = {
       id,
       title: title.trim(),
@@ -81,31 +89,61 @@ class ToolsEngine {
       dateStr: new Date(now).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
       timestamp: now,
     };
-    await notesCollection().doc(id).set(item);
+    this.inMemoryNotes.set(id, item);
+
+    try {
+      await notesCollection().doc(id).set(item);
+    } catch {}
+
     return item;
   }
 
   public async getReminders(): Promise<ReminderItem[]> {
-    const snap = await remindersCollection().orderBy("dueTimestamp", "asc").get();
-    return snap.docs.map((d) => d.data() as ReminderItem);
+    try {
+      const snap = await remindersCollection().orderBy("dueTimestamp", "asc").get();
+      const items = snap.docs.map((d) => d.data() as ReminderItem);
+      items.forEach((r) => this.inMemoryReminders.set(r.id, r));
+      return items;
+    } catch {
+      return Array.from(this.inMemoryReminders.values()).sort((a, b) => a.dueTimestamp - b.dueTimestamp);
+    }
   }
 
   /** Reminders whose due time has passed and haven't fired yet. */
   public async getDueReminders(now = Date.now()): Promise<ReminderItem[]> {
-    const snap = await remindersCollection()
-      .where("isCompleted", "==", false)
-      .where("dueTimestamp", "<=", now)
-      .get();
-    return snap.docs.map((d) => d.data() as ReminderItem);
+    try {
+      const snap = await remindersCollection()
+        .where("isCompleted", "==", false)
+        .where("dueTimestamp", "<=", now)
+        .get();
+      return snap.docs.map((d) => d.data() as ReminderItem);
+    } catch {
+      return Array.from(this.inMemoryReminders.values()).filter(
+        (r) => !r.isCompleted && r.dueTimestamp <= now
+      );
+    }
   }
 
   public async markReminderCompleted(id: string): Promise<void> {
-    await remindersCollection().doc(id).set({ isCompleted: true }, { merge: true });
+    const r = this.inMemoryReminders.get(id);
+    if (r) {
+      r.isCompleted = true;
+      this.inMemoryReminders.set(id, r);
+    }
+    try {
+      await remindersCollection().doc(id).set({ isCompleted: true }, { merge: true });
+    } catch {}
   }
 
   public async getNotes(): Promise<NoteItem[]> {
-    const snap = await notesCollection().orderBy("timestamp", "desc").get();
-    return snap.docs.map((d) => d.data() as NoteItem);
+    try {
+      const snap = await notesCollection().orderBy("timestamp", "desc").get();
+      const items = snap.docs.map((d) => d.data() as NoteItem);
+      items.forEach((n) => this.inMemoryNotes.set(n.id, n));
+      return items;
+    } catch {
+      return Array.from(this.inMemoryNotes.values()).sort((a, b) => b.timestamp - a.timestamp);
+    }
   }
 
   /**

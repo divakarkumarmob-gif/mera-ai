@@ -11,6 +11,9 @@ const vaultCollection = () => db.collection("secure_vault");
 const MASTER_SECRET = process.env.VAULT_MASTER_KEY || "friday_super_secret_master_vault_key_2026";
 
 class SecureVaultService {
+  // In-memory encrypted cache for instant retrieval & offline resilience
+  private inMemoryVault: Map<string, { key: string; category: string; encryptedData: string; iv: string; tag: string; updatedAt: string }> = new Map();
+
   private getKey(): Buffer {
     return crypto.createHash("sha256").update(MASTER_SECRET).digest();
   }
@@ -51,14 +54,23 @@ class SecureVaultService {
     const { iv, encryptedData, tag } = this.encrypt(val);
     const now = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
 
-    await vaultCollection().doc(key).set({
+    const entry = {
       key,
       category,
       encryptedData,
       iv,
       tag,
       updatedAt: now,
-    });
+    };
+
+    // Cache in memory
+    this.inMemoryVault.set(key, entry);
+
+    try {
+      await vaultCollection().doc(key).set(entry);
+    } catch (e: any) {
+      console.warn("[SecureVault] Firestore write note (cached locally):", e?.message || e);
+    }
 
     return {
       success: true,
@@ -70,9 +82,19 @@ class SecureVaultService {
     keyName: string
   ): Promise<{ success: boolean; key: string; secretValue?: string; message: string }> {
     const key = (keyName || "").toLowerCase().trim().replace(/[^a-z0-9_-]/g, "_");
-    const doc = await vaultCollection().doc(key).get();
+    let data = this.inMemoryVault.get(key);
 
-    if (!doc.exists) {
+    if (!data) {
+      try {
+        const doc = await vaultCollection().doc(key).get();
+        if (doc.exists) {
+          data = doc.data() as any;
+          if (data) this.inMemoryVault.set(key, data);
+        }
+      } catch {}
+    }
+
+    if (!data) {
       return {
         success: false,
         key,
@@ -80,7 +102,6 @@ class SecureVaultService {
       };
     }
 
-    const data = doc.data()!;
     try {
       const decrypted = this.decrypt(data.encryptedData, data.iv, data.tag);
       return {
@@ -98,16 +119,40 @@ class SecureVaultService {
     }
   }
 
+  public async deleteSecret(keyName: string): Promise<{ success: boolean; message: string }> {
+    const key = (keyName || "").toLowerCase().trim().replace(/[^a-z0-9_-]/g, "_");
+    this.inMemoryVault.delete(key);
+
+    try {
+      await vaultCollection().doc(key).delete();
+    } catch {}
+
+    return {
+      success: true,
+      message: `Boss, vault se "${keyName}" secret successfully delete kar diya gaya hai.`,
+    };
+  }
+
   public async listSecretKeys(): Promise<{ success: boolean; keys: VaultSecretItem[]; message: string }> {
-    const snap = await vaultCollection().get();
-    const keys: VaultSecretItem[] = snap.docs.map((d) => {
-      const data = d.data();
-      return {
-        key: data.key,
-        category: data.category || "General",
-        updatedAt: data.updatedAt,
-      };
-    });
+    let keys: VaultSecretItem[] = [];
+
+    try {
+      const snap = await vaultCollection().get();
+      keys = snap.docs.map((d) => {
+        const data = d.data();
+        return {
+          key: data.key,
+          category: data.category || "General",
+          updatedAt: data.updatedAt,
+        };
+      });
+    } catch {
+      keys = Array.from(this.inMemoryVault.values()).map((v) => ({
+        key: v.key,
+        category: v.category,
+        updatedAt: v.updatedAt,
+      }));
+    }
 
     return {
       success: true,

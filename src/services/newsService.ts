@@ -514,7 +514,7 @@ export class NewsService {
 
       const xml = await res.text();
       const articles: NewsArticle[] = [];
-      const itemRegex = /<item>(.*?)<\/item>/gs;
+      const itemRegex = /<item>([\s\S]*?)<\/item>/g;
       let match;
 
       while ((match = itemRegex.exec(xml)) !== null && articles.length < count) {

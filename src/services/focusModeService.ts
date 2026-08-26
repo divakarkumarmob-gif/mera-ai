@@ -1,15 +1,17 @@
 export interface FocusSessionState {
   isActive: boolean;
   durationMinutes: number;
+  remainingMinutes: number;
   goalTitle: string;
   startedAt: string;
   endsAt: string;
+  endTimestamp: number;
   lofiStreamUrl: string;
   message: string;
 }
 
 class FocusModeService {
-  private currentSession: FocusSessionState | null = null;
+  private currentSession: (Omit<FocusSessionState, "remainingMinutes"> & { endTimestamp: number }) | null = null;
 
   public async startFocusMode(
     durationMinutes = 25,
@@ -30,6 +32,7 @@ class FocusModeService {
       goalTitle,
       startedAt,
       endsAt,
+      endTimestamp: end,
       lofiStreamUrl: lofiStream,
       message: `Boss, ${durationMinutes} minute ka Focus Mode activate ho gaya hai! (Goal: "${goalTitle}", Ends at: ${endsAt}). Lo-Fi background beats ready hain. All notifications silenced for maximum productivity!`,
     };
@@ -44,7 +47,44 @@ class FocusModeService {
       );
     } catch {}
 
-    return this.currentSession;
+    return {
+      ...this.currentSession,
+      remainingMinutes: durationMinutes,
+    };
+  }
+
+  public getFocusModeStatus(): { isActive: boolean; session: FocusSessionState | null; message: string } {
+    if (!this.currentSession || !this.currentSession.isActive) {
+      return {
+        isActive: false,
+        session: null,
+        message: "Boss, filhal koi Focus Mode active nahi hai. Aap normal mode me hain.",
+      };
+    }
+
+    const now = Date.now();
+    const remainingMs = this.currentSession.endTimestamp - now;
+
+    if (remainingMs <= 0) {
+      this.currentSession = null;
+      return {
+        isActive: false,
+        session: null,
+        message: "Boss, pichhla Focus Mode session complete ho chuka hai.",
+      };
+    }
+
+    const remainingMinutes = Math.max(1, Math.ceil(remainingMs / 60000));
+    const sessionState: FocusSessionState = {
+      ...this.currentSession,
+      remainingMinutes,
+    };
+
+    return {
+      isActive: true,
+      session: sessionState,
+      message: `Boss, Focus Mode ACTIVE hai! Goal: "${this.currentSession.goalTitle}". Lagbhag ${remainingMinutes} minutes bache hain (Ends at: ${this.currentSession.endsAt}).`,
+    };
   }
 
   public stopFocusMode(): { success: boolean; message: string } {

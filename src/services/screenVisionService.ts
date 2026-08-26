@@ -66,25 +66,35 @@ Respond with ONLY valid JSON in this exact shape:
   "suggestedAction": "one concrete next step the user can take"
 }`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [
-          {
-            role: "user",
-            parts: [
-              { text: prompt },
+      const models = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash"];
+      let raw = "";
+
+      for (const model of models) {
+        try {
+          const response = await ai.models.generateContent({
+            model,
+            contents: [
               {
-                inlineData: {
-                  mimeType,
-                  data: imageBase64,
-                },
+                role: "user",
+                parts: [
+                  { text: prompt },
+                  {
+                    inlineData: {
+                      mimeType,
+                      data: imageBase64,
+                    },
+                  },
+                ],
               },
             ],
-          },
-        ],
-      });
+          });
+          raw = response.text || "";
+          if (raw) break;
+        } catch (mErr) {
+          console.warn(`[ScreenVision] ${model} attempt warning:`, mErr);
+        }
+      }
 
-      const raw = response.text || "{}";
       const jsonMatch = raw.match(/\{[\s\S]*\}/);
       const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
 

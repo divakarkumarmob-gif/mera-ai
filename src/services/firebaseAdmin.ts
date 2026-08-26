@@ -65,13 +65,14 @@ function buildCredential(): admin.credential.Credential | undefined {
 }
 
 if (!admin.apps.length) {
+  const projectId = sanitizeValue(process.env.FIREBASE_PROJECT_ID);
   const credential = buildCredential();
   if (credential) {
-    admin.initializeApp({ credential });
+    admin.initializeApp({ credential, projectId });
   } else {
     // Initialize with application default or dummy to prevent app crash on startup
     try {
-      admin.initializeApp();
+      admin.initializeApp({ projectId });
     } catch (e) {
       console.warn("[FirebaseAdmin] Initialized without credentials. Configure Firebase env vars to enable Firestore.");
     }

@@ -13,51 +13,80 @@ export interface ContactEntry {
 const contactsCollection = () => db.collection("contacts");
 
 class ContactsService {
+  // In-memory contact cache for resilient offline performance
+  private inMemoryContacts: Map<string, ContactEntry> = new Map();
+
+  /**
+   * Saves or updates a contact in Firestore with in-memory fallback.
+   */
   public async saveContact(name: string, phone: string, relation?: string): Promise<ContactEntry> {
     const cleanPhone = phone.replace(/[\s\-\(\)\+]/g, "").trim();
     const now = Date.now();
 
     // Normalize robustly using the last 10 digits — handles leading 0,
     // '91' country code, spaces mid-number, or any other stray formatting
-    // that voice-dictated numbers can produce. This guarantees saved
-    // numbers line up with WhatsApp's senderPhone format (91XXXXXXXXXX).
     const last10 = cleanPhone.replace(/\D/g, "").slice(-10);
     const normalizedPhone = last10.length === 10 ? `91${last10}` : cleanPhone;
+    const cleanName = (name || "Contact").trim();
 
-    // Check for an existing contact with the same name (case-insensitive) to update in place
-    const existingSnap = await contactsCollection()
-      .where("nameLower", "==", name.toLowerCase().trim())
-      .limit(1)
-      .get();
+    let id = Math.random().toString(36).substring(2, 9);
 
-    const id = existingSnap.empty ? Math.random().toString(36).substring(2, 9) : existingSnap.docs[0].id;
+    // Try finding existing contact in Firestore or memory
+    try {
+      const existingSnap = await contactsCollection()
+        .where("nameLower", "==", cleanName.toLowerCase())
+        .limit(1)
+        .get();
+
+      if (!existingSnap.empty) {
+        id = existingSnap.docs[0].id;
+      }
+    } catch {
+      // Memory fallback lookup
+      for (const [memId, c] of this.inMemoryContacts.entries()) {
+        if (c.name.toLowerCase() === cleanName.toLowerCase()) {
+          id = memId;
+          break;
+        }
+      }
+    }
 
     const entry: ContactEntry = {
       id,
-      name: name.trim(),
+      name: cleanName,
       phone: normalizedPhone,
       relation: relation?.trim() || "",
       dateAdded: new Date(now).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
       timestamp: now,
     };
 
-    await contactsCollection()
-      .doc(id)
-      .set({ ...entry, nameLower: name.toLowerCase().trim(), phoneLast10: last10 });
+    // Cache locally
+    this.inMemoryContacts.set(id, entry);
+
+    // Save to Firestore with silent offline fallback
+    try {
+      await contactsCollection()
+        .doc(id)
+        .set({ ...entry, nameLower: cleanName.toLowerCase(), phoneLast10: last10 });
+    } catch (e: any) {
+      console.warn("[Contacts] Firestore save warning, stored in-memory:", e?.message || e);
+    }
 
     return entry;
   }
 
+  /**
+   * Finds a contact by name, phone, relation, or boss/self alias.
+   */
   public async findContact(query: string): Promise<ContactEntry | undefined> {
-    const q = query.toLowerCase().trim();
+    const q = (query || "").toLowerCase().trim();
     const cleanDigits = query.replace(/\D/g, "");
     const queryLast10 = cleanDigits.slice(-10);
 
-    // Fetch all contacts to perform search
+    // Fetch all contacts (Firestore + in-memory cache)
     const all = await this.getAllContacts();
 
-    // 1. Phone matching — always compare by last 10 digits on both sides,
-    // regardless of country code / leading zero / formatting differences.
+    // 1. Phone matching — always compare by last 10 digits
     if (queryLast10.length === 10) {
       const phoneMatch = all.find((c) => {
         const cDigits = (c.phone || "").replace(/\D/g, "");
@@ -71,7 +100,7 @@ class ContactsService {
     if (direct) return direct;
 
     // 2.1 Boss / DK / Divakar / Self alias match
-    const bossAliases = ["boss", "divakar", "dk", "divakar kumar", "self", "me", "mera number", "mere"];
+    const bossAliases = ["boss", "divakar", "dk", "divakar kumar", "self", "me", "mera number", "mere", "boss ka number"];
     if (bossAliases.includes(q)) {
       const bossMatch = all.find((c) => {
         const cName = c.name?.toLowerCase().trim() || "";
@@ -86,6 +115,18 @@ class ContactsService {
         );
       });
       if (bossMatch) return bossMatch;
+
+      // Check environment OWNER_WHATSAPP_NUMBER or provide clean default Boss contact
+      const ownerEnv = (process.env.OWNER_WHATSAPP_NUMBER || process.env.BOSS_WHATSAPP_NUMBER || "").replace(/\D/g, "");
+      const ownerLast10 = ownerEnv ? ownerEnv.slice(-10) : "";
+      return {
+        id: "owner_default",
+        name: "DK (Boss)",
+        phone: ownerLast10.length === 10 ? `91${ownerLast10}` : (ownerEnv || "919999999999"),
+        relation: "owner",
+        dateAdded: new Date().toLocaleString("en-IN"),
+        timestamp: Date.now(),
+      };
     }
 
     // 3. Partial name match
@@ -110,28 +151,50 @@ class ContactsService {
     return undefined;
   }
 
+  /**
+   * Deletes a contact by name or phone.
+   */
   public async deleteContact(nameOrPhone: string): Promise<{ deleted: boolean; name?: string; phone?: string }> {
     try {
       const contact = await this.findContact(nameOrPhone);
-      if (!contact || contact.id === "temp") {
+      if (!contact || contact.id === "temp" || contact.id === "owner_default") {
         return { deleted: false };
       }
-      await contactsCollection().doc(contact.id).delete();
+
+      this.inMemoryContacts.delete(contact.id);
+
+      try {
+        await contactsCollection().doc(contact.id).delete();
+      } catch (err: any) {
+        console.warn("[Contacts] Firestore delete warning:", err?.message || err);
+      }
+
       return { deleted: true, name: contact.name, phone: contact.phone };
     } catch {
       return { deleted: false };
     }
   }
 
+  /**
+   * Retrieves all contacts, merging Firestore results and local memory cache.
+   */
   public async getAllContacts(): Promise<ContactEntry[]> {
+    let contacts: ContactEntry[] = [];
     try {
       const snap = await contactsCollection().orderBy("timestamp", "desc").get();
-      return snap.docs.map((d) => this.stripInternal(d.data()));
+      contacts = snap.docs.map((d) => this.stripInternal(d.data()));
     } catch {
-      return [];
+      contacts = Array.from(this.inMemoryContacts.values()).sort((a, b) => b.timestamp - a.timestamp);
     }
+
+    // Cache locally
+    contacts.forEach((c) => this.inMemoryContacts.set(c.id, c));
+    return contacts;
   }
 
+  /**
+   * Compiles contact list as text for Gemini prompt injection.
+   */
   public async compileContactsForPrompt(): Promise<string> {
     const contacts = await this.getAllContacts();
     if (contacts.length === 0) {
@@ -147,4 +210,3 @@ class ContactsService {
 }
 
 export const contactsService = new ContactsService();
-

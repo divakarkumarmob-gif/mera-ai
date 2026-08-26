@@ -10,8 +10,7 @@ import { db } from "./firebaseAdmin";
 //
 // When someone messages DK on WhatsApp, Friday tries to answer using ONLY
 // today's update text (via Gemini, told strictly not to guess). If nothing
-// relevant is found, Friday tells the asker she doesn't know and asks DK —
-// see PendingQuestion below for that flow.
+// relevant is found, Friday tells the asker she doesn't know and asks DK.
 // ---------------------------------------------------------------------------
 
 export interface DailyUpdateEntry {
@@ -20,10 +19,6 @@ export interface DailyUpdateEntry {
   updatedAt: number;     // ms epoch of last append
 }
 
-/**
- * A question from someone on WhatsApp that today's update couldn't answer,
- * waiting on DK's reply so Friday can forward it back to the original sender.
- */
 export interface PendingQuestion {
   id: string;
   senderPhone: string;
@@ -62,7 +57,6 @@ export function resolveRelativeDateIST(dateWord: string): string {
   else if (normalized === "kal" || normalized === "yesterday") daysAgo = 1;
   else if (normalized === "parso" || normalized === "parsoon" || normalized === "parson") daysAgo = 2;
   else {
-    // "3 din pehle" / "5 days ago" style — pull the first number out.
     const match = normalized.match(/(\d+)/);
     if (match) daysAgo = parseInt(match[1], 10);
   }
@@ -72,6 +66,10 @@ export function resolveRelativeDateIST(dateWord: string): string {
 }
 
 class DailyUpdateService {
+  // In-memory caches for zero-downtime offline resiliency
+  private inMemoryUpdates: Map<string, DailyUpdateEntry> = new Map();
+  private inMemoryPending: Map<string, PendingQuestion> = new Map();
+
   /**
    * Appends DK's spoken update to today's entry. Multiple calls the same
    * day accumulate into one document, separated by " | ".
@@ -79,16 +77,33 @@ class DailyUpdateService {
   public async appendUpdate(text: string): Promise<DailyUpdateEntry> {
     const date = todayIST();
     const now = Date.now();
-    const ref = updatesCol().doc(date);
+    const cleanText = text.trim();
 
-    const snap = await ref.get();
-    const existing = snap.exists ? (snap.data() as DailyUpdateEntry) : null;
-    const combinedText = existing?.text ? `${existing.text} | ${text.trim()}` : text.trim();
+    // Check memory first
+    const memExisting = this.inMemoryUpdates.get(date);
+    let existingText = memExisting?.text || "";
 
+    try {
+      const snap = await updatesCol().doc(date).get();
+      if (snap.exists) {
+        existingText = (snap.data() as DailyUpdateEntry).text || existingText;
+      }
+    } catch (e: any) {
+      console.warn("[DailyUpdate] Firestore read warning (using memory cache):", e?.message || e);
+    }
+
+    const combinedText = existingText ? `${existingText} | ${cleanText}` : cleanText;
     const entry: DailyUpdateEntry = { dateStr: date, text: combinedText, updatedAt: now };
-    await ref.set(entry);
 
-    this.trimOldUpdates().catch((e) => console.error("[DailyUpdate] Trim failed:", e));
+    this.inMemoryUpdates.set(date, entry);
+
+    try {
+      await updatesCol().doc(date).set(entry);
+    } catch (e: any) {
+      console.warn("[DailyUpdate] Firestore write warning (cached in memory):", e?.message || e);
+    }
+
+    this.trimOldUpdates().catch(() => {});
     return entry;
   }
 
@@ -96,11 +111,16 @@ class DailyUpdateService {
   public async getUpdateForDate(dateStr: string): Promise<DailyUpdateEntry | null> {
     try {
       const snap = await updatesCol().doc(dateStr).get();
-      return snap.exists ? (snap.data() as DailyUpdateEntry) : null;
-    } catch (e) {
-      console.error(`[DailyUpdate] Failed to fetch update for ${dateStr}:`, e);
-      return null;
+      if (snap.exists) {
+        const data = snap.data() as DailyUpdateEntry;
+        this.inMemoryUpdates.set(dateStr, data);
+        return data;
+      }
+    } catch (e: any) {
+      console.warn(`[DailyUpdate] Firestore fetch warning for ${dateStr}, checking memory cache.`);
     }
+
+    return this.inMemoryUpdates.get(dateStr) || null;
   }
 
   /** Whether anything has been logged for today yet. */
@@ -111,12 +131,14 @@ class DailyUpdateService {
 
   /** Keeps only the most recent MAX_DAYS_RETAINED day-documents. */
   private async trimOldUpdates() {
-    const snapshot = await updatesCol().orderBy("dateStr", "desc").get();
-    if (snapshot.size <= MAX_DAYS_RETAINED) return;
-    const toDelete = snapshot.docs.slice(MAX_DAYS_RETAINED);
-    const batch = db.batch();
-    toDelete.forEach((doc) => batch.delete(doc.ref));
-    await batch.commit();
+    try {
+      const snapshot = await updatesCol().orderBy("dateStr", "desc").get();
+      if (snapshot.size <= MAX_DAYS_RETAINED) return;
+      const toDelete = snapshot.docs.slice(MAX_DAYS_RETAINED);
+      const batch = db.batch();
+      toDelete.forEach((doc) => batch.delete(doc.ref));
+      await batch.commit();
+    } catch {}
   }
 
   /**
@@ -134,9 +156,8 @@ class DailyUpdateService {
       return null;
     }
 
-    try {
-      const ai = new GoogleGenAI({ apiKey });
-      const prompt = `You are Friday, DK's WhatsApp assistant. Below is DK's own update log for TODAY only — short notes DK dictated about what he did/is doing today.
+    const models = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash"];
+    const prompt = `You are Friday, DK's WhatsApp assistant. Below is DK's own update log for TODAY only — short notes DK dictated about what he did/is doing today.
 
 TODAY'S UPDATE LOG:
 "${today.text}"
@@ -147,18 +168,24 @@ Answer ONLY using facts explicitly present in the update log above, in Friday's 
 If the update log does NOT contain information relevant to this specific question, respond with EXACTLY the single word: NONE
 Do not guess, infer, or make up anything not explicitly stated in the log.`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.6-flash",
-        contents: prompt,
-      });
+    const ai = new GoogleGenAI({ apiKey });
 
-      const reply = response.text?.trim();
-      if (!reply || reply.toUpperCase() === "NONE") return null;
-      return reply;
-    } catch (e) {
-      console.error("[DailyUpdate] Failed to answer from today's update:", e);
-      return null;
+    for (const model of models) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: prompt,
+        });
+
+        const reply = response.text?.trim();
+        if (!reply || reply.toUpperCase() === "NONE") return null;
+        return reply;
+      } catch (e: any) {
+        console.warn(`[DailyUpdate] Model ${model} failed, trying fallback:`, e?.message || e);
+      }
     }
+
+    return null;
   }
 
   // ── Pending questions (the "DK se poochu?" → forward-back flow) ──────────
@@ -169,7 +196,7 @@ Do not guess, infer, or make up anything not explicitly stated in the log.`;
     replyJid: string;
     question: string;
   }): Promise<PendingQuestion> {
-    const id = Math.random().toString(36).substring(2, 9);
+    const id = "pq_" + Math.random().toString(36).substring(2, 9);
     const entry: PendingQuestion = {
       id,
       senderPhone: params.senderPhone,
@@ -180,36 +207,72 @@ Do not guess, infer, or make up anything not explicitly stated in the log.`;
       status: "awaiting_confirmation",
       createdAt: Date.now(),
     };
-    await pendingCol().doc(id).set(entry);
+
+    this.inMemoryPending.set(id, entry);
+
+    try {
+      await pendingCol().doc(id).set(entry);
+    } catch (e: any) {
+      console.warn("[DailyUpdate] Firestore pending save warning (cached in memory):", e?.message || e);
+    }
+
     return entry;
   }
 
   /** Most recent not-yet-resolved pending question from this specific sender, if any (within the last hour). */
   public async getRecentPendingForSender(senderPhone: string): Promise<PendingQuestion | null> {
+    const oneHourAgo = Date.now() - 60 * 60 * 1000;
+
     try {
-      const oneHourAgo = Date.now() - 60 * 60 * 1000;
       const snap = await pendingCol()
         .where("senderPhone", "==", senderPhone)
         .where("status", "in", ["awaiting_confirmation", "awaiting_dk"])
         .orderBy("createdAt", "desc")
         .limit(1)
         .get();
-      if (snap.empty) return null;
-      const entry = snap.docs[0].data() as PendingQuestion;
-      if (entry.createdAt < oneHourAgo) return null;
-      return entry;
+
+      if (!snap.empty) {
+        const entry = snap.docs[0].data() as PendingQuestion;
+        if (entry.createdAt >= oneHourAgo) {
+          this.inMemoryPending.set(entry.id, entry);
+          return entry;
+        }
+      }
     } catch (e) {
-      console.error("[DailyUpdate] Failed to fetch pending question:", e);
-      return null;
+      // Check memory fallback
+      for (const entry of this.inMemoryPending.values()) {
+        if (
+          entry.senderPhone === senderPhone &&
+          (entry.status === "awaiting_confirmation" || entry.status === "awaiting_dk") &&
+          entry.createdAt >= oneHourAgo
+        ) {
+          return entry;
+        }
+      }
     }
+
+    return null;
   }
 
   public async markAskedDK(id: string) {
-    await pendingCol().doc(id).set({ status: "awaiting_dk", askedDK: true }, { merge: true });
+    const p = this.inMemoryPending.get(id);
+    if (p) {
+      p.status = "awaiting_dk";
+      p.askedDK = true;
+    }
+    try {
+      await pendingCol().doc(id).set({ status: "awaiting_dk", askedDK: true }, { merge: true });
+    } catch {}
   }
 
   public async markAnswered(id: string) {
-    await pendingCol().doc(id).set({ status: "answered" }, { merge: true });
+    const p = this.inMemoryPending.get(id);
+    if (p) {
+      p.status = "answered";
+    }
+    try {
+      await pendingCol().doc(id).set({ status: "answered" }, { merge: true });
+    } catch {}
   }
 
   /** All pending questions currently waiting on DK's answer (for DK-side forwarding). */
@@ -218,8 +281,7 @@ Do not guess, infer, or make up anything not explicitly stated in the log.`;
       const snap = await pendingCol().where("status", "==", "awaiting_dk").get();
       return snap.docs.map((d) => d.data() as PendingQuestion);
     } catch (e) {
-      console.error("[DailyUpdate] Failed to fetch questions awaiting DK:", e);
-      return [];
+      return Array.from(this.inMemoryPending.values()).filter((p) => p.status === "awaiting_dk");
     }
   }
 
@@ -227,8 +289,6 @@ Do not guess, infer, or make up anything not explicitly stated in the log.`;
   public isAffirmative(text: string): boolean {
     const normalized = (text || "").trim().toLowerCase().replace(/[.!?]+$/g, "");
     if (AFFIRMATIVE_WORDS.has(normalized)) return true;
-    // Reasoning-lite fallback: very short replies (<=3 words) that don't look
-    // like a real new question are treated as affirmative-ish confirmations.
     const wordCount = normalized.split(/\s+/).filter(Boolean).length;
     return wordCount > 0 && wordCount <= 2 && !normalized.includes("?");
   }

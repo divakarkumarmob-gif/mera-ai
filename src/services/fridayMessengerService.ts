@@ -77,6 +77,8 @@ class FridayMessengerService {
     },
   ];
 
+  private inMemoryMessages = new Map<string, MessengerMessage[]>();
+
   public async getContacts(): Promise<MessengerContact[]> {
     try {
       const snap = await messengerContactsCol().get();
@@ -98,10 +100,14 @@ class FridayMessengerService {
   public async getMessages(chatId: string): Promise<MessengerMessage[]> {
     try {
       const snap = await messengerMessagesCol(chatId).orderBy("timestamp", "asc").limit(100).get();
-      return snap.docs.map((d) => d.data() as MessengerMessage);
-    } catch {
-      return [];
-    }
+      const messages = snap.docs.map((d) => d.data() as MessengerMessage);
+      if (messages.length > 0) {
+        this.inMemoryMessages.set(chatId, messages);
+        return messages;
+      }
+    } catch {}
+
+    return this.inMemoryMessages.get(chatId) || [];
   }
 
   public async setContactRole(contactId: string, role: MessengerRole): Promise<{ success: boolean; message: string }> {
@@ -188,6 +194,11 @@ TONE & PERSONALITY:
       aiGenerated: false,
     };
 
+    // Cache user message locally
+    const existingList = this.inMemoryMessages.get(chatId) || [];
+    existingList.push(userMessage);
+    this.inMemoryMessages.set(chatId, existingList);
+
     // Save user message in Firestore
     try {
       await messengerMessagesCol(chatId).doc(userMsgId).set(userMessage);
@@ -232,6 +243,9 @@ TONE & PERSONALITY:
           timestamp: Date.now(),
           aiGenerated: true,
         };
+
+        existingList.push(aiReply);
+        this.inMemoryMessages.set(chatId, existingList);
 
         await messengerMessagesCol(chatId).doc(aiMsgId).set(aiReply);
         await messengerContactsCol().doc(chatId).set(
