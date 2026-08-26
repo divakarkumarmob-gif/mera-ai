@@ -626,6 +626,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         quality?: string;
         durationSec?: number;
         audioUrl?: string;
+        fallbackAudioUrl?: string;
         isPlaying?: boolean;
         hasError?: boolean;
         errorMessage?: string;
@@ -642,7 +643,32 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     }, []);
 
     const toggleMusicPlayPause = useCallback(() => {
-        if (!musicAudioRef.current) return;
+        if (!musicAudioRef.current) {
+            if (nowPlayingMusic?.audioUrl || nowPlayingMusic?.fallbackAudioUrl) {
+                const targetUrl = nowPlayingMusic.audioUrl || nowPlayingMusic.fallbackAudioUrl;
+                if (targetUrl) {
+                    const audio = new Audio();
+                    audio.crossOrigin = 'anonymous';
+                    audio.src = targetUrl;
+                    audio.volume = 0.85;
+                    audio.onended = () => {
+                        setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: false } : null);
+                    };
+                    audio.onerror = () => {
+                        setNowPlayingMusic(prev => prev ? { ...prev, hasError: true, isPlaying: false, errorMessage: 'Stream unavailable' } : null);
+                    };
+                    musicAudioRef.current = audio;
+                    audio.play().then(() => {
+                        setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: true, hasError: false } : null);
+                    }).catch(err => {
+                        console.warn('[Music] Manual play error:', err);
+                        setNowPlayingMusic(prev => prev ? { ...prev, hasError: true, errorMessage: 'Playback blocked' } : null);
+                    });
+                }
+            }
+            return;
+        }
+
         if (nowPlayingMusic?.isPlaying) {
             musicAudioRef.current.pause();
             setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: false } : null);
@@ -654,7 +680,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 setNowPlayingMusic(prev => prev ? { ...prev, hasError: true, errorMessage: 'Playback blocked or stream expired' } : null);
             });
         }
-    }, [nowPlayingMusic?.isPlaying]);
+    }, [nowPlayingMusic?.isPlaying, nowPlayingMusic?.audioUrl, nowPlayingMusic?.fallbackAudioUrl]);
 
     // ── MediaSession API for Background / Lockscreen Playback ─────────────────
     useEffect(() => {
@@ -1375,41 +1401,67 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         setResearchReport(msg.report);
                     }
                 } else if (msg.type === 'play_music') {
-                    // FIX: Preserve Music Player UI Widget state on stream error / autoplay block instead of immediate dismissal!
+                    // Graceful track stream resolution & error fallback recovery
                     stopMusicPlayback();
+                    const primaryAudioUrl = msg.audioUrl || msg.streamUrl;
+                    const fallbackAudioUrl = msg.fallbackAudioUrl || msg.fallbackUrl;
                     const trackInfo = {
                         trackName: msg.trackName || 'Music Track',
                         artistName: msg.artistName,
                         albumArt: msg.albumArt,
                         spotifyUrl: msg.spotifyUrl,
-                        youtubeMusicUrl: msg.youtubeMusicUrl,
+                        youtubeMusicUrl: msg.youtubeMusicUrl || (msg.videoId ? `https://music.youtube.com/watch?v=${msg.videoId}` : undefined),
+                        embedUrl: msg.embedUrl || (msg.videoId ? `https://www.youtube-nocookie.com/embed/${msg.videoId}?autoplay=1&enablejsapi=1&controls=1&modestbranding=1` : undefined),
+                        videoId: msg.videoId,
                         isFullSong: msg.isFullSong,
                         quality: msg.quality,
                         durationSec: msg.durationSec,
-                        audioUrl: msg.audioUrl,
+                        audioUrl: primaryAudioUrl,
+                        fallbackAudioUrl: fallbackAudioUrl,
                         isPlaying: false,
                         hasError: false,
                     };
 
-                    if (msg.audioUrl) {
+                    const attemptPlayback = (srcUrl: string, isFallbackAttempt = false) => {
                         try {
+                            if (musicAudioRef.current) {
+                                musicAudioRef.current.pause();
+                                musicAudioRef.current = null;
+                            }
                             const audio = new Audio();
-                            audio.src = msg.audioUrl;
+                            audio.crossOrigin = 'anonymous';
+                            audio.src = srcUrl;
                             audio.volume = 0.85;
 
                             audio.onended = () => {
                                 setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: false } : null);
                             };
 
-                            // Do NOT dismiss player widget on error — set explicit error fallback state!
                             audio.onerror = (e) => {
-                                console.warn('[Music] Audio stream playback error:', e);
-                                setNowPlayingMusic(prev => prev ? {
-                                    ...prev,
-                                    hasError: true,
-                                    isPlaying: false,
-                                    errorMessage: 'Stream playback unavailable'
-                                } : null);
+                                console.warn('[Music] Audio stream error on source:', srcUrl, e);
+                                if (!isFallbackAttempt && fallbackAudioUrl && fallbackAudioUrl !== srcUrl) {
+                                    console.log('[Music] Attempting fallback audio stream URL...');
+                                    attemptPlayback(fallbackAudioUrl, true);
+                                } else if (msg.videoId || msg.embedUrl || trackInfo.embedUrl) {
+                                    console.log('[Music] Direct stream failed, falling back to YouTube Music embed');
+                                    if (musicAudioRef.current) {
+                                        musicAudioRef.current.pause();
+                                        musicAudioRef.current = null;
+                                    }
+                                    setNowPlayingMusic({
+                                        ...trackInfo,
+                                        isYouTubeMusic: true,
+                                        isPlaying: true,
+                                        hasError: false,
+                                    });
+                                } else {
+                                    setNowPlayingMusic(prev => prev ? {
+                                        ...prev,
+                                        hasError: true,
+                                        isPlaying: false,
+                                        errorMessage: 'Audio stream failed to load. Use Spotify or YouTube link below.'
+                                    } : null);
+                                }
                             };
 
                             musicAudioRef.current = audio;
@@ -1419,8 +1471,13 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                                 playPromise.then(() => {
                                     setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: true, hasError: false } : null);
                                 }).catch((err) => {
-                                    console.warn('[Music] Autoplay blocked or start failed:', err);
-                                    setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: false, hasError: false } : null);
+                                    console.warn('[Music] Autoplay prevented or start failed:', err);
+                                    setNowPlayingMusic(prev => prev ? {
+                                        ...prev,
+                                        isPlaying: false,
+                                        hasError: false,
+                                        errorMessage: 'Click ▶ Play to start audio'
+                                    } : null);
                                 });
                             }
 
@@ -1433,11 +1490,20 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                             setNowPlayingMusic({
                                 ...trackInfo,
                                 hasError: true,
-                                errorMessage: 'Failed to initialize audio',
+                                errorMessage: 'Failed to initialize audio player',
                             });
                         }
+                    };
+
+                    if (primaryAudioUrl) {
+                        attemptPlayback(primaryAudioUrl);
+                    } else if (msg.videoId || msg.embedUrl) {
+                        setNowPlayingMusic({
+                            ...trackInfo,
+                            isYouTubeMusic: true,
+                            isPlaying: true,
+                        });
                     } else {
-                        // If no direct stream URL is available, display track card with Spotify button!
                         setNowPlayingMusic(trackInfo);
                     }
                 } else if (msg.type === 'play_youtube_music' && msg.track) {
@@ -1719,16 +1785,19 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                                     <button
                                         onClick={() => {
                                             stopMusicPlayback();
-                                            const audio = new Audio(identifiedSong.previewUrl);
+                                            const audio = new Audio();
+                                            audio.crossOrigin = 'anonymous';
+                                            audio.src = identifiedSong.previewUrl;
                                             audio.volume = 0.85;
                                             audio.onended = () => setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: false } : null);
-                                            audio.onerror = () => setNowPlayingMusic(prev => prev ? { ...prev, hasError: true, isPlaying: false } : null);
+                                            audio.onerror = () => setNowPlayingMusic(prev => prev ? { ...prev, hasError: true, isPlaying: false, errorMessage: 'Preview audio error' } : null);
                                             musicAudioRef.current = audio;
                                             audio.play().catch(() => {});
                                             setNowPlayingMusic({
                                                 trackName: identifiedSong.trackName,
                                                 artistName: identifiedSong.artistName,
                                                 spotifyUrl: identifiedSong.spotifyUrl,
+                                                audioUrl: identifiedSong.previewUrl,
                                                 isPlaying: true,
                                             });
                                         }}
@@ -1801,7 +1870,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                                             {nowPlayingMusic.trackName}
                                         </span>
                                         <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-emerald-500/30 text-emerald-300 font-mono">
-                                            {nowPlayingMusic.isFullSong ? '✨ Full Song (320kbps)' : 'Music Track'}
+                                            {nowPlayingMusic.isFullSong ? '✨ Full Song' : 'Music Track'}
                                         </span>
                                     </div>
                                     <p className="text-slate-300 text-[11px] truncate">
@@ -1809,13 +1878,13 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                                     </p>
                                     {nowPlayingMusic.hasError && (
                                         <p className="text-rose-400 text-[10px] truncate font-medium mt-0.5">
-                                            ⚠️ Direct stream unavailable — open on Spotify below
+                                            ⚠️ {nowPlayingMusic.errorMessage || 'Direct stream unavailable — use links below'}
                                         </p>
                                     )}
                                 </div>
 
                                 <div className="flex items-center gap-1.5 shrink-0">
-                                    {musicAudioRef.current && !nowPlayingMusic.hasError && !nowPlayingMusic.isYouTubeMusic && (
+                                    {(musicAudioRef.current || nowPlayingMusic.audioUrl || nowPlayingMusic.fallbackAudioUrl) && !nowPlayingMusic.isYouTubeMusic && (
                                         <button
                                             onClick={toggleMusicPlayPause}
                                             className="px-2 py-1 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-semibold text-[11px] transition-colors shadow-sm cursor-pointer"
