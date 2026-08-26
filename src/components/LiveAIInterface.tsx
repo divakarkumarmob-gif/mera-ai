@@ -1529,19 +1529,24 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     const track = msg.track;
                     const directAudio = track.audioUrl || (track.streamUrl && !track.streamUrl.includes('youtube-nocookie.com') ? track.streamUrl : undefined);
 
+                    const embedUrl = track.embedUrl || (track.videoId ? `https://www.youtube-nocookie.com/embed/${track.videoId}?autoplay=1&enablejsapi=1&controls=1&modestbranding=1&playsinline=1&rel=0` : undefined);
+
                     const trackState = {
                         trackName: track.trackName || 'YouTube Music Track',
                         artistName: track.artistName || 'YouTube Music',
                         albumArt: track.albumArt || (track.videoId ? `https://img.youtube.com/vi/${track.videoId}/hqdefault.jpg` : undefined),
-                        embedUrl: directAudio ? undefined : (track.embedUrl || (track.videoId ? `https://www.youtube-nocookie.com/embed/${track.videoId}?autoplay=1&enablejsapi=1&controls=1&modestbranding=1` : undefined)),
+                        embedUrl: embedUrl,
                         videoId: track.videoId,
-                        isYouTubeMusic: !directAudio,
+                        isYouTubeMusic: true,
                         isFullSong: true,
                         isPlaying: true,
                         quality: directAudio ? 'HD 320kbps Audio' : 'YouTube Music HD',
                         youtubeMusicUrl: track.youtubeMusicUrl || (track.videoId ? `https://music.youtube.com/watch?v=${track.videoId}` : undefined),
                         audioUrl: directAudio,
                     };
+
+                    // Acquire Screen/Background WakeLock to prevent app/music sleep
+                    screenWakeLock.requestLock().catch(() => {});
 
                     // Start background HTML5 Audio stream (works 24/7 with Screen OFF & App Minimized)
                     if (directAudio) {
@@ -1552,10 +1557,10 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                             audio.volume = 0.85;
                             audio.onended = () => {
                                 setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: false } : null);
+                                screenWakeLock.releaseLock();
                             };
                             audio.onerror = () => {
                                 console.warn('[Music] Direct stream error, falling back to embedded player');
-                                setNowPlayingMusic(prev => prev ? { ...prev, isYouTubeMusic: true, embedUrl: track.embedUrl } : null);
                             };
                             musicAudioRef.current = audio;
                             audio.play().catch(err => {
@@ -1990,9 +1995,10 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                                 </div>
                                 <div className="aspect-video w-full rounded-xl overflow-hidden bg-black border border-slate-800">
                                     <iframe
+                                        id="youtube-iframe"
                                         src={nowPlayingMusic.embedUrl}
                                         title={nowPlayingMusic.trackName}
-                                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                        allow="autoplay; encrypted-media; accelerometer; clipboard-write; gyroscope; picture-in-picture"
                                         allowFullScreen
                                         className="w-full h-full border-0"
                                     />
