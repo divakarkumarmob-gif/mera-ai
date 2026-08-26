@@ -1,5 +1,9 @@
 import { db } from "./firebaseAdmin";
 import { publicApisService } from "./publicApisService";
+import { systemHealthService } from "./systemHealthService";
+import { voicePersonaService } from "./voicePersonaService";
+import { smartHomeService } from "./smartHomeService";
+import { focusModeService } from "./focusModeService";
 
 export interface ReminderItem {
   id: string;
@@ -271,7 +275,6 @@ class ToolsEngine {
    * JARVIS PC & System Health Diagnostics
    */
   public getSystemHealth() {
-    const { systemHealthService } = require("./systemHealthService");
     return systemHealthService.getHealthMetrics();
   }
 
@@ -295,7 +298,6 @@ class ToolsEngine {
    * Voice Persona & Style Switcher
    */
   public switchVoicePersona(personaName: string) {
-    const { voicePersonaService } = require("./voicePersonaService");
     return voicePersonaService.switchPersona(personaName);
   }
 
@@ -457,12 +459,10 @@ class ToolsEngine {
    * Smart Home & IoT Voice Controller
    */
   public async controlSmartDevice(deviceNameOrRoom: string, action: any, value?: number) {
-    const { smartHomeService } = require("./smartHomeService");
     return await smartHomeService.controlDevice(deviceNameOrRoom, action, value);
   }
 
   public async getSmartHomeStatus() {
-    const { smartHomeService } = require("./smartHomeService");
     return await smartHomeService.getHomeStatus();
   }
 
@@ -475,7 +475,6 @@ class ToolsEngine {
   }
 
   public stopFocusMode() {
-    const { focusModeService } = require("./focusModeService");
     return focusModeService.stopFocusMode();
   }
 

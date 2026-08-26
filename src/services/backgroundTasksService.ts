@@ -84,7 +84,7 @@ class BackgroundTasksService {
    */
   public completeTask(id: string, resultSummary: string, rawResult?: any): void {
     const task = this.tasks.get(id);
-    if (!task) return;
+    if (!task || task.status === "cancelled") return;
     task.status = "completed";
     task.completedAt = Date.now();
     task.progressStep = "Task successfully complete ho gaya.";
@@ -100,7 +100,7 @@ class BackgroundTasksService {
    */
   public failTask(id: string, errorSummary: string): void {
     const task = this.tasks.get(id);
-    if (!task) return;
+    if (!task || task.status === "cancelled") return;
     task.status = "failed";
     task.completedAt = Date.now();
     task.progressStep = "Task fail ho gaya.";

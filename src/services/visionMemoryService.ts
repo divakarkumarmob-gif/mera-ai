@@ -34,6 +34,7 @@ class VisionMemoryService {
     ocrText?: string;
     timestamp: number;
   } | null = null;
+  private inMemoryPersonMemories = new Map<string, StoredPersonMemory>();
 
   private getGenAI(): GoogleGenAI | null {
     const key = process.env.GEMINI_API_KEY;
@@ -306,7 +307,12 @@ Extract:
       updatedAt: Date.now(),
     };
 
-    await db.collection("personMemories").doc(personId).set(memory, { merge: true });
+    this.inMemoryPersonMemories.set(personId, memory);
+    try {
+      await db.collection("personMemories").doc(personId).set(memory, { merge: true });
+    } catch (e) {
+      console.warn("[VisionMemoryService] Firestore save error, using in-memory cache:", e);
+    }
     console.log(`[VisionMemoryService] Stored person visual memory for "${name}" (ID: ${personId})`);
 
     return {
@@ -336,16 +342,27 @@ Extract:
       };
     }
 
-    // 1. Fetch all stored person memories from Firestore
-    const snap = await db.collection("personMemories").limit(50).get();
-    if (snap.empty) {
+    // 1. Fetch all stored person memories from Firestore or local cache
+    let memories: StoredPersonMemory[] = [];
+    try {
+      const snap = await db.collection("personMemories").limit(50).get();
+      if (!snap.empty) {
+        memories = snap.docs.map((d) => d.data() as StoredPersonMemory);
+      }
+    } catch (e) {
+      console.warn("[VisionMemoryService] Firestore fetch error, using in-memory cache:", e);
+    }
+
+    if (memories.length === 0) {
+      memories = Array.from(this.inMemoryPersonMemories.values());
+    }
+
+    if (memories.length === 0) {
       return {
         identified: false,
         explanation: "Boss, memory me abhi koi person profile save nahi hai. Aap kisi ki photo bhej kar 'iska naam Rahul hai' bolenge to main save kar lungi.",
       };
     }
-
-    const memories = snap.docs.map((d) => d.data() as StoredPersonMemory);
     const ai = this.getGenAI();
 
     if (!ai) {

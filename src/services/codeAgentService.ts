@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import { GoogleGenAI } from "@google/genai";
 import { db } from "./firebaseAdmin";
 import { githubService } from "./githubService";
@@ -848,9 +850,21 @@ ${original ? `Current Code:\n${original}` : "New File"}`;
    * 1-Click Rollback: Reverts the latest commit on the repository base branch.
    */
   public async rollback(): Promise<{ message: string }> {
-    const result = await githubService.rollbackLastCommit();
-    console.log(`[CodeAgent] Rollback executed: ${result.message}`);
-    return result;
+    try {
+      const result = await githubService.rollbackLastCommit();
+      console.log(`[CodeAgent] Rollback executed: ${result.message}`);
+      return result;
+    } catch (err: any) {
+      try {
+        const { execSync } = await import("child_process");
+        const log = execSync("git log -n 1 --format=%h", { encoding: "utf8" }).trim();
+        return {
+          message: `Local repository is at commit ${log}. Remote GitHub rollback requires GITHUB_TOKEN & GITHUB_REPO in .env.`,
+        };
+      } catch {
+        throw err;
+      }
+    }
   }
 
   /**
@@ -858,8 +872,41 @@ ${original ? `Current Code:\n${original}` : "New File"}`;
    */
   public async searchAndExplainCodebase(query: string): Promise<{ answer: string; relatedFiles: string[] }> {
     try {
-      const allFiles = await githubService.listRepoFiles();
-      const codeFiles = allFiles.filter((p) => /\.(ts|tsx|js|jsx)$/i.test(p)).slice(0, 70);
+      let codeFiles: string[] = [];
+      try {
+        const allFiles = await githubService.listRepoFiles();
+        codeFiles = allFiles.filter((p) => /\.(ts|tsx|js|jsx)$/i.test(p)).slice(0, 70);
+      } catch {
+        // Local filesystem scan fallback
+        const scanDir = (dir: string, base = ""): string[] => {
+          let results: string[] = [];
+          if (!fs.existsSync(dir)) return results;
+          try {
+            const entries = fs.readdirSync(dir, { withFileTypes: true });
+            for (const ent of entries) {
+              if (ent.name.startsWith(".") || ent.name === "node_modules" || ent.name === "dist" || ent.name === "scratch") continue;
+              const full = path.join(dir, ent.name);
+              const rel = path.join(base, ent.name).replace(/\\/g, "/");
+              if (ent.isDirectory()) {
+                results = results.concat(scanDir(full, rel));
+              } else if (/\.(ts|tsx|js|jsx)$/i.test(ent.name)) {
+                results.push(rel);
+              }
+            }
+          } catch {}
+          return results;
+        };
+        codeFiles = scanDir(process.cwd()).slice(0, 70);
+      }
+
+      // Keyword match to find the most relevant files
+      const qLower = query.toLowerCase();
+      const qWords = qLower.split(/\s+/).filter((w) => w.length > 2);
+      const matched = codeFiles.filter((f) => {
+        const fLower = f.toLowerCase();
+        return qWords.some((w) => fLower.includes(w));
+      });
+      const topFiles = matched.length > 0 ? matched.slice(0, 5) : codeFiles.slice(0, 5);
 
       const prompt = `You are DK's expert Codebase Guide. The user is asking about the codebase: "${query}".
 Repository files:
@@ -870,10 +917,18 @@ Provide a concise, direct answer in friendly conversational Hindi/Hinglish:
 2. The key functions/components involved.
 3. A 2-sentence summary of how it works.`;
 
-      const response = await callModel(prompt);
+      let response: string | null = null;
+      try {
+        response = await callModel(prompt);
+      } catch {}
+
+      if (!response) {
+        response = `Boss, "${query}" se related logic mukhya roop se in files me sthit hai: ${topFiles.join(", ")}. In components ko inspect karke aap is feature ki implementation dekh sakte hain.`;
+      }
+
       return {
-        answer: response || "Codebase logic search complete.",
-        relatedFiles: codeFiles.slice(0, 5),
+        answer: response,
+        relatedFiles: topFiles,
       };
     } catch (e: any) {
       return {

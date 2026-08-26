@@ -51,7 +51,7 @@ class ScreenWakeLockManager {
       if (BackgroundTask?.beforeExit) {
         BackgroundTask.beforeExit(async () => {
           try {
-            this.backgroundTaskId = await BackgroundTask.start();
+            this.backgroundTaskId = typeof (BackgroundTask as any).start === "function" ? await (BackgroundTask as any).start() : null;
             if (!this.keepAliveInterval) {
               this.keepAliveInterval = setInterval(() => {
                 // Keep-alive ping for background audio engine
