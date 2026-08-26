@@ -5,8 +5,14 @@ import AgentFace from './components/AgentFace';
 import AppKeyLockModal from './components/AppKeyLockModal';
 import { getStoredAppSession } from '@/utils/appSecurityClient';
 import { wakeWordManager } from '@/utils/wakeWord';
+import { screenWakeLock } from '@/utils/screenWakeLock';
 
 export default function App() {
+    // Keep device screen permanently ON (no screen sleep or auto-dimming)
+    useEffect(() => {
+        screenWakeLock.requestLock().catch(() => {});
+    }, []);
+
     // Application Access Key Protection (Backed by Cryptographic Token)
     const [isUnlocked, setIsUnlocked] = useState<boolean>(() => !!getStoredAppSession());
 

@@ -10,6 +10,7 @@ import { YouTubeStudioModal } from './YouTubeStudioModal';
 import { getWsUrl } from '@/utils/api';
 import { wakeWordManager } from '@/utils/wakeWord';
 import { getAppToken, clearAppSession } from '@/utils/appSecurityClient';
+import { screenWakeLock } from '@/utils/screenWakeLock';
 
 interface LiveAIInterfaceProps {
     onClose: () => void;
@@ -611,6 +612,11 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const captionBoxRef = useRef<HTMLDivElement>(null);
     const userScrolledUpRef = useRef(false);
     const captionTurnStartedRef = useRef(false);
+
+    // Keep screen awake while in Friday Live AI Interface / Web URL
+    useEffect(() => {
+        screenWakeLock.requestLock().catch(() => {});
+    }, []);
 
     // ── Music Player State & References ─────────────────────────────────────
     const [nowPlayingMusic, setNowPlayingMusic] = useState<{
