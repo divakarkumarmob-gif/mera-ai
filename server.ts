@@ -858,10 +858,37 @@ async function startServer() {
       const category = req.query.category ? String(req.query.category) : undefined;
       const country = String(req.query.country || "in");
       const count = Number(req.query.count || 10);
-      const data = await newsService.getLatestNews(q, category, country, "en", count);
+      const engine = (req.query.engine as any) || "auto";
+      const data = await newsService.getLatestNews(q, category, country, "en", count, engine);
       res.json(data);
     } catch (e: any) {
       res.status(500).json({ success: false, error: e?.message || "news_fetch_failed" });
+    }
+  });
+
+  app.get("/api/news/newsdata", async (req, res) => {
+    try {
+      const q = req.query.q ? String(req.query.q) : undefined;
+      const category = req.query.category ? String(req.query.category) : undefined;
+      const country = String(req.query.country || "in");
+      const count = Number(req.query.count || 10);
+      const data = await newsService.getNewsDataLatest(q, category, country, "en", count);
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || "newsdata_fetch_failed" });
+    }
+  });
+
+  app.get("/api/news/newsapi", async (req, res) => {
+    try {
+      const q = req.query.q ? String(req.query.q) : undefined;
+      const category = req.query.category ? String(req.query.category) : undefined;
+      const country = String(req.query.country || "in");
+      const count = Number(req.query.count || 10);
+      const data = await newsService.getNewsApiOrgLatest(q, category, country, count);
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || "newsapi_fetch_failed" });
     }
   });
 

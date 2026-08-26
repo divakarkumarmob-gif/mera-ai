@@ -63,9 +63,55 @@ export class NewsService {
   }
 
   /**
-   * 1. Real-Time Latest Breaking News (Category, Country, Search Query, Multi-Language)
+   * 1. Real-Time Latest Breaking News (Multi-Engine: Auto / NewsData.io / NewsAPI.org / Google News)
    */
   public async getLatestNews(
+    topicOrQuery?: string,
+    category?: string,
+    country: string = "in",
+    language: string = "en",
+    count: number = 10,
+    engine: "auto" | "newsdata" | "newsapi" | "google" = "auto"
+  ): Promise<NewsResult> {
+    if (engine === "newsdata") {
+      return this.getNewsDataLatest(topicOrQuery, category, country, language, count);
+    }
+    if (engine === "newsapi") {
+      return this.getNewsApiOrgLatest(topicOrQuery, category, country, count);
+    }
+    if (engine === "google") {
+      const cat = category || this.detectCategory(topicOrQuery);
+      return this.getGoogleNewsFallback(topicOrQuery, cat, count);
+    }
+
+    // Auto Mode: Try NewsData.io -> NewsAPI.org -> Google News Live
+    const apiKey = this.getApiKey();
+    const requestedCount = Math.min(Math.max(count || 10, 1), 15);
+    const cat = category || this.detectCategory(topicOrQuery);
+
+    if (apiKey) {
+      const ndRes = await this.getNewsDataLatest(topicOrQuery, cat, country, language, requestedCount);
+      if (ndRes.success && ndRes.articles.length > 0) {
+        return ndRes;
+      }
+    }
+
+    const newsApiKey = process.env.NEWS_API_KEY || process.env.NEWSAPI_KEY;
+    if (newsApiKey) {
+      const naRes = await this.getNewsApiOrgLatest(topicOrQuery, cat, country, requestedCount);
+      if (naRes.success && naRes.articles.length > 0) {
+        return naRes;
+      }
+    }
+
+    // High-precision Real-Time Google News Live RSS Fallback
+    return this.getGoogleNewsFallback(topicOrQuery, cat, requestedCount);
+  }
+
+  /**
+   * Directly fetch from NewsData.io API (Fallback #2)
+   */
+  public async getNewsDataLatest(
     topicOrQuery?: string,
     category?: string,
     country: string = "in",
@@ -73,70 +119,178 @@ export class NewsService {
     count: number = 10
   ): Promise<NewsResult> {
     const apiKey = this.getApiKey();
+    if (!apiKey) {
+      return {
+        success: false,
+        totalResults: 0,
+        articles: [],
+        sourceEngine: "newsdata_io",
+        message: "NEWSDATA_API_KEY environment variable set nahi hai. Kripya .env me NEWSDATA_API_KEY provide karein.",
+      };
+    }
+
     const requestedCount = Math.min(Math.max(count || 10, 1), 15);
     const cat = category || this.detectCategory(topicOrQuery);
 
-    if (apiKey) {
-      try {
-        const params = new URLSearchParams({
-          apikey: apiKey,
-          country: country || "in",
-          language: language || "en",
-        });
+    try {
+      const params = new URLSearchParams({
+        apikey: apiKey,
+        country: country || "in",
+        language: language || "en",
+      });
 
-        if (cat && cat !== "all" && cat !== "top") {
-          params.set("category", cat);
-        }
-
-        if (topicOrQuery && !this.isGenericQuery(topicOrQuery)) {
-          params.set("q", topicOrQuery);
-        }
-
-        const url = `${this.baseUrl}/latest?${params.toString()}`;
-        const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
-
-        if (res.ok) {
-          const data = await res.json();
-          if (data.status === "success" && Array.isArray(data.results) && data.results.length > 0) {
-            const articles: NewsArticle[] = data.results.slice(0, requestedCount).map((r: any) => ({
-              title: r.title,
-              link: r.link,
-              source: r.source_id || r.source_name || "NewsData",
-              sourceIcon: r.source_icon,
-              pubDate: r.pubDate,
-              description: r.description,
-              imageUrl: r.image_url,
-              category: r.category,
-              country: r.country,
-              language: r.language,
-              sentiment: r.sentiment || "neutral",
-              sentimentStats: r.sentiment_stats,
-            }));
-
-            let msg = `📰 **Latest Breaking News${cat ? ` (${cat.toUpperCase()})` : ""}:**\n\n`;
-            articles.slice(0, 5).forEach((a, idx) => {
-              msg += `${idx + 1}. **${a.title}**\n   🏛️ _Source: ${a.source}_ | ⏱️ ${a.pubDate || "Just now"}\n`;
-            });
-
-            return {
-              success: true,
-              totalResults: data.totalResults || articles.length,
-              category: cat,
-              topic: topicOrQuery,
-              articles,
-              sourceEngine: "newsdata_io",
-              nextPage: data.nextPage,
-              message: msg.trim(),
-            };
-          }
-        }
-      } catch (e) {
-        console.warn("[NewsService] NewsData.io error, falling back to Google News:", e);
+      if (cat && cat !== "all" && cat !== "top") {
+        params.set("category", cat);
       }
+
+      if (topicOrQuery && !this.isGenericQuery(topicOrQuery)) {
+        params.set("q", topicOrQuery);
+      }
+
+      const url = `${this.baseUrl}/latest?${params.toString()}`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status === "success" && Array.isArray(data.results)) {
+          const articles: NewsArticle[] = data.results.slice(0, requestedCount).map((r: any) => ({
+            title: r.title,
+            link: r.link,
+            source: r.source_id || r.source_name || "NewsData",
+            sourceIcon: r.source_icon,
+            pubDate: r.pubDate,
+            description: r.description,
+            imageUrl: r.image_url,
+            category: r.category,
+            country: r.country,
+            language: r.language,
+            sentiment: r.sentiment || "neutral",
+            sentimentStats: r.sentiment_stats,
+          }));
+
+          let msg = `📰 **NewsData.io Direct Headlines${cat ? ` (${cat.toUpperCase()})` : ""}:**\n\n`;
+          articles.slice(0, 5).forEach((a, idx) => {
+            msg += `${idx + 1}. **${a.title}**\n   🏛️ _Source: ${a.source}_ | ⏱️ ${a.pubDate || "Just now"}\n`;
+          });
+
+          return {
+            success: true,
+            totalResults: data.totalResults || articles.length,
+            category: cat,
+            topic: topicOrQuery,
+            articles,
+            sourceEngine: "newsdata_io",
+            nextPage: data.nextPage,
+            message: msg.trim(),
+          };
+        }
+      }
+    } catch (e: any) {
+      return {
+        success: false,
+        totalResults: 0,
+        articles: [],
+        sourceEngine: "newsdata_io",
+        message: `NewsData.io fetch error: ${e?.message || e}`,
+      };
     }
 
-    // High-precision Real-Time Google News Live RSS Fallback
-    return this.getGoogleNewsFallback(topicOrQuery, cat, requestedCount);
+    return {
+      success: false,
+      totalResults: 0,
+      articles: [],
+      sourceEngine: "newsdata_io",
+      message: "NewsData.io se articles nahi mil sake.",
+    };
+  }
+
+  /**
+   * Directly fetch from NewsAPI.org API (Fallback #3)
+   */
+  public async getNewsApiOrgLatest(
+    topicOrQuery?: string,
+    category?: string,
+    country: string = "in",
+    count: number = 10
+  ): Promise<NewsResult> {
+    const apiKey = process.env.NEWS_API_KEY || process.env.NEWSAPI_KEY || process.env.NEWSAPI_API_KEY;
+    if (!apiKey) {
+      return {
+        success: false,
+        totalResults: 0,
+        articles: [],
+        sourceEngine: "newsapi_org",
+        message: "NEWS_API_KEY environment variable set nahi hai. Kripya .env me NEWS_API_KEY provide karein.",
+      };
+    }
+
+    const requestedCount = Math.min(Math.max(count || 10, 1), 15);
+    const cat = category || this.detectCategory(topicOrQuery);
+
+    try {
+      const params = new URLSearchParams({
+        apiKey: apiKey,
+        country: country || "in",
+        pageSize: String(requestedCount),
+      });
+
+      if (cat && cat !== "all" && cat !== "top") {
+        params.set("category", cat);
+      }
+
+      if (topicOrQuery && !this.isGenericQuery(topicOrQuery)) {
+        params.set("q", topicOrQuery);
+      }
+
+      const url = `https://newsapi.org/v2/top-headlines?${params.toString()}`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status === "ok" && Array.isArray(data.articles)) {
+          const articles: NewsArticle[] = data.articles.slice(0, requestedCount).map((r: any) => ({
+            title: r.title,
+            link: r.url,
+            source: r.source?.name || "NewsAPI.org",
+            pubDate: r.publishedAt,
+            description: r.description,
+            imageUrl: r.urlToImage,
+            sentiment: "neutral",
+          }));
+
+          let msg = `📰 **NewsAPI.org Direct Headlines${cat ? ` (${cat.toUpperCase()})` : ""}:**\n\n`;
+          articles.slice(0, 5).forEach((a, idx) => {
+            msg += `${idx + 1}. **${a.title}**\n   🏛️ _Source: ${a.source}_\n`;
+          });
+
+          return {
+            success: true,
+            totalResults: data.totalResults || articles.length,
+            category: cat,
+            topic: topicOrQuery,
+            articles,
+            sourceEngine: "newsapi_org",
+            message: msg.trim(),
+          };
+        }
+      }
+    } catch (e: any) {
+      return {
+        success: false,
+        totalResults: 0,
+        articles: [],
+        sourceEngine: "newsapi_org",
+        message: `NewsAPI.org fetch error: ${e?.message || e}`,
+      };
+    }
+
+    return {
+      success: false,
+      totalResults: 0,
+      articles: [],
+      sourceEngine: "newsapi_org",
+      message: "NewsAPI.org se articles nahi mil sake.",
+    };
   }
 
   /**
