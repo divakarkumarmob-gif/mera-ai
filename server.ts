@@ -750,11 +750,21 @@ async function startServer() {
 
   app.get("/api/railradar/between", async (req, res) => {
     try {
-      const { from, to } = req.query as { from?: string; to?: string };
-      const data = await railRadarService.searchTrainsBetweenStations(String(from || "GAYA"), String(to || "PNBE"));
+      const { from, to, date } = req.query as { from?: string; to?: string; date?: string };
+      const data = await railRadarService.searchTrainsBetweenStations(String(from || "GAYA"), String(to || "PNBE"), date);
       res.json(data);
     } catch (e: any) {
       res.status(500).json({ success: false, error: e?.message || "between_stations_failed" });
+    }
+  });
+
+  app.get("/api/railradar/train/:number/seats", async (req, res) => {
+    try {
+      const { from, to, date, class: cls } = req.query as { from?: string; to?: string; date?: string; class?: string };
+      const data = await railRadarService.getSeatAvailability(req.params.number, from, to, date, cls);
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || "seat_availability_failed" });
     }
   });
 
@@ -5631,7 +5641,9 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                   const toStation = String(call.args?.toStation || call.args?.to || "");
                   
                   try {
-                    if (action.includes("coach") || action.includes("layout") || action.includes("general") || action.includes("composition")) {
+                    if (action.includes("seat") || action.includes("availab") || action.includes("tatkal") || action.includes("quota")) {
+                      result = await railRadarService.getSeatAvailability(query, fromStation, toStation);
+                    } else if (action.includes("coach") || action.includes("layout") || action.includes("general") || action.includes("composition")) {
                       result = await railRadarService.getCoachPosition(query);
                     } else if (action.includes("stop") || action.includes("halt") || action.includes("route_check")) {
                       result = await railRadarService.checkTrainStoppage(query, targetStation || "PNBE");

@@ -127,7 +127,9 @@ export interface TrainsBetweenResult {
   success: boolean;
   fromStation: string;
   toStation: string;
+  journeyDate?: string;
   trainsCount: number;
+  bookingUrl?: string;
   trains: {
     trainNumber: string;
     trainName: string;
@@ -135,7 +137,33 @@ export interface TrainsBetweenResult {
     expectedDeparture?: string;
     delayMinutes?: number;
     platform?: string | number;
+    bookingUrl?: string;
   }[];
+  message: string;
+}
+
+export interface ClassAvailability {
+  classCode: string;
+  className: string;
+  quotaCode: "GN" | "TQ" | "PT";
+  status: string;
+  statusCode: "AVAILABLE" | "WAITLIST" | "RAC" | "REGRET" | "UNKNOWN";
+  isAvailable: boolean;
+  availableSeats?: number;
+  waitlistNumber?: number;
+}
+
+export interface SeatAvailabilityResult {
+  success: boolean;
+  trainNumber: string;
+  trainName?: string;
+  fromStation?: string;
+  toStation?: string;
+  journeyDate?: string;
+  generalAvailability: ClassAvailability[];
+  tatkalAvailability: ClassAvailability[];
+  tatkalOpeningInfo?: string;
+  bookingUrl?: string;
   message: string;
 }
 
@@ -143,6 +171,43 @@ export interface TrainsBetweenResult {
 const STATION_CODE_MAP: Record<string, string> = {
   patna: "PNBE",
   "patna junction": "PNBE",
+  "rajendra nagar": "RJPB",
+  danapur: "DNR",
+  patliputra: "PPTA",
+  jamui: "JMU",
+  dholi: "DOL",
+  muzaffarpur: "MFP",
+  samastipur: "SPJ",
+  darbhanga: "DBG",
+  barauni: "BJU",
+  kiul: "KIUL",
+  mokama: "MKA",
+  bakhtiyarpur: "BKP",
+  jhajha: "JAJ",
+  jasidih: "JSME",
+  deoghar: "DGHR",
+  bhagalpur: "BGP",
+  saharsa: "SHC",
+  purnia: "PRNA",
+  katihar: "KIR",
+  gaya: "GAYA",
+  sasaram: "SSM",
+  "dehri on sone": "DOS",
+  buxar: "BXR",
+  ara: "ARA",
+  hajipur: "HJP",
+  chhapra: "CPR",
+  siwan: "SV",
+  gopalganj: "THE",
+  thawe: "THE",
+  motihari: "BMKI",
+  bettiah: "BTH",
+  narkatiaganj: "NKE",
+  ranchi: "RNC",
+  dhanbad: "DHN",
+  bokaro: "BKSC",
+  tatanagar: "TATA",
+  jamshedpur: "TATA",
   "new delhi": "NDLS",
   delhi: "DLI",
   "hazrat nizamuddin": "NZM",
@@ -154,6 +219,9 @@ const STATION_CODE_MAP: Record<string, string> = {
   prayagraj: "PRYJ",
   allahabad: "PRYJ",
   varanasi: "BSB",
+  "pt deen dayal upadhyaya": "DDU",
+  ddu: "DDU",
+  mughalsarai: "DDU",
   mumbai: "CSMT",
   "mumbai central": "MMCT",
   csmt: "CSMT",
@@ -171,14 +239,25 @@ const STATION_CODE_MAP: Record<string, string> = {
   jaipur: "JP",
   lucknow: "LKO",
   gorakhpur: "GKP",
-  muzaffarpur: "MFP",
-  gaya: "GAYA",
-  ranchi: "RNC",
   bhopal: "BPL",
   indore: "INDB",
   chandigarh: "CDG",
   surat: "ST",
   nagpur: "NGP",
+  amritsar: "ASR",
+  agra: "AGC",
+  mathura: "MTJ",
+  gwalior: "GWL",
+  jhansi: "VGLJ",
+  jabalpur: "JBP",
+  kota: "KOTA",
+  vadodara: "BRC",
+  raipur: "R",
+  bilaspur: "BSP",
+  bhubaneswar: "BBS",
+  puri: "PURI",
+  guwahati: "GHY",
+  dibrugarh: "DBRG",
 };
 
 export class RailRadarService {
@@ -774,11 +853,25 @@ export class RailRadarService {
   }
 
   /**
-   * 7. Nearest Station Trains / Journey Planner (e.g. from GAYA to PNBE or CNB to NDLS)
+   * 7. Time-Aware Nearest Station Trains & Journey Planner
    */
-  public async searchTrainsBetweenStations(fromStation: string, toStation: string): Promise<TrainsBetweenResult> {
+  public async searchTrainsBetweenStations(
+    fromStation: string,
+    toStation: string,
+    journeyDate?: string
+  ): Promise<TrainsBetweenResult> {
     const fromCode = this.resolveStationCode(fromStation);
     const toCode = this.resolveStationCode(toStation);
+    const travelDate = journeyDate || new Date().toISOString().slice(0, 10);
+    const isToday = travelDate === new Date().toISOString().slice(0, 10);
+
+    // Current IST Time HH:MM for time-filtering
+    const nowIST = new Date();
+    const currentHours = nowIST.getUTCHours() + 5 + Math.floor((nowIST.getUTCMinutes() + 30) / 60);
+    const currentMins = (nowIST.getUTCMinutes() + 30) % 60;
+    const currentMinutesOfDay = (currentHours % 24) * 60 + currentMins;
+
+    const bookingUrl = `https://www.confirmtkt.com/rbooking-d/trains?from=${fromCode}&to=${toCode}&date=${travelDate}`;
 
     try {
       const url = `${this.baseUrl}/stations/${fromCode}/live`;
@@ -790,36 +883,70 @@ export class RailRadarService {
       if (res.ok) {
         const json = await res.json();
         const allTrains = json.data?.trains || [];
-        const matching = allTrains.filter(
+        
+        let matching = allTrains.filter(
           (t: any) =>
             t.train?.destination === toCode ||
             t.train?.destination?.includes(toCode) ||
             t.train?.source === toCode
         );
 
-        const targetList = matching.length > 0 ? matching : allTrains.slice(0, 6);
+        if (matching.length === 0) {
+          matching = allTrains;
+        }
 
-        const formattedTrains = targetList.slice(0, 6).map((m: any) => ({
-          trainNumber: m.train?.number || m.number,
-          trainName: m.train?.name || m.name,
-          scheduledDeparture: m.stop?.departure || m.sta,
-          expectedDeparture: m.live?.expectedDepartureTime || m.eta,
-          delayMinutes: Number(m.live?.delayMinutes || m.delay || 0),
-          platform: m.stop?.platform || m.platform,
-        }));
+        // Time filter: If journey is today, filter out trains that departed in the past
+        let upcomingTrains = matching;
+        if (isToday) {
+          upcomingTrains = matching.filter((t: any) => {
+            const depStr = t.stop?.departure || t.live?.expectedDepartureTime;
+            if (!depStr) return true;
+            try {
+              if (depStr.includes(":")) {
+                const parts = depStr.split(":");
+                const depMinutes = parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+                return depMinutes >= currentMinutesOfDay - 15; // include trains within 15 min buffer
+              }
+            } catch {}
+            return true;
+          });
+        }
 
-        let msg = `🚆 **Available Trains from ${fromCode} ➔ ${toCode}:**\n\n`;
+        if (upcomingTrains.length === 0) {
+          upcomingTrains = matching.slice(0, 5);
+        }
+
+        const formattedTrains = upcomingTrains.slice(0, 7).map((m: any) => {
+          const tNum = m.train?.number || m.number;
+          return {
+            trainNumber: tNum,
+            trainName: m.train?.name || m.name,
+            scheduledDeparture: m.stop?.departure || m.sta,
+            expectedDeparture: m.live?.expectedDepartureTime || m.eta,
+            delayMinutes: Number(m.live?.delayMinutes || m.delay || 0),
+            platform: m.stop?.platform || m.platform,
+            bookingUrl: `https://www.confirmtkt.com/rbooking-d/trains?from=${fromCode}&to=${toCode}&date=${travelDate}`,
+          };
+        });
+
+        let msg = `🚆 **Upcoming Trains from ${fromCode} ➔ ${toCode}:**\n`;
+        msg += `📅 **Date:** ${travelDate} ${isToday ? "(Showing future trains from current time)" : ""}\n\n`;
+
         formattedTrains.forEach((t: any) => {
           const delayTxt = t.delayMinutes && t.delayMinutes > 0 ? `🔴 (${t.delayMinutes}m Late)` : `🟢 (On Time)`;
-          msg += `• **#${t.trainNumber}** ${t.trainName}\n  ⏱️ Dep Time: *${t.scheduledDeparture || "Soon"}* ${delayTxt}${t.platform ? ` | 🏢 Plat #${t.platform}` : ""}\n`;
+          msg += `• **#${t.trainNumber}** ${t.trainName}\n  ⏱️ Departs: **${t.scheduledDeparture || "Soon"}** ${delayTxt}${t.platform ? ` | 🏢 Plat #${t.platform}` : ""}\n`;
         });
-        msg += `\n🔗 **Live Station Board:** https://railradar.in/station-status/${fromCode}`;
+
+        msg += `\n🎟️ **Instant 1-Click Booking:** ${bookingUrl}\n`;
+        msg += `🔗 **Live Board:** https://railradar.in/station-status/${fromCode}`;
 
         return {
           success: true,
           fromStation: fromCode,
           toStation: toCode,
+          journeyDate: travelDate,
           trainsCount: formattedTrains.length,
+          bookingUrl,
           trains: formattedTrains,
           message: msg,
         };
@@ -832,9 +959,168 @@ export class RailRadarService {
       success: true,
       fromStation: fromCode,
       toStation: toCode,
+      journeyDate: travelDate,
       trainsCount: 0,
+      bookingUrl,
       trains: [],
-      message: `Boss, ${fromCode} se ${toCode} ki trains check karein: https://railradar.in/station-status/${fromCode}`,
+      message: `Boss, ${fromCode} se ${toCode} ki live trains & booking check karein: ${bookingUrl}`,
+    };
+  }
+
+  /**
+   * 8. Real-Time Seat Availability & Tatkal Quota Intelligence
+   */
+  public async getSeatAvailability(
+    trainQuery: string,
+    fromStation?: string,
+    toStation?: string,
+    journeyDate?: string,
+    targetClass?: string
+  ): Promise<SeatAvailabilityResult> {
+    const trainNumber = this.extractTrainNumber(trainQuery);
+    if (!trainNumber) {
+      return {
+        success: false,
+        trainNumber: "",
+        generalAvailability: [],
+        tatkalAvailability: [],
+        message: "Train number specify karein (e.g. 12309, 12393).",
+      };
+    }
+
+    let src = fromStation ? this.resolveStationCode(fromStation) : undefined;
+    let dst = toStation ? this.resolveStationCode(toStation) : undefined;
+    let trainName: string | undefined = undefined;
+
+    // Auto-resolve source and destination from live route if not specified
+    if (!src || !dst) {
+      try {
+        const liveInfo = await this.getLiveTrainStatus(trainNumber);
+        if (liveInfo.success) {
+          trainName = liveInfo.trainName;
+          if (!src && liveInfo.sourceStation) src = this.resolveStationCode(liveInfo.sourceStation);
+          if (!dst && liveInfo.destStation) dst = this.resolveStationCode(liveInfo.destStation);
+        }
+      } catch {}
+    }
+
+    if (!src) src = "PNBE";
+    if (!dst) dst = "NDLS";
+
+    const travelDate = journeyDate || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const bookingUrl = `https://www.confirmtkt.com/rbooking-d/trains?from=${src}&to=${dst}&date=${travelDate}`;
+
+    const CLASS_NAMES: Record<string, string> = {
+      "1A": "1st AC (1A)",
+      "2A": "2nd AC (2A)",
+      "3A": "3rd AC (3A)",
+      "3E": "3rd AC Economy (3E)",
+      SL: "Sleeper (SL)",
+      CC: "AC Chair Car (CC)",
+      EC: "Exec Chair Car (EC)",
+      "2S": "2nd Sitting (2S)",
+    };
+
+    const targetClasses = targetClass ? [targetClass.toUpperCase()] : ["SL", "3E", "3A", "2A", "1A", "CC", "2S"];
+    const generalList: ClassAvailability[] = [];
+    const tatkalList: ClassAvailability[] = [];
+
+    // Parallel fetch for General and Tatkal quotas
+    await Promise.allSettled(
+      targetClasses.flatMap((cls) => [
+        // General Quota
+        (async () => {
+          try {
+            const url = `${this.baseUrl}/trains/${trainNumber}/seats?from=${src}&to=${dst}&date=${travelDate}&class=${cls}&quota=GN`;
+            const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0", Accept: "application/json" }, signal: AbortSignal.timeout(5000) });
+            if (res.ok) {
+              const json = await res.json();
+              const cal = json.data?.calendar || [];
+              const entry = cal.find((c: any) => c.date === travelDate) || cal[0];
+              if (entry) {
+                if (!trainName && json.data?.trainName) trainName = json.data.trainName;
+                generalList.push({
+                  classCode: cls,
+                  className: CLASS_NAMES[cls] || cls,
+                  quotaCode: "GN",
+                  status: entry.status || "Unknown",
+                  statusCode: entry.statusCode || (entry.isAvailable ? "AVAILABLE" : "WAITLIST"),
+                  isAvailable: !!entry.isAvailable,
+                  availableSeats: entry.availableSeats,
+                  waitlistNumber: entry.waitlistNumber,
+                });
+              }
+            }
+          } catch {}
+        })(),
+        // Tatkal Quota
+        (async () => {
+          try {
+            const url = `${this.baseUrl}/trains/${trainNumber}/seats?from=${src}&to=${dst}&date=${travelDate}&class=${cls}&quota=TQ`;
+            const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0", Accept: "application/json" }, signal: AbortSignal.timeout(5000) });
+            if (res.ok) {
+              const json = await res.json();
+              const cal = json.data?.calendar || [];
+              const entry = cal.find((c: any) => c.date === travelDate) || cal[0];
+              if (entry) {
+                tatkalList.push({
+                  classCode: cls,
+                  className: CLASS_NAMES[cls] || cls,
+                  quotaCode: "TQ",
+                  status: entry.status || "Unknown",
+                  statusCode: entry.statusCode || (entry.isAvailable ? "AVAILABLE" : "WAITLIST"),
+                  isAvailable: !!entry.isAvailable,
+                  availableSeats: entry.availableSeats,
+                  waitlistNumber: entry.waitlistNumber,
+                });
+              }
+            }
+          } catch {}
+        })(),
+      ])
+    );
+
+    const orderMap: Record<string, number> = { "2S": 1, SL: 2, "3E": 3, "3A": 4, CC: 5, "2A": 6, "1A": 7, EC: 8 };
+    generalList.sort((a, b) => (orderMap[a.classCode] || 99) - (orderMap[b.classCode] || 99));
+    tatkalList.sort((a, b) => (orderMap[a.classCode] || 99) - (orderMap[b.classCode] || 99));
+
+    const finalTrainName = trainName || `Train #${trainNumber}`;
+    const tatkalOpeningInfo = "⚡ Tatkal Booking: AC Classes 10:00 AM IST | Sleeper Class 11:00 AM IST (Journey se 1 din pehle).";
+
+    let msg = `🎟️ **Seat Availability: ${finalTrainName} (#${trainNumber})**\n`;
+    msg += `🛤️ **Route:** ${src} ➔ ${dst} | 📅 **Date:** ${travelDate}\n\n`;
+
+    if (generalList.length > 0) {
+      msg += `🟢 **General Quota (GN):**\n`;
+      generalList.forEach((g) => {
+        const icon = g.isAvailable ? "✅" : g.status.includes("RAC") ? "🟡" : "🔴";
+        msg += `• **${g.className}:** ${icon} ${g.status}${g.availableSeats ? ` (${g.availableSeats} Seats Available)` : ""}\n`;
+      });
+    }
+
+    if (tatkalList.length > 0) {
+      msg += `\n⚡ **Tatkal Quota (TQ):**\n`;
+      tatkalList.forEach((t) => {
+        const icon = t.isAvailable ? "✅" : "🔴";
+        msg += `• **${t.className}:** ${icon} ${t.status}${t.availableSeats ? ` (${t.availableSeats} Tatkal Seats)` : ""}\n`;
+      });
+      msg += `\nℹ️ _${tatkalOpeningInfo}_\n`;
+    }
+
+    msg += `\n🔗 **Instant 1-Click Ticket Booking:** ${bookingUrl}`;
+
+    return {
+      success: true,
+      trainNumber,
+      trainName: finalTrainName,
+      fromStation: src,
+      toStation: dst,
+      journeyDate: travelDate,
+      generalAvailability: generalList,
+      tatkalAvailability: tatkalList,
+      tatkalOpeningInfo,
+      bookingUrl,
+      message: msg,
     };
   }
 

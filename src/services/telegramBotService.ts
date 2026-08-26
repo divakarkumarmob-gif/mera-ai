@@ -1702,6 +1702,25 @@ INSTRUCTIONS FOR WHEN SENDER IS SOMEONE ELSE (NOT DK):
       }
     }
 
+    // 2.0L Handle Real-Time Seat Availability & Tatkal Quota ("/seats <number>" or "/tatkal <number>")
+    const seatMatch = text.match(/^(?:\/seats|\/seat|\/tatkal|seats|seat|tatkal|seat\s*availability)\s+(\d{4,5}|\w+)(?:\s+([a-zA-Z\s]{2,15}))?(?:\s+([a-zA-Z\s]{2,15}))?/i) ||
+      text.match(/(\d{5})\s+(?:me\s+)?(?:seat|khali|tatkal|seat\s*available)/i);
+
+    if (seatMatch) {
+      const trainQuery = seatMatch[1];
+      const fromStn = seatMatch[2]?.trim();
+      const toStn = seatMatch[3]?.trim();
+      try {
+        await this.sendMessage(chatId, `🎟️ *RailRadar Seat Availability:* Fetching real-time General & Tatkal seats for *#${trainQuery}*... 🔍`);
+        const seatRes = await railRadarService.getSeatAvailability(trainQuery, fromStn, toStn);
+        await this.sendMessage(chatId, seatRes.message);
+        return;
+      } catch (e: any) {
+        await this.sendMessage(chatId, `❌ Seat availability check failed: ${e?.message || e}`);
+        return;
+      }
+    }
+
     // 2.01 Handle Group Textual Role Setup: "User A @username" / "User B @username"
     const isGroupChat = msg.chat?.type === "group" || msg.chat?.type === "supergroup";
     if (isGroupChat) {
