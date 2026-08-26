@@ -63,19 +63,252 @@ jobs:
             printf "\nconfigurations.all {\n    resolutionStrategy {\n        force 'org.jetbrains.kotlin:kotlin-stdlib:1.8.22'\n        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22'\n        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22'\n    }\n}\n\ndependencies {\n    constraints {\n        implementation('org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22') {\n            because('kotlin-stdlib-jdk7 is now part of kotlin-stdlib')\n        }\n        implementation('org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22') {\n            because('kotlin-stdlib-jdk8 is now part of kotlin-stdlib')\n        }\n    }\n}\n" >> "$APP_GRADLE"
           fi
 
-      - name: 🔑 Configure Permissions in AndroidManifest
+      - name: 🔑 Configure Permissions & Android 14/15 Foreground Service in AndroidManifest
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           if [ -f "$MANIFEST" ]; then
-            # Ensure INTERNET & NETWORK permissions are present
-            if ! grep -q "android.permission.INTERNET" "$MANIFEST"; then
-              sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />' "$MANIFEST"
-            fi
-            # Add RECORD_AUDIO and MODIFY_AUDIO_SETTINGS if not already present
-            if ! grep -q "RECORD_AUDIO" "$MANIFEST"; then
-              sed -i '/<application/i \    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />' "$MANIFEST"
+            # 1. Add All Required Android Permissions for Background Mic, Media, WakeLock, and Notification
+            PERMS='    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />\n    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />\n    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />'
+            
+            # Remove any duplicate internet permission before re-injecting
+            sed -i '/android.permission.INTERNET/d' "$MANIFEST"
+            sed -i '/android.permission.RECORD_AUDIO/d' "$MANIFEST"
+            sed -i '/<application/i '"$PERMS"'' "$MANIFEST"
+
+            # 2. Register FridayForegroundService with Android 14+ Foreground Service Types
+            SERVICE_TAG='        <service\n            android:name=".FridayForegroundService"\n            android:foregroundServiceType="microphone|mediaPlayback|dataSync"\n            android:exported="false" />'
+            if ! grep -q "FridayForegroundService" "$MANIFEST"; then
+              sed -i '/<\/application>/i '"$SERVICE_TAG"'' "$MANIFEST"
             fi
           fi
+
+      - name: 🛡️ Inject Native FridayForegroundService & Background WebView in MainActivity
+        run: |
+          PACKAGE_DIR="android/app/src/main/java/com/friday/ai"
+          mkdir -p "$PACKAGE_DIR"
+
+          # 1. Create FridayForegroundService.java
+          cat << 'EOF' > "$PACKAGE_DIR/FridayForegroundService.java"
+          package com.friday.ai;
+
+          import android.app.Notification;
+          import android.app.NotificationChannel;
+          import android.app.NotificationManager;
+          import android.app.PendingIntent;
+          import android.app.Service;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.pm.ServiceInfo;
+          import android.net.wifi.WifiManager;
+          import android.os.Build;
+          import android.os.IBinder;
+          import android.os.PowerManager;
+          import androidx.core.app.NotificationCompat;
+
+          public class FridayForegroundService extends Service {
+              public static final String CHANNEL_ID = "friday_background_channel";
+              public static final int NOTIFICATION_ID = 1001;
+              public static final String ACTION_START = "ACTION_START";
+              public static final String ACTION_STOP = "ACTION_STOP";
+
+              private PowerManager.WakeLock wakeLock;
+              private WifiManager.WifiLock wifiLock;
+
+              @Override
+              public void onCreate() {
+                  super.onCreate();
+                  createNotificationChannel();
+                  acquireLocks();
+              }
+
+              @Override
+              public int onStartCommand(Intent intent, int flags, int startId) {
+                  if (intent != null && ACTION_STOP.equals(intent.getAction())) {
+                      stopForeground(true);
+                      stopSelf();
+                      return START_NOT_STICKY;
+                  }
+
+                  Notification notification = buildForegroundNotification();
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                      int serviceType = 0;
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                          serviceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE | ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK;
+                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                              serviceType |= ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC;
+                          }
+                      }
+                      startForeground(NOTIFICATION_ID, notification, serviceType);
+                  } else {
+                      startForeground(NOTIFICATION_ID, notification);
+                  }
+
+                  return START_STICKY;
+              }
+
+              private void acquireLocks() {
+                  try {
+                      PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
+                      if (powerManager != null && (wakeLock == null || !wakeLock.isHeld())) {
+                          wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "FridayAI:BackgroundWakeLock");
+                          wakeLock.acquire();
+                      }
+                      WifiManager wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+                      if (wifiManager != null && (wifiLock == null || !wifiLock.isHeld())) {
+                          wifiLock = wifiManager.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "FridayAI:WifiLock");
+                          wifiLock.acquire();
+                      }
+                  } catch (Exception e) {
+                      e.printStackTrace();
+                  }
+              }
+
+              private void releaseLocks() {
+                  try {
+                      if (wakeLock != null && wakeLock.isHeld()) {
+                          wakeLock.release();
+                          wakeLock = null;
+                      }
+                      if (wifiLock != null && wifiLock.isHeld()) {
+                          wifiLock.release();
+                          wifiLock = null;
+                      }
+                  } catch (Exception e) {
+                      e.printStackTrace();
+                  }
+              }
+
+              private void createNotificationChannel() {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      NotificationChannel channel = new NotificationChannel(
+                          CHANNEL_ID,
+                          "FRIDAY AI Background Service",
+                          NotificationManager.IMPORTANCE_LOW
+                      );
+                      channel.setDescription("Keeps Friday AI active for wake word detection, music playback, and voice commands when screen is off.");
+                      NotificationManager manager = getSystemService(NotificationManager.class);
+                      if (manager != null) {
+                          manager.createNotificationChannel(channel);
+                      }
+                  }
+              }
+
+              private Notification buildForegroundNotification() {
+                  Intent launchIntent = new Intent(this, MainActivity.class);
+                  launchIntent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                  PendingIntent pendingIntent = PendingIntent.getActivity(
+                      this,
+                      0,
+                      launchIntent,
+                      PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0)
+                  );
+
+                  return new NotificationCompat.Builder(this, CHANNEL_ID)
+                      .setContentTitle("FRIDAY AI Active")
+                      .setContentText("Listening for 'Hello Friday' • Background Music Active 🎙️🎵")
+                      .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                      .setContentIntent(pendingIntent)
+                      .setOngoing(true)
+                      .setPriority(NotificationCompat.PRIORITY_LOW)
+                      .setCategory(NotificationCompat.CATEGORY_SERVICE)
+                      .build();
+              }
+
+              @Override
+              public void onDestroy() {
+                  releaseLocks();
+                  super.onDestroy();
+              }
+
+              @Override
+              public IBinder onBind(Intent intent) {
+                  return null;
+              }
+          }
+          EOF
+
+          # 2. Update MainActivity.java
+          cat << 'EOF' > "$PACKAGE_DIR/MainActivity.java"
+          package com.friday.ai;
+
+          import android.content.Intent;
+          import android.net.Uri;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.os.PowerManager;
+          import android.provider.Settings;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import androidx.core.app.ActivityCompat;
+          import com.getcapacitor.BridgeActivity;
+
+          public class MainActivity extends BridgeActivity {
+              @Override
+              public void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  
+                  // 1. Request Battery Exemption so Android Doze doesn't sleep the CPU
+                  requestBatteryExemption();
+
+                  // 2. Request Notification Permission for Android 13+ (Tiramisu)
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                      ActivityCompat.requestPermissions(
+                          this,
+                          new String[]{android.Manifest.permission.POST_NOTIFICATIONS, android.Manifest.permission.RECORD_AUDIO},
+                          101
+                      );
+                  }
+
+                  // 3. Start Friday Native Foreground Service
+                  startFridayBackgroundService();
+
+                  // 4. Configure WebView to allow background media & audio without user gesture
+                  try {
+                      WebView webView = this.getBridge().getWebView();
+                      if (webView != null) {
+                          WebSettings settings = webView.getSettings();
+                          settings.setMediaPlaybackRequiresUserGesture(false);
+                          settings.setJavaScriptEnabled(true);
+                          settings.setDomStorageEnabled(true);
+                          settings.setDatabaseEnabled(true);
+                      }
+                  } catch (Exception e) {
+                      e.printStackTrace();
+                  }
+              }
+
+              private void startFridayBackgroundService() {
+                  try {
+                      Intent serviceIntent = new Intent(this, FridayForegroundService.class);
+                      serviceIntent.setAction(FridayForegroundService.ACTION_START);
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                          startForegroundService(serviceIntent);
+                      } else {
+                          startService(serviceIntent);
+                      }
+                  } catch (Exception e) {
+                      e.printStackTrace();
+                  }
+              }
+
+              private void requestBatteryExemption() {
+                  try {
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                          Intent intent = new Intent();
+                          String packageName = getPackageName();
+                          PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+                          if (pm != null && !pm.isIgnoringBatteryOptimizations(packageName)) {
+                              intent.setAction(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                              intent.setData(Uri.parse("package:" + packageName));
+                              startActivity(intent);
+                          }
+                      }
+                  } catch (Exception e) {
+                      e.printStackTrace();
+                  }
+              }
+          }
+          EOF
 
       - name: 🔨 Build Debug APK via Gradle
         run: |
