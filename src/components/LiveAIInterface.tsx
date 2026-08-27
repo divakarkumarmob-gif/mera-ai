@@ -649,48 +649,42 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
             musicAudioRef.current.src = '';
             musicAudioRef.current = null;
         }
+        try {
+            const iframe = document.getElementById('youtube-iframe') as HTMLIFrameElement;
+            iframe?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'stopVideo', args: [] }), '*');
+        } catch { /* ignore */ }
         setNowPlayingMusic(null);
     }, []);
 
-    const toggleMusicPlayPause = useCallback(() => {
-        if (!musicAudioRef.current) {
-            if (nowPlayingMusic?.audioUrl || nowPlayingMusic?.fallbackAudioUrl) {
-                const targetUrl = nowPlayingMusic.audioUrl || nowPlayingMusic.fallbackAudioUrl;
-                if (targetUrl) {
-                    const audio = new Audio();
-                    audio.crossOrigin = 'anonymous';
-                    audio.src = targetUrl;
-                    audio.volume = 0.85;
-                    audio.onended = () => {
-                        setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: false } : null);
-                    };
-                    audio.onerror = () => {
-                        setNowPlayingMusic(prev => prev ? { ...prev, hasError: true, isPlaying: false, errorMessage: 'Stream unavailable' } : null);
-                    };
-                    musicAudioRef.current = audio;
-                    audio.play().then(() => {
-                        setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: true, hasError: false } : null);
-                    }).catch(err => {
-                        console.warn('[Music] Manual play error:', err);
-                        setNowPlayingMusic(prev => prev ? { ...prev, hasError: true, errorMessage: 'Playback blocked' } : null);
-                    });
-                }
-            }
-            return;
-        }
-
-        if (nowPlayingMusic?.isPlaying) {
+    const pauseMusicPlayback = useCallback(() => {
+        if (musicAudioRef.current) {
             musicAudioRef.current.pause();
-            setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: false } : null);
-        } else {
-            musicAudioRef.current.play().then(() => {
-                setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: true, hasError: false } : null);
-            }).catch((err) => {
-                console.warn('[Music] Manual play error:', err);
-                setNowPlayingMusic(prev => prev ? { ...prev, hasError: true, errorMessage: 'Playback blocked or stream expired' } : null);
-            });
         }
-    }, [nowPlayingMusic?.isPlaying, nowPlayingMusic?.audioUrl, nowPlayingMusic?.fallbackAudioUrl]);
+        try {
+            const iframe = document.getElementById('youtube-iframe') as HTMLIFrameElement;
+            iframe?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo', args: [] }), '*');
+        } catch { /* ignore */ }
+        setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: false } : null);
+    }, []);
+
+    const resumeMusicPlayback = useCallback(() => {
+        if (musicAudioRef.current) {
+            musicAudioRef.current.play().catch(() => {});
+        }
+        try {
+            const iframe = document.getElementById('youtube-iframe') as HTMLIFrameElement;
+            iframe?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*');
+        } catch { /* ignore */ }
+        setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: true } : null);
+    }, []);
+
+    const toggleMusicPlayPause = useCallback(() => {
+        if (nowPlayingMusic?.isPlaying) {
+            pauseMusicPlayback();
+        } else {
+            resumeMusicPlayback();
+        }
+    }, [nowPlayingMusic?.isPlaying, pauseMusicPlayback, resumeMusicPlayback]);
 
     // ── MediaSession API for Background / Lockscreen Playback ─────────────────
     useEffect(() => {
@@ -1600,6 +1594,10 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     setNowPlayingMusic(trackState);
                 } else if (msg.type === 'stop_music') {
                     stopMusicPlayback();
+                } else if (msg.type === 'pause_music') {
+                    pauseMusicPlayback();
+                } else if (msg.type === 'resume_music') {
+                    resumeMusicPlayback();
                 }
             } catch (err) {
                 console.warn("[LiveAIInterface] Error processing socket message:", err);

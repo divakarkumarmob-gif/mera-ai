@@ -3340,7 +3340,25 @@ STYLE:
         },
         {
           name: "stop_music",
-          description: "Stop / Pause the currently playing music immediately when DK says 'stop', 'gana band karo', 'mujhe achha nahi laga', 'band karo gana', 'gana nahi sunna mujhe'.",
+          description: "Stop and close the currently playing music immediately when DK says 'stop', 'gana band karo', 'mujhe achha nahi laga', 'band karo gana', 'gana nahi sunna mujhe'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+            required: [],
+          },
+        },
+        {
+          name: "pause_music",
+          description: "Pause the currently playing song when DK says 'gana pause karo', 'thodi der roko', 'hold karo gana', 'pause music', 'ek minute roko'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+            required: [],
+          },
+        },
+        {
+          name: "resume_music",
+          description: "Resume or continue playing the paused music track when DK says 'gana resume karo', 'gana continue karo', 'phir se chalao', 'play karo', 'unpause karo', 'gana chalu karo'.",
           parameters: {
             type: "OBJECT",
             properties: {},
@@ -5378,6 +5396,20 @@ STYLE:
                     safeSend(JSON.stringify({ type: 'stop_music' }));
                   } catch (e: any) {
                     result = { success: false, message: `Music stop fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "pause_music") {
+                  try {
+                    safeSend(JSON.stringify({ type: 'pause_music' }));
+                    result = { success: true, message: "Boss, gana pause kar diya hai! ⏸️" };
+                  } catch (e: any) {
+                    result = { success: false, message: `Music pause fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "resume_music") {
+                  try {
+                    safeSend(JSON.stringify({ type: 'resume_music' }));
+                    result = { success: true, message: "Boss, gana resume kar diya hai! ▶️" };
+                  } catch (e: any) {
+                    result = { success: false, message: `Music resume fail hua: ${e?.message || e}` };
                   }
                 } else if (call.name === "scan_connected_wifi_devices") {
                   const { forceRefresh } = call.args || {};
