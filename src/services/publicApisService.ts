@@ -34,6 +34,7 @@ import { weatherService } from "./weatherService";
 import { newsService } from "./newsService";
 import { recipeService } from "./recipeService";
 import { networkDeviceScannerService } from "./networkDeviceScannerService";
+import { googleMapsService } from "./googleMapsService";
 
 class PublicApisService {
   // 1. Weather — Powered by WeatherAPI.com (with Open-Meteo fallback)
@@ -459,94 +460,9 @@ class PublicApisService {
     return { success: true, pincode, count: offices.length, offices };
   }
 
-  // 15. Nearby places — Nominatim + Overpass + Web Search Fallback (100% Free, No Key Required)
-  // Searches amenities, shops (sweet shops, showrooms, clothes, electronics), tourism, etc.
+  // 15. Nearby places — Powered by Google Places Platform API (Real Ratings, Reviews & Maps)
   public async getNearbyPlaces(place: string, amenityOrQuery: string): Promise<any> {
-    const headers = {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      "Accept-Language": "en-US,en;q=0.9",
-    };
-
-    // 1. Try Nominatim Direct Search
-    try {
-      const nomUrl = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(`${amenityOrQuery} in ${place}`)}&format=json&limit=8`;
-      const res = await fetch(nomUrl, { headers });
-      const json = await res.json();
-      if (Array.isArray(json) && json.length > 0) {
-        const places = json.map((x: any) => ({
-          name: x.display_name?.split(",")?.[0] || x.name || "Place",
-          address: x.display_name,
-          type: x.type || x.class || amenityOrQuery,
-          lat: x.lat,
-          lon: x.lon,
-        }));
-        return { success: true, near: place, query: amenityOrQuery, count: places.length, places, source: "osm_nominatim" };
-      }
-    } catch {}
-
-    // 2. Try Overpass API
-    try {
-      const geo = await fetchJson(
-        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(place)}&format=json&limit=1`
-      );
-      const loc = geo?.[0];
-      if (loc && loc.lat && loc.lon) {
-        const clean = amenityOrQuery.toLowerCase().replace(/[^a-zA-Z0-9_]/g, "");
-        const queryBody = `
-          node["amenity"="${clean}"](around:5000,${loc.lat},${loc.lon});
-          node["shop"="${clean}"](around:5000,${loc.lat},${loc.lon});
-          node["amenity"~"${clean}",i](around:5000,${loc.lat},${loc.lon});
-          node["shop"~"${clean}",i](around:5000,${loc.lat},${loc.lon});
-          node["name"~"${clean}",i](around:5000,${loc.lat},${loc.lon});
-        `;
-        const overpassRes = await fetch("https://overpass-api.de/api/interpreter", {
-          method: "POST",
-          body: `[out:json][timeout:10];(${queryBody});out 10;`,
-          headers,
-        });
-        const data = await overpassRes.json();
-        const places = (data.elements || [])
-          .filter((el: any) => el.tags?.name)
-          .slice(0, 8)
-          .map((el: any) => ({
-            name: el.tags?.name,
-            type: el.tags?.amenity || el.tags?.shop || amenityOrQuery,
-            address: [el.tags?.["addr:street"], el.tags?.["addr:city"]].filter(Boolean).join(", ") || undefined,
-            lat: el.lat,
-            lon: el.lon,
-          }));
-
-        if (places.length) {
-          return { success: true, near: place, query: amenityOrQuery, count: places.length, places, source: "osm_overpass" };
-        }
-      }
-    } catch {}
-
-    // 3. Web search fallback for business/store queries
-    try {
-      const q = encodeURIComponent(`${amenityOrQuery} in ${place} address locations`);
-      const ddgRes = await fetch(`https://html.duckduckgo.com/html/?q=${q}`, { headers });
-      const html = await ddgRes.text();
-      const snippets: string[] = [];
-      const regex = /<a class="result__snippet[^>]*>(.*?)<\/a>/g;
-      let match;
-      while ((match = regex.exec(html)) !== null && snippets.length < 4) {
-        const clean = match[1].replace(/<[^>]*>/g, "").trim();
-        if (clean) snippets.push(clean);
-      }
-      if (snippets.length) {
-        return {
-          success: true,
-          near: place,
-          query: amenityOrQuery,
-          count: snippets.length,
-          summary: snippets.join(" | "),
-          source: "web_search_fallback",
-        };
-      }
-    } catch {}
-
-    return { success: false, message: `"${place}" me "${amenityOrQuery}" ke liye koi result nahi mila.` };
+    return googleMapsService.searchNearbyPlaces(place, amenityOrQuery);
   }
 
   // 16. Time zone info — worldtimeapi.org (free, no key)
@@ -1660,108 +1576,9 @@ class PublicApisService {
     return { success: false, message: `"${q}" ke liye koi image nahi mili.` };
   }
 
-  // 34. Maps/directions — OpenRouteService with 100% Free OSRM Fallback
+  // 34. Maps/directions — Powered by Google Maps Directions API Suite
   public async getDirections(fromPlace: string, toPlace: string): Promise<any> {
-    const geocode = async (place: string): Promise<{ lon: number; lat: number; name?: string } | null> => {
-      // 1. Try Open-Meteo Geocoding
-      try {
-        const gm = await fetchJson(
-          `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(place)}&count=1&language=en&format=json`
-        );
-        const res = gm?.results?.[0];
-        if (res && res.latitude && res.longitude) {
-          return { lon: res.longitude, lat: res.latitude, name: res.name };
-        }
-      } catch {}
-
-      // 2. Try Nominatim Geocoding
-      try {
-        const gn = await fetchJson(
-          `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(place)}&format=json&limit=1`
-        );
-        const res = gn?.[0];
-        if (res && res.lat && res.lon) {
-          return { lon: parseFloat(res.lon), lat: parseFloat(res.lat), name: res.display_name?.split(",")?.[0] || place };
-        }
-      } catch {}
-
-      // 3. Try OpenRouteService Geocoding if key exists
-      const key = process.env.OPENROUTESERVICE_API_KEY;
-      if (key) {
-        try {
-          const data = await fetchJson(
-            `https://api.openrouteservice.org/geocode/search?api_key=${key}&text=${encodeURIComponent(place)}&size=1`
-          );
-          const coords = data?.features?.[0]?.geometry?.coordinates;
-          if (coords) return { lon: coords[0], lat: coords[1], name: place };
-        } catch {}
-      }
-
-      return null;
-    };
-
-    try {
-      const [from, to] = await Promise.all([geocode(fromPlace), geocode(toPlace)]);
-      if (!from) return { success: false, message: `"${fromPlace}" location nahi mili.` };
-      if (!to) return { success: false, message: `"${toPlace}" location nahi mili.` };
-
-      const key = process.env.OPENROUTESERVICE_API_KEY;
-      if (key) {
-        try {
-          const routeRes = await fetch(
-            `https://api.openrouteservice.org/v2/directions/driving-car?api_key=${key}&start=${from.lon},${from.lat}&end=${to.lon},${to.lat}`
-          );
-          const routeData = await routeRes.json();
-          const summary = routeData?.features?.[0]?.properties?.summary;
-          if (summary) {
-            const distKm = (summary.distance / 1000).toFixed(1);
-            const totalMins = Math.round(summary.duration / 60);
-            const hours = Math.floor(totalMins / 60);
-            const mins = totalMins % 60;
-            const durationFormatted = hours > 0 ? `${hours} hours ${mins} mins` : `${mins} mins`;
-
-            return {
-              success: true,
-              from: from.name || fromPlace,
-              to: to.name || toPlace,
-              distanceKm: distKm,
-              durationMinutes: totalMins,
-              estimatedTime: durationFormatted,
-              source: "openrouteservice",
-            };
-          }
-        } catch {}
-      }
-
-      // 100% Free OSRM Routing Fallback (No API key needed)
-      const osrmRes = await fetch(
-        `https://router.project-osrm.org/route/v1/driving/${from.lon},${from.lat};${to.lon},${to.lat}?overview=false`,
-        { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" } }
-      );
-      const osrmData = await osrmRes.json();
-      const route = osrmData?.routes?.[0];
-      if (route) {
-        const distKm = (route.distance / 1000).toFixed(1);
-        const totalMins = Math.round(route.duration / 60);
-        const hours = Math.floor(totalMins / 60);
-        const mins = totalMins % 60;
-        const durationFormatted = hours > 0 ? `${hours} hours ${mins} mins` : `${mins} mins`;
-
-        return {
-          success: true,
-          from: from.name || fromPlace,
-          to: to.name || toPlace,
-          distanceKm: distKm,
-          durationMinutes: totalMins,
-          estimatedTime: durationFormatted,
-          source: "osrm_free_fallback",
-        };
-      }
-
-      return { success: false, message: `"${fromPlace}" se "${toPlace}" ka driving route nahi nikal saka.` };
-    } catch (e: any) {
-      return { success: false, message: `Directions fetch fail hui: ${e?.message || e}` };
-    }
+    return googleMapsService.getDirections(fromPlace, toPlace);
   }
 
   // ---------------------------------------------------------------------
@@ -3524,93 +3341,9 @@ class PublicApisService {
     };
   }
 
-  // 47c. Location Overview & Map Briefing (Weather, AQI, Map Link, Coordinates & Highlights)
+  // 47c. Location Overview & Google Map Briefing
   public async getLocationOverview(place: string): Promise<any> {
-    const clean = String(place || "").trim();
-    if (!clean) return { success: false, message: "Location name zaroori hai." };
-
-    let loc: { name: string; fullName: string; latitude: number; longitude: number } | null = null;
-
-    // 1. Try Nominatim (precise for landmarks, colonies, sectors, cities)
-    try {
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(clean)}&format=json&limit=1`,
-        { headers: { "User-Agent": "MeraAI-Location/1.0" } }
-      );
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data[0]) {
-          loc = {
-            name: data[0].display_name.split(",")[0],
-            fullName: data[0].display_name,
-            latitude: parseFloat(data[0].lat),
-            longitude: parseFloat(data[0].lon),
-          };
-        }
-      }
-    } catch {}
-
-    // 2. Try Open-Meteo Geocoder fallback
-    if (!loc) {
-      try {
-        const res = await fetch(
-          `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(clean)}&count=1&language=en&format=json`
-        );
-        if (res.ok) {
-          const data = await res.json();
-          const r = data?.results?.[0];
-          if (r) {
-            loc = {
-              name: r.name,
-              fullName: [r.name, r.admin1, r.country].filter(Boolean).join(", "),
-              latitude: r.latitude,
-              longitude: r.longitude,
-            };
-          }
-        }
-      } catch {}
-    }
-
-    if (!loc) {
-      return {
-        success: true,
-        place: clean,
-        googleMapsUrl: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(clean)}`,
-        message: `Location "${clean}" ka map link ready hai.`,
-      };
-    }
-
-    // Fetch Weather and Air Quality in parallel
-    const [wRes, aqiRes] = await Promise.all([
-      fetch(
-        `https://api.open-meteo.com/v1/forecast?latitude=${loc.latitude}&longitude=${loc.longitude}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min&timezone=auto`
-      ).then((r) => r.json()).catch(() => null),
-      fetch(
-        `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${loc.latitude}&longitude=${loc.longitude}&current=us_aqi,pm2_5,pm10`
-      ).then((r) => r.json()).catch(() => null),
-    ]);
-
-    const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(loc.fullName)}`;
-
-    return {
-      success: true,
-      placeName: loc.name,
-      fullAddress: loc.fullName,
-      coordinates: { latitude: loc.latitude, longitude: loc.longitude },
-      googleMapsUrl,
-      weather: {
-        currentTempC: wRes?.current?.temperature_2m,
-        humidityPct: wRes?.current?.relative_humidity_2m,
-        todayMaxC: wRes?.daily?.temperature_2m_max?.[0],
-        todayMinC: wRes?.daily?.temperature_2m_min?.[0],
-        windKmh: wRes?.current?.wind_speed_10m,
-      },
-      airQuality: {
-        aqi: aqiRes?.current?.us_aqi,
-        pm25: aqiRes?.current?.pm2_5,
-      },
-      sourceProvider: "osm_nominatim_and_meteo",
-    };
+    return googleMapsService.getLocationOverview(place);
   }
 
   // 48. X (Twitter) Profile, Real-time Tweets & Discussion
