@@ -3913,33 +3913,31 @@ class PublicApisService {
       const directAudioUrl = saavnRes?.tracks?.[0]?.audioUrl;
       const saavnTitle = saavnRes?.tracks?.[0]?.trackName;
       const saavnArtist = saavnRes?.tracks?.[0]?.artistName;
-      const albumArt = saavnRes?.tracks?.[0]?.albumArt || (videoId ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` : undefined);
-
-      if (videoId || directAudioUrl) {
+      if (videoId) {
         return {
           success: true,
-          trackName: saavnTitle || title,
-          artistName: saavnArtist || artist,
-          videoId: videoId || undefined,
-          youtubeMusicUrl: videoId ? `https://music.youtube.com/watch?v=${videoId}` : undefined,
-          youtubeUrl: videoId ? `https://www.youtube.com/watch?v=${videoId}` : undefined,
-          embedUrl: videoId ? `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&enablejsapi=1&controls=1&modestbranding=1&playsinline=1&rel=0` : undefined,
-          albumArt,
-          audioUrl: directAudioUrl,
-          streamUrl: directAudioUrl || (videoId ? `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&enablejsapi=1&playsinline=1` : undefined),
+          trackName: title,
+          artistName: artist,
+          videoId: videoId,
+          youtubeMusicUrl: `https://music.youtube.com/watch?v=${videoId}`,
+          youtubeUrl: `https://www.youtube.com/watch?v=${videoId}`,
+          embedUrl: `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&enablejsapi=1&controls=1&modestbranding=1&playsinline=1&rel=0`,
+          albumArt: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
           isFullSong: true,
           isYouTubeMusic: true,
-          quality: directAudioUrl ? "HD 320kbps Audio (Background & Screen-Off Ready)" : "YouTube Music HD",
+          quality: "YouTube Music HD",
           source: "youtube_music",
-          message: `Boss, "${saavnTitle || title}" (${saavnArtist || artist}) mil gaya hai! Gana background aur screen-off me bhi bajta rahega 🎵✨`,
+          message: `Boss, "${title}" (${artist}) YouTube Music par play ho raha hai! 🎵✨`,
         };
       }
     } catch (e) {
-      console.warn("[PublicApis] YouTube Music scraping fallback:", e);
+      console.warn("[PublicApis] YouTube Music search fallback:", e);
     }
 
-    // Fallback to JioSaavn full search
-    return this.searchMusic(q);
+    return {
+      success: false,
+      message: `Boss, "${q}" gana nahi mil paya. Kripya dusra gana batayein.`,
+    };
   }
 
   // 51. Music Search — JioSaavn (100% Free Full-Length 320kbps Songs) + Deezer + iTunes fallback

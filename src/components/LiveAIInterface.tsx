@@ -1428,26 +1428,39 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         setResearchReport(msg.report);
                     }
                 } else if (msg.type === 'play_music') {
-                    // Graceful track stream resolution & error fallback recovery
+                    // Stop any ongoing native audio
                     stopMusicPlayback();
-                    const primaryAudioUrl = msg.audioUrl || msg.streamUrl;
-                    const fallbackAudioUrl = msg.fallbackAudioUrl || msg.fallbackUrl;
                     const trackInfo = {
                         trackName: msg.trackName || 'Music Track',
-                        artistName: msg.artistName,
-                        albumArt: msg.albumArt,
+                        artistName: msg.artistName || 'YouTube Music',
+                        albumArt: msg.albumArt || (msg.videoId ? `https://img.youtube.com/vi/${msg.videoId}/hqdefault.jpg` : undefined),
                         spotifyUrl: msg.spotifyUrl,
                         youtubeMusicUrl: msg.youtubeMusicUrl || (msg.videoId ? `https://music.youtube.com/watch?v=${msg.videoId}` : undefined),
-                        embedUrl: msg.embedUrl || (msg.videoId ? `https://www.youtube-nocookie.com/embed/${msg.videoId}?autoplay=1&enablejsapi=1&controls=1&modestbranding=1` : undefined),
+                        embedUrl: msg.embedUrl || (msg.videoId ? `https://www.youtube-nocookie.com/embed/${msg.videoId}?autoplay=1&enablejsapi=1&controls=1&modestbranding=1&playsinline=1&rel=0` : undefined),
                         videoId: msg.videoId,
-                        isFullSong: msg.isFullSong,
-                        quality: msg.quality,
+                        isFullSong: true,
+                        isYouTubeMusic: true,
+                        quality: msg.quality || 'YouTube Music HD',
                         durationSec: msg.durationSec,
-                        audioUrl: primaryAudioUrl,
-                        fallbackAudioUrl: fallbackAudioUrl,
-                        isPlaying: false,
+                        audioUrl: msg.audioUrl,
+                        fallbackAudioUrl: msg.fallbackAudioUrl,
+                        isPlaying: true,
                         hasError: false,
                     };
+
+                    // If YouTube video / embed is present (Primary & 100% reliable)
+                    if (trackInfo.embedUrl || trackInfo.videoId) {
+                        setNowPlayingMusic({
+                            ...trackInfo,
+                            isYouTubeMusic: true,
+                            isPlaying: true,
+                            hasError: false,
+                        });
+                        return;
+                    }
+
+                    const primaryAudioUrl = msg.audioUrl || msg.streamUrl;
+                    const fallbackAudioUrl = msg.fallbackAudioUrl || msg.fallbackUrl;
 
                     const attemptPlayback = (srcUrl: string, isFallbackAttempt = false, isProxyAttempt = false) => {
                         try {
