@@ -160,7 +160,7 @@ export default function WifiRadarModal({ onClose }: WifiRadarModalProps) {
   };
 
   useEffect(() => {
-    fetchRadar(false);
+    fetchRadar(true);
   }, []);
 
   const handleCopy = (text: string) => {

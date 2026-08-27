@@ -92,6 +92,7 @@ async function startServer() {
 
     if (
       path.startsWith("/api/app-key/") ||
+      path.startsWith("/api/network/") ||
       path.startsWith("/api/instagram/webhook") ||
       path.startsWith("/api/whatsapp/cloud/webhook") ||
       path.startsWith("/api/telegram/webhook") ||
@@ -248,7 +249,7 @@ async function startServer() {
 
   app.get("/api/network/connected-devices", async (req, res) => {
     try {
-      const force = req.query.refresh === "true";
+      const force = req.query.refresh !== "false";
       const result = await networkDeviceScannerService.scanConnectedDevices(force);
       res.json(result);
     } catch (e: any) {
@@ -258,7 +259,7 @@ async function startServer() {
 
   app.get("/api/network/wifi-radar", async (req, res) => {
     try {
-      const force = req.query.refresh === "true";
+      const force = req.query.refresh !== "false";
       const result = await networkDeviceScannerService.scanConnectedDevices(force);
       res.json(result);
     } catch (e: any) {
@@ -268,7 +269,7 @@ async function startServer() {
 
   app.get("/api/network/wifi-recon", async (req, res) => {
     try {
-      const force = req.query.refresh === "true";
+      const force = req.query.refresh !== "false";
       const result = await networkDeviceScannerService.scanNearbyWifiRecon(force);
       res.json(result);
     } catch (e: any) {

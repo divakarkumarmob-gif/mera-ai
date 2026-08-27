@@ -281,7 +281,7 @@ const MAC_VENDOR_MAP: Record<string, { vendor: string; type: ConnectedNetworkDev
 class NetworkDeviceScannerService {
   private cachedScan: NetworkScanResult | null = null;
   private lastScanTime: number = 0;
-  private readonly CACHE_TTL_MS = 35 * 1000; // 35 Seconds Cache
+  private readonly CACHE_TTL_MS = 3 * 1000; // 3 Seconds Ultra-Fresh Cache
 
   /**
    * Identifies the current local IPv4 network interface and gateway.
