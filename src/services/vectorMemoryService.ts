@@ -158,6 +158,15 @@ class VectorMemoryService {
     const now = Date.now();
     const createdDateStr = new Date(now).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
 
+    const finalMetadata = {
+      session_id: params.metadata?.session_id || "vec_sess_" + now,
+      exact_date: params.metadata?.exact_date || new Date(params.startTimestamp).toLocaleDateString("en-CA"),
+      timestamp: params.startTimestamp,
+      date_range_str: params.dateRangeStr,
+      source_type: params.sourceType,
+      ...(params.metadata || {}),
+    };
+
     const entry: VectorMemoryEntry = {
       id,
       sourceType: params.sourceType,
@@ -169,7 +178,7 @@ class VectorMemoryService {
       endTimestamp: params.endTimestamp,
       createdAt: now,
       createdDateStr,
-      metadata: params.metadata || {},
+      metadata: finalMetadata,
     };
 
     this.inMemoryVectors.set(id, entry);
@@ -189,14 +198,20 @@ class VectorMemoryService {
 
   /**
    * Performs semantic similarity search across all lifetime vector memories.
+   * Tip 3: Supports direct metadata filtering via filterOptions (exactDate, sessionId).
    */
   public async searchSemanticMemory(
     queryText: string,
     limit: number = 5,
-    minSimilarity: number = 0.15
+    minSimilarity: number = 0.15,
+    filterOptions?: {
+      exactDate?: string;
+      sessionId?: string;
+    }
   ): Promise<{
     query: string;
     totalMatches: number;
+    filterApplied?: Record<string, any>;
     results: Array<{
       similarity: number;
       dateRange: string;
@@ -205,6 +220,7 @@ class VectorMemoryService {
       sourceType: string;
       timestamp: number;
       createdDateStr: string;
+      metadata?: Record<string, any>;
     }>;
   }> {
     await this.initPromise;
@@ -219,7 +235,23 @@ class VectorMemoryService {
       entry: VectorMemoryEntry;
     }> = [];
 
+    const normFilterDate = filterOptions?.exactDate?.trim().toLowerCase();
+    const filterSess = filterOptions?.sessionId?.trim();
+
     for (const entry of this.inMemoryVectors.values()) {
+      // Tip 3: Exact date or session metadata filtering
+      if (normFilterDate) {
+        const metaDate = String(entry.metadata?.exact_date || "").toLowerCase();
+        const dateRange = String(entry.dateRangeStr || "").toLowerCase();
+        if (!metaDate.includes(normFilterDate) && !dateRange.includes(normFilterDate)) {
+          continue; // Skip document if date does not match
+        }
+      }
+
+      if (filterSess && entry.metadata?.session_id !== filterSess) {
+        continue; // Skip document if session does not match
+      }
+
       if (entry.embedding && entry.embedding.length === queryVector.length) {
         const similarity = this.cosineSimilarity(queryVector, entry.embedding);
         if (similarity >= minSimilarity) {
@@ -235,6 +267,7 @@ class VectorMemoryService {
     return {
       query: queryText,
       totalMatches: topMatches.length,
+      filterApplied: filterOptions,
       results: topMatches.map((m) => ({
         similarity: parseFloat(m.similarity.toFixed(4)),
         dateRange: m.entry.dateRangeStr,
@@ -243,6 +276,7 @@ class VectorMemoryService {
         sourceType: m.entry.sourceType,
         timestamp: m.entry.startTimestamp,
         createdDateStr: m.entry.createdDateStr,
+        metadata: m.entry.metadata,
       })),
     };
   }

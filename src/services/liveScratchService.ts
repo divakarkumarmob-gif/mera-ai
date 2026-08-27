@@ -166,19 +166,27 @@ class LiveScratchService {
 
       // 2. Find summaries older than 30 days -> convert to permanent vector database!
       const expiredSummaries = Array.from(this.inMemorySummaries.values()).filter((s) => s.timestamp < cutoff30d);
-      for (const expired of expiredSummaries) {
-        await vectorMemoryService.archiveToVectorStore({
-          originalText: expired.fullContent,
-          summary: expired.summary,
-          sourceType: "scratch_cache",
-          dateRangeStr: expired.dateStr,
-          startTimestamp: expired.timestamp - MS_24_HOURS,
-          endTimestamp: expired.timestamp,
-        });
+      if (expiredSummaries.length > 0) {
+        const batch = db.batch();
+        for (const expired of expiredSummaries) {
+          await vectorMemoryService.archiveToVectorStore({
+            originalText: expired.fullContent,
+            summary: expired.summary,
+            sourceType: "scratch_cache",
+            dateRangeStr: expired.dateStr,
+            startTimestamp: expired.timestamp - MS_24_HOURS,
+            endTimestamp: expired.timestamp,
+            metadata: {
+              session_id: "scratch_archive",
+              exact_date: expired.dateStr,
+            },
+          });
 
-        this.inMemorySummaries.delete(expired.id);
-        await scratchSummariesCol().doc(expired.id).delete().catch(() => {});
-        console.log(`[LiveScratchService] Archived 30d+ scratch summary ${expired.id} into permanent vector database.`);
+          this.inMemorySummaries.delete(expired.id);
+          batch.delete(scratchSummariesCol().doc(expired.id));
+          console.log(`[LiveScratchService] Archived 30d+ scratch summary ${expired.id} into permanent vector database.`);
+        }
+        await batch.commit().catch(() => {});
       }
     } catch (e: any) {
       console.error("[LiveScratchService] Lifecycle error:", e?.message || e);

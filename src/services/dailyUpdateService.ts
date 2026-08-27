@@ -15,6 +15,16 @@ export interface DailyUpdateEntry {
   dateStr: string;      // "YYYY-MM-DD" in IST — the document id
   text: string;         // accumulated update text for the day, newest appended at the end
   updatedAt: number;     // ms epoch of last append
+  status: "active" | "archived";
+}
+
+export interface MidTermSummaryEntry {
+  id: string;
+  dateStr: string;
+  summary: string;
+  rawText: string;
+  archivedAt: number;
+  status: "archived";
 }
 
 export interface PendingQuestion {
@@ -29,6 +39,7 @@ export interface PendingQuestion {
 }
 
 const updatesCol = () => db.collection("daily_updates");
+const midTermSummariesCol = () => db.collection("mid_term_summaries");
 const pendingCol = () => db.collection("pending_questions");
 
 const MAX_DAYS_RETAINED = 30;
@@ -69,25 +80,51 @@ class DailyUpdateService {
   private inMemoryPending: Map<string, PendingQuestion> = new Map();
 
   /**
-   * Appends DK's spoken update to today's entry. Multiple calls the same
-   * day accumulate into one document, separated by " | ".
+   * Fast-Summary Prompt helper:
+   * Generates a concise factual summary of prior text before overwriting.
    */
-  public async appendUpdate(text: string): Promise<DailyUpdateEntry> {
+  private async generateFastSummary(text: string): Promise<string> {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey || !text.trim()) {
+      return text.slice(0, 200);
+    }
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+      const resp = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: `Generate a crisp, factual 1-2 sentence high-density summary of this previous daily status update:\n\n${text}`,
+      });
+      return resp.text?.trim() || text.slice(0, 200);
+    } catch {
+      return text.slice(0, 200);
+    }
+  }
+
+  /**
+   * Appends or Overwrites DK's spoken update to today's entry.
+   * Tip 2: If isOverwrite is true and previous content exists,
+   * it queries status: "active", sends the old text to Fast-Summary,
+   * stores the summary in mid_term_summaries, and replaces the live doc!
+   */
+  public async appendUpdate(text: string, isOverwrite: boolean = false): Promise<DailyUpdateEntry> {
     const date = todayIST();
     const now = Date.now();
     const cleanText = text.trim();
 
-    // Check memory first
-    const memExisting = this.inMemoryUpdates.get(date);
-    let existingText = memExisting?.text || "";
-
+    // Query active document
+    let existingText = "";
     try {
-      const snap = await updatesCol().doc(date).get();
-      if (snap.exists) {
-        existingText = (snap.data() as DailyUpdateEntry).text || existingText;
+      const activeSnap = await updatesCol().where("dateStr", "==", date).where("status", "==", "active").limit(1).get();
+      if (!activeSnap.empty) {
+        existingText = (activeSnap.docs[0].data() as DailyUpdateEntry).text || "";
+      } else {
+        const docSnap = await updatesCol().doc(date).get();
+        if (docSnap.exists) {
+          existingText = (docSnap.data() as DailyUpdateEntry).text || "";
+        }
       }
     } catch (e: any) {
-      console.warn("[DailyUpdate] Firestore read warning (using memory cache):", e?.message || e);
+      existingText = this.inMemoryUpdates.get(date)?.text || "";
     }
 
     const timeFormatted = new Date(now).toLocaleTimeString("en-IN", {
@@ -97,8 +134,38 @@ class DailyUpdateService {
       hour12: true,
     });
     const updateSnippet = `[${timeFormatted}] ${cleanText}`;
-    const combinedText = existingText ? `${existingText} | ${updateSnippet}` : updateSnippet;
-    const entry: DailyUpdateEntry = { dateStr: date, text: combinedText, updatedAt: now };
+
+    let finalUpdatedText = updateSnippet;
+
+    if (existingText && isOverwrite) {
+      // Send prior text to Fast-Summary and archive to mid_term_summaries
+      const fastSummary = await this.generateFastSummary(existingText);
+      const summaryId = `mid_sum_${date}_${now}`;
+      const midSummaryDoc: MidTermSummaryEntry = {
+        id: summaryId,
+        dateStr: date,
+        summary: fastSummary,
+        rawText: existingText,
+        archivedAt: now,
+        status: "archived",
+      };
+
+      midTermSummariesCol().doc(summaryId).set(midSummaryDoc).catch((err) => {
+        console.warn("[DailyUpdate] Failed to write mid_term_summary:", err);
+      });
+
+      finalUpdatedText = updateSnippet;
+      console.log(`[DailyUpdate] Archived prior update for ${date} into mid_term_summaries.`);
+    } else if (existingText) {
+      finalUpdatedText = `${existingText} | ${updateSnippet}`;
+    }
+
+    const entry: DailyUpdateEntry = {
+      dateStr: date,
+      text: finalUpdatedText,
+      updatedAt: now,
+      status: "active",
+    };
 
     this.inMemoryUpdates.set(date, entry);
 
@@ -136,14 +203,14 @@ class DailyUpdateService {
 
   /**
    * Keeps only the most recent MAX_DAYS_RETAINED (30 days) day-documents.
-   * Documents older than 30 days are automatically converted into Vector Embeddings
-   * and saved permanently into the Vector Database before raw removal!
+   * Tip 1: Uses Firestore db.batch() to batch delete and vector archive!
    */
   private async trimOldUpdates() {
     try {
       const snapshot = await updatesCol().orderBy("dateStr", "desc").get();
       if (snapshot.size <= MAX_DAYS_RETAINED) return;
       const toArchive = snapshot.docs.slice(MAX_DAYS_RETAINED);
+      const batch = db.batch();
 
       for (const doc of toArchive) {
         const data = doc.data() as DailyUpdateEntry;
@@ -155,13 +222,17 @@ class DailyUpdateService {
             dateRangeStr: data.dateStr,
             startTimestamp: data.updatedAt || Date.now(),
             endTimestamp: data.updatedAt || Date.now(),
-            metadata: { dateStr: data.dateStr },
+            metadata: {
+              session_id: "daily_update_" + data.dateStr,
+              exact_date: data.dateStr,
+            },
           });
         }
-        await doc.ref.delete();
+        batch.delete(doc.ref);
         this.inMemoryUpdates.delete(data.dateStr);
         console.log(`[DailyUpdate] Archived 30d+ daily update for ${data.dateStr} into permanent vector database.`);
       }
+      await batch.commit().catch(() => {});
     } catch (e) {
       console.warn("[DailyUpdate] Archival error:", e);
     }

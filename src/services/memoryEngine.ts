@@ -147,6 +147,9 @@ class MemoryEngine {
       const snapshot = await sessionsCol().where("startTime", "<", cutoff60d).get();
       if (snapshot.empty) return;
 
+      let batch = db.batch();
+      let opCount = 0;
+
       for (const doc of snapshot.docs) {
         const session = doc.data() as ConversationSession;
         const dialogueText = (session.messages || [])
@@ -162,13 +165,25 @@ class MemoryEngine {
           startTimestamp: session.startTime,
           endTimestamp: session.endTime || session.startTime,
           metadata: {
-            sessionId: session.id,
+            session_id: session.id,
+            exact_date: session.dateStr,
             pinnedFacts: session.pinnedFacts || [],
           },
         });
 
-        await doc.ref.delete();
+        batch.delete(doc.ref);
+        opCount++;
+
+        if (opCount >= 400) {
+          await batch.commit().catch(() => {});
+          batch = db.batch();
+          opCount = 0;
+        }
         console.log(`[MemoryEngine] Archived 60d+ session ${session.id} (${session.dateStr}) into permanent vector database.`);
+      }
+
+      if (opCount > 0) {
+        await batch.commit().catch(() => {});
       }
     } catch (e: any) {
       console.warn("[MemoryEngine] Vector archival lifecycle warning:", e?.message || e);

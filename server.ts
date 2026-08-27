@@ -225,8 +225,14 @@ async function startServer() {
     try {
       const q = String(req.query.q || "").trim();
       const limit = req.query.limit ? Number(req.query.limit) : 5;
+      const filterDate = req.query.date ? String(req.query.date).trim() : undefined;
       if (!q) return res.status(400).json({ ok: false, error: "query 'q' is required" });
-      const searchRes = await vectorMemoryService.searchSemanticMemory(q, limit);
+      const searchRes = await vectorMemoryService.searchSemanticMemory(
+        q,
+        limit,
+        0.15,
+        filterDate ? { exactDate: filterDate } : undefined
+      );
       res.json({ ok: true, ...searchRes });
     } catch (e) {
       res.status(500).json({ error: "failed_to_search_vector_memory" });
@@ -2427,12 +2433,13 @@ HOW TO READ MESSAGES:
         },
         {
           name: "search_long_term_vector_memory",
-          description: "Search Friday's permanent Vector Database using SOTA semantic AI embeddings. Retrieves conversations, decisions, daily updates, or project milestones from weeks, months, or years ago even if phrased differently. Use when DK asks 'Humne pichle mahine kya discuss kiya tha?', 'Purani vector memory search karo', '2 mahine pehle maine kya bola tha?'.",
+          description: "Search Friday's permanent Vector Database using SOTA semantic AI embeddings. Retrieves conversations, decisions, daily updates, or project milestones from weeks, months, or years ago even if phrased differently. Supports exact date filtering with filterDate. Use when DK asks 'Humne pichle mahine kya discuss kiya tha?', 'Purani vector memory search karo', '25 August ko maine kya bola tha?'.",
           parameters: {
             type: "OBJECT",
             properties: {
               searchQuery: { type: "STRING", description: "The concept, topic, or question to search across lifetime memory" },
               limit: { type: "NUMBER", description: "Maximum number of results to return (default 5)" },
+              filterDate: { type: "STRING", description: "Optional specific date or month to filter by (e.g. '2026-08-25', 'June 2026')" },
             },
             required: ["searchQuery"],
           },
@@ -4742,11 +4749,13 @@ HOW TO READ MESSAGES:
                     result = { success: false, message: `Could not fetch lessons: ${e?.message || e}` };
                   }
                 } else if (call.name === "search_long_term_vector_memory") {
-                  const { searchQuery, limit } = call.args || {};
+                  const { searchQuery, limit, filterDate } = call.args || {};
                   try {
                     result = await vectorMemoryService.searchSemanticMemory(
                       String(searchQuery || ""),
-                      limit ? Number(limit) : 5
+                      limit ? Number(limit) : 5,
+                      0.15,
+                      filterDate ? { exactDate: String(filterDate) } : undefined
                     );
                   } catch (e: any) {
                     result = { success: false, message: `Vector search failed: ${e?.message || e}` };
