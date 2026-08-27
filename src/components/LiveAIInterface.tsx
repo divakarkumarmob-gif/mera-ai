@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { X, Mic, Plus, Loader2, Settings, ChevronDown, Captions, MessageSquare, Square, Code2, Terminal, Shield, ShieldCheck, Trash2, Key, Check, AlertCircle, Send, Instagram, Download } from 'lucide-react';
+import { X, Mic, Plus, Loader2, Settings, ChevronDown, Captions, MessageSquare, Square, Code2, Terminal, Shield, ShieldCheck, Trash2, Key, Check, AlertCircle, Send, Instagram, Download, Radio } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import AgentFace from './AgentFace';
 import ChatHistoryModal from './ChatHistoryModal';
@@ -8,6 +8,7 @@ import CodeAgentPage from './CodeAgentPage';
 import WebCrawlerStudioModal from './WebCrawlerStudioModal';
 import { YouTubeStudioModal } from './YouTubeStudioModal';
 import MemoryBackupModal from './MemoryBackupModal';
+import WifiRadarModal from './WifiRadarModal';
 import { getWsUrl } from '@/utils/api';
 import { wakeWordManager } from '@/utils/wakeWord';
 import { getAppToken, clearAppSession } from '@/utils/appSecurityClient';
@@ -610,6 +611,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const [showYouTubeStudio, setShowYouTubeStudio] = useState(false);
     const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
     const [showBackupModal, setShowBackupModal] = useState(false);
+    const [showWifiRadar, setShowWifiRadar] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const captionBoxRef = useRef<HTMLDivElement>(null);
     const userScrolledUpRef = useRef(false);
@@ -1653,7 +1655,17 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
 
                     {/* ── Horizontally Slideable Capsule Pills (Swipe Left/Right on Mobile & Desktop) ── */}
                     <div className="w-full overflow-x-auto no-scrollbar scroll-smooth flex items-center gap-2 py-1 px-1 touch-pan-x select-none">
-                        {/* 1. Memory Backup & Download Capsule */}
+                        {/* 1. Wi-Fi Radar Capsule */}
+                        <button
+                            onClick={() => setShowWifiRadar(true)}
+                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/50 text-cyan-300 text-xs font-semibold shadow-[0_0_15px_rgba(6,182,212,0.25)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95 hover:scale-105"
+                            title="Wi-Fi Radar & Connected Devices"
+                        >
+                            <Radio className="w-3.5 h-3.5 text-cyan-400" />
+                            <span>Wi-Fi Radar</span>
+                        </button>
+
+                        {/* 2. Memory Backup & Download Capsule */}
                         <button
                             onClick={() => setShowBackupModal(true)}
                             className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 text-amber-300 text-xs font-semibold shadow-[0_0_15px_rgba(245,158,11,0.25)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95 hover:scale-105"
@@ -2347,6 +2359,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
             <YouTubeStudioModal isOpen={showYouTubeStudio} onClose={() => setShowYouTubeStudio(false)} />
             <WhatsAppPairModal isOpen={showWhatsAppModal} onClose={() => setShowWhatsAppModal(false)} />
             {showBackupModal && <MemoryBackupModal onClose={() => setShowBackupModal(false)} />}
+            {showWifiRadar && <WifiRadarModal onClose={() => setShowWifiRadar(false)} />}
 
             {/* Deep Research Report Modal */}
             <AnimatePresence>

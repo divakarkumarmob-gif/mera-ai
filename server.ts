@@ -40,6 +40,7 @@ import { liveScratchService } from "./src/services/liveScratchService";
 import { smartMemoryRetrieverService } from "./src/services/smartMemoryRetrieverService";
 import { memoryBackupService } from "./src/services/memoryBackupService";
 import { telegramSecurityBotService } from "./src/services/telegramSecurityBotService";
+import { networkDeviceScannerService } from "./src/services/networkDeviceScannerService";
 
 const PORT = Number(process.env.PORT) || 3000;
 const isProduction = process.env.NODE_ENV === "production";
@@ -242,6 +243,26 @@ async function startServer() {
       res.json(result);
     } catch (e) {
       res.status(500).json({ error: "failed_to_record_lesson" });
+    }
+  });
+
+  app.get("/api/network/connected-devices", async (req, res) => {
+    try {
+      const force = req.query.refresh === "true";
+      const result = await networkDeviceScannerService.scanConnectedDevices(force);
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || "Scan failed" });
+    }
+  });
+
+  app.get("/api/network/wifi-radar", async (req, res) => {
+    try {
+      const force = req.query.refresh === "true";
+      const result = await networkDeviceScannerService.scanConnectedDevices(force);
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || "Radar scan failed" });
     }
   });
 
@@ -1545,6 +1566,7 @@ async function startServer() {
    - Commit & push to master -> Call 'approve_and_commit_to_master'.
 6. 📶 HARDWARE, WIFI & DIAGNOSTICS:
    - System health / CPU / RAM -> Call 'get_system_health'.
+   - Scan connected Wi-Fi devices / "WiFi se kaun kaun connected hai?", "Network par kitne log/phones hain" -> Call 'scan_connected_wifi_devices'.
    - Scan WiFi -> Call 'scan_wifi_networks'.
    - Connect WiFi -> Call 'connect_to_wifi' (ssid, password).
 7. 🔍 DYNAMIC ON-DEMAND MEMORY & PAST ARCHIVES:
@@ -3114,6 +3136,17 @@ STYLE:
               role: { type: "STRING", description: "New role: 'boss', 'girlfriend', 'friend', 'unknown'" },
             },
             required: ["contactId", "role"],
+          },
+        },
+        {
+          name: "scan_connected_wifi_devices",
+          description: "Scan and list all devices currently connected to the same Wi-Fi / Local Network (e.g., Mobile phones like Apple iPhone, Samsung, Xiaomi, OnePlus, Laptops, PCs, Smart TVs, IoT devices, Routers/Gateways). Returns the total count, device types, brands, IP addresses, and hostnames. Use when DK asks 'WiFi se kaun kaun connected hai?', 'Mere WiFi par kitne phone chal rahe hain?', 'Network scan karo', 'Connected devices dikhao', or 'WiFi devices check karo'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              forceRefresh: { type: "BOOLEAN", description: "Set to true to force a fresh ARP ping sweep of the network instead of using cached results." },
+            },
+            required: [],
           },
         },
         {
@@ -5164,6 +5197,34 @@ STYLE:
                     safeSend(JSON.stringify({ type: 'stop_music' }));
                   } catch (e: any) {
                     result = { success: false, message: `Music stop fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "scan_connected_wifi_devices") {
+                  const { forceRefresh } = call.args || {};
+                  try {
+                    const scan = await networkDeviceScannerService.scanConnectedDevices(Boolean(forceRefresh));
+                    result = {
+                      success: true,
+                      totalDevices: scan.totalDevices,
+                      summary: scan.summary,
+                      subnet: scan.subnet,
+                      gatewayIp: scan.gatewayIp,
+                      selfIp: scan.selfIp,
+                      wifiHealth: scan.wifiHealth,
+                      devices: scan.devices.map((d) => ({
+                        vendor: d.vendor,
+                        hostname: d.hostname,
+                        modelName: d.modelName,
+                        ip: d.ip,
+                        deviceType: d.deviceType,
+                        services: d.services,
+                        activeStream: d.activeStream,
+                        isGateway: d.isGateway,
+                        isSelf: d.isSelf,
+                      })),
+                      speechContext: networkDeviceScannerService.compileVoicePromptContext(scan),
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `Wi-Fi devices scan fail hua: ${e?.message || e}` };
                   }
                 } else if (call.name === "send_music_on_whatsapp") {
                   const { songName, targetPhone } = call.args || {};
