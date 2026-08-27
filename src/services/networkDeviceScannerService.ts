@@ -2,6 +2,7 @@ import { exec } from "child_process";
 import os from "os";
 import dns from "dns";
 import dgram from "dgram";
+import net from "net";
 import util from "util";
 import http from "http";
 
@@ -572,6 +573,71 @@ class NetworkDeviceScannerService {
   }
 
   /**
+   * Active Multi-Protocol Phone & Device Wakeup Sweep:
+   * Modern smartphones (Android/iOS) go into sleep/doze mode on Wi-Fi and ignore ICMP ping.
+   * This sends parallel lightweight UDP broadcasts (Port 9, 137, 1900, 5353) and TCP SYN probes
+   * across all 254 subnet IPs to force their Wi-Fi chips to wake up and register in the kernel ARP table.
+   */
+  private async triggerActiveWakeupSweep(subnetPrefix: string): Promise<void> {
+    try {
+      // 1. Broadcast UDP wake-up on Ports 9 (WOL), 137 (NetBIOS), 5353 (mDNS), 1900 (SSDP)
+      const udpSocket = dgram.createSocket("udp4");
+      const wakePayload = Buffer.from([0x00, 0x00, 0x01, 0x00]);
+      const ports = [9, 137, 5353, 1900];
+
+      udpSocket.bind(() => {
+        try {
+          udpSocket.setBroadcast(true);
+          for (const port of ports) {
+            udpSocket.send(wakePayload, port, `${subnetPrefix}.255`, () => {});
+          }
+        } catch {}
+      });
+
+      // 2. Parallel TCP SYN sweep across all 254 IPs on common smartphone & smart home ports
+      const probePorts = [80, 443, 8008, 62078, 5353];
+      const promises: Promise<void>[] = [];
+
+      for (let i = 1; i <= 254; i++) {
+        const ip = `${subnetPrefix}.${i}`;
+        for (const port of probePorts) {
+          promises.push(
+            new Promise<void>((resolve) => {
+              const socket = new net.Socket();
+              socket.setTimeout(250);
+              socket.on("connect", () => {
+                socket.destroy();
+                resolve();
+              });
+              socket.on("error", () => {
+                socket.destroy();
+                resolve();
+              });
+              socket.on("timeout", () => {
+                socket.destroy();
+                resolve();
+              });
+              try {
+                socket.connect(port, ip);
+              } catch {
+                resolve();
+              }
+            })
+          );
+        }
+      }
+
+      await Promise.all(promises);
+      try { udpSocket.close(); } catch {}
+
+      // Short delay for OS kernel ARP cache update
+      await new Promise((r) => setTimeout(r, 300));
+    } catch (e) {
+      console.warn("[NetworkScanner] Wakeup sweep error:", e);
+    }
+  }
+
+  /**
    * Parses ARP table from the operating system (`arp -a`).
    */
   private async getArpTable(): Promise<Array<{ ip: string; mac: string }>> {
@@ -680,12 +746,12 @@ class NetworkDeviceScannerService {
     const { localIp, subnetPrefix, gatewayIp } = this.getLocalInterfaceInfo();
     const activeSubnet = subnetPrefix ? `${subnetPrefix}.0/24` : "192.168.1.0/24";
 
-    // 1. Parallel execution of: Wi-Fi Health check, ARP Ping sweep, SSDP M-Search, and mDNS probe
+    // 1. Parallel execution of: Wi-Fi Health check, Active Wakeup sweep, SSDP M-Search, and mDNS probe
     const [wifiHealth, ssdpMap, mdnsMap] = await Promise.all([
       this.getWifiLinkHealth(),
       this.probeSsdpDevices(),
       this.probeMdnsServices(),
-      subnetPrefix ? this.triggerFastArpSweep(subnetPrefix) : Promise.resolve(),
+      subnetPrefix ? this.triggerActiveWakeupSweep(subnetPrefix) : Promise.resolve(),
     ]);
 
     // 2. Read kernel ARP table
