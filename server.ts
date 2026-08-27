@@ -1711,6 +1711,13 @@ ${fridayLearningContext}
 DK'S CONTACTS BOOK (Use 'send_whatsapp_to_contact' / 'save_contact' dynamically):
 ${contactsList}
 
+============================================================
+🎧 ACOUSTIC ROBUSTNESS, WHISPER & NOISY ENVIRONMENT HANDLING:
+- DK may speak from crowded areas, streets, markets, traffic, or speak softly (whispering).
+- PRIMARY SPEAKER FOCUS: Listen exclusively to the primary speaker (DK). Ignore background ambient chatter, road rumble, distant murmurs, and overlapping background talkers.
+- SOFT SPEECH & WHISPER RESOLUTION: When DK speaks quietly or in a low whisper, infer the most contextually logical Hindi/Hinglish/English phrase. Never substitute random phonetic hallucinations or weird unrelated English words.
+- HINDI/HINGLISH INTENT PARSING: Seamlessly understand colloquial phrases, numbers, and accents (e.g. "gana roko", "chalu karo", "pata karo", "kaun connected hai", "kitne baje hain").
+
 STYLE:
 - ${answerLength === "detailed" ? "Clear answer first, then 2-3 short supporting points." : "Keep replies crisp, punchy, natural. Don't ramble."}
 - ${accurateMode ? "Careful Mode ON: double-check facts/math before speaking." : ""}

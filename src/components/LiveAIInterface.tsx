@@ -1116,10 +1116,38 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
             console.error("Failed to resume AudioContext:", e);
         }
 
+        // 1. Source from Microphone MediaStream
         const source = inputAudioCtx.current.createMediaStreamSource(stream);
+
+        // 2. High-pass filter at 100 Hz (Cuts traffic hum, wind, fans, sub-bass desk thumps)
+        const highpass = inputAudioCtx.current.createBiquadFilter();
+        highpass.type = 'highpass';
+        highpass.frequency.value = 100;
+        highpass.Q.value = 0.707;
+
+        // 3. Low-pass filter at 6000 Hz (Cuts high-frequency shrieks, hiss, cutlery/street screech)
+        const lowpass = inputAudioCtx.current.createBiquadFilter();
+        lowpass.type = 'lowpass';
+        lowpass.frequency.value = 6000;
+        lowpass.Q.value = 0.707;
+
+        // 4. Studio Dynamics Compressor (Boosts soft whispers, evens out dynamics, prevents loud clipping)
+        const compressor = inputAudioCtx.current.createDynamicsCompressor();
+        compressor.threshold.value = -36; // Catches soft whispers down to -36 dB
+        compressor.knee.value = 12;
+        compressor.ratio.value = 4.0;
+        compressor.attack.value = 0.003; // 3ms fast response
+        compressor.release.value = 0.25;
+
+        // 5. Connect DSP Chain: source -> highpass -> lowpass -> compressor -> processor
+        source.connect(highpass);
+        highpass.connect(lowpass);
+        lowpass.connect(compressor);
+
         processor.current = inputAudioCtx.current.createScriptProcessor(4096, 1, 1);
-        source.connect(processor.current);
+        compressor.connect(processor.current);
         processor.current.connect(inputAudioCtx.current.destination);
+
         processor.current.onaudioprocess = (e) => {
             const isAudioStillPlaying = !!(outputAudioCtx.current && outputAudioCtx.current.currentTime < (nextStartTime.current - 0.05));
             const isAiBusy = aiTurnActiveRef.current || isAiSpeaking.current || isAiThinkingRef.current || statusRef.current === "Thinking..." || statusRef.current === "Speaking..." || isAudioStillPlaying;
@@ -1135,7 +1163,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 sumSquares += pcm[i] * pcm[i];
             }
             const rms = Math.sqrt(sumSquares / pcm.length) * 1000;
-            const isHumanSpeaking = rms >= 10;
+            const isHumanSpeaking = rms >= 8; // Sensitive threshold supported by AGC & Compressor
             if (isHumanSpeaking) {
                 lastActivityTimeRef.current = Date.now();
                 if (isWarningSpokenRef.current) {
@@ -1145,18 +1173,26 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
             }
 
             ws.current?.send(JSON.stringify({ audio: pcmToBase64(pcm) }));
-            setVolume(Math.min(100, rms * 2.2));
+            setVolume(Math.min(100, rms * 2.5));
         };
     };
 
     const requestMicStream = async (): Promise<MediaStream> => {
         return navigator.mediaDevices.getUserMedia({
             audio: {
-                echoCancellation: true,
-                noiseSuppression: true,
-                autoGainControl: true,
-                channelCount: 1,
-            },
+                echoCancellation: { ideal: true },
+                noiseSuppression: { ideal: true },
+                autoGainControl: { ideal: true },
+                channelCount: { ideal: 1 },
+                sampleRate: { ideal: 16000 },
+                // Chrome & Chromium WebRTC advanced DSP flags
+                googEchoCancellation: true,
+                googAutoGainControl: true,
+                googNoiseSuppression: true,
+                googHighpassFilter: true,
+                googTypingNoiseDetection: true,
+                googAudioMirroring: false,
+            } as any,
         });
     };
 
