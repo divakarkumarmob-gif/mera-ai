@@ -248,50 +248,41 @@ async function startServer() {
     }
   });
 
-  // ── Audio Proxy for JioSaavn / CDN streams ──
+  // ── Audio Proxy for JioSaavn / CDN streams (HTTP 206 Range Stream Support) ──
   app.get("/api/music/proxy-stream", async (req, res) => {
     const rawUrl = String(req.query.url || "");
     if (!rawUrl || !rawUrl.startsWith("http")) {
       return res.status(400).send("Invalid stream URL");
     }
     try {
-      const audioRes = await fetch(rawUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-          Range: (req.headers.range as string) || "bytes=0-",
-        },
-      });
-      if (!audioRes.ok && audioRes.status !== 206) {
-        return res.status(audioRes.status).send("Stream fetch failed");
+      const headers: Record<string, string> = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+      };
+      if (req.headers.range) {
+        headers["Range"] = req.headers.range as string;
       }
 
+      const audioRes = await fetch(rawUrl, { headers });
+
+      res.status(audioRes.status);
       res.set({
         "Content-Type": audioRes.headers.get("content-type") || "audio/mp4",
-        "Content-Length": audioRes.headers.get("content-length") || undefined,
         "Accept-Ranges": "bytes",
         "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+        "Access-Control-Allow-Headers": "Range, Content-Type",
         "Cache-Control": "public, max-age=86400",
       });
 
-      if (audioRes.body) {
-        const reader = audioRes.body.getReader();
-        const pump = async () => {
-          try {
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              if (res.writableEnded) break;
-              res.write(value);
-            }
-            res.end();
-          } catch {
-            res.end();
-          }
-        };
-        pump();
-      } else {
-        res.end();
+      if (audioRes.headers.get("content-range")) {
+        res.set("Content-Range", audioRes.headers.get("content-range")!);
       }
+      if (audioRes.headers.get("content-length")) {
+        res.set("Content-Length", audioRes.headers.get("content-length")!);
+      }
+
+      const arrayBuf = await audioRes.arrayBuffer();
+      res.end(Buffer.from(arrayBuf));
     } catch (e: any) {
       console.warn("[MusicProxy] Error streaming audio:", e?.message || e);
       if (!res.headersSent) res.status(500).send("Proxy error");

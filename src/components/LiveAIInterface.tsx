@@ -674,18 +674,23 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         hasLyrics?: boolean;
     }) => {
         stopMusicPlayback();
-        const proxiedUrl = song.audioUrl?.startsWith('http')
-            ? getApiUrl(`/api/music/proxy-stream?url=${encodeURIComponent(song.audioUrl)}`)
-            : song.audioUrl;
+        const rawUrl = song.audioUrl || '';
+        let finalStreamUrl = rawUrl;
+        if (rawUrl.startsWith('/api/')) {
+            finalStreamUrl = getApiUrl(rawUrl);
+        } else if (rawUrl.startsWith('http') && !rawUrl.includes('/api/music/proxy-stream')) {
+            finalStreamUrl = getApiUrl(`/api/music/proxy-stream?url=${encodeURIComponent(rawUrl)}`);
+        }
 
         const audio = new Audio();
-        if (proxiedUrl) audio.src = proxiedUrl;
+        audio.preload = 'auto';
+        if (finalStreamUrl) audio.src = finalStreamUrl;
         audio.volume = 0.85;
         audio.onended = () => {
             setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: false } : null);
         };
         audio.onerror = (e) => {
-            console.warn('[Music] Error playing direct song:', e);
+            console.warn('[Music] Error playing direct song on URL:', finalStreamUrl, e);
         };
         musicAudioRef.current = audio;
         audio.play().then(() => {
@@ -693,7 +698,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 trackName: song.trackName,
                 artistName: song.artistName,
                 albumArt: song.albumArt,
-                audioUrl: proxiedUrl,
+                audioUrl: finalStreamUrl,
                 isJioSaavn: true,
                 isFullSong: true,
                 quality: song.quality || "JioSaavn 320kbps Ultra-HD",
@@ -707,7 +712,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 trackName: song.trackName,
                 artistName: song.artistName,
                 albumArt: song.albumArt,
-                audioUrl: proxiedUrl,
+                audioUrl: finalStreamUrl,
                 isJioSaavn: true,
                 isPlaying: false,
                 songId: song.songId,
