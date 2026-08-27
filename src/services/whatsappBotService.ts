@@ -824,11 +824,12 @@ class WhatsAppBotService {
    * Handles: identity ("who made you / who are you"), privacy guard for DK's data, normal chat.
    */
   private static readonly AUTO_REPLY_MODEL_CHAIN = [
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
     "gemini-3.6-flash",
     "gemini-3.5-flash",
-    "gemini-3.5-flash-lite",
-    "gemini-3.1-pro",
     "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
   ];
 
   private async generateSmartAutoReply(
