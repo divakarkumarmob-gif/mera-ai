@@ -173,13 +173,34 @@ class VoiceBiometricsService {
   /**
    * Returns all active enrolled voice profiles from Firestore with in-memory fallback.
    */
+  /**
+   * Returns all active enrolled voice profiles from Firestore with in-memory fallback.
+   */
   public async getProfiles(): Promise<BossVoiceProfile[]> {
     try {
       const snap = await db.collection("bossVoiceProfiles").orderBy("createdAt", "asc").get();
-      const list = snap.docs.map((doc) => doc.data() as BossVoiceProfile);
-      for (const p of list) {
-        this.inMemoryProfiles.set(p.id, p);
-      }
+      const list = snap.docs.map((doc) => {
+        const data = doc.data() as any;
+        const name = String(data.name || "Unknown").trim();
+        const role: SpeakerRole = data.role || (name.toLowerCase().includes("boss") || name.toLowerCase().includes("divakar") ? "boss" : "friend");
+        const isRootAdmin = data.isRootAdmin ?? (role === "boss");
+        const profile: BossVoiceProfile = {
+          id: doc.id || data.id || `voice_${Date.now()}`,
+          name,
+          role,
+          relationWithDivakar: data.relationWithDivakar || (role === "boss" ? "Boss (Self)" : "Friend"),
+          voiceTraits: data.voiceTraits || "Voice biometric profile.",
+          spokenPhrases: Array.isArray(data.spokenPhrases) ? data.spokenPhrases : (data.spokenPhrase ? [data.spokenPhrase] : []),
+          acousticProfile: data.acousticProfile,
+          isRootAdmin,
+          allowedActions: Array.isArray(data.allowedActions) ? data.allowedActions : (isRootAdmin ? ["all"] : ["general_info", "music", "weather", "calculator", "chat", "web_search"]),
+          createdAt: Number(data.createdAt || Date.now()),
+          updatedAt: Number(data.updatedAt || Date.now()),
+          lastVerifiedAt: data.lastVerifiedAt ? Number(data.lastVerifiedAt) : undefined,
+        };
+        this.inMemoryProfiles.set(profile.id, profile);
+        return profile;
+      });
       return list;
     } catch {
       return Array.from(this.inMemoryProfiles.values());
@@ -190,27 +211,36 @@ class VoiceBiometricsService {
    * Compiles list of enrolled voice profiles for Friday system prompt context.
    */
   public async compileVoiceProfilesPromptContext(): Promise<string> {
-    const profiles = await this.getProfiles();
-    if (profiles.length === 0) {
-      return `VOICE BIOMETRICS SECURITY STATUS:
+    try {
+      const profiles = await this.getProfiles();
+      if (!profiles || profiles.length === 0) {
+        return `VOICE BIOMETRICS SECURITY STATUS:
 - No voice profiles enrolled yet.
 - DEFAULT ACCESS POLICY: Boss DK has full access. If strangers speak, identify context and offer guided voice profile creation.`;
-    }
+      }
 
-    const list = profiles
-      .map(
-        (p, i) =>
-          `${i + 1}. Name: "${p.name}" | Role: ${p.role.toUpperCase()} (Relation: ${p.relationWithDivakar}) | Root Admin: ${p.isRootAdmin ? "YES 👑" : "NO (Restricted)"} | Profile ID: "${p.id}"`
-      )
-      .join("\n");
+      const list = profiles
+        .map((p, i) => {
+          const roleStr = (p.role || "friend").toUpperCase();
+          const nameStr = p.name || "Unknown";
+          const relationStr = p.relationWithDivakar || "Friend";
+          const adminStr = p.isRootAdmin ? "YES 👑" : "NO (Restricted)";
+          return `${i + 1}. Name: "${nameStr}" | Role: ${roleStr} (Relation: ${relationStr}) | Root Admin: ${adminStr} | Profile ID: "${p.id}"`;
+        })
+        .join("\n");
 
-    return `VOICE BIOMETRICS PROFILES (${profiles.length} Enrolled):
+      return `VOICE BIOMETRICS PROFILES (${profiles.length} Enrolled):
 ${list}
 
 SPEAKER ACCESS RULES:
 1. If speaker matches BOSS (DK): 100% Root Access granted.
 2. If speaker matches Enrolled Friend/Family (e.g. Aman, Priya): Greet by name, provide friendly chat, music & general info. SENSITIVE ACTIONS (Contacts, Memory Deletions, System Settings, Shell Commands) are STRICTLY BLOCKED with refusal.
 3. If speaker is UNKNOWN: General Info only. If asking sensitive questions, refuse and say: "Aapki aawaz mere Boss DK se match nahi ho rahi hai. Main yeh sensitive details share nahi kar sakti. Kripya apni Voice Profile banayein."`;
+    } catch (err) {
+      console.warn("[VoiceBiometrics] Failed to compile voice prompt context:", err);
+      return `VOICE BIOMETRICS SECURITY STATUS:
+- Default Access: Boss DK has full access.`;
+    }
   }
 
   /**
