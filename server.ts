@@ -316,6 +316,18 @@ async function startServer() {
     }
   });
 
+  // ── Music Search Endpoint (JioSaavn HD) ──
+  app.get("/api/music/search", async (req, res) => {
+    const query = String(req.query.query || "").trim();
+    if (!query) return res.status(400).json({ success: false, message: "Query required" });
+    try {
+      const searchRes = await jioSaavnService.searchSong(query);
+      res.json(searchRes);
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || e });
+    }
+  });
+
   app.get("/api/network/connected-devices", async (req, res) => {
     try {
       const force = req.query.refresh !== "false";

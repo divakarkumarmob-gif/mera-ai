@@ -14,6 +14,7 @@ import { wakeWordManager } from '@/utils/wakeWord';
 import { getAppToken, clearAppSession } from '@/utils/appSecurityClient';
 import { screenWakeLock } from '@/utils/screenWakeLock';
 import { MusicCapsule } from './MusicCapsule';
+import { MusicStudioModal } from './MusicStudioModal';
 
 interface LiveAIInterfaceProps {
     onClose: () => void;
@@ -613,6 +614,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
     const [showBackupModal, setShowBackupModal] = useState(false);
     const [showWifiRadar, setShowWifiRadar] = useState(false);
+    const [showMusicStudio, setShowMusicStudio] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const captionBoxRef = useRef<HTMLDivElement>(null);
     const userScrolledUpRef = useRef(false);
@@ -658,6 +660,61 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         } catch { /* ignore */ }
         setNowPlayingMusic(null);
     }, []);
+
+    const playDirectSong = useCallback((song: {
+        trackName: string;
+        artistName: string;
+        albumName?: string;
+        albumArt?: string;
+        audioUrl?: string;
+        isJioSaavn?: boolean;
+        isFullSong?: boolean;
+        quality?: string;
+        songId?: string;
+        hasLyrics?: boolean;
+    }) => {
+        stopMusicPlayback();
+        const proxiedUrl = song.audioUrl?.startsWith('http')
+            ? getApiUrl(`/api/music/proxy-stream?url=${encodeURIComponent(song.audioUrl)}`)
+            : song.audioUrl;
+
+        const audio = new Audio();
+        if (proxiedUrl) audio.src = proxiedUrl;
+        audio.volume = 0.85;
+        audio.onended = () => {
+            setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: false } : null);
+        };
+        audio.onerror = (e) => {
+            console.warn('[Music] Error playing direct song:', e);
+        };
+        musicAudioRef.current = audio;
+        audio.play().then(() => {
+            setNowPlayingMusic({
+                trackName: song.trackName,
+                artistName: song.artistName,
+                albumArt: song.albumArt,
+                audioUrl: proxiedUrl,
+                isJioSaavn: true,
+                isFullSong: true,
+                quality: song.quality || "JioSaavn 320kbps Ultra-HD",
+                isPlaying: true,
+                songId: song.songId,
+                hasLyrics: song.hasLyrics,
+            });
+        }).catch(err => {
+            console.warn('[Music] Direct play catch:', err);
+            setNowPlayingMusic({
+                trackName: song.trackName,
+                artistName: song.artistName,
+                albumArt: song.albumArt,
+                audioUrl: proxiedUrl,
+                isJioSaavn: true,
+                isPlaying: false,
+                songId: song.songId,
+                hasLyrics: song.hasLyrics,
+            });
+        });
+    }, [stopMusicPlayback]);
 
     const pauseMusicPlayback = useCallback(() => {
         if (musicAudioRef.current) {
@@ -1759,6 +1816,16 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                             <span>Crawler</span>
                         </button>
 
+                        {/* 4.5 Music Studio Capsule */}
+                        <button
+                            onClick={() => setShowMusicStudio(true)}
+                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-gradient-to-r from-cyan-500/20 to-fuchsia-500/20 hover:from-cyan-500/30 hover:to-fuchsia-500/30 border border-cyan-400/50 text-cyan-300 text-xs font-semibold shadow-[0_0_15px_rgba(6,182,212,0.25)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95 hover:scale-105"
+                            title="JioSaavn 320kbps HD Music Studio"
+                        >
+                            <span>🎵</span>
+                            <span>Music Studio</span>
+                        </button>
+
                         {/* 5. YouTube AI Capsule */}
                         <button
                             onClick={() => setShowYouTubeStudio(true)}
@@ -2495,6 +2562,14 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         musicAudioRef.current.volume = vol;
                     }
                 }}
+            />
+            {/* Music Studio Modal (JioSaavn 320kbps Search & Play) */}
+            <MusicStudioModal
+                isOpen={showMusicStudio}
+                onClose={() => setShowMusicStudio(false)}
+                onPlaySong={playDirectSong}
+                currentPlayingSongName={nowPlayingMusic?.trackName}
+                isPlaying={nowPlayingMusic?.isPlaying}
             />
         </div>
     );
