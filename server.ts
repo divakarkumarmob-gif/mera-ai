@@ -266,6 +266,16 @@ async function startServer() {
     }
   });
 
+  app.get("/api/network/wifi-recon", async (req, res) => {
+    try {
+      const force = req.query.refresh === "true";
+      const result = await networkDeviceScannerService.scanNearbyWifiRecon(force);
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || "Recon scan failed" });
+    }
+  });
+
   app.get("/api/memory/vector/search", async (req, res) => {
     try {
       const q = String(req.query.q || "").trim();
@@ -1567,6 +1577,7 @@ async function startServer() {
 6. 📶 HARDWARE, WIFI & DIAGNOSTICS:
    - System health / CPU / RAM -> Call 'get_system_health'.
    - Scan connected Wi-Fi devices / "WiFi se kaun kaun connected hai?", "Network par kitne log/phones hain" -> Call 'scan_connected_wifi_devices'.
+   - Scan nearby Wi-Fi airspace / "Aas paas kaun se Wi-Fi hain", "Wi-Fi security recon karo", "Open Wi-Fi check karo" -> Call 'scan_nearby_wifi_recon'.
    - Scan WiFi -> Call 'scan_wifi_networks'.
    - Connect WiFi -> Call 'connect_to_wifi' (ssid, password).
 7. 🔍 DYNAMIC ON-DEMAND MEMORY & PAST ARCHIVES:
@@ -3145,6 +3156,17 @@ STYLE:
             type: "OBJECT",
             properties: {
               forceRefresh: { type: "BOOLEAN", description: "Set to true to force a fresh ARP ping sweep of the network instead of using cached results." },
+            },
+            required: [],
+          },
+        },
+        {
+          name: "scan_nearby_wifi_recon",
+          description: "Level 4 Cyber Airspace Recon: Scan all surrounding Wi-Fi networks over-the-air, analyze security encryption (Open / WPA2 / WPA3), detect rogue AP / evil twin anomalies, find hidden SSIDs, and recommend cleanest zero-ping channels. Use when DK asks 'Aas paas kaun se Wi-Fi hain?', 'Wi-Fi security recon karo', 'Hawa me kitne Wi-Fi chal rahe hain?', 'Open Wi-Fi hai kya koi?', or 'Best channel kaun sa hai?'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              forceRefresh: { type: "BOOLEAN", description: "Set to true to force fresh over-the-air BSSID radio scan." },
             },
             required: [],
           },
@@ -5225,6 +5247,22 @@ STYLE:
                     };
                   } catch (e: any) {
                     result = { success: false, message: `Wi-Fi devices scan fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "scan_nearby_wifi_recon") {
+                  const { forceRefresh } = call.args || {};
+                  try {
+                    const recon = await networkDeviceScannerService.scanNearbyWifiRecon(Boolean(forceRefresh));
+                    result = {
+                      success: true,
+                      totalNetworks: recon.totalNetworks,
+                      securitySummary: recon.securitySummary,
+                      channelAnalysis: recon.channelAnalysis,
+                      currentConnectedSsid: recon.currentConnectedSsid,
+                      networks: recon.networks.slice(0, 10),
+                      speechContext: networkDeviceScannerService.compileReconVoicePromptContext(recon),
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `Airspace Wi-Fi Recon fail hua: ${e?.message || e}` };
                   }
                 } else if (call.name === "send_music_on_whatsapp") {
                   const { songName, targetPhone } = call.args || {};
