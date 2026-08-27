@@ -336,6 +336,44 @@ async function startServer() {
     }
   });
 
+  // ── Music Audio Proxy Stream (Bypasses CDN CORS Blocks) ──────────────────────
+  app.get("/api/music/proxy-stream", async (req, res) => {
+    try {
+      const audioUrl = String(req.query.url || "");
+      if (!audioUrl || (!audioUrl.startsWith("http://") && !audioUrl.startsWith("https://"))) {
+        return res.status(400).send("Valid audio 'url' parameter is required.");
+      }
+
+      const response = await fetch(audioUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+          "Referer": "https://www.jiosaavn.com/",
+          "Accept": "*/*",
+        },
+      });
+
+      if (!response.ok) {
+        return res.status(response.status).send(`Upstream audio fetch failed: ${response.statusText}`);
+      }
+
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "*");
+      res.setHeader("Content-Type", response.headers.get("content-type") || "audio/mp4");
+      
+      const contentLength = response.headers.get("content-length");
+      if (contentLength) res.setHeader("Content-Length", contentLength);
+      
+      const acceptRanges = response.headers.get("accept-ranges");
+      if (acceptRanges) res.setHeader("Accept-Ranges", acceptRanges);
+
+      const arrayBuffer = await response.arrayBuffer();
+      res.send(Buffer.from(arrayBuffer));
+    } catch (e: any) {
+      res.status(500).send(`Audio proxy streaming failed: ${e?.message || e}`);
+    }
+  });
+
   app.get("/api/memory/vector/search", async (req, res) => {
     try {
       const q = String(req.query.q || "").trim();

@@ -83,11 +83,18 @@ const AgentFace: React.FC<AgentFaceProps> = ({ status, volume, size = 120, color
   );
 
   const mouth = isThinking ? (
-    <motion.path d="M 40 80 Q 60 70 80 80" stroke={color} strokeWidth="4" fill="transparent" />
+    <path d="M 40 80 Q 60 70 80 80" stroke={color} strokeWidth="4" fill="transparent" />
   ) : isSpeaking ? (
-    <motion.path d="M 40 80 Q 60 90 80 80" stroke={color} strokeWidth="4" fill="transparent" animate={{ d: "M 40 80 Q 60 100 80 80" }} transition={{ repeat: Infinity, repeatType: "reverse", duration: 0.2 }} />
+    <motion.path
+      d="M 40 80 Q 60 95 80 80"
+      stroke={color}
+      strokeWidth="4"
+      fill="transparent"
+      animate={{ scaleY: [1, 1.4, 0.8, 1.3, 1] }}
+      transition={{ repeat: Infinity, duration: 0.35 }}
+    />
   ) : (
-    <motion.path d="M 40 70 Q 60 90 80 70" stroke={color} strokeWidth="4" fill="transparent" />
+    <path d="M 40 70 Q 60 90 80 70" stroke={color} strokeWidth="4" fill="transparent" />
   );
 
   return (

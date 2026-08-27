@@ -9,7 +9,7 @@ import WebCrawlerStudioModal from './WebCrawlerStudioModal';
 import { YouTubeStudioModal } from './YouTubeStudioModal';
 import MemoryBackupModal from './MemoryBackupModal';
 import WifiRadarModal from './WifiRadarModal';
-import { getWsUrl } from '@/utils/api';
+import { getWsUrl, getApiUrl } from '@/utils/api';
 import { wakeWordManager } from '@/utils/wakeWord';
 import { getAppToken, clearAppSession } from '@/utils/appSecurityClient';
 import { screenWakeLock } from '@/utils/screenWakeLock';
@@ -1449,14 +1449,14 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         hasError: false,
                     };
 
-                    const attemptPlayback = (srcUrl: string, isFallbackAttempt = false) => {
+                    const attemptPlayback = (srcUrl: string, isFallbackAttempt = false, isProxyAttempt = false) => {
                         try {
                             if (musicAudioRef.current) {
                                 musicAudioRef.current.pause();
                                 musicAudioRef.current = null;
                             }
                             const audio = new Audio();
-                            audio.crossOrigin = 'anonymous';
+                            // Do NOT set audio.crossOrigin = 'anonymous' because it causes CDNs to reject CORS!
                             audio.src = srcUrl;
                             audio.volume = 0.85;
 
@@ -1466,9 +1466,13 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
 
                             audio.onerror = (e) => {
                                 console.warn('[Music] Audio stream error on source:', srcUrl, e);
-                                if (!isFallbackAttempt && fallbackAudioUrl && fallbackAudioUrl !== srcUrl) {
+                                if (!isProxyAttempt && srcUrl.startsWith('http')) {
+                                    console.log('[Music] Attempting server audio proxy stream...');
+                                    const proxyUrl = getApiUrl(`/api/music/proxy-stream?url=${encodeURIComponent(srcUrl)}`);
+                                    attemptPlayback(proxyUrl, isFallbackAttempt, true);
+                                } else if (!isFallbackAttempt && fallbackAudioUrl && fallbackAudioUrl !== srcUrl) {
                                     console.log('[Music] Attempting fallback audio stream URL...');
-                                    attemptPlayback(fallbackAudioUrl, true);
+                                    attemptPlayback(fallbackAudioUrl, true, false);
                                 } else if (msg.videoId || msg.embedUrl || trackInfo.embedUrl) {
                                     console.log('[Music] Direct stream failed, falling back to YouTube Music embed');
                                     if (musicAudioRef.current) {

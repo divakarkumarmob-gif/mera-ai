@@ -42,26 +42,28 @@ class ScreenWakeLockManager {
     this.isRequested = true;
     if (typeof window === "undefined") return false;
 
-    // 1. Try Capacitor Native KeepAwake & BackgroundTask (For Mobile APK)
+    // 1. Try Capacitor Native KeepAwake & BackgroundTask (For Mobile APK only)
     try {
-      if (KeepAwake?.keepAwake) {
-        await KeepAwake.keepAwake();
-        console.log("[ScreenWakeLock] 💡 Capacitor Native KeepAwake activated! Screen will NOT sleep.");
-      }
-      if (BackgroundTask?.beforeExit) {
-        BackgroundTask.beforeExit(async () => {
-          try {
-            this.backgroundTaskId = typeof (BackgroundTask as any).start === "function" ? await (BackgroundTask as any).start() : null;
-            if (!this.keepAliveInterval) {
-              this.keepAliveInterval = setInterval(() => {
-                // Keep-alive ping for background audio engine
-              }, 5000);
+      if (typeof (window as any).Capacitor !== "undefined" && (window as any).Capacitor.isNativePlatform()) {
+        if (KeepAwake?.keepAwake) {
+          await KeepAwake.keepAwake();
+          console.log("[ScreenWakeLock] 💡 Capacitor Native KeepAwake activated! Screen will NOT sleep.");
+        }
+        if (BackgroundTask?.beforeExit) {
+          BackgroundTask.beforeExit(async () => {
+            try {
+              this.backgroundTaskId = typeof (BackgroundTask as any).start === "function" ? await (BackgroundTask as any).start() : null;
+              if (!this.keepAliveInterval) {
+                this.keepAliveInterval = setInterval(() => {
+                  // Keep-alive ping for background audio engine
+                }, 5000);
+              }
+              console.log("[ScreenWakeLock] 🚀 Capacitor BackgroundTask started! ID:", this.backgroundTaskId);
+            } catch (e) {
+              console.warn("[ScreenWakeLock] BackgroundTask start error:", e);
             }
-            console.log("[ScreenWakeLock] 🚀 Capacitor BackgroundTask started! ID:", this.backgroundTaskId);
-          } catch (e) {
-            console.warn("[ScreenWakeLock] BackgroundTask start error:", e);
-          }
-        });
+          });
+        }
       }
     } catch {
       // Running in standard web browser
