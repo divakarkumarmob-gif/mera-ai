@@ -1,6 +1,6 @@
 /**
  * JioSaavn HD Music Streaming & Decryption Service
- * Native Pure-JS DES-ECB Decryption for 320kbps Pure Audio Streaming.
+ * Comprehensive Catalog Search & Native DES-ECB Decryption for 320kbps Pure Audio Streaming.
  * Inspired by https://github.com/sumitkolhe/jiosaavn-api
  */
 
@@ -61,7 +61,7 @@ class JioSaavnService {
   }
 
   /**
-   * Clean HTML entities from titles and artist strings
+   * Clean HTML entities and unicode escaping from titles and artist strings
    */
   private cleanText(str: string): string {
     return String(str || "")
@@ -91,15 +91,128 @@ class JioSaavnService {
   }
 
   /**
-   * Search songs on JioSaavn and decrypt 320kbps audio streams
+   * Search songs on JioSaavn across entire catalog with multiple API fallbacks
    */
-  public async searchSong(query: string): Promise<JioSaavnSearchResult> {
+  public async searchSong(query: string, limit: number = 20): Promise<JioSaavnSearchResult> {
     const cleanQuery = String(query || "").trim();
     if (!cleanQuery) {
       return { success: false, query: "", count: 0, songs: [], message: "Song name zaroori hai." };
     }
 
-    // 1. Primary: autocomplete.get (Fastest and always reliable)
+    // 1. Primary: search.getResults (Deep catalog search with full metadata)
+    try {
+      const searchUrl = `${this.API_BASE}?__call=search.getResults&_format=json&_marker=0&cc=in&includeMetaTags=1&p=1&n=${limit}&q=${encodeURIComponent(cleanQuery)}`;
+      const res = await fetch(searchUrl, { headers: this.HEADERS });
+      if (res.ok) {
+        const text = await res.text();
+        let data: any = {};
+        try {
+          data = JSON.parse(text);
+        } catch {
+          // Attempt to strip jsonp if wrapped
+          const clean = text.replace(/^[^{]*/, "").replace(/[^}]*$/, "");
+          data = JSON.parse(clean);
+        }
+
+        const results = data?.results || [];
+        if (Array.isArray(results) && results.length > 0) {
+          const songs: JioSaavnSong[] = [];
+
+          for (const item of results) {
+            const rawEncUrl = item.encrypted_media_url || item.more_info?.encrypted_media_url;
+            const decrypted = this.decryptUrl(rawEncUrl);
+            if (!decrypted) continue;
+
+            const streams = this.buildQualityStreams(decrypted);
+            const rawImg = String(item.image || "").replace(/http:\/\//, "https://");
+            const albumArt500 = rawImg.replace(/150x150\.jpg|50x50\.jpg/, "500x500.jpg");
+            const albumArt150 = rawImg.replace(/500x500\.jpg|50x50\.jpg/, "150x150.jpg");
+
+            songs.push({
+              id: item.id,
+              songName: this.cleanText(item.song || item.title || item.more_info?.song),
+              albumName: this.cleanText(item.album || item.more_info?.album),
+              artistName: this.cleanText(item.primary_artists || item.more_info?.primary_artists || item.singers || item.music || "Artist"),
+              year: item.year || item.more_info?.year,
+              durationSec: Number(item.duration || item.more_info?.duration || 0),
+              albumArt500: albumArt500 || albumArt150,
+              albumArt150: albumArt150 || albumArt500,
+              audio320kbps: streams.audio320 || decrypted,
+              audio160kbps: streams.audio160 || decrypted,
+              audio96kbps: streams.audio96 || decrypted,
+              hasLyrics: item.has_lyrics === "true" || item.more_info?.has_lyrics === "true",
+              copyright: item.copyright_text || item.more_info?.copyright_text,
+            });
+          }
+
+          if (songs.length > 0) {
+            return {
+              success: true,
+              query: cleanQuery,
+              count: songs.length,
+              songs,
+              topSong: songs[0],
+              message: `JioSaavn catalog par "${cleanQuery}" ke ${songs.length} gaane mil gaye hain. 🎵`,
+            };
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn("[JioSaavn] search.getResults error:", err?.message || err);
+    }
+
+    // 2. Secondary: search.getMoreResults fallback
+    try {
+      const moreUrl = `${this.API_BASE}?__call=search.getMoreResults&_format=json&_marker=0&cc=in&includeMetaTags=1&p=1&n=${limit}&q=${encodeURIComponent(cleanQuery)}&params=%7B%22type%22:%22songs%22%7D`;
+      const res = await fetch(moreUrl, { headers: this.HEADERS });
+      if (res.ok) {
+        const data = await res.json();
+        const results = data?.results || [];
+        if (Array.isArray(results) && results.length > 0) {
+          const songs: JioSaavnSong[] = [];
+          for (const item of results) {
+            const rawEncUrl = item.encrypted_media_url || item.more_info?.encrypted_media_url;
+            const decrypted = this.decryptUrl(rawEncUrl);
+            if (!decrypted) continue;
+
+            const streams = this.buildQualityStreams(decrypted);
+            const rawImg = String(item.image || "").replace(/http:\/\//, "https://");
+            const albumArt500 = rawImg.replace(/150x150\.jpg|50x50\.jpg/, "500x500.jpg");
+            const albumArt150 = rawImg.replace(/500x500\.jpg|50x50\.jpg/, "150x150.jpg");
+
+            songs.push({
+              id: item.id,
+              songName: this.cleanText(item.song || item.title || item.more_info?.song),
+              albumName: this.cleanText(item.album || item.more_info?.album),
+              artistName: this.cleanText(item.primary_artists || item.more_info?.primary_artists || item.singers || "Artist"),
+              year: item.year || item.more_info?.year,
+              durationSec: Number(item.duration || item.more_info?.duration || 0),
+              albumArt500: albumArt500 || albumArt150,
+              albumArt150: albumArt150 || albumArt500,
+              audio320kbps: streams.audio320 || decrypted,
+              audio160kbps: streams.audio160 || decrypted,
+              audio96kbps: streams.audio96 || decrypted,
+              hasLyrics: item.has_lyrics === "true" || item.more_info?.has_lyrics === "true",
+            });
+          }
+
+          if (songs.length > 0) {
+            return {
+              success: true,
+              query: cleanQuery,
+              count: songs.length,
+              songs,
+              topSong: songs[0],
+              message: `JioSaavn catalog par "${cleanQuery}" ke ${songs.length} gaane mil gaye hain. 🎵`,
+            };
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn("[JioSaavn] search.getMoreResults error:", err?.message || err);
+    }
+
+    // 3. Fallback: autocomplete.get + song.getDetails
     try {
       const autoUrl = `${this.API_BASE}?__call=autocomplete.get&_format=json&_marker=0&cc=in&includeMetaTags=1&query=${encodeURIComponent(cleanQuery)}`;
       const res = await fetch(autoUrl, { headers: this.HEADERS });
@@ -108,7 +221,7 @@ class JioSaavnService {
         const autoSongs = data?.songs?.data || [];
 
         if (Array.isArray(autoSongs) && autoSongs.length > 0) {
-          const songIds = autoSongs.slice(0, 4).map((s: any) => s.id).join(",");
+          const songIds = autoSongs.slice(0, 10).map((s: any) => s.id).join(",");
           const detailUrl = `${this.API_BASE}?__call=song.getDetails&pids=${songIds}&_format=json&_marker=0&cc=in`;
           const detailRes = await fetch(detailUrl, { headers: this.HEADERS });
 
@@ -133,7 +246,7 @@ class JioSaavnService {
                 id: songObj.id || item.id,
                 songName: this.cleanText(songObj.song || songObj.title || item.title),
                 albumName: this.cleanText(songObj.album || songObj.more_info?.album || item.album),
-                artistName: this.cleanText(songObj.primary_artists || songObj.more_info?.primary_artists || item.description || "JioSaavn Artist"),
+                artistName: this.cleanText(songObj.primary_artists || songObj.more_info?.primary_artists || item.description || "Artist"),
                 year: songObj.year,
                 durationSec: Number(songObj.duration || 0),
                 albumArt500: albumArt500 || albumArt150,
@@ -152,7 +265,7 @@ class JioSaavnService {
                 count: songs.length,
                 songs,
                 topSong: songs[0],
-                message: `JioSaavn 320kbps HD par "${songs[0].songName}" mil gaya hai. 🎵`,
+                message: `JioSaavn par "${songs[0].songName}" mil gaya hai. 🎵`,
               };
             }
           }
@@ -167,7 +280,7 @@ class JioSaavnService {
       query: cleanQuery,
       count: 0,
       songs: [],
-      message: `JioSaavn par "${cleanQuery}" ke liye song nahi mila.`,
+      message: `JioSaavn catalog par "${cleanQuery}" ke liye song nahi mila.`,
     };
   }
 
