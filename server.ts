@@ -5352,13 +5352,16 @@ STYLE:
                   const { songName } = call.args || {};
                   try {
                     result = await publicApisService.playMusic(String(songName || ""));
-                    if (result.success && result.audioUrl) {
+                    if (result.success) {
                       clientWs.send(JSON.stringify({
                         type: 'play_music',
                         trackName: result.trackName,
                         artistName: result.artistName,
                         albumArt: result.albumArt,
                         audioUrl: result.audioUrl,
+                        videoId: result.videoId,
+                        embedUrl: result.embedUrl,
+                        isYouTubeMusic: !!result.isYouTubeMusic || !!result.videoId,
                         spotifyUrl: result.spotifyUrl,
                         youtubeMusicUrl: result.youtubeMusicUrl,
                         isFullSong: result.isFullSong,

@@ -4089,11 +4089,21 @@ class PublicApisService {
 
   // 51.1 Play & Stream FULL Music Track in Background
   public async playMusic(songOrArtist: string): Promise<any> {
+    // 1. Primary: YouTube Music HD Search
+    try {
+      const ytRes = await this.searchYouTubeMusic(songOrArtist);
+      if (ytRes.success && ytRes.videoId) {
+        return ytRes;
+      }
+    } catch (e) {
+      console.warn("[PublicApis] YouTube music search error in playMusic:", e);
+    }
+
+    // 2. Fallback: Multi-Source Search
     const res = await this.searchMusic(songOrArtist);
     if (res.success && res.tracks && res.tracks.length > 0) {
-      const fullTrack = res.tracks.find((t: any) => t.isFullSong && t.fullAudioUrl);
-      const topTrack = fullTrack || res.tracks.find((t: any) => t.previewUrl) || res.tracks[0];
-      const audioUrl = topTrack.fullAudioUrl || topTrack.previewUrl;
+      const topTrack = res.tracks[0];
+      const audioUrl = topTrack.fullAudioUrl || topTrack.previewUrl || topTrack.audioUrl;
 
       return {
         success: true,
@@ -4104,19 +4114,18 @@ class PublicApisService {
         albumArt: topTrack.albumArt,
         durationSec: topTrack.durationSec,
         isFullSong: !!topTrack.isFullSong,
-        quality: topTrack.quality || (topTrack.isFullSong ? "320kbps Full HD" : "Preview"),
+        quality: topTrack.quality || "HD Audio",
         audioUrl: audioUrl,
-        deezerUrl: topTrack.deezerUrl,
         spotifyUrl: topTrack.spotifyUrl,
         youtubeMusicUrl: topTrack.youtubeMusicUrl || `https://music.youtube.com/search?q=${encodeURIComponent(topTrack.trackName + " " + topTrack.artistName)}`,
         source: topTrack.source,
-        message: `"${topTrack.trackName}" by ${topTrack.artistName} (${topTrack.isFullSong ? "Pura Gaana 100% Full Length" : "Preview Clip"}) play ho raha hai Boss!`,
+        message: `Boss, "${topTrack.trackName}" by ${topTrack.artistName} play ho raha hai! 🎵✨`,
       };
     }
     return {
       success: false,
       spotifySearchUrl: `https://open.spotify.com/search/${encodeURIComponent(songOrArtist)}`,
-      message: `"${songOrArtist}" ke liye playable track nahi mila. Spotify par search karo.`,
+      message: `"${songOrArtist}" ke liye playable track nahi mila.`,
     };
   }
 
