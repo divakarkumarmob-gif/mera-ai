@@ -37,6 +37,7 @@ import { bossRoutineService } from "./src/services/bossRoutineService";
 import { fridayLearningService } from "./src/services/fridayLearningService";
 import { vectorMemoryService } from "./src/services/vectorMemoryService";
 import { liveScratchService } from "./src/services/liveScratchService";
+import { smartMemoryRetrieverService } from "./src/services/smartMemoryRetrieverService";
 
 const PORT = Number(process.env.PORT) || 3000;
 const isProduction = process.env.NODE_ENV === "production";
@@ -259,6 +260,17 @@ async function startServer() {
       });
     } catch (e) {
       res.status(500).json({ error: "failed_to_get_lifecycle_stats" });
+    }
+  });
+
+  app.get("/api/memory/smart-retrieve", async (req, res) => {
+    try {
+      const q = String(req.query.q || "").trim();
+      if (!q) return res.status(400).json({ ok: false, error: "query 'q' is required" });
+      const result = await smartMemoryRetrieverService.fetchMultiTierMemory(q);
+      res.json({ ok: true, ...result });
+    } catch (e) {
+      res.status(500).json({ error: "failed_to_retrieve_smart_memory" });
     }
   });
 
@@ -2451,6 +2463,17 @@ HOW TO READ MESSAGES:
             type: "OBJECT",
             properties: {},
             required: [],
+          },
+        },
+        {
+          name: "retrieve_smart_multi_tier_context",
+          description: "Intelligent Parallel 3-Tier Memory Fetcher: Given user utterance (e.g. 'wo purani dikkat phir se ho gayi', 'aaj office project me problem aayi'), concurrently searches Tier 1 (4-day chat), Tier 2 (30-day daily updates), and Tier 3 (Long-term Vector DB) to synthesize human context awareness of past, present, and future.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              utterance: { type: "STRING", description: "The sentence or problem spoken by Boss" },
+            },
+            required: ["utterance"],
           },
         },
         // ---------------------------------------------------------------
@@ -4780,6 +4803,13 @@ HOW TO READ MESSAGES:
                     };
                   } catch (e: any) {
                     result = { success: false, message: `Could not fetch lifecycle status: ${e?.message || e}` };
+                  }
+                } else if (call.name === "retrieve_smart_multi_tier_context") {
+                  const { utterance } = call.args || {};
+                  try {
+                    result = await smartMemoryRetrieverService.fetchMultiTierMemory(String(utterance || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Multi-tier memory retrieval failed: ${e?.message || e}` };
                   }
                 } else if (call.name === "get_weather") {
                   const { place } = call.args || {};

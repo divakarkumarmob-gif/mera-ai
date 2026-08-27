@@ -3,6 +3,8 @@ import { db, FieldValue } from "./firebaseAdmin";
 import { vectorMemoryService } from "./vectorMemoryService";
 import { liveScratchService } from "./liveScratchService";
 
+import { memoryNotificationService } from "./memoryNotificationService";
+
 export interface SessionMessage {
   sender: "user" | "ai";
   text: string;
@@ -27,6 +29,9 @@ export interface ConversationSession {
   summary?: string;
   pinnedFacts?: string[];
   mistakesOrInsights?: string[];
+  status?: "active" | "archived_pending_delete";
+  safeDeleteAfter?: number;
+  summaryId?: string;
   /** Index into `messages` up to which periodic fact-extraction has already run (in-memory only, not persisted). */
   lastExtractedIndex?: number;
   /** Guards against overlapping periodic-extraction calls for the same session. */
@@ -87,6 +92,10 @@ class MemoryEngine {
     return session;
   }
 
+  public getActiveSessions(): ConversationSession[] {
+    return Array.from(this.activeSessions.values());
+  }
+
   public recordMessage(sessionId: string, sender: "user" | "ai", text: string) {
     if (!text || !text.trim()) return;
     let session = this.activeSessions.get(sessionId);
@@ -137,8 +146,11 @@ class MemoryEngine {
   }
 
   /**
-   * Sessions older than 60 days are automatically converted to Vector Embeddings
-   * and saved permanently into the Vector Database, then safely purged from raw sessions.
+   * Sessions older than 60 days:
+   * Phase 1 (Stage & Buffer): Converts to Vector Embeddings, saves to Firestore vectorStore,
+   * marks status: "archived_pending_delete" with a 24-Hour Safety Buffer, and dispatches
+   * verified alerts to Telegram and WhatsApp.
+   * Phase 2 (Prune): Deletes raw document ONLY after 24 hours have elapsed.
    */
   public async processVectorArchivalLifecycle(): Promise<void> {
     try {
@@ -147,17 +159,34 @@ class MemoryEngine {
       const snapshot = await sessionsCol().where("startTime", "<", cutoff60d).get();
       if (snapshot.empty) return;
 
-      let batch = db.batch();
-      let opCount = 0;
+      let deleteBatch = db.batch();
+      let deleteCount = 0;
 
       for (const doc of snapshot.docs) {
         const session = doc.data() as ConversationSession;
+
+        // Phase 2: Prune if already buffered for 24 hours
+        if (session.status === "archived_pending_delete") {
+          if (session.safeDeleteAfter && session.safeDeleteAfter <= now) {
+            deleteBatch.delete(doc.ref);
+            deleteCount++;
+            if (deleteCount >= 400) {
+              await deleteBatch.commit().catch(() => {});
+              deleteBatch = db.batch();
+              deleteCount = 0;
+            }
+            console.log(`[MemoryEngine] 🗑️ Safely pruned 24h buffered session ${session.id} (${session.dateStr}).`);
+          }
+          continue;
+        }
+
+        // Phase 1: Stage, archive to Vector DB, set 24h buffer, notify
         const dialogueText = (session.messages || [])
           .map((m) => `[${m.timeStr || new Date(m.timestamp).toLocaleTimeString()}] ${m.sender.toUpperCase()}: ${m.text}`)
           .join("\n");
         const summary = session.summary || `Comprehensive conversation session on ${session.dateStr}`;
 
-        await vectorMemoryService.archiveToVectorStore({
+        const archiveRes = await vectorMemoryService.archiveToVectorStore({
           originalText: dialogueText,
           summary,
           sourceType: "session_dialogue",
@@ -171,19 +200,34 @@ class MemoryEngine {
           },
         });
 
-        batch.delete(doc.ref);
-        opCount++;
+        if (archiveRes.success && archiveRes.entryId) {
+          const safeDeleteAfter = now + 24 * 60 * 60 * 1000; // 24-hour buffer
+          await doc.ref.set(
+            {
+              status: "archived_pending_delete",
+              safeDeleteAfter,
+              summaryId: archiveRes.entryId,
+            },
+            { merge: true }
+          );
 
-        if (opCount >= 400) {
-          await batch.commit().catch(() => {});
-          batch = db.batch();
-          opCount = 0;
+          // Real-time verified confirmation to Telegram and WhatsApp
+          memoryNotificationService
+            .notifySummaryVerifiedAndStaged({
+              dateRangeStr: session.dateStr,
+              summaryType: "session_digest",
+              summaryId: archiveRes.entryId,
+              summaryText: summary,
+              targetCollection: "vectorStore",
+            })
+            .catch(() => {});
+
+          console.log(`[MemoryEngine] 🛡️ Staged session ${session.id} (${session.dateStr}) under 24h buffer.`);
         }
-        console.log(`[MemoryEngine] Archived 60d+ session ${session.id} (${session.dateStr}) into permanent vector database.`);
       }
 
-      if (opCount > 0) {
-        await batch.commit().catch(() => {});
+      if (deleteCount > 0) {
+        await deleteBatch.commit().catch(() => {});
       }
     } catch (e: any) {
       console.warn("[MemoryEngine] Vector archival lifecycle warning:", e?.message || e);

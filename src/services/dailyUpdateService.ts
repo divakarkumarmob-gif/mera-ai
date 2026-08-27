@@ -1,6 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { db } from "./firebaseAdmin";
 import { vectorMemoryService } from "./vectorMemoryService";
+import { memoryNotificationService } from "./memoryNotificationService";
 
 // ---------------------------------------------------------------------------
 // Daily Update system.
@@ -15,7 +16,9 @@ export interface DailyUpdateEntry {
   dateStr: string;      // "YYYY-MM-DD" in IST — the document id
   text: string;         // accumulated update text for the day, newest appended at the end
   updatedAt: number;     // ms epoch of last append
-  status: "active" | "archived";
+  status: "active" | "archived_pending_delete" | "archived";
+  safeDeleteAfter?: number;
+  summaryId?: string;
 }
 
 export interface MidTermSummaryEntry {
@@ -79,25 +82,38 @@ class DailyUpdateService {
   private inMemoryUpdates: Map<string, DailyUpdateEntry> = new Map();
   private inMemoryPending: Map<string, PendingQuestion> = new Map();
 
+  private static readonly FAST_SUMMARY_MODELS = [
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-2.5-flash",
+  ];
+
   /**
    * Fast-Summary Prompt helper:
-   * Generates a concise factual summary of prior text before overwriting.
+   * Generates a concise factual summary of prior text before overwriting
+   * using a resilient multi-model fallback chain.
    */
   private async generateFastSummary(text: string): Promise<string> {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey || !text.trim()) {
-      return text.slice(0, 200);
+      return text.slice(0, 250);
     }
-    try {
-      const ai = new GoogleGenAI({ apiKey });
-      const resp = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: `Generate a crisp, factual 1-2 sentence high-density summary of this previous daily status update:\n\n${text}`,
-      });
-      return resp.text?.trim() || text.slice(0, 200);
-    } catch {
-      return text.slice(0, 200);
+    const ai = new GoogleGenAI({ apiKey });
+    for (const model of DailyUpdateService.FAST_SUMMARY_MODELS) {
+      try {
+        const resp = await ai.models.generateContent({
+          model,
+          contents: `Generate a crisp, factual 1-2 sentence high-density summary of this previous daily status update:\n\n${text}`,
+        });
+        if (resp.text?.trim()) {
+          return resp.text.trim();
+        }
+      } catch (e: any) {
+        console.warn(`[DailyUpdate] Fast-summary model ${model} failed, trying fallback:`, e?.message || e);
+      }
     }
+    return text.slice(0, 250);
   }
 
   /**
@@ -150,7 +166,16 @@ class DailyUpdateService {
         status: "archived",
       };
 
-      midTermSummariesCol().doc(summaryId).set(midSummaryDoc).catch((err) => {
+      midTermSummariesCol().doc(summaryId).set(midSummaryDoc).then(() => {
+        // Dispatch verified notification to Telegram and WhatsApp
+        memoryNotificationService.notifySummaryVerifiedAndStaged({
+          dateRangeStr: date,
+          summaryType: "mid_term_summary",
+          summaryId,
+          summaryText: fastSummary,
+          targetCollection: "mid_term_summaries",
+        }).catch(() => {});
+      }).catch((err) => {
         console.warn("[DailyUpdate] Failed to write mid_term_summary:", err);
       });
 
@@ -203,34 +228,74 @@ class DailyUpdateService {
 
   /**
    * Keeps only the most recent MAX_DAYS_RETAINED (30 days) day-documents.
-   * Tip 1: Uses Firestore db.batch() to batch delete and vector archive!
+   * Zero Data-Loss 24-Hour Safety Buffer:
+   * Phase 1: Converts 30d+ updates to Vector DB, marks status 'archived_pending_delete',
+   * sets safeDeleteAfter = now + 24h, and sends verified notification to Telegram & WhatsApp.
+   * Phase 2: Prunes raw document ONLY after 24 hours have elapsed.
    */
   private async trimOldUpdates() {
     try {
+      const now = Date.now();
       const snapshot = await updatesCol().orderBy("dateStr", "desc").get();
       if (snapshot.size <= MAX_DAYS_RETAINED) return;
-      const toArchive = snapshot.docs.slice(MAX_DAYS_RETAINED);
+      const toCheck = snapshot.docs.slice(MAX_DAYS_RETAINED);
       const batch = db.batch();
+      let deleteCount = 0;
 
-      for (const doc of toArchive) {
+      for (const doc of toCheck) {
         const data = doc.data() as DailyUpdateEntry;
+
+        // Phase 2: Prune if 24 hours have passed
+        if (data.status === "archived_pending_delete") {
+          if (data.safeDeleteAfter && data.safeDeleteAfter <= now) {
+            batch.delete(doc.ref);
+            this.inMemoryUpdates.delete(data.dateStr);
+            deleteCount++;
+            console.log(`[DailyUpdate] 🗑️ Safely pruned 24h buffered daily update for ${data.dateStr}.`);
+          }
+          continue;
+        }
+
+        // Phase 1: Stage to vector store, buffer for 24h, and notify
         if (data.text) {
-          await vectorMemoryService.archiveToVectorStore({
+          const summaryText = `Daily Update Log for ${data.dateStr}: ${data.text.slice(0, 300)}`;
+          const archiveRes = await vectorMemoryService.archiveToVectorStore({
             originalText: data.text,
-            summary: `Daily Update Log for ${data.dateStr}: ${data.text.slice(0, 300)}`,
+            summary: summaryText,
             sourceType: "daily_update",
             dateRangeStr: data.dateStr,
-            startTimestamp: data.updatedAt || Date.now(),
-            endTimestamp: data.updatedAt || Date.now(),
+            startTimestamp: data.updatedAt || now,
+            endTimestamp: data.updatedAt || now,
             metadata: {
               session_id: "daily_update_" + data.dateStr,
               exact_date: data.dateStr,
             },
           });
+
+          if (archiveRes.success && archiveRes.entryId) {
+            const safeDeleteAfter = now + 24 * 60 * 60 * 1000;
+            batch.set(
+              doc.ref,
+              {
+                status: "archived_pending_delete",
+                safeDeleteAfter,
+                summaryId: archiveRes.entryId,
+              },
+              { merge: true }
+            );
+
+            // Verified real notification to Telegram & WhatsApp
+            memoryNotificationService.notifySummaryVerifiedAndStaged({
+              dateRangeStr: data.dateStr,
+              summaryType: "daily_update",
+              summaryId: archiveRes.entryId,
+              summaryText: summaryText,
+              targetCollection: "vectorStore",
+            }).catch(() => {});
+
+            console.log(`[DailyUpdate] 🛡️ Staged 30d+ daily update for ${data.dateStr} under 24h buffer.`);
+          }
         }
-        batch.delete(doc.ref);
-        this.inMemoryUpdates.delete(data.dateStr);
-        console.log(`[DailyUpdate] Archived 30d+ daily update for ${data.dateStr} into permanent vector database.`);
       }
       await batch.commit().catch(() => {});
     } catch (e) {

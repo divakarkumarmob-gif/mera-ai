@@ -1,6 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { db } from "./firebaseAdmin";
 import { vectorMemoryService } from "./vectorMemoryService";
+import { memoryNotificationService } from "./memoryNotificationService";
 
 export interface LiveScratchTurn {
   id: string;
@@ -9,6 +10,8 @@ export interface LiveScratchTurn {
   text: string;
   timestamp: number;
   spokenTimeIST: string;
+  status?: "active" | "archived_pending_delete";
+  safeDeleteAfter?: number;
 }
 
 export interface ScratchSummaryEntry {
@@ -130,13 +133,26 @@ class LiveScratchService {
         const earliestTime = oldTurns[0].spokenTimeIST;
         const latestTime = oldTurns[oldTurns.length - 1].spokenTimeIST;
         const dateRangeStr = `${earliestTime} – ${latestTime}`;
-
         try {
-          const resp = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
-            contents: `Summarize these raw past 24-hour conversation scratch turns cleanly for long-term memory, highlighting key decisions, commands, personal details, and topics discussed:\n\n${content}`,
-          });
-          const summary = resp.text?.trim() || "24-hour scratch activity summary.";
+          let summary = "";
+          const summaryModels = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"];
+        for (const model of summaryModels) {
+          try {
+            const resp = await ai.models.generateContent({
+              model,
+              contents: `Summarize these raw past 24-hour conversation scratch turns cleanly for long-term memory, highlighting key decisions, commands, personal details, and topics discussed:\n\n${content}`,
+            });
+            if (resp.text?.trim()) {
+              summary = resp.text.trim();
+              break;
+            }
+          } catch (mErr: any) {
+            console.warn(`[LiveScratchService] Summary model ${model} failed, trying fallback:`, mErr?.message || mErr);
+          }
+        }
+        if (!summary) {
+          summary = `24-hour scratch activity summary (${dateRangeStr}): ${content.slice(0, 300)}`;
+        }
 
           const summaryId = "scratch_sum_" + now;
           const summaryEntry: ScratchSummaryEntry = {
@@ -151,14 +167,33 @@ class LiveScratchService {
           this.inMemorySummaries.set(summaryId, summaryEntry);
           await scratchSummariesCol().doc(summaryId).set(summaryEntry);
 
-          // Delete processed raw turns
+          // Real-time verified confirmation to Telegram and WhatsApp
+          memoryNotificationService.notifySummaryVerifiedAndStaged({
+            dateRangeStr,
+            summaryType: "scratch_archive",
+            summaryId,
+            summaryText: summary,
+            targetCollection: "scratchSummaries",
+          }).catch(() => {});
+
+          // Zero Data-Loss: Stage processed turns under 24-hour buffer instead of instant deletion!
           const batch = db.batch();
+          const safeDeleteAfter = now + MS_24_HOURS;
           for (const t of oldTurns) {
-            this.inMemoryScratch.delete(t.id);
-            batch.delete(scratchCol().doc(t.id));
+            if (t.status === "archived_pending_delete" && t.safeDeleteAfter && t.safeDeleteAfter <= now) {
+              // 24 hours have passed -> Safe to prune
+              this.inMemoryScratch.delete(t.id);
+              batch.delete(scratchCol().doc(t.id));
+            } else if (!t.status || t.status === "active") {
+              // Stage with 24-hour safety buffer
+              t.status = "archived_pending_delete";
+              t.safeDeleteAfter = safeDeleteAfter;
+              this.inMemoryScratch.set(t.id, t);
+              batch.set(scratchCol().doc(t.id), { status: "archived_pending_delete", safeDeleteAfter }, { merge: true });
+            }
           }
           await batch.commit().catch(() => {});
-          console.log(`[LiveScratchService] Processed ${oldTurns.length} 24h+ scratch turns into 30-day summary.`);
+          console.log(`[LiveScratchService] 🛡️ Staged/Pruned ${oldTurns.length} turns under 24h buffer.`);
         } catch (sumErr) {
           console.warn("[LiveScratchService] 24h summarization error:", sumErr);
         }
