@@ -1,5 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import { db } from "./firebaseAdmin";
+import { encryptData, decryptData } from "../utils/cryptoVault";
 
 export interface VectorMemoryEntry {
   id: string;
@@ -38,6 +39,8 @@ class VectorMemoryService {
       if (!snap.empty) {
         for (const doc of snap.docs) {
           const data = doc.data() as VectorMemoryEntry;
+          data.originalText = decryptData(data.originalText);
+          data.summary = decryptData(data.summary);
           this.inMemoryVectors.set(data.id, data);
         }
       }
@@ -184,7 +187,12 @@ class VectorMemoryService {
     this.inMemoryVectors.set(id, entry);
 
     try {
-      await vectorCol().doc(id).set(entry);
+      const docToStore = {
+        ...entry,
+        originalText: encryptData(entry.originalText),
+        summary: encryptData(entry.summary),
+      };
+      await vectorCol().doc(id).set(docToStore);
     } catch (e: any) {
       console.warn("[VectorMemoryService] Firestore vector write warning:", e?.message || e);
     }

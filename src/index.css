@@ -21,3 +21,12 @@ html, body, #root {
   background: rgba(139, 92, 246, 0.5);
   border-radius: 999px;
 }
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+

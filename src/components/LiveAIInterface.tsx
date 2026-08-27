@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { X, Mic, Plus, Loader2, Settings, ChevronDown, Captions, MessageSquare, Square, Code2, Terminal, Shield, ShieldCheck, Trash2, Key, Check, AlertCircle, Send, Instagram } from 'lucide-react';
+import { X, Mic, Plus, Loader2, Settings, ChevronDown, Captions, MessageSquare, Square, Code2, Terminal, Shield, ShieldCheck, Trash2, Key, Check, AlertCircle, Send, Instagram, Download } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import AgentFace from './AgentFace';
 import ChatHistoryModal from './ChatHistoryModal';
@@ -7,6 +7,7 @@ import WhatsAppPairModal from './WhatsAppPairModal';
 import CodeAgentPage from './CodeAgentPage';
 import WebCrawlerStudioModal from './WebCrawlerStudioModal';
 import { YouTubeStudioModal } from './YouTubeStudioModal';
+import MemoryBackupModal from './MemoryBackupModal';
 import { getWsUrl } from '@/utils/api';
 import { wakeWordManager } from '@/utils/wakeWord';
 import { getAppToken, clearAppSession } from '@/utils/appSecurityClient';
@@ -608,6 +609,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const [showWebCrawler, setShowWebCrawler] = useState(false);
     const [showYouTubeStudio, setShowYouTubeStudio] = useState(false);
     const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+    const [showBackupModal, setShowBackupModal] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const captionBoxRef = useRef<HTMLDivElement>(null);
     const userScrolledUpRef = useRef(false);
@@ -1630,61 +1632,137 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
             className="fixed inset-0 z-[1000] bg-gradient-to-b from-[#0a0f24] via-[#0a0f24] via-60% to-black text-white flex flex-col items-center pt-[env(safe-area-inset-top,0px)] px-6 pb-[max(env(safe-area-inset-bottom,0px),12px)] overflow-hidden"
         >
             <div className="w-full h-full flex flex-col flex-1 overflow-hidden">
-                <div className="w-full flex justify-between items-center mb-6 pt-4">
-                    <h1 className="text-lg font-bold flex items-center gap-2">AI <span className="text-blue-400">Live Agent</span></h1>
-                    <div className="flex items-center gap-3">
+                {/* ── Top Dashboard Header & Horizontally Slideable Capsule Buttons ── */}
+                <div className="w-full flex flex-col gap-2 mb-4 pt-2 shrink-0">
+                    <div className="flex items-center justify-between px-1">
+                        <h1 className="text-base sm:text-lg font-bold flex items-center gap-2">
+                            <span>🤖</span>
+                            <span>FRIDAY</span>
+                            <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 font-mono font-medium border border-blue-500/40">Live Agent</span>
+                        </h1>
+                        <span className="text-[11px] text-slate-400 font-mono flex items-center gap-1.5 bg-slate-900/60 px-2.5 py-1 rounded-full border border-white/5">
+                            <span className={`w-2 h-2 rounded-full ${isRecording ? 'bg-red-500 animate-ping' : 'bg-emerald-400'}`} />
+                            <span>{isRecording ? 'Listening...' : 'Ready'}</span>
+                        </span>
+                    </div>
+
+                    {/* ── Horizontally Slideable Capsule Pills (Swipe Left/Right on Mobile & Desktop) ── */}
+                    <div className="w-full overflow-x-auto no-scrollbar scroll-smooth flex items-center gap-2 py-1 px-1 touch-pan-x select-none">
+                        {/* 1. Memory Backup & Download Capsule */}
+                        <button
+                            onClick={() => setShowBackupModal(true)}
+                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 text-amber-300 text-xs font-semibold shadow-[0_0_15px_rgba(245,158,11,0.25)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95 hover:scale-105"
+                            title="Memory Backup Download & Security Hub"
+                        >
+                            <Download className="w-3.5 h-3.5" />
+                            <span>Backup & Vault</span>
+                        </button>
+
+                        {/* 2. Security Shield Capsule */}
+                        <button
+                            onClick={() => setShowBackupModal(true)}
+                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/50 text-rose-300 text-xs font-semibold shadow-[0_0_15px_rgba(244,63,94,0.25)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95 hover:scale-105"
+                            title="Intrusion Shield & Blocked Devices"
+                        >
+                            <Shield className="w-3.5 h-3.5" />
+                            <span>Security Shield</span>
+                        </button>
+
+                        {/* 3. Link WhatsApp Capsule */}
                         <button
                             onClick={() => setShowWhatsAppModal(true)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 text-xs font-semibold shadow-[0_0_15px_rgba(16,185,129,0.25)] transition-all cursor-pointer hover:scale-105 active:scale-95"
+                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 text-xs font-semibold shadow-[0_0_15px_rgba(16,185,129,0.25)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95 hover:scale-105"
                             title="WhatsApp Link Assistant"
                         >
                             <span>📲</span>
-                            <span>Link WhatsApp</span>
+                            <span>WhatsApp</span>
                         </button>
+
+                        {/* 4. Web Crawler Capsule */}
                         <button
                             onClick={() => setShowWebCrawler(true)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/50 text-cyan-300 text-xs font-semibold shadow-[0_0_15px_rgba(6,182,212,0.25)] transition-all cursor-pointer hover:scale-105 active:scale-95"
+                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/50 text-cyan-300 text-xs font-semibold shadow-[0_0_15px_rgba(6,182,212,0.25)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95 hover:scale-105"
                             title="Web Crawler & AI Research Studio"
                         >
                             <span>🕷️</span>
-                            <span>Web Crawler</span>
+                            <span>Crawler</span>
                         </button>
+
+                        {/* 5. YouTube AI Capsule */}
                         <button
                             onClick={() => setShowYouTubeStudio(true)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 text-red-300 text-xs font-semibold shadow-[0_0_15px_rgba(239,68,68,0.25)] transition-all cursor-pointer hover:scale-105 active:scale-95"
+                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 text-red-300 text-xs font-semibold shadow-[0_0_15px_rgba(239,68,68,0.25)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95 hover:scale-105"
                             title="YouTube Intelligence & Ask Gemini Studio"
                         >
                             <span>🎬</span>
                             <span>YouTube AI</span>
                         </button>
+
+                        {/* 6. Screen Vision Capsule */}
                         <button
                             onClick={toggleScreenShare}
-                            className={`px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold shrink-0 whitespace-nowrap transition-all cursor-pointer active:scale-95 hover:scale-105 ${
                                 isScreenSharing
                                     ? 'bg-red-500/20 border border-red-500/60 text-red-300 shadow-[0_0_15px_rgba(239,68,68,0.3)] animate-pulse'
-                                    : 'bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 hover:bg-indigo-500/20'
+                                    : 'bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 shadow-[0_0_15px_rgba(99,102,241,0.25)] hover:bg-indigo-500/30'
                             }`}
                             title={isScreenSharing ? 'Stop Screen Sharing' : 'Share Screen with Friday for Vision AI'}
                         >
-                            <span>{isScreenSharing ? '🔴 Sharing Screen' : '🖥️ Screen Vision'}</span>
+                            <span>{isScreenSharing ? '🔴 Vision ON' : '🖥️ Vision'}</span>
                         </button>
-                        <button onClick={() => setShowCaptions(!showCaptions)} className={showCaptions ? 'text-green-500' : 'text-white'}>
-                            <Captions className="h-6 w-6" />
+
+                        {/* 7. Chat History Capsule */}
+                        <button
+                            onClick={() => setShowChatHistory(true)}
+                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/50 text-blue-300 text-xs font-semibold shadow-[0_0_15px_rgba(59,130,246,0.25)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95 hover:scale-105"
+                            title="Encrypted Chat History"
+                        >
+                            <MessageSquare className="w-3.5 h-3.5" />
+                            <span>Chat History</span>
                         </button>
-                        <button onClick={() => setShowChatHistory(true)} className="text-white">
-                            <MessageSquare className="h-6 w-6" />
+
+                        {/* 8. Captions Capsule */}
+                        <button
+                            onClick={() => setShowCaptions(!showCaptions)}
+                            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold shrink-0 whitespace-nowrap transition-all cursor-pointer active:scale-95 hover:scale-105 ${
+                                showCaptions
+                                    ? 'bg-emerald-500/25 border border-emerald-500/60 text-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.25)]'
+                                    : 'bg-slate-800/80 border border-slate-700 text-slate-300 hover:bg-slate-700'
+                            }`}
+                            title={showCaptions ? 'Captions ON' : 'Captions OFF'}
+                        >
+                            <Captions className="w-3.5 h-3.5" />
+                            <span>Captions</span>
                         </button>
-                        <button onClick={() => setShowCodeAgent(true)} className="text-white hover:text-cyan-400 transition-colors" title="Coding Agent & Diagnostics Logs">
-                            <Code2 className="h-6 w-6" />
+
+                        {/* 9. Code Agent Capsule */}
+                        <button
+                            onClick={() => setShowCodeAgent(true)}
+                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/50 text-purple-300 text-xs font-semibold shadow-[0_0_15px_rgba(168,85,247,0.25)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95 hover:scale-105"
+                            title="Coding Agent & Diagnostics Logs"
+                        >
+                            <Code2 className="w-3.5 h-3.5" />
+                            <span>Code Agent</span>
                         </button>
-                        <button onClick={() => setShowCodeAgent(true)} className="text-cyan-400 hover:text-cyan-300 transition-colors" title="Execution Logs & Diagnostics">
-                            <Terminal className="h-5 w-5" />
+
+                        {/* 10. Settings Capsule */}
+                        <button
+                            onClick={() => setShowSettings(!showSettings)}
+                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-slate-800/80 hover:bg-slate-700 border border-slate-600 text-slate-200 text-xs font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95 hover:scale-105"
+                            title="Settings"
+                        >
+                            <Settings className="w-3.5 h-3.5" />
+                            <span>Settings</span>
                         </button>
-                        <button onClick={() => setShowSettings(!showSettings)} className="text-white">
-                            <Settings className="h-6 w-6" />
-                        </button>
-                        <button onClick={handleClose} className="text-white">
-                            <X className="h-6 w-6" />
+
+                        {/* 11. Minimize / Close Capsule */}
+                        <button
+                            onClick={handleClose}
+                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/50 text-rose-300 text-xs font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95 hover:scale-105"
+                            title="Close / Minimize"
+                        >
+                            <X className="w-3.5 h-3.5" />
+                            <span>Close</span>
                         </button>
                     </div>
                 </div>
@@ -2263,6 +2341,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
             {showWebCrawler && <WebCrawlerStudioModal onClose={() => setShowWebCrawler(false)} />}
             <YouTubeStudioModal isOpen={showYouTubeStudio} onClose={() => setShowYouTubeStudio(false)} />
             <WhatsAppPairModal isOpen={showWhatsAppModal} onClose={() => setShowWhatsAppModal(false)} />
+            {showBackupModal && <MemoryBackupModal onClose={() => setShowBackupModal(false)} />}
 
             {/* Deep Research Report Modal */}
             <AnimatePresence>

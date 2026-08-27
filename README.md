@@ -20,6 +20,7 @@
 - 🔒 **Personal Vault:** Literal, unaltered facts about Boss's family, secrets, and identity that are NEVER summarized or diluted.
 - 🏋️ **24-Hour Habit Graph:** Real-time awareness of Boss's daily routine (Gym, Coding, Lunch, Walk, Sleep) based on current IST time.
 - 🔐 **Zero-Trust App Lock & Intrusion Defense:** Passkey gate with HMAC-SHA256 session tokens, 3-strike IP auto-blocking, rate limiting, and remote control via Telegram/WhatsApp.
+- 🛡️ **Universal AES-256-GCM Memory Encryption:** Personal Vault, Daily Updates, Scratch Cache, and Sessions are 100% encrypted at rest in Firestore. Includes Plain-Text JSON Backup Export & Key Rotation Restore API!
 
 ---
 
@@ -138,9 +139,13 @@ mera-ai/
 │   │   ├── fridayLearningService.ts      # Wisdom Vault, continual self-learning & humility protocol
 │   │   ├── bossRoutineService.ts         # 24-Hour IST Habit Graph & active timetable slot tracker
 │   │   ├── appSecurityService.ts         # Zero-Trust App Key, HMAC-SHA256 tokens & 3-strike IP auto-blocking
+│   │   ├── memoryBackupService.ts        # Decrypted plain-text JSON backup export & key rotation restore API
 │   │   ├── telegramBotService.ts         # Telegram bot polling, message dispatcher & media vault
+│   │   ├── telegramSecurityBotService.ts # Dedicated Telegram Security Sentinel Bot (Dual-Layer Auth)
 │   │   ├── whatsappService.ts            # WhatsApp Baileys integration & unified message sender
 │   │   └── firebaseAdmin.ts              # Firebase Admin SDK with zero-downtime offline fallback
+│   ├── utils/
+│   │   └── cryptoVault.ts                # Universal AES-256-GCM encryption vault with backward compatibility
 │   ├── components/
 │   │   ├── LiveAIInterface.tsx           # Full-screen voice UI, live captions & settings
 │   │   ├── AgentFace.tsx                 # Dynamic animated face with emotional lip-sync

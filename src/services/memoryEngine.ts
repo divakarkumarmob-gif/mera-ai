@@ -2,8 +2,8 @@ import { GoogleGenAI } from "@google/genai";
 import { db, FieldValue } from "./firebaseAdmin";
 import { vectorMemoryService } from "./vectorMemoryService";
 import { liveScratchService } from "./liveScratchService";
-
 import { memoryNotificationService } from "./memoryNotificationService";
+import { encryptData, decryptData } from "../utils/cryptoVault";
 
 export interface SessionMessage {
   sender: "user" | "ai";
@@ -131,7 +131,15 @@ class MemoryEngine {
     this.activeSessions.delete(sessionId);
 
     try {
-      await sessionsCol().doc(session.id).set(session);
+      const toPersist = {
+        ...session,
+        summary: session.summary ? encryptData(session.summary) : undefined,
+        messages: (session.messages || []).map((m) => ({
+          ...m,
+          text: encryptData(m.text),
+        })),
+      };
+      await sessionsCol().doc(session.id).set(toPersist);
       this.processVectorArchivalLifecycle().catch(() => {});
     } catch (e) {
       console.error("[MemoryEngine] Failed to persist session to Firestore:", e);
@@ -445,7 +453,7 @@ ${transcript}`;
       await vaultCol().doc(id).set({
         id,
         category: category || "personal_secrets_and_facts",
-        exactFact: exactFact.trim(),
+        exactFact: encryptData(exactFact.trim()),
         date: new Date(now).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
         timestamp: now,
       });
@@ -461,7 +469,7 @@ ${transcript}`;
     try {
       await pinnedCol().doc(id).set({
         id,
-        fact: fact.trim(),
+        fact: encryptData(fact.trim()),
         date: new Date(now).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
         timestamp: now,
       });
@@ -482,12 +490,25 @@ ${transcript}`;
       const profileData = profileSnap.exists ? profileSnap.data()! : { profileFacts: [], knownMistakes: [] };
 
       return {
-        personalVault: vaultSnap.docs.map((d) => d.data() as PersonalVaultEntry),
-        pinnedMemories: pinnedSnap.docs.map((d) => d.data()),
+        personalVault: vaultSnap.docs.map((d) => {
+          const v = d.data() as PersonalVaultEntry;
+          return { ...v, exactFact: decryptData(v.exactFact) };
+        }),
+        pinnedMemories: pinnedSnap.docs.map((d) => {
+          const p = d.data();
+          return { ...p, fact: decryptData(p.fact) };
+        }),
         profileFacts: profileData.profileFacts || [],
         knownMistakes: profileData.knownMistakes || [],
         pastSessionsCount: sessionsSnap.size,
-        recentSessions: sessionsSnap.docs.map((d) => d.data()).reverse(),
+        recentSessions: sessionsSnap.docs.map((d) => {
+          const s = d.data() as ConversationSession;
+          return {
+            ...s,
+            summary: s.summary ? decryptData(s.summary) : s.summary,
+            messages: (s.messages || []).map((m) => ({ ...m, text: decryptData(m.text) })),
+          };
+        }).reverse(),
       };
     } catch (e) {
       console.error("[MemoryEngine] Failed to fetch memories from Firestore:", e);

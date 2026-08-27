@@ -2,6 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 import { db } from "./firebaseAdmin";
 import { vectorMemoryService } from "./vectorMemoryService";
 import { memoryNotificationService } from "./memoryNotificationService";
+import { encryptData, decryptData } from "../utils/cryptoVault";
 
 export interface LiveScratchTurn {
   id: string;
@@ -48,6 +49,7 @@ class LiveScratchService {
       if (!snap.empty) {
         for (const doc of snap.docs) {
           const data = doc.data() as LiveScratchTurn;
+          data.text = decryptData(data.text);
           this.inMemoryScratch.set(data.id, data);
         }
       }
@@ -58,6 +60,8 @@ class LiveScratchService {
       if (!sumSnap.empty) {
         for (const doc of sumSnap.docs) {
           const data = doc.data() as ScratchSummaryEntry;
+          data.summary = decryptData(data.summary);
+          data.fullContent = decryptData(data.fullContent);
           this.inMemorySummaries.set(data.id, data);
         }
       }
@@ -91,10 +95,14 @@ class LiveScratchService {
 
     this.inMemoryScratch.set(id, turn);
 
-    // Write asynchronously to Firestore
+    // Write encrypted asynchronously to Firestore
+    const turnToStore = {
+      ...turn,
+      text: encryptData(turn.text),
+    };
     scratchCol()
       .doc(id)
-      .set(turn)
+      .set(turnToStore)
       .catch((err) => {
         console.warn("[LiveScratchService] Failed to stream turn to Firestore:", err?.message || err);
       });
@@ -165,7 +173,12 @@ class LiveScratchService {
           };
 
           this.inMemorySummaries.set(summaryId, summaryEntry);
-          await scratchSummariesCol().doc(summaryId).set(summaryEntry);
+          const summaryEntryToStore = {
+            ...summaryEntry,
+            summary: encryptData(summaryEntry.summary),
+            fullContent: encryptData(summaryEntry.fullContent),
+          };
+          await scratchSummariesCol().doc(summaryId).set(summaryEntryToStore);
 
           // Real-time verified confirmation to Telegram and WhatsApp
           memoryNotificationService.notifySummaryVerifiedAndStaged({

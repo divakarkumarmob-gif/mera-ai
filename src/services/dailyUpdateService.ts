@@ -2,6 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 import { db } from "./firebaseAdmin";
 import { vectorMemoryService } from "./vectorMemoryService";
 import { memoryNotificationService } from "./memoryNotificationService";
+import { encryptData, decryptData } from "../utils/cryptoVault";
 
 // ---------------------------------------------------------------------------
 // Daily Update system.
@@ -132,11 +133,13 @@ class DailyUpdateService {
     try {
       const activeSnap = await updatesCol().where("dateStr", "==", date).where("status", "==", "active").limit(1).get();
       if (!activeSnap.empty) {
-        existingText = (activeSnap.docs[0].data() as DailyUpdateEntry).text || "";
+        const rawT = (activeSnap.docs[0].data() as DailyUpdateEntry).text || "";
+        existingText = decryptData(rawT);
       } else {
         const docSnap = await updatesCol().doc(date).get();
         if (docSnap.exists) {
-          existingText = (docSnap.data() as DailyUpdateEntry).text || "";
+          const rawT = (docSnap.data() as DailyUpdateEntry).text || "";
+          existingText = decryptData(rawT);
         }
       }
     } catch (e: any) {
@@ -157,13 +160,15 @@ class DailyUpdateService {
       // Send prior text to Fast-Summary and archive to mid_term_summaries
       const fastSummary = await this.generateFastSummary(existingText);
       const summaryId = `mid_sum_${date}_${now}`;
-      const midSummaryDoc: MidTermSummaryEntry = {
+
+      // Encrypt at rest in Firestore
+      const midSummaryDoc = {
         id: summaryId,
         dateStr: date,
-        summary: fastSummary,
-        rawText: existingText,
+        summary: encryptData(fastSummary),
+        rawText: encryptData(existingText),
         archivedAt: now,
-        status: "archived",
+        status: "archived" as const,
       };
 
       midTermSummariesCol().doc(summaryId).set(midSummaryDoc).then(() => {
@@ -195,7 +200,12 @@ class DailyUpdateService {
     this.inMemoryUpdates.set(date, entry);
 
     try {
-      await updatesCol().doc(date).set(entry);
+      // Encrypt text at rest before writing to Firestore
+      const docToStore = {
+        ...entry,
+        text: encryptData(entry.text),
+      };
+      await updatesCol().doc(date).set(docToStore);
     } catch (e: any) {
       console.warn("[DailyUpdate] Firestore write warning (cached in memory):", e?.message || e);
     }
@@ -210,8 +220,13 @@ class DailyUpdateService {
       const snap = await updatesCol().doc(dateStr).get();
       if (snap.exists) {
         const data = snap.data() as DailyUpdateEntry;
-        this.inMemoryUpdates.set(dateStr, data);
-        return data;
+        // Decrypt text from Firestore
+        const decryptedData: DailyUpdateEntry = {
+          ...data,
+          text: decryptData(data.text),
+        };
+        this.inMemoryUpdates.set(dateStr, decryptedData);
+        return decryptedData;
       }
     } catch (e: any) {
       console.warn(`[DailyUpdate] Firestore fetch warning for ${dateStr}, checking memory cache.`);

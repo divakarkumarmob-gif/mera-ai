@@ -38,6 +38,8 @@ import { fridayLearningService } from "./src/services/fridayLearningService";
 import { vectorMemoryService } from "./src/services/vectorMemoryService";
 import { liveScratchService } from "./src/services/liveScratchService";
 import { smartMemoryRetrieverService } from "./src/services/smartMemoryRetrieverService";
+import { memoryBackupService } from "./src/services/memoryBackupService";
+import { telegramSecurityBotService } from "./src/services/telegramSecurityBotService";
 
 const PORT = Number(process.env.PORT) || 3000;
 const isProduction = process.env.NODE_ENV === "production";
@@ -76,6 +78,7 @@ async function startServer() {
   app.use(async (req, res, next) => {
     const path = req.path;
     const clientIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0].trim() || req.socket.remoteAddress || "127.0.0.1";
+    const userAgent = (req.headers["user-agent"] as string) || "Unknown Device";
 
     // Immediate block for IPs with 3 failed password attempts
     if (appSecurityService.isIpBlocked(clientIp)) {
@@ -102,7 +105,27 @@ async function startServer() {
       (req.headers["authorization"] ? req.headers["authorization"].replace(/^Bearer\s+/i, "") : null) ||
       (req.query["token"] as string);
 
+    const isUltraSensitive =
+      path.includes("/memory/export/") ||
+      path.includes("/memory/import/") ||
+      path.includes("/memory/clear") ||
+      path.includes("/reset-all-data");
+
     if (!authHeader || !appSecurityService.verifySessionToken(authHeader)) {
+      // If someone directly attacks or probes sensitive endpoints without a valid token:
+      if (isUltraSensitive) {
+        await appSecurityService.blockClient(
+          clientIp,
+          userAgent,
+          `Direct unauthorized attack/probe on sensitive endpoint: ${path}`
+        );
+        return res.status(403).json({
+          ok: false,
+          error: "ACCESS_BLOCKED_IMMEDIATE",
+          message: "🚨 Critical Intrusion: Direct unauthorized probe on protected endpoint. Your IP & Device have been permanently blocked.",
+        });
+      }
+
       return res.status(401).json({
         ok: false,
         error: "ACCESS_LOCKED",
@@ -271,6 +294,101 @@ async function startServer() {
       res.json({ ok: true, ...result });
     } catch (e) {
       res.status(500).json({ error: "failed_to_retrieve_smart_memory" });
+    }
+  });
+
+  app.get("/api/memory/export/decrypted-backup", async (req, res) => {
+    try {
+      const clientIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0].trim() || req.socket.remoteAddress || "127.0.0.1";
+      const userAgent = (req.headers["user-agent"] as string) || "Unknown Device";
+
+      // High-Security Double Lock: Requires Boss's Master App Key even with a valid session token!
+      const passkey = (req.query.key as string) || (req.headers["x-master-app-key"] as string);
+      const activeKey = await appSecurityService.getAppKey();
+      if (activeKey && (!passkey || passkey.trim() !== activeKey.trim())) {
+        await appSecurityService.blockClient(
+          clientIp,
+          userAgent,
+          `Unauthorized backup export attempt with invalid Master Key on ${req.path}`
+        );
+        return res.status(403).json({
+          ok: false,
+          error: "ACCESS_BLOCKED_IMMEDIATE",
+          message: "🚨 Critical Intrusion: Wrong/missing Master App Key for decrypted backup. IP & Device blocked.",
+        });
+      }
+
+      const backup = await memoryBackupService.exportDecryptedBackup();
+      const filename = `friday_memory_backup_${new Date().toISOString().slice(0, 10)}.json`;
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.setHeader("Content-Type", "application/json");
+      res.send(JSON.stringify(backup, null, 2));
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "Failed to export backup" });
+    }
+  });
+
+  app.post("/api/memory/import/restore-backup", async (req, res) => {
+    try {
+      const clientIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0].trim() || req.socket.remoteAddress || "127.0.0.1";
+      const userAgent = (req.headers["user-agent"] as string) || "Unknown Device";
+
+      // High-Security Double Lock: Requires Boss's Master App Key
+      const passkey = (req.query.key as string) || (req.headers["x-master-app-key"] as string) || req.body?.masterKey;
+      const activeKey = await appSecurityService.getAppKey();
+      if (activeKey && (!passkey || passkey.trim() !== activeKey.trim())) {
+        await appSecurityService.blockClient(
+          clientIp,
+          userAgent,
+          `Unauthorized backup restore attempt with invalid Master Key on ${req.path}`
+        );
+        return res.status(403).json({
+          ok: false,
+          error: "ACCESS_BLOCKED_IMMEDIATE",
+          message: "🚨 Critical Intrusion: Wrong/missing Master App Key for memory restore. IP & Device blocked.",
+        });
+      }
+
+      const backupData = req.body;
+      if (!backupData || !backupData.version) {
+        return res.status(400).json({ ok: false, error: "Invalid backup JSON payload" });
+      }
+      const result = await memoryBackupService.restoreAndReEncryptBackup(backupData);
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "Failed to restore backup" });
+    }
+  });
+
+  // ── Dashboard Unblock & Blocked Clients Management ─────────────────────────
+  app.get("/api/security/blocked-clients", async (_req, res) => {
+    try {
+      const list = await appSecurityService.listBlockedIps();
+      res.json({ ok: true, blockedList: list });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "Failed to list blocked clients" });
+    }
+  });
+
+  app.post("/api/security/unblock", async (req, res) => {
+    try {
+      const { ip, masterKey } = req.body || {};
+      const activeKey = await appSecurityService.getAppKey();
+      if (activeKey && (!masterKey || masterKey.trim() !== activeKey.trim())) {
+        return res.status(403).json({ ok: false, error: "MASTER_KEY_REQUIRED", message: "Boss's Master App Key required to unblock clients." });
+      }
+
+      if (!ip) return res.status(400).json({ ok: false, error: "IP address is required" });
+
+      if (ip === "all") {
+        const count = await appSecurityService.unblockAll();
+        return res.json({ ok: true, message: `Successfully unblocked all ${count} clients.` });
+      }
+
+      const success = await appSecurityService.unblockIp(ip);
+      res.json({ ok: true, success, message: success ? `IP ${ip} unblocked successfully.` : `IP ${ip} not found in blocked list.` });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "Failed to unblock client" });
     }
   });
 
@@ -1201,6 +1319,7 @@ async function startServer() {
 
   const httpServer = http.createServer(app);
   const wss = new WebSocketServer({ server: httpServer, path: "/live" });
+  telegramSecurityBotService.setConnectionTracker(() => wss.clients.size);
 
   // Track currently-connected live-voice clients so the reminder scheduler
   // can push due reminders to whichever app instance(s) are open right now.
@@ -1304,6 +1423,11 @@ async function startServer() {
   // Start Friday Telegram Bot and connect live broadcasts
   telegramBotService.start().catch((err) =>
     console.error("[Server] Telegram Bot start error:", err)
+  );
+
+  // Start Friday Dedicated Security Sentinel Telegram Bot
+  telegramSecurityBotService.start().catch((err) =>
+    console.error("[Server] Telegram Security Bot start error:", err)
   );
 
   telegramBotService.setMessageCallback((msg) => {

@@ -234,7 +234,7 @@ class AppSecurityService {
     }
 
     // Trigger instant Dual-Channel Alerts to WhatsApp and Telegram
-    this.dispatchBlockAlert(cleanIp, userAgent).catch((err) => {
+    this.dispatchBlockAlert(cleanIp, userAgent, reason).catch((err) => {
       console.error("[AppSecurity] Error dispatching security block alerts:", err);
     });
   }
@@ -242,26 +242,29 @@ class AppSecurityService {
   /**
    * Dispatches instant security alert to WhatsApp and Telegram.
    */
-  private async dispatchBlockAlert(clientIp: string, userAgent: string): Promise<void> {
+  private async dispatchBlockAlert(clientIp: string, userAgent: string, reason?: string): Promise<void> {
     const now = new Date();
     const timeStr = now.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: true });
     const dateStr = now.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" });
 
+    const isDirectAttack = reason && (reason.includes("Direct") || reason.includes("probe") || reason.includes("sensitive") || reason.includes("download"));
+    const headline = isDirectAttack
+      ? `🚨 *CRITICAL ALERT: UNAUTHORIZED ATTACK BLOCKED!* 🚨\n\n⚠️ Kisi ne direct sensitive endpoint ya memory backup ko unauthorized access / download karne ki koshish ki!\nDevice aur IP ko turant *PERMANENTLY BLOCK* kar diya gaya hai.`
+      : `🚨 *SECURITY ALERT: APP ACCESS BLOCKED* 🚨\n\n⚠️ *3 galat password attempts* detect hue hain!\nDevice aur IP ko turant *BLOCK* kar diya gaya hai.`;
+
     const alertMessage =
-`🚨 *SECURITY ALERT: APP ACCESS BLOCKED* 🚨
+`${headline}
 
-⚠️ *3 galat password attempts* detect hue hain!
-Device aur IP ko turant *BLOCK* kar diya gaya hai.
-
+🎯 *Reason / Target:* ${reason || "Unauthorized endpoint access"}
 🌐 *IP Address:* \`${clientIp}\`
 📱 *Device / Browser:* ${userAgent || "Unknown Device"}
 ⏰ *Time:* ${timeStr}, ${dateStr} (IST)
 🛡️ *Status:* Access Locked ❌
 
-🔓 *Unblock karne ke liye reply karein:*
-👉 \`unblock ${clientIp}\`
+🔓 *Boss, unblock karne ke liye reply karein:*
+👉 \`/unblock ${clientIp}\`
 ya
-👉 \`unblock all\``;
+👉 \`/unblock all\``;
 
     console.warn(`[AppSecurity] 🚨 Auto-blocked IP ${clientIp}. Dispatching WhatsApp & Telegram alerts...`);
 
@@ -389,6 +392,15 @@ ya
         appKey: this.cachedKey,
         updatedAt: this.cachedUpdatedAt || 0,
         updatedBy: "system",
+        source: "system",
+      };
+    }
+    const envKey = (process.env.APP_KEY || process.env.APP_PASSWORD || "").trim();
+    if (envKey) {
+      return {
+        appKey: envKey,
+        updatedAt: 0,
+        updatedBy: "env",
         source: "system",
       };
     }
@@ -564,8 +576,8 @@ ya
   ): Promise<{ handled: boolean; replyText?: string }> {
     const trimmed = text.trim();
 
-    // 1. Unblock Command (e.g. "unblock 192.168.1.5" or "unblock all")
-    const unblockMatch = trimmed.match(/^unblock\s+([^\s]+)/i);
+    // 1. Unblock Command (e.g. "/unblock 192.168.1.5", "unblock 192.168.1.5", or "unblock all")
+    const unblockMatch = trimmed.match(/^\/?unblock\s+([^\s]+)/i);
     if (unblockMatch) {
       if (!isOwner) {
         return {
@@ -592,8 +604,8 @@ ya
       }
     }
 
-    // 2. List Blocked Command (e.g. "blocked list", "blocked ips", "list blocked")
-    const isListBlocked = /^(?:list\s+blocked|blocked\s+list|blocked\s+ips|show\s+blocked|check\s+blocked)/i.test(trimmed);
+    // 2. List Blocked Command (e.g. "/blocked", "blocked list", "blocked ips", "list blocked")
+    const isListBlocked = /^\/?(?:list\s+blocked|blocked\s+list|blocked\s+ips|blocked|show\s+blocked|check\s+blocked)/i.test(trimmed);
     if (isListBlocked) {
       if (!isOwner) {
         return {
