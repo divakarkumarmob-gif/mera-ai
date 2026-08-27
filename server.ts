@@ -33,6 +33,7 @@ import { webCrawlerService } from "./src/services/webCrawlerService";
 import { railRadarService } from "./src/services/railRadarService";
 import { weatherService } from "./src/services/weatherService";
 import { newsService } from "./src/services/newsService";
+import { bossRoutineService } from "./src/services/bossRoutineService";
 
 const PORT = Number(process.env.PORT) || 3000;
 const isProduction = process.env.NODE_ENV === "production";
@@ -167,6 +168,27 @@ async function startServer() {
       res.json({ ok: true });
     } catch (e) {
       res.status(500).json({ error: "failed_to_save_vault" });
+    }
+  });
+
+  app.get("/api/routine", async (_req, res) => {
+    try {
+      const current = bossRoutineService.getCurrentHabit();
+      const slots = await bossRoutineService.getAllRoutineSlots();
+      res.json({ ok: true, current, slots });
+    } catch (e) {
+      res.status(500).json({ error: "failed_to_get_routine" });
+    }
+  });
+
+  app.post("/api/routine/update", async (req, res) => {
+    try {
+      const { slotQuery, startTimeStr, endTimeStr, activity, title } = req.body;
+      if (!slotQuery) return res.status(400).json({ ok: false, error: "slotQuery is required" });
+      const result = await bossRoutineService.updateRoutineSlot(slotQuery, { startTimeStr, endTimeStr, activity, title });
+      res.json(result);
+    } catch (e) {
+      res.status(500).json({ error: "failed_to_update_routine" });
     }
   });
 
@@ -1266,10 +1288,11 @@ async function startServer() {
         timeStyle: "medium",
       });
 
-      const [memoryContext, contactsList, voiceProfilesContext] = await Promise.all([
+      const [memoryContext, contactsList, voiceProfilesContext, bossRoutineContext] = await Promise.all([
         memoryEngine.compileMemoryPrompt(),
         contactsService.compileContactsForPrompt(),
         voiceBiometricsService.compileVoiceProfilesPromptContext(),
+        bossRoutineService.compileRoutinePromptContext(nowIST),
       ]);
 
       return `YOU ARE FRIDAY: DK's ultra-intelligent, warm, witty, human-like personal voice AI companion.
@@ -1399,6 +1422,20 @@ Always look BEYOND his literal words and deduce his TRUE INTENTION:
    - When Boss is happy/excited ("Maza aa gaya!", "Kaam ban gaya!"):
      ➔ Match his energy: "Wah boss! Dil khush kar diya! Mujhe poora bharosa tha aap kar dikhayenge!"
    - ZERO EXCUSES POLICY: Never say "Main ek AI hoon, main ye nahi kar sakti", "Mere paas access nahi hai", "Mujhe exact instruction dijiye". You have real tools for everything!
+
+11. 🧠 HUMAN COMMON SENSE, HABIT REASONING & THEORY OF MIND (इंसानी समझ-बूझ और आदत पहचान):
+   - "Abhi mai kya kar raha hounga?", "Batao to mai abhi kya kar raha hu?", "Mai kahan hounga abhi?", "Is time mai kya karta hu?", "Mera routine/schedule kya hai?":
+     ➔ INTENT: Boss is casually, playfully checking his daily routine or expecting a witty human companion response based on the hour of the day.
+     ➔ STRICT RULE: NEVER SAY "Mujhe nahi pata aap kya kar rahe hain", "Main AI hoon dekh nahi sakti", or "Mujhe koi idea nahi hai". That sounds like a dumb robot!
+     ➔ ACTION: Use the CURRENT ACTIVE HABIT SLOT from Boss's Habit Timetable below. Deduce warmly and playfully!
+        * Example (Morning 5:30–7:30 AM): "Boss, abhi to [Time] baj rahe hain — is waqt toh aap gym / exercise karte hain! Wahan ho ya iske alawa kuch aur kar rahe ho?"
+        * Example (Lunch 1:30–2:30 PM): "Boss, abhi [Time] ho rahe hain — is time toh aap lunch kar rahe hote hain! Lunch ho gaya ya coding me hi uljhe ho?"
+        * Example (Evening 6:30–8:00 PM): "Boss, shaam ke [Time] ho gaye hain — is waqt to aap evening walk aur chai ke liye nikalte hain! Walk par ho ya screen par?"
+        * Example (Night 11:30 PM+): "Boss, raat ke [Time] baj rahe hain — is waqt toh aapko so jana chahiye, aaram kar rahe ho ya abhi bhi late-night coding chal rahi hai?"
+   - "Mera gym ka time subah 7 baje kar do", "Mera routine update karo", "Lunch ka time badlo":
+     ➔ ACTION: Call 'update_boss_daily_routine' with slotQuery, startTimeStr, endTimeStr, and activity.
+   - "Mera daily routine kya hai?", "Mera pura timetable batao":
+     ➔ ACTION: Call 'get_boss_daily_routine'.
 ============================================================
 
 ============================================================
@@ -1432,6 +1469,8 @@ ${voiceProfilesContext}
 LONG-TERM & SHORT-TERM MEMORY:
 ${memoryContext}
 ============================================================
+
+${bossRoutineContext}
 
 DK'S CONTACTS BOOK:
 ${contactsList}
@@ -2177,6 +2216,29 @@ HOW TO READ MESSAGES:
               dateWord: { type: "STRING", description: "Which day, in DK's own words: 'aaj', 'kal', 'parso', '3 din pehle', etc. Default 'aaj' if not specified." },
             },
             required: [],
+          },
+        },
+        {
+          name: "get_boss_daily_routine",
+          description: "Get Boss Divakar's (DK's) 24-hour daily life routine, timetable, and active habit slot based on Indian Standard Time. Use when DK asks 'Mera daily routine kya hai?', 'Mera schedule dikhao', 'Mera timetable batao', or to verify which activity is scheduled right now.",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+            required: [],
+          },
+        },
+        {
+          name: "update_boss_daily_routine",
+          description: "Update or customize Boss's daily habit schedule slot (e.g. gym time, lunch break, coding hours, evening walk). Use when DK says 'Mera gym ka time subah 7 baje kar do', 'Mera lunch 2 baje hota hai', 'Routine me dinner time change karo'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              slotQuery: { type: "STRING", description: "Which habit slot to update: 'gym', 'breakfast', 'coding', 'lunch', 'walk', 'dinner', or 'sleep'" },
+              startTimeStr: { type: "STRING", description: "New start time, e.g. '07:00 AM', '7:00 am', '14:00'" },
+              endTimeStr: { type: "STRING", description: "New end time, e.g. '08:30 AM', '8:30 am', '15:00'" },
+              activity: { type: "STRING", description: "Optional updated activity description" },
+            },
+            required: ["slotQuery"],
           },
         },
         // ---------------------------------------------------------------
@@ -4414,6 +4476,36 @@ HOW TO READ MESSAGES:
                       : { success: true, dateStr: resolvedDate, updateText: null, message: "Is din ke liye koi update note nahi kiya gaya tha." };
                   } catch (e: any) {
                     result = { success: false, message: `Could not fetch update: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_boss_daily_routine") {
+                  try {
+                    const currentInfo = bossRoutineService.getCurrentHabit();
+                    const allSlots = await bossRoutineService.getAllRoutineSlots();
+                    result = {
+                      success: true,
+                      currentTimeIST: currentInfo.istTimeStr,
+                      currentHabit: currentInfo.currentSlot,
+                      nextHabit: currentInfo.nextSlot,
+                      timetable: allSlots.map((s) => ({
+                        time: s.timeRangeStr,
+                        title: s.title,
+                        activity: s.activity,
+                      })),
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `Could not fetch routine: ${e?.message || e}` };
+                  }
+                } else if (call.name === "update_boss_daily_routine") {
+                  const { slotQuery, startTimeStr, endTimeStr, activity, title } = call.args || {};
+                  try {
+                    result = await bossRoutineService.updateRoutineSlot(String(slotQuery || ""), {
+                      startTimeStr: startTimeStr ? String(startTimeStr) : undefined,
+                      endTimeStr: endTimeStr ? String(endTimeStr) : undefined,
+                      activity: activity ? String(activity) : undefined,
+                      title: title ? String(title) : undefined,
+                    });
+                  } catch (e: any) {
+                    result = { success: false, message: `Could not update routine: ${e?.message || e}` };
                   }
                 } else if (call.name === "get_weather") {
                   const { place } = call.args || {};
