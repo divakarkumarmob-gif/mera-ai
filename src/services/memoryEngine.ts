@@ -1,10 +1,13 @@
 import { GoogleGenAI } from "@google/genai";
 import { db, FieldValue } from "./firebaseAdmin";
+import { vectorMemoryService } from "./vectorMemoryService";
+import { liveScratchService } from "./liveScratchService";
 
 export interface SessionMessage {
   sender: "user" | "ai";
   text: string;
   timestamp: number;
+  timeStr?: string;
 }
 
 export interface PersonalVaultEntry {
@@ -90,11 +93,22 @@ class MemoryEngine {
     if (!session) {
       session = this.startSession(sessionId);
     }
+    const now = Date.now();
+    const timeStr = new Date(now).toLocaleTimeString("en-IN", {
+      timeZone: "Asia/Kolkata",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    });
     session.messages.push({
       sender,
       text: text.trim(),
-      timestamp: Date.now(),
+      timestamp: now,
+      timeStr,
     });
+
+    // Real-time live crash-proof Firestore stream
+    liveScratchService.recordLiveTurn(sessionId, sender, text.trim());
   }
 
   public async finalizeSession(sessionId: string, ai?: GoogleGenAI) {
@@ -109,7 +123,7 @@ class MemoryEngine {
 
     try {
       await sessionsCol().doc(session.id).set(session);
-      await this.trimOldSessions();
+      this.processVectorArchivalLifecycle().catch(() => {});
     } catch (e) {
       console.error("[MemoryEngine] Failed to persist session to Firestore:", e);
     }
@@ -122,17 +136,42 @@ class MemoryEngine {
     }
   }
 
-  /** Keep only the most recent 50 sessions, like the old local-file behavior. */
-  private async trimOldSessions() {
+  /**
+   * Sessions older than 60 days are automatically converted to Vector Embeddings
+   * and saved permanently into the Vector Database, then safely purged from raw sessions.
+   */
+  public async processVectorArchivalLifecycle(): Promise<void> {
     try {
-      const snapshot = await sessionsCol().orderBy("startTime", "desc").get();
-      if (snapshot.size <= 50) return;
-      const toDelete = snapshot.docs.slice(50);
-      const batch = db.batch();
-      toDelete.forEach((doc) => batch.delete(doc.ref));
-      await batch.commit();
-    } catch (e) {
-      console.error("[MemoryEngine] Failed to trim old sessions:", e);
+      const now = Date.now();
+      const cutoff60d = now - 60 * 24 * 60 * 60 * 1000;
+      const snapshot = await sessionsCol().where("startTime", "<", cutoff60d).get();
+      if (snapshot.empty) return;
+
+      for (const doc of snapshot.docs) {
+        const session = doc.data() as ConversationSession;
+        const dialogueText = (session.messages || [])
+          .map((m) => `[${m.timeStr || new Date(m.timestamp).toLocaleTimeString()}] ${m.sender.toUpperCase()}: ${m.text}`)
+          .join("\n");
+        const summary = session.summary || `Comprehensive conversation session on ${session.dateStr}`;
+
+        await vectorMemoryService.archiveToVectorStore({
+          originalText: dialogueText,
+          summary,
+          sourceType: "session_dialogue",
+          dateRangeStr: session.dateStr,
+          startTimestamp: session.startTime,
+          endTimestamp: session.endTime || session.startTime,
+          metadata: {
+            sessionId: session.id,
+            pinnedFacts: session.pinnedFacts || [],
+          },
+        });
+
+        await doc.ref.delete();
+        console.log(`[MemoryEngine] Archived 60d+ session ${session.id} (${session.dateStr}) into permanent vector database.`);
+      }
+    } catch (e: any) {
+      console.warn("[MemoryEngine] Vector archival lifecycle warning:", e?.message || e);
     }
   }
 
@@ -168,7 +207,7 @@ class MemoryEngine {
     const prompt = `You are Friday AI's memory engine. Analyze this conversation snippet between user DK and Friday.
 Extract long-term insights and return ONLY a valid JSON object matching this schema:
 {
-  "summary": "Brief 2-3 sentence summary of what was discussed in this snippet.",
+  "summary": "Detailed, comprehensive 3-5 sentence summary of what was discussed in this snippet, explicitly preserving all decisions, topics, questions asked, and key numbers/events so no vital information is missed.",
   "exactPersonalFacts": [
     {
       "category": "boss_identity | family_members | personal_secrets_and_facts | career_and_business | residence_and_lifestyle | general_personal_info",
@@ -485,27 +524,32 @@ ${transcript}`;
         sections.push(`### 🎯 DK'S PROFILE & LEARNING CONTEXT:\n${profileText.trim()}`);
       }
 
-      // 4. Past Sessions Timeline (Earlier than last 5)
-      const olderSessions = sessions.slice(0, -5).filter((s) => s.summary);
-      if (olderSessions.length > 0) {
-        const timeline = olderSessions
-          .slice(-10)
-          .map((s) => `- [${s.dateStr}]: ${s.summary}`)
-          .join("\n");
-        sections.push(`### HISTORICAL SESSIONS TIMELINE (PAST DAYS):\n${timeline}`);
+      const now = Date.now();
+      const cutoff4d = now - 4 * 24 * 60 * 60 * 1000;
+      const cutoff60d = now - 60 * 24 * 60 * 60 * 1000;
+
+      // 4. SESSIONS IN LAST 4 DAYS: 100% Exact Word-to-Word Transcripts (Unlimited Sessions)
+      const last4DaySessions = sessions.filter((s) => s.startTime >= cutoff4d);
+      if (last4DaySessions.length > 0) {
+        const verbatimBlocks = last4DaySessions.map((s, idx) => {
+          const dialog = (s.messages || [])
+            .map((m) => {
+              const timeFormatted = m.timeStr || new Date(m.timestamp).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", timeStyle: "short" });
+              return `[${timeFormatted}] ${m.sender === "user" ? "Boss DK" : "Friday"}: "${m.text}"`;
+            })
+            .join("\n");
+          return `--- Session #${idx + 1} (${s.dateStr}) ---${s.summary ? `\nContext Summary: ${s.summary}` : ""}\nExact Word-to-Word Dialogue:\n${dialog}`;
+        });
+        sections.push(`### 🗣️ EXACT WORD-TO-WORD DIALOGUES (LAST 4 DAYS - UNALTERED VERBATIM LOGS):\n${verbatimBlocks.join("\n\n")}`);
       }
 
-      // 5. EXACT TRANSCRIPTS OF LAST 5 CONVERSATIONS
-      const last5Sessions = sessions.slice(-5);
-      if (last5Sessions.length > 0) {
-        const transcriptBlocks = last5Sessions.map((s, idx) => {
-          const dialog = (s.messages || [])
-            .slice(-12)
-            .map((m) => `${m.sender === "user" ? "DK" : "Friday"}: ${m.text}`)
-            .join("\n");
-          return `--- Conversation #${idx + 1} (${s.dateStr}) ---${s.summary ? `\nSummary: ${s.summary}` : ""}\nExact Dialogue:\n${dialog}`;
-        });
-        sections.push(`### EXACT TRANSCRIPTS OF THE LAST ${last5Sessions.length} CONVERSATION(S):\n${transcriptBlocks.join("\n\n")}`);
+      // 5. SESSIONS BETWEEN 4 DAYS AND 60 DAYS: High-Fidelity Comprehensive Summaries
+      const midTierSessions = sessions.filter((s) => s.startTime < cutoff4d && s.startTime >= cutoff60d && s.summary);
+      if (midTierSessions.length > 0) {
+        const midSummaries = midTierSessions
+          .map((s) => `• [${s.dateStr}]: ${s.summary}`)
+          .join("\n");
+        sections.push(`### 📚 COMPREHENSIVE PAST SESSIONS DIGEST (PAST 4 TO 60 DAYS):\n${midSummaries}`);
       }
     } catch (e) {
       console.error("[MemoryEngine] Failed to compile memory prompt from Firestore:", e);

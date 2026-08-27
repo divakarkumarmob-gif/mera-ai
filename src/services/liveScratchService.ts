@@ -1,0 +1,189 @@
+import { GoogleGenAI } from "@google/genai";
+import { db } from "./firebaseAdmin";
+import { vectorMemoryService } from "./vectorMemoryService";
+
+export interface LiveScratchTurn {
+  id: string;
+  sessionId: string;
+  sender: "user" | "ai";
+  text: string;
+  timestamp: number;
+  spokenTimeIST: string;
+}
+
+export interface ScratchSummaryEntry {
+  id: string;
+  dateStr: string;
+  summary: string;
+  fullContent: string;
+  timestamp: number;
+  expiresAt30d: number;
+}
+
+const scratchCol = () => db.collection("live_scratch_cache");
+const scratchSummariesCol = () => db.collection("memory").doc("scratchSummaries").collection("entries");
+
+const MS_24_HOURS = 24 * 60 * 60 * 1000;
+const MS_30_DAYS = 30 * 24 * 60 * 60 * 1000;
+
+class LiveScratchService {
+  private inMemoryScratch: Map<string, LiveScratchTurn> = new Map();
+  private inMemorySummaries: Map<string, ScratchSummaryEntry> = new Map();
+  private initPromise: Promise<void>;
+
+  constructor() {
+    this.initPromise = this.init();
+  }
+
+  private async init(): Promise<void> {
+    try {
+      const now = Date.now();
+      const cutoff24h = now - MS_24_HOURS;
+
+      // Load active turns from last 24h from Firestore
+      const snap = await scratchCol().where("timestamp", ">=", cutoff24h).orderBy("timestamp", "asc").get();
+      if (!snap.empty) {
+        for (const doc of snap.docs) {
+          const data = doc.data() as LiveScratchTurn;
+          this.inMemoryScratch.set(data.id, data);
+        }
+      }
+
+      // Load 30-day summaries from Firestore
+      const cutoff30d = now - MS_30_DAYS;
+      const sumSnap = await scratchSummariesCol().where("timestamp", ">=", cutoff30d).get();
+      if (!sumSnap.empty) {
+        for (const doc of sumSnap.docs) {
+          const data = doc.data() as ScratchSummaryEntry;
+          this.inMemorySummaries.set(data.id, data);
+        }
+      }
+    } catch (e: any) {
+      console.warn("[LiveScratchService] Firestore sync warning (in-memory mode):", e?.message || e);
+    }
+  }
+
+  /**
+   * Real-time live Firestore stream: persists every single message turn immediately.
+   * Crash-proof: survives server restarts or abrupt process terminates!
+   */
+  public async recordLiveTurn(sessionId: string, sender: "user" | "ai", text: string): Promise<LiveScratchTurn> {
+    const cleanText = text.trim();
+    const now = Date.now();
+    const spokenTimeIST = new Date(now).toLocaleString("en-IN", {
+      timeZone: "Asia/Kolkata",
+      dateStyle: "medium",
+      timeStyle: "medium",
+    });
+
+    const id = "turn_" + Math.random().toString(36).substring(2, 9) + "_" + now;
+    const turn: LiveScratchTurn = {
+      id,
+      sessionId,
+      sender,
+      text: cleanText,
+      timestamp: now,
+      spokenTimeIST,
+    };
+
+    this.inMemoryScratch.set(id, turn);
+
+    // Write asynchronously to Firestore
+    scratchCol()
+      .doc(id)
+      .set(turn)
+      .catch((err) => {
+        console.warn("[LiveScratchService] Failed to stream turn to Firestore:", err?.message || err);
+      });
+
+    return turn;
+  }
+
+  /**
+   * Returns all active scratch turns within the last 24 hours.
+   */
+  public async getRecentScratchTurns(hours: number = 24): Promise<LiveScratchTurn[]> {
+    await this.initPromise;
+    const cutoff = Date.now() - hours * 60 * 60 * 1000;
+    return Array.from(this.inMemoryScratch.values())
+      .filter((t) => t.timestamp >= cutoff)
+      .sort((a, b) => a.timestamp - b.timestamp);
+  }
+
+  /**
+   * Lifecycle cleaner:
+   * 1. Turns > 24 hours: Summarized and stored in 30-day summaries collection; raw turn purged.
+   * 2. Summaries > 30 days: Converted into Vector Database embeddings permanently!
+   */
+  public async runScratchLifecycle(ai?: GoogleGenAI): Promise<void> {
+    await this.initPromise;
+    const now = Date.now();
+    const cutoff24h = now - MS_24_HOURS;
+    const cutoff30d = now - MS_30_DAYS;
+
+    try {
+      // 1. Find raw turns older than 24 hours
+      const oldTurns = Array.from(this.inMemoryScratch.values()).filter((t) => t.timestamp < cutoff24h);
+      if (oldTurns.length >= 4 && ai) {
+        // Group by session or batch into a 24h summary
+        const content = oldTurns.map((t) => `[${t.spokenTimeIST}] ${t.sender.toUpperCase()}: ${t.text}`).join("\n");
+        const earliestTime = oldTurns[0].spokenTimeIST;
+        const latestTime = oldTurns[oldTurns.length - 1].spokenTimeIST;
+        const dateRangeStr = `${earliestTime} – ${latestTime}`;
+
+        try {
+          const resp = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: `Summarize these raw past 24-hour conversation scratch turns cleanly for long-term memory, highlighting key decisions, commands, personal details, and topics discussed:\n\n${content}`,
+          });
+          const summary = resp.text?.trim() || "24-hour scratch activity summary.";
+
+          const summaryId = "scratch_sum_" + now;
+          const summaryEntry: ScratchSummaryEntry = {
+            id: summaryId,
+            dateStr: dateRangeStr,
+            summary,
+            fullContent: content,
+            timestamp: now,
+            expiresAt30d: now + MS_30_DAYS,
+          };
+
+          this.inMemorySummaries.set(summaryId, summaryEntry);
+          await scratchSummariesCol().doc(summaryId).set(summaryEntry);
+
+          // Delete processed raw turns
+          const batch = db.batch();
+          for (const t of oldTurns) {
+            this.inMemoryScratch.delete(t.id);
+            batch.delete(scratchCol().doc(t.id));
+          }
+          await batch.commit().catch(() => {});
+          console.log(`[LiveScratchService] Processed ${oldTurns.length} 24h+ scratch turns into 30-day summary.`);
+        } catch (sumErr) {
+          console.warn("[LiveScratchService] 24h summarization error:", sumErr);
+        }
+      }
+
+      // 2. Find summaries older than 30 days -> convert to permanent vector database!
+      const expiredSummaries = Array.from(this.inMemorySummaries.values()).filter((s) => s.timestamp < cutoff30d);
+      for (const expired of expiredSummaries) {
+        await vectorMemoryService.archiveToVectorStore({
+          originalText: expired.fullContent,
+          summary: expired.summary,
+          sourceType: "scratch_cache",
+          dateRangeStr: expired.dateStr,
+          startTimestamp: expired.timestamp - MS_24_HOURS,
+          endTimestamp: expired.timestamp,
+        });
+
+        this.inMemorySummaries.delete(expired.id);
+        await scratchSummariesCol().doc(expired.id).delete().catch(() => {});
+        console.log(`[LiveScratchService] Archived 30d+ scratch summary ${expired.id} into permanent vector database.`);
+      }
+    } catch (e: any) {
+      console.error("[LiveScratchService] Lifecycle error:", e?.message || e);
+    }
+  }
+}
+
+export const liveScratchService = new LiveScratchService();

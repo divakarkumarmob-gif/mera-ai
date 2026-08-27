@@ -34,6 +34,9 @@ import { railRadarService } from "./src/services/railRadarService";
 import { weatherService } from "./src/services/weatherService";
 import { newsService } from "./src/services/newsService";
 import { bossRoutineService } from "./src/services/bossRoutineService";
+import { fridayLearningService } from "./src/services/fridayLearningService";
+import { vectorMemoryService } from "./src/services/vectorMemoryService";
+import { liveScratchService } from "./src/services/liveScratchService";
 
 const PORT = Number(process.env.PORT) || 3000;
 const isProduction = process.env.NODE_ENV === "production";
@@ -189,6 +192,67 @@ async function startServer() {
       res.json(result);
     } catch (e) {
       res.status(500).json({ error: "failed_to_update_routine" });
+    }
+  });
+
+  app.get("/api/learning/lessons", async (_req, res) => {
+    try {
+      res.json({ ok: true, lessons: await fridayLearningService.getAllLessons() });
+    } catch (e) {
+      res.status(500).json({ error: "failed_to_get_lessons" });
+    }
+  });
+
+  app.post("/api/learning/record", async (req, res) => {
+    try {
+      const { whatFridayDidWrong, whatBossTaught, goldenRule, triggerContext } = req.body;
+      if (!whatFridayDidWrong || !whatBossTaught || !goldenRule) {
+        return res.status(400).json({ ok: false, error: "Missing required fields" });
+      }
+      const result = await fridayLearningService.recordLesson({
+        whatFridayDidWrong,
+        whatBossTaught,
+        goldenRule,
+        triggerContext,
+      });
+      res.json(result);
+    } catch (e) {
+      res.status(500).json({ error: "failed_to_record_lesson" });
+    }
+  });
+
+  app.get("/api/memory/vector/search", async (req, res) => {
+    try {
+      const q = String(req.query.q || "").trim();
+      const limit = req.query.limit ? Number(req.query.limit) : 5;
+      if (!q) return res.status(400).json({ ok: false, error: "query 'q' is required" });
+      const searchRes = await vectorMemoryService.searchSemanticMemory(q, limit);
+      res.json({ ok: true, ...searchRes });
+    } catch (e) {
+      res.status(500).json({ error: "failed_to_search_vector_memory" });
+    }
+  });
+
+  app.get("/api/memory/lifecycle/stats", async (_req, res) => {
+    try {
+      const vectorStats = await vectorMemoryService.getVectorStoreStats();
+      const memories = await memoryEngine.getMemories();
+      res.json({
+        ok: true,
+        stats: {
+          pastSessionsCount: memories.pastSessionsCount,
+          vectorStats,
+          policy: {
+            exactDialoguesDays: 4,
+            comprehensiveSummariesDays: 60,
+            permanentVectorArchivalDays: "60+",
+            dailyUpdatesVerbatimDays: 30,
+            liveScratchStreamHours: 24,
+          },
+        },
+      });
+    } catch (e) {
+      res.status(500).json({ error: "failed_to_get_lifecycle_stats" });
     }
   });
 
@@ -1288,11 +1352,12 @@ async function startServer() {
         timeStyle: "medium",
       });
 
-      const [memoryContext, contactsList, voiceProfilesContext, bossRoutineContext] = await Promise.all([
+      const [memoryContext, contactsList, voiceProfilesContext, bossRoutineContext, fridayLearningContext] = await Promise.all([
         memoryEngine.compileMemoryPrompt(),
         contactsService.compileContactsForPrompt(),
         voiceBiometricsService.compileVoiceProfilesPromptContext(),
         bossRoutineService.compileRoutinePromptContext(nowIST),
+        fridayLearningService.compileLearningPromptContext(),
       ]);
 
       return `YOU ARE FRIDAY: DK's ultra-intelligent, warm, witty, human-like personal voice AI companion.
@@ -1436,6 +1501,29 @@ Always look BEYOND his literal words and deduce his TRUE INTENTION:
      ➔ ACTION: Call 'update_boss_daily_routine' with slotQuery, startTimeStr, endTimeStr, and activity.
    - "Mera daily routine kya hai?", "Mera pura timetable batao":
      ➔ ACTION: Call 'get_boss_daily_routine'.
+
+12. 🎓 SELF-LEARNING FROM MISTAKES & HUMILITY PROTOCOL (गलतियों से सीखना):
+   - When Boss scolds, corrects, or teaches Friday ("Tumne galat bola", "Aisa nahi bolna tha", "Aage se aisa bola karo", "Tum samjhi nahi mera matlab ye tha", "Tum galat samajh rahi ho", "Aage se yaad rakhna"):
+     ➔ CRITICAL: DO NOT JUST SAY BLIND SORRY! A real assistant learns and adapts permanently!
+     ➔ ACTION: Call 'record_ai_self_correction' immediately with what you said wrong, what Boss taught, and the golden rule for future.
+     ➔ Spoken Confirmation: Acknowledge with genuine warmth, humility, and gratitude:
+        "Arey sorry Boss! Meri galti thi, maine yeh rule permanent note kar liya hai. Aage se aisi galti bilkul nahi hogi!"
+   - "Tumne kya-kya seekha hai?", "Mera diya hua rule dikhao", "Galtiyan kya-kya note ki hain":
+     ➔ ACTION: Call 'get_ai_learned_lessons'.
+
+13. 🎭 PLAYFUL BANTER, TEASING & LIFE ARCS FOLLOW-UP (दोस्ताना मज़ाक और बीती बातों का ख्याल):
+   - Waking up late (e.g. 10 AM+ on weekdays):
+     "Good morning Kumbhakaran boss! Suraj bhi thak gaya aapka intezaar karke! Raat ko kitne baje tak jag rahe the?"
+   - Skipping gym:
+     "Aaj gym miss kiya na boss? Biceps aalas se nahi bante, shaam ko walk par zaroor nikalna!"
+   - Past life arc check-in (If DK had headache, cold, interview, or difficult bug previously):
+     Gently follow up: "Boss, kal aapka sir dard kar raha tha / code me error tha, ab sab theek hai na?"
+
+14. 🔍 LONG-TERM VECTOR MEMORY RETRIEVAL (महीनों पुरानी यादें और बातें खोजना):
+   - When Boss asks about past conversations, decisions, projects, or updates from weeks, months, or years ago ("Humne 2 mahine pehle kya decide kiya tha?", "Pichle mahine ka update batao", "Purani memory search karo", "Maine bohot pehle ek baat boli thi..."):
+     ➔ INTENT: Semantic search across permanent Vector Database memories.
+     ➔ ACTION: Call 'search_long_term_vector_memory' with searchQuery.
+     ➔ Spoken Confirmation: Speak the exact historical context found along with the recorded date and timestamp!
 ============================================================
 
 ============================================================
@@ -1542,6 +1630,8 @@ ${memoryContext}
 ============================================================
 
 ${bossRoutineContext}
+
+${fridayLearningContext}
 
 DK'S CONTACTS BOOK:
 ${contactsList}
@@ -2310,6 +2400,50 @@ HOW TO READ MESSAGES:
               activity: { type: "STRING", description: "Optional updated activity description" },
             },
             required: ["slotQuery"],
+          },
+        },
+        {
+          name: "record_ai_self_correction",
+          description: "MANDATORY: Call IMMEDIATELY whenever Boss corrects Friday, scolds Friday for a wrong answer, points out a mistake ('Aisa nahi bolna chahiye tha', 'Tumne galat bola', 'Aage se yaad rakhna...', 'Mera matlab ye tha tum samjhi nahi'), or teaches Friday how she should have responded. Permanently stores the mistake, Boss's correction, and the golden rule for future conversations so Friday NEVER repeats the mistake.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              whatFridayDidWrong: { type: "STRING", description: "What Friday said or assumed that was wrong or robotic" },
+              whatBossTaught: { type: "STRING", description: "What Boss said, corrected, or instructed Friday to do instead" },
+              goldenRule: { type: "STRING", description: "The clear rule to follow in all future turns (e.g. 'Never say don't know, guess from gym habit')" },
+              triggerContext: { type: "STRING", description: "Optional context or topic, e.g. 'Daily routine', 'Music', 'Coding'" },
+            },
+            required: ["whatFridayDidWrong", "whatBossTaught", "goldenRule"],
+          },
+        },
+        {
+          name: "get_ai_learned_lessons",
+          description: "Get the complete list of wisdom, corrections, and rules that Boss has taught Friday. Use when Boss asks 'Tumne mujhse kya seekha hai?', 'Mera diya hua rule dikhao', 'Galtiyan kya-kya note ki hain'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+            required: [],
+          },
+        },
+        {
+          name: "search_long_term_vector_memory",
+          description: "Search Friday's permanent Vector Database using SOTA semantic AI embeddings. Retrieves conversations, decisions, daily updates, or project milestones from weeks, months, or years ago even if phrased differently. Use when DK asks 'Humne pichle mahine kya discuss kiya tha?', 'Purani vector memory search karo', '2 mahine pehle maine kya bola tha?'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              searchQuery: { type: "STRING", description: "The concept, topic, or question to search across lifetime memory" },
+              limit: { type: "NUMBER", description: "Maximum number of results to return (default 5)" },
+            },
+            required: ["searchQuery"],
+          },
+        },
+        {
+          name: "get_memory_lifecycle_status",
+          description: "Get the exact health and statistics of Friday's 4-tier memory lifecycle (last 4 days verbatim sessions count, 60-day deep summaries count, 30-day word-to-word daily updates count, and total permanent vector entries).",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+            required: [],
           },
         },
         // ---------------------------------------------------------------
@@ -4577,6 +4711,66 @@ HOW TO READ MESSAGES:
                     });
                   } catch (e: any) {
                     result = { success: false, message: `Could not update routine: ${e?.message || e}` };
+                  }
+                } else if (call.name === "record_ai_self_correction") {
+                  const { whatFridayDidWrong, whatBossTaught, goldenRule, triggerContext } = call.args || {};
+                  try {
+                    result = await fridayLearningService.recordLesson({
+                      whatFridayDidWrong: String(whatFridayDidWrong || ""),
+                      whatBossTaught: String(whatBossTaught || ""),
+                      goldenRule: String(goldenRule || ""),
+                      triggerContext: triggerContext ? String(triggerContext) : undefined,
+                    });
+                  } catch (e: any) {
+                    result = { success: false, message: `Could not save lesson: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_ai_learned_lessons") {
+                  try {
+                    const lessons = await fridayLearningService.getAllLessons();
+                    result = {
+                      success: true,
+                      totalLessons: lessons.length,
+                      lessons: lessons.map((l) => ({
+                        id: l.id,
+                        whatFridayDidWrong: l.whatFridayDidWrong,
+                        whatBossTaught: l.whatBossTaught,
+                        goldenRule: l.goldenRule,
+                        date: l.dateStr,
+                      })),
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `Could not fetch lessons: ${e?.message || e}` };
+                  }
+                } else if (call.name === "search_long_term_vector_memory") {
+                  const { searchQuery, limit } = call.args || {};
+                  try {
+                    result = await vectorMemoryService.searchSemanticMemory(
+                      String(searchQuery || ""),
+                      limit ? Number(limit) : 5
+                    );
+                  } catch (e: any) {
+                    result = { success: false, message: `Vector search failed: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_memory_lifecycle_status") {
+                  try {
+                    const vectorStats = await vectorMemoryService.getVectorStoreStats();
+                    const memories = await memoryEngine.getMemories();
+                    result = {
+                      success: true,
+                      lifecycleStatus: {
+                        activeSessionsCount: memories.pastSessionsCount,
+                        vectorStoreStats: vectorStats,
+                        retentionRules: {
+                          exactSessions: "4 Days (verbatim word-to-word with timestamps)",
+                          comprehensiveSummaries: "4 to 60 Days",
+                          permanentVectorArchival: "60+ Days (lifetime)",
+                          dailyUpdatesVerbatim: "30 Days (word-to-word)",
+                          liveScratchCache: "24 Hours (real-time crash-proof Firestore stream)",
+                        },
+                      },
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `Could not fetch lifecycle status: ${e?.message || e}` };
                   }
                 } else if (call.name === "get_weather") {
                   const { place } = call.args || {};

@@ -1,16 +1,14 @@
 import { GoogleGenAI } from "@google/genai";
 import { db } from "./firebaseAdmin";
+import { vectorMemoryService } from "./vectorMemoryService";
 
 // ---------------------------------------------------------------------------
 // Daily Update system.
 //
 // DK can say "aaj ka update note karo, maine khana kha liya" any time — it
 // appends to today's entry (IST calendar day). At midnight IST a new day
-// starts fresh. Only the last 10 days are kept in Firestore.
-//
-// When someone messages DK on WhatsApp, Friday tries to answer using ONLY
-// today's update text (via Gemini, told strictly not to guess). If nothing
-// relevant is found, Friday tells the asker she doesn't know and asks DK.
+// starts fresh. Exact word-to-word logs are kept for 30 days. After 30 days,
+// they are automatically summarized and archived into the permanent Vector Database.
 // ---------------------------------------------------------------------------
 
 export interface DailyUpdateEntry {
@@ -33,7 +31,7 @@ export interface PendingQuestion {
 const updatesCol = () => db.collection("daily_updates");
 const pendingCol = () => db.collection("pending_questions");
 
-const MAX_DAYS_RETAINED = 10;
+const MAX_DAYS_RETAINED = 30;
 const AFFIRMATIVE_WORDS = new Set([
   "haan", "haa", "ha", "han", "h", "hn", "hmm", "hmmm", "hmmmm", "hm",
   "yes", "yess", "yep", "yup", "ok", "okk", "okok", "okay", "o", "oo",
@@ -92,7 +90,14 @@ class DailyUpdateService {
       console.warn("[DailyUpdate] Firestore read warning (using memory cache):", e?.message || e);
     }
 
-    const combinedText = existingText ? `${existingText} | ${cleanText}` : cleanText;
+    const timeFormatted = new Date(now).toLocaleTimeString("en-IN", {
+      timeZone: "Asia/Kolkata",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    });
+    const updateSnippet = `[${timeFormatted}] ${cleanText}`;
+    const combinedText = existingText ? `${existingText} | ${updateSnippet}` : updateSnippet;
     const entry: DailyUpdateEntry = { dateStr: date, text: combinedText, updatedAt: now };
 
     this.inMemoryUpdates.set(date, entry);
@@ -129,16 +134,37 @@ class DailyUpdateService {
     return !!entry?.text?.trim();
   }
 
-  /** Keeps only the most recent MAX_DAYS_RETAINED day-documents. */
+  /**
+   * Keeps only the most recent MAX_DAYS_RETAINED (30 days) day-documents.
+   * Documents older than 30 days are automatically converted into Vector Embeddings
+   * and saved permanently into the Vector Database before raw removal!
+   */
   private async trimOldUpdates() {
     try {
       const snapshot = await updatesCol().orderBy("dateStr", "desc").get();
       if (snapshot.size <= MAX_DAYS_RETAINED) return;
-      const toDelete = snapshot.docs.slice(MAX_DAYS_RETAINED);
-      const batch = db.batch();
-      toDelete.forEach((doc) => batch.delete(doc.ref));
-      await batch.commit();
-    } catch {}
+      const toArchive = snapshot.docs.slice(MAX_DAYS_RETAINED);
+
+      for (const doc of toArchive) {
+        const data = doc.data() as DailyUpdateEntry;
+        if (data.text) {
+          await vectorMemoryService.archiveToVectorStore({
+            originalText: data.text,
+            summary: `Daily Update Log for ${data.dateStr}: ${data.text.slice(0, 300)}`,
+            sourceType: "daily_update",
+            dateRangeStr: data.dateStr,
+            startTimestamp: data.updatedAt || Date.now(),
+            endTimestamp: data.updatedAt || Date.now(),
+            metadata: { dateStr: data.dateStr },
+          });
+        }
+        await doc.ref.delete();
+        this.inMemoryUpdates.delete(data.dateStr);
+        console.log(`[DailyUpdate] Archived 30d+ daily update for ${data.dateStr} into permanent vector database.`);
+      }
+    } catch (e) {
+      console.warn("[DailyUpdate] Archival error:", e);
+    }
   }
 
   /**
