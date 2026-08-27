@@ -13,6 +13,7 @@ import { getWsUrl, getApiUrl } from '@/utils/api';
 import { wakeWordManager } from '@/utils/wakeWord';
 import { getAppToken, clearAppSession } from '@/utils/appSecurityClient';
 import { screenWakeLock } from '@/utils/screenWakeLock';
+import { MusicCapsule } from './MusicCapsule';
 
 interface LiveAIInterfaceProps {
     onClose: () => void;
@@ -640,6 +641,8 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         isPlaying?: boolean;
         hasError?: boolean;
         errorMessage?: string;
+        songId?: string;
+        hasLyrics?: boolean;
     } | null>(null);
     const musicAudioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -2472,6 +2475,27 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     </motion.div>
                 )}
             </AnimatePresence>
+
+            {/* Floating Futuristic Music Capsule Widget */}
+            <MusicCapsule
+                nowPlaying={nowPlayingMusic ? {
+                    trackName: nowPlayingMusic.trackName,
+                    artistName: nowPlayingMusic.artistName || 'Artist',
+                    albumArt: nowPlayingMusic.albumArt,
+                    isPlaying: !!nowPlayingMusic.isPlaying,
+                    quality: nowPlayingMusic.quality,
+                    audioUrl: nowPlayingMusic.audioUrl,
+                    songId: nowPlayingMusic.songId,
+                    hasLyrics: nowPlayingMusic.hasLyrics,
+                } : null}
+                onPlayPause={toggleMusicPlayPause}
+                onStop={stopMusicPlayback}
+                onVolumeChange={(vol) => {
+                    if (musicAudioRef.current) {
+                        musicAudioRef.current.volume = vol;
+                    }
+                }}
+            />
         </div>
     );
 }

@@ -35,6 +35,7 @@ import { newsService } from "./newsService";
 import { recipeService } from "./recipeService";
 import { networkDeviceScannerService } from "./networkDeviceScannerService";
 import { googleMapsService } from "./googleMapsService";
+import { jioSaavnService } from "./jioSaavnService";
 
 class PublicApisService {
   // 1. Weather — Powered by WeatherAPI.com (with Open-Meteo fallback)
@@ -3820,11 +3821,45 @@ class PublicApisService {
     };
   }
 
-  // 51.1 Play & Stream FULL Music Track in Background
+  // 51.1 Play & Stream FULL Music Track (Primary: JioSaavn 320kbps Pure Audio, Fallback: YouTube Music HD)
   public async playMusic(songOrArtist: string): Promise<any> {
-    // 1. Primary: YouTube Music HD Search
+    const q = String(songOrArtist || "").trim();
+
+    // 1. Primary: JioSaavn 320kbps HD Audio
     try {
-      const ytRes = await this.searchYouTubeMusic(songOrArtist);
+      const saavnRes = await jioSaavnService.searchSong(q);
+      if (saavnRes.success && saavnRes.topSong) {
+        const s = saavnRes.topSong;
+        const directAudio = s.audio320kbps || s.audio160kbps || s.audio96kbps;
+        const proxiedUrl = `/api/music/proxy-stream?url=${encodeURIComponent(directAudio)}`;
+
+        return {
+          success: true,
+          action: "play",
+          trackName: s.songName,
+          artistName: s.artistName,
+          albumName: s.albumName,
+          albumArt: s.albumArt500,
+          durationSec: s.durationSec,
+          isFullSong: true,
+          isJioSaavn: true,
+          quality: "JioSaavn 320kbps Ultra-HD",
+          audioUrl: proxiedUrl,
+          directCdnUrl: directAudio,
+          hasLyrics: s.hasLyrics,
+          songId: s.id,
+          youtubeMusicUrl: `https://music.youtube.com/search?q=${encodeURIComponent(s.songName + " " + s.artistName)}`,
+          source: "jiosaavn_320kbps",
+          message: `Boss, "${s.songName}" (${s.artistName}) JioSaavn 320kbps Ultra-HD me play ho raha hai! 🎵✨`,
+        };
+      }
+    } catch (e) {
+      console.warn("[PublicApis] JioSaavn search error in playMusic:", e);
+    }
+
+    // 2. Secondary Fallback: YouTube Music HD
+    try {
+      const ytRes = await this.searchYouTubeMusic(q);
       if (ytRes.success && ytRes.videoId) {
         return ytRes;
       }
@@ -3832,8 +3867,8 @@ class PublicApisService {
       console.warn("[PublicApis] YouTube music search error in playMusic:", e);
     }
 
-    // 2. Fallback: Multi-Source Search
-    const res = await this.searchMusic(songOrArtist);
+    // 3. Fallback: Multi-Source Search
+    const res = await this.searchMusic(q);
     if (res.success && res.tracks && res.tracks.length > 0) {
       const topTrack = res.tracks[0];
       const audioUrl = topTrack.fullAudioUrl || topTrack.previewUrl || topTrack.audioUrl;
@@ -3855,10 +3890,11 @@ class PublicApisService {
         message: `Boss, "${topTrack.trackName}" by ${topTrack.artistName} play ho raha hai! 🎵✨`,
       };
     }
+
     return {
       success: false,
-      spotifySearchUrl: `https://open.spotify.com/search/${encodeURIComponent(songOrArtist)}`,
-      message: `"${songOrArtist}" ke liye playable track nahi mila.`,
+      spotifySearchUrl: `https://open.spotify.com/search/${encodeURIComponent(q)}`,
+      message: `"${q}" ke liye playable track nahi mila.`,
     };
   }
 

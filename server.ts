@@ -41,6 +41,7 @@ import { smartMemoryRetrieverService } from "./src/services/smartMemoryRetriever
 import { memoryBackupService } from "./src/services/memoryBackupService";
 import { telegramSecurityBotService } from "./src/services/telegramSecurityBotService";
 import { networkDeviceScannerService } from "./src/services/networkDeviceScannerService";
+import { jioSaavnService } from "./src/services/jioSaavnService";
 
 const PORT = Number(process.env.PORT) || 3000;
 const isProduction = process.env.NODE_ENV === "production";
@@ -244,6 +245,74 @@ async function startServer() {
       res.json(result);
     } catch (e) {
       res.status(500).json({ error: "failed_to_record_lesson" });
+    }
+  });
+
+  // ── Audio Proxy for JioSaavn / CDN streams ──
+  app.get("/api/music/proxy-stream", async (req, res) => {
+    const rawUrl = String(req.query.url || "");
+    if (!rawUrl || !rawUrl.startsWith("http")) {
+      return res.status(400).send("Invalid stream URL");
+    }
+    try {
+      const audioRes = await fetch(rawUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+          Range: (req.headers.range as string) || "bytes=0-",
+        },
+      });
+      if (!audioRes.ok && audioRes.status !== 206) {
+        return res.status(audioRes.status).send("Stream fetch failed");
+      }
+
+      res.set({
+        "Content-Type": audioRes.headers.get("content-type") || "audio/mp4",
+        "Content-Length": audioRes.headers.get("content-length") || undefined,
+        "Accept-Ranges": "bytes",
+        "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "public, max-age=86400",
+      });
+
+      if (audioRes.body) {
+        const reader = audioRes.body.getReader();
+        const pump = async () => {
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              if (res.writableEnded) break;
+              res.write(value);
+            }
+            res.end();
+          } catch {
+            res.end();
+          }
+        };
+        pump();
+      } else {
+        res.end();
+      }
+    } catch (e: any) {
+      console.warn("[MusicProxy] Error streaming audio:", e?.message || e);
+      if (!res.headersSent) res.status(500).send("Proxy error");
+    }
+  });
+
+  // ── Music Lyrics Endpoint ──
+  app.get("/api/music/lyrics", async (req, res) => {
+    const query = String(req.query.query || "");
+    if (!query) return res.status(400).json({ success: false, message: "Query required" });
+    try {
+      const searchRes = await jioSaavnService.searchSong(query);
+      if (searchRes.success && searchRes.topSong?.id) {
+        const lyricsRes = await jioSaavnService.getLyrics(searchRes.topSong.id);
+        if (lyricsRes.success) {
+          return res.json({ success: true, lyrics: lyricsRes.lyrics, copyright: lyricsRes.copyright });
+        }
+      }
+      res.json({ success: false, message: "Lyrics not found" });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || e });
     }
   });
 
@@ -5387,6 +5456,10 @@ STYLE:
                         videoId: result.videoId,
                         embedUrl: result.embedUrl,
                         isYouTubeMusic: !!result.isYouTubeMusic || !!result.videoId,
+                        isJioSaavn: !!result.isJioSaavn,
+                        hasLyrics: !!result.hasLyrics,
+                        songId: result.songId,
+                        directCdnUrl: result.directCdnUrl,
                         spotifyUrl: result.spotifyUrl,
                         youtubeMusicUrl: result.youtubeMusicUrl,
                         isFullSong: result.isFullSong,
