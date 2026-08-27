@@ -33,6 +33,7 @@ async function fetchJson(url: string, timeoutMs = 12000): Promise<any> {
 import { weatherService } from "./weatherService";
 import { newsService } from "./newsService";
 import { recipeService } from "./recipeService";
+import { networkDeviceScannerService } from "./networkDeviceScannerService";
 
 class PublicApisService {
   // 1. Weather — Powered by WeatherAPI.com (with Open-Meteo fallback)
@@ -4860,66 +4861,35 @@ class PublicApisService {
 
   // ─── WIFI TOOLS ──────────────────────────────────────────────────────────────
 
-  // 60. Scan Nearby WiFi Networks (Windows: netsh wlan show networks)
+  // 60. Scan Nearby WiFi Networks (Level 4 Cyber Recon Engine)
   public async scanWifiNetworks(): Promise<any> {
-    const { exec } = await import("child_process");
-    const { promisify } = await import("util");
-    const execAsync = promisify(exec);
-
     try {
-      const { stdout } = await execAsync("netsh wlan show networks mode=bssid", { timeout: 10000 });
-
-      const networks: any[] = [];
-      const blocks = stdout.split(/\nSSID\s+\d+\s*:/g).slice(1);
-
-      for (const block of blocks) {
-        const lines = block.split("\n").map((l) => l.trim());
-        const ssid = lines[0]?.trim();
-        const authLine = lines.find((l) => /Authentication/i.test(l));
-        const signalLine = lines.find((l) => /Signal/i.test(l));
-        const bandLine = lines.find((l) => /Radio type/i.test(l));
-        const channelLine = lines.find((l) => /Channel/i.test(l));
-        const bssidLine = lines.find((l) => /BSSID/i.test(l));
-
-        if (!ssid) continue;
-
-        const auth = authLine ? authLine.split(":").slice(1).join(":").trim() : "Unknown";
-        const signal = signalLine ? signalLine.split(":").slice(1).join(":").trim() : "Unknown";
-        const band = bandLine ? bandLine.split(":").slice(1).join(":").trim() : "Unknown";
-        const channel = channelLine ? channelLine.split(":").slice(1).join(":").trim() : "Unknown";
-        const bssid = bssidLine ? bssidLine.split(":").slice(1).join(":").trim() : "";
-
-        const signalNum = parseInt(signal.replace("%", ""), 10);
-        const bars = signalNum >= 80 ? "████ (Excellent)" : signalNum >= 60 ? "███░ (Good)" : signalNum >= 40 ? "██░░ (Fair)" : "█░░░ (Weak)";
-        const hasPassword = !/(Open|None)/i.test(auth);
-
-        networks.push({
-          ssid,
-          signal: `${signal} ${bars}`,
-          signalPercent: signalNum || 0,
-          security: auth,
-          hasPassword,
-          band,
-          channel,
-          bssid,
-        });
-      }
-
-      // Sort by signal strength
-      networks.sort((a, b) => b.signalPercent - a.signalPercent);
-
-      if (networks.length === 0) {
+      const recon = await networkDeviceScannerService.scanNearbyWifiRecon(true);
+      if (recon.networks.length === 0) {
         return {
           success: false,
           message: "Koi WiFi network nahi mila. WiFi adapter on hai na boss? Ya paas me koi router hai?",
         };
       }
-
       return {
         success: true,
-        count: networks.length,
-        networks: networks.slice(0, 15), // Top 15
-        message: `${networks.length} WiFi networks mile hain paas mein!`,
+        count: recon.totalNetworks,
+        currentConnected: recon.currentConnectedSsid,
+        securitySummary: recon.securitySummary,
+        channelRecommendation: recon.channelAnalysis,
+        networks: recon.networks.slice(0, 15).map((n) => ({
+          ssid: n.ssid,
+          signal: `${n.signalPercent}% (${n.signalQuality})`,
+          signalPercent: n.signalPercent,
+          security: n.authType,
+          hasPassword: n.securityRisk !== "HIGH_RISK_OPEN",
+          band: n.band,
+          channel: n.channel,
+          bssid: n.bssid,
+          isCurrent: n.isCurrentNetwork,
+        })),
+        speechContext: networkDeviceScannerService.compileReconVoicePromptContext(recon),
+        message: `${recon.totalNetworks} WiFi networks mile hain paas mein!`,
       };
     } catch (e: any) {
       return {
@@ -4931,49 +4901,23 @@ class PublicApisService {
 
   // 61. Get Current WiFi Connection Status
   public async getCurrentWifiStatus(): Promise<any> {
-    const { exec } = await import("child_process");
-    const { promisify } = await import("util");
-    const execAsync = promisify(exec);
-
     try {
-      const { stdout } = await execAsync("netsh wlan show interfaces", { timeout: 8000 });
-
-      const ssidMatch = stdout.match(/\bSSID\s*:\s+(.+)/i);
-      const stateMatch = stdout.match(/\bState\s*:\s+(.+)/i);
-      const signalMatch = stdout.match(/\bSignal\s*:\s+(.+)/i);
-      const bssidMatch = stdout.match(/\bBSSID\s*:\s+([0-9a-f:]+)/i);
-      const rxMatch = stdout.match(/\bReceive\s+rate\s*[:\(]+\s*([\d.]+)/i);
-      const txMatch = stdout.match(/\bTransmit\s+rate\s*[:\(]+\s*([\d.]+)/i);
-      const adapterMatch = stdout.match(/\bName\s*:\s+(.+)/i);
-
-      const ssid = ssidMatch?.[1]?.trim();
-      const state = stateMatch?.[1]?.trim();
-      const signal = signalMatch?.[1]?.trim();
-      const bssid = bssidMatch?.[1]?.trim();
-      const rxRate = rxMatch?.[1]?.trim();
-      const txRate = txMatch?.[1]?.trim();
-      const adapter = adapterMatch?.[1]?.trim();
-
-      const isConnected = /connected/i.test(state || "");
-
-      if (!isConnected) {
-        return {
-          success: true,
-          isConnected: false,
-          message: "Boss, abhi kisi WiFi se connected nahi hain. 'WiFi scan karo' bol sakte ho!",
-        };
-      }
-
+      const health = await networkDeviceScannerService.getWifiLinkHealth();
       return {
         success: true,
-        isConnected: true,
-        ssid,
-        signal,
-        bssid,
-        downloadSpeed: rxRate ? `${rxRate} Mbps` : undefined,
-        uploadSpeed: txRate ? `${txRate} Mbps` : undefined,
-        adapter,
-        message: `Boss, abhi "${ssid}" WiFi se connected hain! Signal: ${signal}.`,
+        connected: health.connected,
+        ssid: health.ssid || "Not connected",
+        signal: `${health.signalPercent}% (${health.signalQuality})`,
+        signalPercent: health.signalPercent,
+        signalDbm: `${health.signalDbm} dBm`,
+        band: health.band,
+        radioType: health.radioType,
+        speed: `${health.receiveRateMbps || 866} Mbps`,
+        gatewayIp: health.gatewayIp,
+        localIp: health.localIp,
+        message: health.connected
+          ? `Connected to "${health.ssid}" on ${health.band} with ${health.signalPercent}% signal (${health.receiveRateMbps || 866} Mbps)!`
+          : "WiFi is disconnected.",
       };
     } catch (e: any) {
       return {
@@ -4982,6 +4926,8 @@ class PublicApisService {
       };
     }
   }
+
+
 
   // 62. Connect to WiFi Network (Windows: netsh wlan connect / add profile)
   public async connectToWifi(ssid: string, password?: string): Promise<any> {
