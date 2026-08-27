@@ -549,6 +549,58 @@ ${transcript}`;
   }
 
   /**
+   * Compiles a LEAN, lightning-fast memory context for WebSocket handshake / session start.
+   * Priority: Essential core vault facts, pinned memories, and profile overview.
+   * Deep verbatim logs and 60-day digests are loaded ON-DEMAND via tools.
+   */
+  public async compileLeanMemoryPrompt(): Promise<string> {
+    await this.initPromise;
+    const sections: string[] = [];
+
+    try {
+      const [vaultSnap, pinnedSnap, profileSnap] = await Promise.all([
+        vaultCol().limit(12).get(),
+        pinnedCol().orderBy("timestamp", "desc").limit(6).get(),
+        profileDoc().get(),
+      ]);
+
+      const personalVault = vaultSnap.docs.map((d) => d.data() as PersonalVaultEntry);
+      const pinnedMemories = pinnedSnap.docs.map((d) => d.data() as { fact: string; date: string });
+      const profileData = profileSnap.exists ? profileSnap.data()! : { profileFacts: [], knownMistakes: [] };
+
+      // 1. Core Personal Vault (Essential identity truths)
+      if (personalVault.length > 0) {
+        const vaultList = personalVault
+          .map((p, i) => `${i + 1}. [${p.category}]: "${p.exactFact}"`)
+          .join("\n");
+        sections.push(`### 🔒 CORE PERSONAL VAULT:\n${vaultList}`);
+      }
+
+      // 2. Pinned Memories (Most recent key facts)
+      if (pinnedMemories.length > 0) {
+        const pinnedList = pinnedMemories
+          .map((p, i) => `${i + 1}. [${p.date}]: "${p.fact}"`)
+          .join("\n");
+        sections.push(`### 📌 PINNED KEY FACTS:\n${pinnedList}`);
+      }
+
+      // 3. DK Profile & Learning Context
+      const profileFacts: string[] = profileData.profileFacts || [];
+      if (profileFacts.length > 0) {
+        sections.push(`### 🎯 DK PROFILE HIGHLIGHTS:\n- ${profileFacts.slice(-6).join("\n- ")}`);
+      }
+    } catch (e) {
+      console.error("[MemoryEngine] Failed to compile lean memory prompt:", e);
+    }
+
+    if (sections.length === 0) {
+      return "Core Profile: DK is your creator and Boss. You are Friday, his loyal AI companion.";
+    }
+
+    return sections.join("\n\n");
+  }
+
+  /**
    * Compiles the full persistent memory context to inject into Friday's system prompt.
    * Priority 1: Exact Personal Vault (Family, Boss identity, Private Facts)
    * Priority 2: Pinned Memories ("Yeh yaad rakhna")

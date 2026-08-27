@@ -1297,9 +1297,11 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     }
                 } else if (msg.type === 'init_ack') {
                     isInitializedRef.current = true;
+                    isAiSpeaking.current = false;
                     isAiThinkingRef.current = false;
                     aiTurnActiveRef.current = false;
                     turnCompletePendingRef.current = false;
+                    speakingCooldownUntilRef.current = 0;
                     if (initAckTimeoutRef.current) { clearTimeout(initAckTimeoutRef.current); initAckTimeoutRef.current = null; }
                     setStatus("Listening...");
                     if (pendingImagePayloadsRef.current.length > 0) {
@@ -1334,6 +1336,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     }
                 } else if (msg.type === 'session_reconnecting') {
                     isInitializedRef.current = false;
+                    isAiSpeaking.current = false;
                     isAiThinkingRef.current = false;
                     aiTurnActiveRef.current = false;
                     clearTimeout((window as any).__thinkingTimeout);
@@ -1341,9 +1344,11 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     setStatus("⚡ AI reconnecting...");
                 } else if (msg.type === 'session_reconnected') {
                     isInitializedRef.current = true;
+                    isAiSpeaking.current = false;
                     isAiThinkingRef.current = false;
                     aiTurnActiveRef.current = false;
                     turnCompletePendingRef.current = false;
+                    speakingCooldownUntilRef.current = 0;
                     setStatus("Listening...");
                 } else if (msg.error === 'session_reconnect_failed') {
                     setStatus("Connection lost. Please refresh the page.");
