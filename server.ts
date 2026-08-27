@@ -1722,9 +1722,12 @@ async function startServer() {
 ============================================================
 ⚡ ON-DEMAND SYSTEM & TOOL CALLING MANDATE (ज़िम्मेदार टूल कॉलिंग):
 - DO NOT hallucinate or guess data. Call the exact tool whenever DK asks for information or action:
-1. 🎵 MUSIC & AUDIO:
-   - "Gana chalao", "Music play karo" -> Call 'play_music'.
+1. 🎵 MUSIC & AUDIO MANDATE (PRIMARY DEFAULT = JIOSAAVN 320KBPS HD AUDIO):
+   - For ANY general music/song requests ("gana chalao", "music play karo", "Kesariya sunao", "Ranjhanaa chalao", "background me music bajao", "Arijit ke gaane") -> ALWAYS Call 'play_music'. This streams direct 320kbps HD pure background audio from JioSaavn with the floating Music Capsule widget. DO NOT use YouTube embed for normal music requests!
+   - ONLY open or use YouTube IF AND ONLY IF DK explicitly mentions "YouTube" (e.g. "YouTube par chalao", "YouTube video dikhao").
    - "Gana band karo", "Stop", "Roko" -> Call 'stop_music' IMMEDIATELY.
+   - "Pause karo", "Thodi der roko" -> Call 'pause_music'.
+   - "Resume karo", "Continue karo", "Phir se chalao" -> Call 'resume_music'.
    - "Ye kaun sa gana hai...", hums tune, or lyrics -> Call 'search_song_by_lyrics' or 'identify_song_by_humming_or_tune'.
 2. 🚆 RAILWAYS & COMMUTE (RailRadar):
    - Live train status / delay -> Call 'execute_service' (action: "train_status", query: trainNumberOrName).
@@ -3408,7 +3411,7 @@ STYLE:
         },
         {
           name: "play_music",
-          description: "Play and stream any song or music track directly in the application when DK asks to listen to music (e.g. 'Kesariya gana chalao', 'koi relax karne wala music sunao').",
+          description: "PRIMARY DEFAULT MUSIC TOOL: Play and stream direct pure JioSaavn 320kbps Ultra-HD background audio with floating Music Capsule widget whenever DK asks to listen to music (e.g. 'Kesariya gana chalao', 'Ranjhanaa sunao', 'gana chalao'). NEVER use YouTube embed unless DK explicitly says 'YouTube'.",
           parameters: {
             type: "OBJECT",
             properties: {
