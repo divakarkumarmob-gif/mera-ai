@@ -674,23 +674,22 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         hasLyrics?: boolean;
     }) => {
         stopMusicPlayback();
-        const rawUrl = song.audioUrl || '';
-        let finalStreamUrl = rawUrl;
-        if (rawUrl.startsWith('/api/')) {
-            finalStreamUrl = getApiUrl(rawUrl);
-        } else if (rawUrl.startsWith('http') && !rawUrl.includes('/api/music/proxy-stream')) {
-            finalStreamUrl = getApiUrl(`/api/music/proxy-stream?url=${encodeURIComponent(rawUrl)}`);
-        }
+        const directUrl = song.audioUrl || '';
 
         const audio = new Audio();
         audio.preload = 'auto';
-        if (finalStreamUrl) audio.src = finalStreamUrl;
+        if (directUrl) audio.src = directUrl;
         audio.volume = 0.85;
         audio.onended = () => {
             setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: false } : null);
         };
         audio.onerror = (e) => {
-            console.warn('[Music] Error playing direct song on URL:', finalStreamUrl, e);
+            console.warn('[Music] Error playing direct CDN song on URL:', directUrl, e);
+            if (directUrl.startsWith('http') && !directUrl.includes('/api/music/proxy-stream')) {
+                const proxied = getApiUrl(`/api/music/proxy-stream?url=${encodeURIComponent(directUrl)}`);
+                audio.src = proxied;
+                audio.play().catch(err => console.warn('[Music] Proxy fallback catch:', err));
+            }
         };
         musicAudioRef.current = audio;
         audio.play().then(() => {
@@ -698,7 +697,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 trackName: song.trackName,
                 artistName: song.artistName,
                 albumArt: song.albumArt,
-                audioUrl: finalStreamUrl,
+                audioUrl: directUrl,
                 isJioSaavn: true,
                 isFullSong: true,
                 quality: song.quality || "JioSaavn 320kbps Ultra-HD",
@@ -712,7 +711,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 trackName: song.trackName,
                 artistName: song.artistName,
                 albumArt: song.albumArt,
-                audioUrl: finalStreamUrl,
+                audioUrl: directUrl,
                 isJioSaavn: true,
                 isPlaying: false,
                 songId: song.songId,

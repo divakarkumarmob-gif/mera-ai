@@ -93,13 +93,13 @@ export const MusicStudioModal: React.FC<MusicStudioModalProps> = ({
   };
 
   const handleSongSelect = (song: SongItem) => {
-    const audioUrl = `/api/music/proxy-stream?url=${encodeURIComponent(song.audio320kbps || song.audio160kbps || song.audio96kbps)}`;
+    const rawAudio = song.audio320kbps || song.audio160kbps || song.audio96kbps;
     onPlaySong({
       trackName: song.songName,
       artistName: song.artistName,
       albumName: song.albumName,
       albumArt: song.albumArt500 || song.albumArt150,
-      audioUrl: audioUrl,
+      audioUrl: rawAudio,
       isJioSaavn: true,
       isFullSong: true,
       quality: "JioSaavn 320kbps Ultra-HD",
