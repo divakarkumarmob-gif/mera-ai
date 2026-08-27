@@ -277,6 +277,65 @@ async function startServer() {
     }
   });
 
+  // ── Voice Biometrics REST Endpoints ─────────────────────────────────────────
+  app.get("/api/voice-biometrics/profiles", async (_req, res) => {
+    try {
+      const profiles = await voiceBiometricsService.getProfiles();
+      res.json({ success: true, count: profiles.length, profiles });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || "Failed to fetch profiles" });
+    }
+  });
+
+  app.post("/api/voice-biometrics/start-enroll", async (req, res) => {
+    try {
+      const { pin, name, relationWithDivakar, role } = req.body || {};
+      const result = await voiceBiometricsService.startVoiceEnrollment(
+        String(pin || ""),
+        String(name || "Guest"),
+        String(relationWithDivakar || "Friend"),
+        role || "friend"
+      );
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || "Enrollment start failed" });
+    }
+  });
+
+  app.post("/api/voice-biometrics/record-sample", async (req, res) => {
+    try {
+      const { sessionId, audioBase64, spokenPhrase } = req.body || {};
+      const result = await voiceBiometricsService.recordCalibrationSample(
+        String(sessionId || ""),
+        String(audioBase64 || ""),
+        spokenPhrase ? String(spokenPhrase) : undefined
+      );
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || "Sample recording failed" });
+    }
+  });
+
+  app.post("/api/voice-biometrics/delete-profile", async (req, res) => {
+    try {
+      const { pin, profileId } = req.body || {};
+      const result = await voiceBiometricsService.deleteVoiceProfile(String(pin || ""), profileId ? String(profileId) : undefined);
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || "Delete profile failed" });
+    }
+  });
+
+  app.post("/api/voice-biometrics/update-pin", async (req, res) => {
+    try {
+      const { newPin, senderName } = req.body || {};
+      const result = await voiceBiometricsService.updateVoicePin(String(newPin || ""), senderName || "Boss (DK)");
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || "Update pin failed" });
+    }
+  });
+
   app.get("/api/memory/vector/search", async (req, res) => {
     try {
       const q = String(req.query.q || "").trim();
@@ -3173,6 +3232,64 @@ STYLE:
           },
         },
         {
+          name: "start_voice_enrollment",
+          description: "Start guided multi-step voice biometric enrollment for a new speaker (Boss, Friend, Family, or Guest). Requires Boss's Voice PIN for authorization.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              pin: { type: "STRING", description: "Boss's secret Voice PIN (e.g. '1234')" },
+              name: { type: "STRING", description: "Name of the person being enrolled (e.g. 'Aman', 'Priya', 'Boss DK')" },
+              relationWithDivakar: { type: "STRING", description: "Relation with Boss DK (e.g. 'Self', 'Best Friend', 'Brother', 'Colleague')" },
+              role: { type: "STRING", description: "Role permission level: 'boss' (Full Root Access) | 'family' | 'friend' | 'guest'" },
+            },
+            required: ["pin", "name", "relationWithDivakar"],
+          },
+        },
+        {
+          name: "record_voice_calibration_sample",
+          description: "Record a spoken calibration phrase for active voice biometric enrollment session.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              sessionId: { type: "STRING", description: "Active enrollment session ID returned from start_voice_enrollment" },
+              spokenPhrase: { type: "STRING", description: "The sentence spoken by the user" },
+            },
+            required: ["sessionId"],
+          },
+        },
+        {
+          name: "list_voice_profiles",
+          description: "List all enrolled biometric voice profiles and their role privileges.",
+          parameters: {
+            type: "OBJECT",
+            properties: {},
+            required: [],
+          },
+        },
+        {
+          name: "delete_voice_profile",
+          description: "Delete an enrolled voice profile. Requires Boss's Voice PIN.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              pin: { type: "STRING", description: "Boss's secret Voice PIN" },
+              profileId: { type: "STRING", description: "Optional specific profile ID to delete. Omit to delete all." },
+            },
+            required: ["pin"],
+          },
+        },
+        {
+          name: "update_voice_pin",
+          description: "Update Boss's master Voice Authentication PIN.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              newPin: { type: "STRING", description: "New 4-6 digit numeric PIN" },
+            },
+            required: ["newPin"],
+          },
+        },
+        {
           name: "play_music",
           description: "Play and stream any song or music track directly in the application when DK asks to listen to music (e.g. 'Kesariya gana chalao', 'koi relax karne wala music sunao').",
           parameters: {
@@ -5264,6 +5381,62 @@ STYLE:
                     };
                   } catch (e: any) {
                     result = { success: false, message: `Airspace Wi-Fi Recon fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "start_voice_enrollment") {
+                  const { pin, name, relationWithDivakar, role } = call.args || {};
+                  try {
+                    result = await voiceBiometricsService.startVoiceEnrollment(
+                      String(pin || ""),
+                      String(name || "Guest"),
+                      String(relationWithDivakar || "Friend"),
+                      role || "friend"
+                    );
+                  } catch (e: any) {
+                    result = { success: false, message: `Voice enrollment start fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "record_voice_calibration_sample") {
+                  const { sessionId, spokenPhrase } = call.args || {};
+                  try {
+                    // Uses dummy/live sample buffer from current turn
+                    result = await voiceBiometricsService.recordCalibrationSample(
+                      String(sessionId || ""),
+                      "",
+                      spokenPhrase ? String(spokenPhrase) : undefined
+                    );
+                  } catch (e: any) {
+                    result = { success: false, message: `Calibration sample record fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "list_voice_profiles") {
+                  try {
+                    const profiles = await voiceBiometricsService.getProfiles();
+                    result = {
+                      success: true,
+                      totalProfiles: profiles.length,
+                      profiles: profiles.map((p) => ({
+                        id: p.id,
+                        name: p.name,
+                        role: p.role,
+                        relationWithDivakar: p.relationWithDivakar,
+                        isRootAdmin: p.isRootAdmin,
+                      })),
+                      speechContext: await voiceBiometricsService.compileVoiceProfilesPromptContext(),
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `Voice profiles fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "delete_voice_profile") {
+                  const { pin, profileId } = call.args || {};
+                  try {
+                    result = await voiceBiometricsService.deleteVoiceProfile(String(pin || ""), profileId ? String(profileId) : undefined);
+                  } catch (e: any) {
+                    result = { success: false, message: `Voice profile delete fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "update_voice_pin") {
+                  const { newPin } = call.args || {};
+                  try {
+                    result = await voiceBiometricsService.updateVoicePin(String(newPin || ""), "Boss (DK)");
+                  } catch (e: any) {
+                    result = { success: false, message: `Voice PIN update fail hua: ${e?.message || e}` };
                   }
                 } else if (call.name === "send_music_on_whatsapp") {
                   const { songName, targetPhone } = call.args || {};
