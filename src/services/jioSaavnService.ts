@@ -20,6 +20,9 @@ export interface JioSaavnSong {
   audio96kbps: string;
   hasLyrics: boolean;
   copyright?: string;
+  playCount?: number;
+  starring?: string;
+  label?: string;
 }
 
 export interface JioSaavnSearchResult {
@@ -91,7 +94,8 @@ class JioSaavnService {
   }
 
   /**
-   * Relevance scoring for search result ranking (Exact > StartsWith > Contains > Artist > Album)
+   * YouTube-Grade Relevance & Popularity scoring for search result ranking
+   * (Exact Title > Popularity Log Boost > StartsWith > Actor/Starring > Artist > Major Label)
    */
   private scoreSong(song: JioSaavnSong, query: string): number {
     const q = query.toLowerCase().trim();
@@ -99,21 +103,36 @@ class JioSaavnService {
     const title = (song.songName || "").toLowerCase().trim();
     const artist = (song.artistName || "").toLowerCase().trim();
     const album = (song.albumName || "").toLowerCase().trim();
+    const starring = (song.starring || "").toLowerCase().trim();
+    const label = (song.label || "").toLowerCase().trim();
 
     let score = 0;
-    if (title === q) score += 1000;
-    else if (title.startsWith(q)) score += 600;
-    else if (title.includes(q)) score += 350;
+    if (title === q) score += 1200;
+    else if (title.startsWith(q)) score += 700;
+    else if (title.includes(q)) score += 400;
 
-    if (artist.includes(q)) score += 250;
-    if (album.includes(q)) score += 120;
+    if (artist.includes(q)) score += 300;
+    if (starring.includes(q)) score += 280;
+    if (album.includes(q)) score += 150;
 
-    const tokens = q.split(/\s+/).filter(t => t.length > 1);
+    const tokens = q.split(/\s+/).filter((t) => t.length > 1);
     for (const t of tokens) {
-      if (title.includes(t)) score += 60;
-      if (artist.includes(t)) score += 40;
-      if (album.includes(t)) score += 20;
+      if (title.includes(t)) score += 80;
+      if (artist.includes(t)) score += 50;
+      if (starring.includes(t)) score += 45;
+      if (album.includes(t)) score += 25;
     }
+
+    // Popularity log-scale multiplier (YouTube RankBrain style)
+    if (song.playCount && song.playCount > 0) {
+      score += Math.min(500, Math.round(Math.log10(song.playCount) * 55));
+    }
+
+    // Official Major Music Label boost
+    if (/t-series|sony music|zee music|saregama|yrf|tips|speed records|universal|erossoundtrack|panchratan/i.test(label)) {
+      score += 100;
+    }
+
     return score;
   }
 
@@ -203,6 +222,9 @@ class JioSaavnService {
               audio96kbps: streams.audio96 || decrypted,
               hasLyrics: item.has_lyrics === "true" || item.more_info?.has_lyrics === "true",
               copyright: item.copyright_text || item.more_info?.copyright_text,
+              playCount: Number(item.play_count || item.more_info?.play_count || 0),
+              starring: this.cleanText(item.starring || item.more_info?.starring || ""),
+              label: this.cleanText(item.label || item.more_info?.label || item.copyright_text || ""),
             });
           }
         }
@@ -258,6 +280,9 @@ class JioSaavnService {
               audio160kbps: streams.audio160 || decrypted,
               audio96kbps: streams.audio96 || decrypted,
               hasLyrics: item.has_lyrics === "true" || item.more_info?.has_lyrics === "true",
+              playCount: Number(item.play_count || item.more_info?.play_count || 0),
+              starring: this.cleanText(item.starring || item.more_info?.starring || ""),
+              label: this.cleanText(item.label || item.more_info?.label || item.copyright_text || ""),
             });
           }
 
@@ -350,6 +375,36 @@ class JioSaavnService {
   }
 
   /**
+   * Generate an intelligent 10-15 song auto-queue based on current song's artist, composer, or album
+   */
+  public async getSmartQueue(currentSong: { songName: string; artistName: string; albumName?: string }): Promise<JioSaavnSong[]> {
+    try {
+      const primaryArtist = (currentSong.artistName || "").split(/[,&/]/)[0].trim();
+      const queries = [
+        `${primaryArtist} Best Hits`,
+        currentSong.albumName ? `${currentSong.albumName}` : "",
+        `${primaryArtist} Romantic Hits`,
+      ].filter(Boolean);
+
+      const songMap = new Map<string, JioSaavnSong>();
+      for (const q of queries) {
+        const res = await this.searchSong(q, 15);
+        if (res.success && res.songs) {
+          for (const s of res.songs) {
+            if (s.songName.toLowerCase() !== currentSong.songName.toLowerCase() && !songMap.has(s.id)) {
+              songMap.set(s.id, s);
+            }
+          }
+        }
+        if (songMap.size >= 12) break;
+      }
+      return Array.from(songMap.values());
+    } catch {
+      return [];
+    }
+  }
+
+  /**
    * Fetch song lyrics by songId
    */
   public async getLyrics(songId: string): Promise<{ success: boolean; lyrics?: string; copyright?: string }> {
@@ -368,6 +423,95 @@ class JioSaavnService {
       }
     } catch {}
     return { success: false };
+  }
+
+  /**
+   * YouTube & Spotify Grade Cognitive Ranking Engine
+   * Scores and diversifies preview candidates so the exact song envisioned by the user appears in top slots.
+   */
+  public rankCandidatesMindReader(query: string, rawCandidates: any[]): any[] {
+    if (!rawCandidates || rawCandidates.length === 0) return [];
+    const q = query.toLowerCase().replace(/[^a-z0-9\s]/g, " ").trim();
+    const qTokens = q.split(/\s+/).filter(Boolean);
+
+    const actorList = ["aamir khan", "amir khan", "aamir", "amir", "salman khan", "salman", "shah rukh khan", "shahrukh khan", "shah rukh", "shahrukh", "srk", "akshay kumar", "akshay", "ranbir kapoor", "ranbir", "hrithik roshan", "hrithik", "govinda", "amitabh bachchan", "amitabh", "ajay devgn", "ajay", "emraan hashmi", "emraan", "kartik aaryan", "kartik"];
+    const singerList = ["arijit singh", "arijit", "arjit", "udit narayan", "udit", "sonu nigam", "sonu", "shreya ghoshal", "shreya", "kishore kumar", "kishore", "lata mangeshkar", "lata", "mohammed rafi", "rafi", "alka yagnik", "alka", "kk", "diljit dosanjh", "diljit", "badshah", "honey singh", "honey", "pritam", "ar rahman", "rahman", "anirudh", "jubin nautiyal", "jubin", "atif aslam", "atif", "darshan raval", "sidhu moose wala"];
+
+    let queryTitleOnly = q;
+    for (const act of actorList) queryTitleOnly = queryTitleOnly.replace(new RegExp(`\\b${act}\\b`, "gi"), "");
+    for (const sng of singerList) queryTitleOnly = queryTitleOnly.replace(new RegExp(`\\b${sng}\\b`, "gi"), "");
+    queryTitleOnly = queryTitleOnly.replace(/\s+/g, " ").trim();
+
+    const scored = rawCandidates.map((c) => {
+      let score = 0;
+      const title = (c.songName || c.trackName || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").trim();
+      const artist = (c.artistName || "").toLowerCase();
+      const album = (c.albumName || "").toLowerCase();
+      const starring = (c.starring || "").toLowerCase();
+      const label = (c.label || "").toLowerCase();
+
+      // 1. Title Matching (Against both full query & queryTitleOnly)
+      const targetQuery = queryTitleOnly.length >= 3 ? queryTitleOnly : q;
+      if (title === targetQuery || title === `main ${targetQuery}` || `main ${title}` === targetQuery) {
+        score += 1200;
+      } else if (title.startsWith(targetQuery) || targetQuery.startsWith(title)) {
+        score += 750;
+      } else {
+        const titleTokens = title.split(/\s+/).filter(Boolean);
+        const matchCount = qTokens.filter((tok) => titleTokens.includes(tok)).length;
+        if (qTokens.length > 0) {
+          score += Math.round((matchCount / qTokens.length) * 450);
+        }
+      }
+
+      // 2. Popularity & Stream Weight (logarithmic)
+      const playCount = Number(c.playCount || (c.source === "spotify" ? 5000000 : 800000));
+      score += Math.min(500, Math.round(Math.log10(Math.max(1000, playCount)) * 65));
+
+      // 3. Entity Matching (Actor, Singer, Composer)
+      for (const act of actorList) {
+        if (q.includes(act) && (starring.includes(act) || artist.includes(act) || album.includes(act) || album.includes("deewana mujh sa nahin"))) {
+          score += 850; // Huge boost for matching requested star cast
+          break;
+        }
+      }
+
+      for (const sng of singerList) {
+        if (q.includes(sng) && (artist.includes(sng) || album.includes(sng) || starring.includes(sng))) {
+          score += 750; // Huge boost for matching requested primary singer/composer
+          break;
+        }
+      }
+
+      // 4. Major Record Label Authority Boost
+      if (label.match(/t-series|sony|zee|saregama|yrf|tips|universal|speed/)) {
+        score += 150;
+      }
+
+      // 5. Penalize low-quality karaoke/instrumental unless explicitly requested
+      if (!q.includes("instrumental") && title.includes("instrumental")) score -= 250;
+      if (!q.includes("karaoke") && title.includes("karaoke")) score -= 350;
+
+      return { ...c, mindScore: score };
+    });
+
+    // Sort by composite score descending
+    scored.sort((a, b) => b.mindScore - a.mindScore);
+
+    // Smart Variant Diversification (Ensure variety in top 4)
+    const result: any[] = [];
+    const seenTitles = new Set<string>();
+
+    for (const item of scored) {
+      const cleanT = (item.songName || item.trackName || "").toLowerCase().replace(/\s*\(.*\)/, "").trim();
+      if (!seenTitles.has(cleanT) || result.length < 2) {
+        seenTitles.add(cleanT);
+        result.push(item);
+      }
+      if (result.length >= 5) break;
+    }
+
+    return result.length > 0 ? result : scored.slice(0, 5);
   }
 }
 

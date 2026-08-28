@@ -319,6 +319,19 @@ async function startServer() {
     }
   });
 
+  // ── Music Smart Queue Endpoint (JioSaavn Radio) ──
+  app.get("/api/music/queue", async (req, res) => {
+    try {
+      const songName = String(req.query.songName || req.query.song || "");
+      const artistName = String(req.query.artistName || req.query.artist || "");
+      const albumName = String(req.query.albumName || req.query.album || "");
+      const queue = await jioSaavnService.getSmartQueue({ songName, artistName, albumName });
+      res.json({ success: true, count: queue.length, queue });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || e, queue: [] });
+    }
+  });
+
   app.get("/api/network/connected-devices", async (req, res) => {
     try {
       const force = req.query.refresh !== "false";
@@ -3448,6 +3461,60 @@ STYLE:
           },
         },
         {
+          name: "control_music",
+          description: "FULL VOICE MUSIC CONTROLLER: Perform any playback or sound control on currently playing music when DK asks (e.g. '10 second aage karo', '10s peeche karo', 'shuru se bajao', 'awaz badhao', 'volume 80% karo', 'awaz kam karo', 'mute/unmute karo', 'agla gana chalao', 'pichhla gana', 'bass badhao', '8D audio lagao', 'vocal boost karo', 'lyrics dikhao').",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              action: {
+                type: "STRING",
+                description: "Action to execute: 'seek_forward' (skip N seconds), 'seek_backward' (rewind N seconds), 'restart' (start from 0s), 'volume_up' (increase volume), 'volume_down' (decrease volume), 'set_volume' (set specific 0-100 level), 'next_song' (play next in queue), 'prev_song' (play previous in queue), 'set_bass' (boost bass 0-100), 'set_equalizer' (apply preset: 'bass_boost', 'vocal_clarity', '8d_spatial', 'party_punch', 'flat'), 'toggle_lyrics' (open/close lyrics)",
+              },
+              value: {
+                type: "STRING",
+                description: "Optional value: seconds to seek (default 10), volume level (0-100), bass level (0-100), or equalizer preset name",
+              },
+            },
+            required: ["action"],
+          },
+        },
+        {
+          name: "preview_song_options",
+          description: "PLAY 30s AUDIO PREVIEWS FOR DISAMBIGUATION: Call this tool whenever DK says the currently playing song is wrong ('ye song nahi hai', 'ye nahi hai', 'galat song hai', 'wrong song', 'ye wala nahi dusra chalao', 'kuch aur sunna tha'). Fetches 3-5 matching candidate songs with 30s preview audio and opens the interactive preview modal.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              query: {
+                type: "STRING",
+                description: "Song title or keywords to search candidate previews for (e.g. 'Raanjhanaa', 'Main Sehra Bandh Ke', 'Tere Bina')",
+              },
+            },
+            required: ["query"],
+          },
+        },
+        {
+          name: "select_preview_option",
+          description: "CONTROL SONG PREVIEW: Next/previous candidate preview or confirm selection when DK speaks during song preview (e.g. 'next', 'agla wala', 'pichhla', 'previous', 'haan ye wala bajao', 'confirm', 'ye wala chalao').",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              action: {
+                type: "STRING",
+                description: "'next' (play next preview), 'prev' (play previous preview), 'confirm' (launch selected full 320kbps song on JioSaavn), 'cancel'",
+              },
+              index: {
+                type: "NUMBER",
+                description: "Optional 1-based index (e.g. 1, 2, 3)",
+              },
+              songName: {
+                type: "STRING",
+                description: "Optional specific candidate song title to play",
+              },
+            },
+            required: ["action"],
+          },
+        },
+        {
           name: "send_music_on_whatsapp",
           description: "Find the real YouTube video link for a song and send it to DK's WhatsApp via Cloud API. If Cloud API fails and Baileys is disabled, inform DK and offer to enable Baileys as backup.",
           parameters: {
@@ -5510,6 +5577,148 @@ STYLE:
                     result = { success: true, message: "Boss, gana resume kar diya hai! ▶️" };
                   } catch (e: any) {
                     result = { success: false, message: `Music resume fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "control_music") {
+                  const { action, value } = call.args || {};
+                  const act = String(action || "").toLowerCase().trim();
+                  const val = value !== undefined ? String(value) : undefined;
+                  try {
+                    const payload = JSON.stringify({
+                      type: 'control_music',
+                      action: act,
+                      value: val,
+                    });
+                    safeSend(payload);
+                    for (const client of connectedClients) {
+                      if (client !== clientWs && client.readyState === 1) {
+                        try { client.send(payload); } catch {}
+                      }
+                    }
+
+                    let ackMsg = `Boss, music action '${act}' execute kar diya hai! 🎵`;
+                    if (act === "seek_forward") ackMsg = `Boss, gana ${val || '10'} seconds aage kar diya hai! ⏩`;
+                    else if (act === "seek_backward") ackMsg = `Boss, gana ${val || '10'} seconds peeche kar diya hai! ⏪`;
+                    else if (act === "restart") ackMsg = `Boss, gana shuru se play kar diya hai! 🔁`;
+                    else if (act === "volume_up") ackMsg = `Boss, awaz badha di hai! 🔊`;
+                    else if (act === "volume_down") ackMsg = `Boss, awaz kam kar di hai! 🔉`;
+                    else if (act === "set_volume") ackMsg = `Boss, volume ${val}% par set kar diya hai! 🔊`;
+                    else if (act === "next_song") ackMsg = `Boss, agla gana play kar rahe hain! ⏭️`;
+                    else if (act === "prev_song") ackMsg = `Boss, pichhla gana play kar rahe hain! ⏮️`;
+                    else if (act === "set_bass") ackMsg = `Boss, Bass Boost ${val || 'Ultra'} activate kar diya hai! 🎧🔊`;
+                    else if (act === "set_equalizer") ackMsg = `Boss, Equalizer preset '${val || 'Bass Boost'}' set kar diya hai! 🎛️`;
+                    else if (act === "toggle_lyrics") ackMsg = `Boss, Lyrics drawer toggle kar diya hai! 📜`;
+
+                    result = { success: true, message: ackMsg, action: act, value: val };
+                  } catch (e: any) {
+                    result = { success: false, message: `Music control fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "preview_song_options") {
+                  const songQuery = String(call.args?.query || "").trim();
+                  try {
+                    const rawPool: any[] = [];
+                    const seenKeys = new Set<string>();
+
+                    // 1. Parallel Ingestion from both Spotify and JioSaavn Catalogs
+                    const [spotifyRes, jioRes] = await Promise.all([
+                      publicApisService.searchMusic(songQuery || "Top Hits").catch(() => null),
+                      jioSaavnService.searchSong(songQuery || "Top Hits", 12).catch(() => null),
+                    ]);
+
+                    // Add Spotify Candidates
+                    if (spotifyRes?.success && Array.isArray(spotifyRes.tracks)) {
+                      for (const t of spotifyRes.tracks) {
+                        if (t.previewUrl && t.trackName) {
+                          const norm = (t.trackName + " " + (t.artistName || "")).toLowerCase().replace(/[^a-z0-9]/g, '');
+                          if (!seenKeys.has(norm)) {
+                            seenKeys.add(norm);
+                            rawPool.push({
+                              id: `spotify_${rawPool.length + 1}`,
+                              songName: t.trackName,
+                              artistName: t.artistName || "Artist",
+                              albumName: t.albumName,
+                              albumArt: t.albumArt,
+                              previewUrl: t.previewUrl,
+                              source: 'spotify',
+                              durationSec: t.durationSec || 30,
+                            });
+                          }
+                        }
+                      }
+                    }
+
+                    // Add JioSaavn Candidates
+                    if (jioRes?.success && Array.isArray(jioRes.songs)) {
+                      for (const s of jioRes.songs) {
+                        const norm = (s.songName + " " + (s.artistName || "")).toLowerCase().replace(/[^a-z0-9]/g, '');
+                        if (!seenKeys.has(norm)) {
+                          seenKeys.add(norm);
+                          rawPool.push({
+                            id: s.id,
+                            songName: s.songName,
+                            artistName: s.artistName,
+                            albumName: s.albumName,
+                            starring: s.starring,
+                            label: s.label,
+                            playCount: s.playCount,
+                            albumArt: s.albumArt500 || s.albumArt150,
+                            previewUrl: s.audio320kbps,
+                            audio320kbps: s.audio320kbps,
+                            fullAudioUrl: s.audio320kbps,
+                            source: 'jiosaavn',
+                            durationSec: s.durationSec,
+                          });
+                        }
+                      }
+                    }
+
+                    // 2. YouTube & Spotify Cognitive Ranking & Intent Scoring
+                    const rankedCandidates = jioSaavnService.rankCandidatesMindReader(songQuery, rawPool);
+
+                    if (rankedCandidates.length > 0) {
+                      const payload = JSON.stringify({
+                        type: 'song_preview_options',
+                        query: songQuery,
+                        candidates: rankedCandidates,
+                      });
+                      safeSend(payload);
+                      for (const client of connectedClients) {
+                        if (client !== clientWs && client.readyState === 1) {
+                          try { client.send(payload); } catch {}
+                        }
+                      }
+                      result = {
+                        success: true,
+                        count: rankedCandidates.length,
+                        topMatch: rankedCandidates[0]?.songName,
+                        primarySource: rankedCandidates[0]?.source || 'spotify',
+                        message: `Ok Boss! Main Spotify & JioSaavn se top ${rankedCandidates.length} matching songs ke 30-sec previews play kar rahi hoon. Sun kar batayein kaun sa wala chahiye! 🎵`,
+                        candidates: rankedCandidates,
+                      };
+                    } else {
+                      result = { success: false, message: `"${songQuery}" ke liye preview options nahi mile.` };
+                    }
+                  } catch (e: any) {
+                    result = { success: false, message: `Preview options search fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "select_preview_option") {
+                  const { action, index, songName } = call.args || {};
+                  const act = String(action || "").toLowerCase().trim();
+                  try {
+                    const payload = JSON.stringify({
+                      type: 'control_preview_option',
+                      action: act,
+                      index: Number(index) || undefined,
+                      songName: songName ? String(songName) : undefined,
+                    });
+                    safeSend(payload);
+                    for (const client of connectedClients) {
+                      if (client !== clientWs && client.readyState === 1) {
+                        try { client.send(payload); } catch {}
+                      }
+                    }
+                    result = { success: true, message: `Preview option '${act}' execute kiya gaya!`, action: act };
+                  } catch (e: any) {
+                    result = { success: false, message: `Preview action fail hua: ${e?.message || e}` };
                   }
                 } else if (call.name === "scan_connected_wifi_devices") {
                   const { forceRefresh } = call.args || {};

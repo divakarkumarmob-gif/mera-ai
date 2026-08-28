@@ -15,6 +15,7 @@ import { getAppToken, clearAppSession } from '@/utils/appSecurityClient';
 import { screenWakeLock } from '@/utils/screenWakeLock';
 import { MusicCapsule } from './MusicCapsule';
 import { MusicStudioModal } from './MusicStudioModal';
+import { SongPreviewModal, PreviewCandidate } from './SongPreviewModal';
 
 interface LiveAIInterfaceProps {
     onClose: () => void;
@@ -615,6 +616,10 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const [showBackupModal, setShowBackupModal] = useState(false);
     const [showWifiRadar, setShowWifiRadar] = useState(false);
     const [showMusicStudio, setShowMusicStudio] = useState(false);
+    const [showSongPreviewModal, setShowSongPreviewModal] = useState(false);
+    const [previewQuery, setPreviewQuery] = useState('');
+    const [previewCandidates, setPreviewCandidates] = useState<PreviewCandidate[]>([]);
+    const [activePreviewIndex, setActivePreviewIndex] = useState(0);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const captionBoxRef = useRef<HTMLDivElement>(null);
     const userScrolledUpRef = useRef(false);
@@ -629,6 +634,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const [nowPlayingMusic, setNowPlayingMusic] = useState<{
         trackName: string;
         artistName?: string;
+        albumName?: string;
         albumArt?: string;
         spotifyUrl?: string;
         youtubeMusicUrl?: string;
@@ -647,8 +653,127 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         hasLyrics?: boolean;
     } | null>(null);
     const musicAudioRef = useRef<HTMLAudioElement | null>(null);
+    const [musicCurrentTime, setMusicCurrentTime] = useState(0);
+    const [musicDuration, setMusicDuration] = useState(0);
+    const [musicQueue, setMusicQueue] = useState<any[]>([]);
+    const [musicEqPreset, setMusicEqPreset] = useState("flat");
+    const musicDspAudioCtxRef = useRef<AudioContext | null>(null);
+    const musicBassFilterRef = useRef<BiquadFilterNode | null>(null);
+    const musicMidFilterRef = useRef<BiquadFilterNode | null>(null);
+    const musicTrebleFilterRef = useRef<BiquadFilterNode | null>(null);
+    const musicPannerRef = useRef<StereoPannerNode | null>(null);
+    const music8dIntervalRef = useRef<any>(null);
+
+    // ── Web Audio DSP Equalizer & 8D Spatial Setup ────────────────────────────
+    const setupAudioDsp = useCallback((audio: HTMLAudioElement) => {
+        try {
+            const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+            if (!AudioCtx) return;
+            const ctx = new AudioCtx();
+            const source = ctx.createMediaElementSource(audio);
+
+            const bassFilter = ctx.createBiquadFilter();
+            bassFilter.type = 'lowshelf';
+            bassFilter.frequency.value = 120;
+            bassFilter.gain.value = 0;
+
+            const midFilter = ctx.createBiquadFilter();
+            midFilter.type = 'peaking';
+            midFilter.frequency.value = 1000;
+            midFilter.gain.value = 0;
+
+            const trebleFilter = ctx.createBiquadFilter();
+            trebleFilter.type = 'highshelf';
+            trebleFilter.frequency.value = 4000;
+            trebleFilter.gain.value = 0;
+
+            let panner: StereoPannerNode | null = null;
+            if (ctx.createStereoPanner) {
+                panner = ctx.createStereoPanner();
+                panner.pan.value = 0;
+            }
+
+            source.connect(bassFilter);
+            bassFilter.connect(midFilter);
+            midFilter.connect(trebleFilter);
+            if (panner) {
+                trebleFilter.connect(panner);
+                panner.connect(ctx.destination);
+            } else {
+                trebleFilter.connect(ctx.destination);
+            }
+
+            musicDspAudioCtxRef.current = ctx;
+            musicBassFilterRef.current = bassFilter;
+            musicMidFilterRef.current = midFilter;
+            musicTrebleFilterRef.current = trebleFilter;
+            musicPannerRef.current = panner;
+        } catch (err) {
+            console.warn('[Music DSP] AudioContext setup notice:', err);
+        }
+    }, []);
+
+    const applyEqPreset = useCallback((preset: string) => {
+        setMusicEqPreset(preset);
+        clearInterval(music8dIntervalRef.current);
+        const bass = musicBassFilterRef.current;
+        const mid = musicMidFilterRef.current;
+        const treble = musicTrebleFilterRef.current;
+        const panner = musicPannerRef.current;
+        if (!bass || !mid || !treble) return;
+
+        if (preset === 'bass_boost') {
+            bass.gain.value = 14; // +14dB Bass Punch
+            mid.gain.value = 0;
+            treble.gain.value = 2;
+            if (panner) panner.pan.value = 0;
+        } else if (preset === '8d_spatial') {
+            bass.gain.value = 6;
+            mid.gain.value = 2;
+            treble.gain.value = 4;
+            if (panner) {
+                let panVal = -1;
+                let direction = 1;
+                music8dIntervalRef.current = setInterval(() => {
+                    panVal += direction * 0.05;
+                    if (panVal >= 1) { panVal = 1; direction = -1; }
+                    if (panVal <= -1) { panVal = -1; direction = 1; }
+                    try { panner.pan.value = panVal; } catch {}
+                }, 80);
+            }
+        } else if (preset === 'vocal_clarity') {
+            bass.gain.value = -3;
+            mid.gain.value = 8;
+            treble.gain.value = 5;
+            if (panner) panner.pan.value = 0;
+        } else if (preset === 'party_punch') {
+            bass.gain.value = 10;
+            mid.gain.value = 2;
+            treble.gain.value = 7;
+            if (panner) panner.pan.value = 0;
+        } else {
+            // Flat / Studio
+            bass.gain.value = 0;
+            mid.gain.value = 0;
+            treble.gain.value = 0;
+            if (panner) panner.pan.value = 0;
+        }
+    }, []);
+
+    // ── Smart Auto-Queue Radio Engine ─────────────────────────────────────────
+    const fetchSmartQueue = useCallback(async (songName: string, artistName: string, albumName?: string) => {
+        try {
+            const url = getApiUrl(`/api/music/queue?songName=${encodeURIComponent(songName)}&artistName=${encodeURIComponent(artistName)}&albumName=${encodeURIComponent(albumName || '')}`);
+            const res = await fetch(url);
+            const data = await res.json();
+            if (data.success && Array.isArray(data.queue)) {
+                setMusicQueue(data.queue);
+            }
+        } catch {}
+    }, []);
 
     const stopMusicPlayback = useCallback(() => {
+        clearInterval(music8dIntervalRef.current);
         if (musicAudioRef.current) {
             musicAudioRef.current.pause();
             musicAudioRef.current.src = '';
@@ -659,6 +784,8 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
             iframe?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'stopVideo', args: [] }), '*');
         } catch { /* ignore */ }
         setNowPlayingMusic(null);
+        setMusicCurrentTime(0);
+        setMusicDuration(0);
     }, []);
 
     const playDirectSong = useCallback((song: {
@@ -680,9 +807,40 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         audio.preload = 'auto';
         if (directUrl) audio.src = directUrl;
         audio.volume = 0.85;
+
+        audio.ontimeupdate = () => {
+            setMusicCurrentTime(audio.currentTime);
+        };
+        audio.ondurationchange = () => {
+            setMusicDuration(audio.duration || 0);
+        };
         audio.onended = () => {
             setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: false } : null);
+            // Auto advance smart queue on song end
+            setMusicQueue(prev => {
+                if (prev.length > 0) {
+                    const nextSong = prev[0];
+                    const remaining = prev.slice(1);
+                    setTimeout(() => {
+                        playDirectSong({
+                            trackName: nextSong.songName,
+                            artistName: nextSong.artistName,
+                            albumName: nextSong.albumName,
+                            albumArt: nextSong.albumArt500 || nextSong.albumArt150,
+                            audioUrl: nextSong.audio320kbps || nextSong.audio160kbps,
+                            isJioSaavn: true,
+                            isFullSong: true,
+                            quality: "JioSaavn 320kbps Ultra-HD",
+                            songId: nextSong.id,
+                            hasLyrics: nextSong.hasLyrics,
+                        });
+                    }, 300);
+                    return remaining;
+                }
+                return [];
+            });
         };
+
         audio.onerror = (e) => {
             console.warn('[Music] Error playing direct CDN song on URL:', directUrl, e);
             if (directUrl.startsWith('http') && !directUrl.includes('/api/music/proxy-stream')) {
@@ -691,11 +849,16 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 audio.play().catch(err => console.warn('[Music] Proxy fallback catch:', err));
             }
         };
+
         musicAudioRef.current = audio;
+        setupAudioDsp(audio);
+        fetchSmartQueue(song.trackName, song.artistName, song.albumName);
+
         audio.play().then(() => {
             setNowPlayingMusic({
                 trackName: song.trackName,
                 artistName: song.artistName,
+                albumName: song.albumName,
                 albumArt: song.albumArt,
                 audioUrl: directUrl,
                 isJioSaavn: true,
@@ -718,7 +881,63 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 hasLyrics: song.hasLyrics,
             });
         });
-    }, [stopMusicPlayback]);
+    }, [stopMusicPlayback, setupAudioDsp, fetchSmartQueue]);
+
+    const playConfirmedCandidate = useCallback(async (chosen: PreviewCandidate) => {
+        setShowSongPreviewModal(false);
+        if (chosen.audio320kbps && chosen.source === 'jiosaavn') {
+            playDirectSong({
+                trackName: chosen.songName,
+                artistName: chosen.artistName,
+                albumName: chosen.albumName,
+                albumArt: chosen.albumArt,
+                audioUrl: chosen.audio320kbps,
+                isJioSaavn: true,
+                isFullSong: true,
+                quality: "JioSaavn 320kbps Ultra-HD",
+                songId: chosen.id,
+            });
+            return;
+        }
+
+        // Resolve 320kbps stream on JioSaavn for Spotify chosen track
+        try {
+            const query = `${chosen.songName} ${chosen.artistName}`.trim();
+            const res = await fetch(getApiUrl(`/api/music/search?q=${encodeURIComponent(query)}&limit=1`));
+            const data = await res.json();
+            if (data.success && data.songs && data.songs.length > 0) {
+                const jio = data.songs[0];
+                playDirectSong({
+                    trackName: jio.songName,
+                    artistName: jio.artistName,
+                    albumName: jio.albumName,
+                    albumArt: jio.albumArt500 || chosen.albumArt,
+                    audioUrl: jio.audio320kbps || jio.audio160kbps,
+                    isJioSaavn: true,
+                    isFullSong: true,
+                    quality: "JioSaavn 320kbps Ultra-HD",
+                    songId: jio.id,
+                    hasLyrics: jio.hasLyrics,
+                });
+                return;
+            }
+        } catch (err) {
+            console.warn("[Music Preview] JioSaavn 320k resolve warning:", err);
+        }
+
+        // Fallback to preview stream if resolution fails
+        playDirectSong({
+            trackName: chosen.songName,
+            artistName: chosen.artistName,
+            albumName: chosen.albumName,
+            albumArt: chosen.albumArt,
+            audioUrl: chosen.audio320kbps || chosen.fullAudioUrl || chosen.previewUrl,
+            isJioSaavn: true,
+            isFullSong: true,
+            quality: "HD Audio",
+            songId: chosen.id,
+        });
+    }, [playDirectSong]);
 
     const pauseMusicPlayback = useCallback(() => {
         if (musicAudioRef.current) {
@@ -750,6 +969,53 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         }
     }, [nowPlayingMusic?.isPlaying, pauseMusicPlayback, resumeMusicPlayback]);
 
+    const seekRelativeMusic = useCallback((deltaSeconds: number) => {
+        if (musicAudioRef.current) {
+            const newTime = Math.max(0, Math.min(musicAudioRef.current.duration || 9999, musicAudioRef.current.currentTime + deltaSeconds));
+            musicAudioRef.current.currentTime = newTime;
+            setMusicCurrentTime(newTime);
+        }
+    }, []);
+
+    const seekToMusic = useCallback((timeSeconds: number) => {
+        if (musicAudioRef.current) {
+            musicAudioRef.current.currentTime = timeSeconds;
+            setMusicCurrentTime(timeSeconds);
+        }
+    }, []);
+
+    const restartMusic = useCallback(() => {
+        if (musicAudioRef.current) {
+            musicAudioRef.current.currentTime = 0;
+            musicAudioRef.current.play().catch(() => {});
+            setMusicCurrentTime(0);
+            setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: true } : null);
+        }
+    }, []);
+
+    const playNextQueueSong = useCallback(() => {
+        if (musicQueue.length > 0) {
+            const nextSong = musicQueue[0];
+            setMusicQueue(prev => prev.slice(1));
+            playDirectSong({
+                trackName: nextSong.songName,
+                artistName: nextSong.artistName,
+                albumName: nextSong.albumName,
+                albumArt: nextSong.albumArt500 || nextSong.albumArt150,
+                audioUrl: nextSong.audio320kbps || nextSong.audio160kbps,
+                isJioSaavn: true,
+                isFullSong: true,
+                quality: "JioSaavn 320kbps Ultra-HD",
+                songId: nextSong.id,
+                hasLyrics: nextSong.hasLyrics,
+            });
+        }
+    }, [musicQueue, playDirectSong]);
+
+    const playPrevQueueSong = useCallback(() => {
+        restartMusic();
+    }, [restartMusic]);
+
     // ── MediaSession API for Background / Lockscreen Playback ─────────────────
     useEffect(() => {
         if (!nowPlayingMusic) {
@@ -764,7 +1030,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 navigator.mediaSession.metadata = new MediaMetadata({
                     title: nowPlayingMusic.trackName || 'Music Track',
                     artist: nowPlayingMusic.artistName || 'Friday Music',
-                    album: nowPlayingMusic.isYouTubeMusic ? 'YouTube Music HD' : 'Friday Audio Stream',
+                    album: nowPlayingMusic.albumName || (nowPlayingMusic.isYouTubeMusic ? 'YouTube Music HD' : 'JioSaavn 320kbps HD'),
                     artwork: nowPlayingMusic.albumArt ? [
                         { src: nowPlayingMusic.albumArt, sizes: '512x512', type: 'image/jpeg' },
                         { src: nowPlayingMusic.albumArt, sizes: '256x256', type: 'image/jpeg' },
@@ -773,28 +1039,35 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
 
                 navigator.mediaSession.playbackState = nowPlayingMusic.isPlaying ? 'playing' : 'paused';
 
-                navigator.mediaSession.setActionHandler('play', () => {
-                    if (musicAudioRef.current) {
-                        musicAudioRef.current.play();
-                        setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: true } : null);
-                    }
+                navigator.mediaSession.setActionHandler('play', () => resumeMusicPlayback());
+                navigator.mediaSession.setActionHandler('pause', () => pauseMusicPlayback());
+                navigator.mediaSession.setActionHandler('stop', () => stopMusicPlayback());
+                navigator.mediaSession.setActionHandler('seekbackward', (details) => {
+                    seekRelativeMusic(-(details.seekOffset || 10));
                 });
+                navigator.mediaSession.setActionHandler('seekforward', (details) => {
+                    seekRelativeMusic(details.seekOffset || 10);
+                });
+                navigator.mediaSession.setActionHandler('seekto', (details) => {
+                    if (details.seekTime !== undefined) seekToMusic(details.seekTime);
+                });
+                navigator.mediaSession.setActionHandler('nexttrack', () => playNextQueueSong());
+                navigator.mediaSession.setActionHandler('previoustrack', () => playPrevQueueSong());
 
-                navigator.mediaSession.setActionHandler('pause', () => {
-                    if (musicAudioRef.current) {
-                        musicAudioRef.current.pause();
-                        setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: false } : null);
-                    }
-                });
-
-                navigator.mediaSession.setActionHandler('stop', () => {
-                    stopMusicPlayback();
-                });
+                if (musicAudioRef.current && musicAudioRef.current.duration) {
+                    try {
+                        navigator.mediaSession.setPositionState({
+                            duration: musicAudioRef.current.duration,
+                            playbackRate: 1,
+                            position: musicAudioRef.current.currentTime,
+                        });
+                    } catch {}
+                }
             } catch (e) {
                 console.warn('[MediaSession] Setup error:', e);
             }
         }
-    }, [nowPlayingMusic, stopMusicPlayback]);
+    }, [nowPlayingMusic, stopMusicPlayback, resumeMusicPlayback, pauseMusicPlayback, seekRelativeMusic, seekToMusic, playNextQueueSong, playPrevQueueSong]);
 
     // ── Smooth Audio Ducking when Friday is speaking ──────────────────────────
     useEffect(() => {
@@ -1698,6 +1971,56 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     pauseMusicPlayback();
                 } else if (msg.type === 'resume_music') {
                     resumeMusicPlayback();
+                } else if (msg.type === 'control_music') {
+                    const act = String(msg.action || '').toLowerCase().trim();
+                    const val = msg.value;
+                    if (act === 'seek_forward') {
+                        seekRelativeMusic(Number(val) || 10);
+                    } else if (act === 'seek_backward') {
+                        seekRelativeMusic(-(Number(val) || 10));
+                    } else if (act === 'restart') {
+                        restartMusic();
+                    } else if (act === 'volume_up') {
+                        if (musicAudioRef.current) {
+                            musicAudioRef.current.volume = Math.min(1, musicAudioRef.current.volume + 0.15);
+                        }
+                    } else if (act === 'volume_down') {
+                        if (musicAudioRef.current) {
+                            musicAudioRef.current.volume = Math.max(0, musicAudioRef.current.volume - 0.15);
+                        }
+                    } else if (act === 'set_volume') {
+                        if (musicAudioRef.current && val !== undefined) {
+                            musicAudioRef.current.volume = Math.max(0, Math.min(1, Number(val) / 100));
+                        }
+                    } else if (act === 'next_song') {
+                        playNextQueueSong();
+                    } else if (act === 'prev_song') {
+                        playPrevQueueSong();
+                    } else if (act === 'set_bass') {
+                        applyEqPreset('bass_boost');
+                    } else if (act === 'set_equalizer') {
+                        applyEqPreset(val || 'bass_boost');
+                    }
+                } else if (msg.type === 'song_preview_options') {
+                    pauseMusicPlayback();
+                    setPreviewQuery(msg.query || '');
+                    setPreviewCandidates(msg.candidates || []);
+                    setActivePreviewIndex(0);
+                    setShowSongPreviewModal(true);
+                } else if (msg.type === 'control_preview_option') {
+                    const act = String(msg.action || '').toLowerCase().trim();
+                    if (act === 'next') {
+                        setActivePreviewIndex(prev => (previewCandidates.length > 0 ? (prev + 1) % previewCandidates.length : 0));
+                    } else if (act === 'prev') {
+                        setActivePreviewIndex(prev => (previewCandidates.length > 0 ? (prev - 1 + previewCandidates.length) % previewCandidates.length : 0));
+                    } else if (act === 'confirm' || act === 'select') {
+                        const chosen = previewCandidates[activePreviewIndex] || (msg.songName ? previewCandidates.find(c => c.songName.toLowerCase().includes(msg.songName.toLowerCase())) : null) || previewCandidates[0];
+                        if (chosen) {
+                            playConfirmedCandidate(chosen);
+                        }
+                    } else if (act === 'cancel') {
+                        setShowSongPreviewModal(false);
+                    }
                 }
             } catch (err) {
                 console.warn("[LiveAIInterface] Error processing socket message:", err);
@@ -2552,6 +2875,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 nowPlaying={nowPlayingMusic ? {
                     trackName: nowPlayingMusic.trackName,
                     artistName: nowPlayingMusic.artistName || 'Artist',
+                    albumName: nowPlayingMusic.albumName,
                     albumArt: nowPlayingMusic.albumArt,
                     isPlaying: !!nowPlayingMusic.isPlaying,
                     quality: nowPlayingMusic.quality,
@@ -2559,8 +2883,31 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     songId: nowPlayingMusic.songId,
                     hasLyrics: nowPlayingMusic.hasLyrics,
                 } : null}
+                currentTime={musicCurrentTime}
+                duration={musicDuration}
+                queue={musicQueue}
+                eqPreset={musicEqPreset}
                 onPlayPause={toggleMusicPlayPause}
                 onStop={stopMusicPlayback}
+                onSeek={seekToMusic}
+                onSeekRelative={seekRelativeMusic}
+                onRestart={restartMusic}
+                onNextTrack={playNextQueueSong}
+                onPreviousTrack={playPrevQueueSong}
+                onSelectEqPreset={applyEqPreset}
+                onPlayQueueSong={(qSong) => {
+                    playDirectSong({
+                        trackName: qSong.songName,
+                        artistName: qSong.artistName,
+                        albumName: qSong.albumName,
+                        albumArt: qSong.albumArt500,
+                        audioUrl: qSong.audio320kbps,
+                        isJioSaavn: true,
+                        isFullSong: true,
+                        quality: "JioSaavn 320kbps Ultra-HD",
+                        songId: qSong.id,
+                    });
+                }}
                 onVolumeChange={(vol) => {
                     if (musicAudioRef.current) {
                         musicAudioRef.current.volume = vol;
@@ -2574,6 +2921,18 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 onPlaySong={playDirectSong}
                 currentPlayingSongName={nowPlayingMusic?.trackName}
                 isPlaying={nowPlayingMusic?.isPlaying}
+            />
+
+            {/* Song Disambiguation 30s Audio Preview Modal */}
+            <SongPreviewModal
+                isOpen={showSongPreviewModal}
+                query={previewQuery}
+                candidates={previewCandidates}
+                currentIndex={activePreviewIndex}
+                onClose={() => setShowSongPreviewModal(false)}
+                onNextPreview={() => setActivePreviewIndex(prev => (previewCandidates.length > 0 ? (prev + 1) % previewCandidates.length : 0))}
+                onPrevPreview={() => setActivePreviewIndex(prev => (previewCandidates.length > 0 ? (prev - 1 + previewCandidates.length) % previewCandidates.length : 0))}
+                onSelectCandidate={playConfirmedCandidate}
             />
         </div>
     );
