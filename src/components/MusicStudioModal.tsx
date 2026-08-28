@@ -36,18 +36,52 @@ interface MusicStudioModalProps {
   isPlaying?: boolean;
 }
 
-const QUICK_TRENDING_CHIPS = [
-  "Raanjhanaa",
-  "Kesariya",
-  "Arijit Singh",
-  "Sidhu Moosewala",
-  "Tum Hi Ho",
-  "Lofi Flip",
-  "Pritam Hits",
-  "Romantic Hindi",
-  "Shreya Ghoshal",
-  "Apna Bana Le",
+// User-specified exact genre categories
+const MUSIC_CATEGORY_TABS = [
+  { id: "all", label: "✨ All", query: "Trending Bollywood Hits" },
+  { id: "hindi_new", label: "🔥 Hindi New", query: "Hindi Hits" },
+  { id: "hindi_old", label: "📻 Hindi Old", query: "Kishore Kumar Lata Mangeshkar" },
+  { id: "bhojpuri", label: "🌾 Bhojpuri", query: "Bhojpuri" },
+  { id: "phonk", label: "⚡ Phonk", query: "Phonk" },
+  { id: "haryanvi", label: "🚜 Haryanvi", query: "Haryanvi" },
+  { id: "punjabi", label: "🕺 Punjabi", query: "Punjabi Hits" },
 ];
+
+/**
+ * Text highlighter component for matched search tokens
+ */
+function HighlightText({ text, query }: { text: string; query: string }) {
+  if (!text) return null;
+  if (!query || !query.trim()) return <span>{text}</span>;
+
+  const words = query
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w.length > 1)
+    .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+
+  if (words.length === 0) return <span>{text}</span>;
+
+  const regex = new RegExp(`(${words.join("|")})`, "gi");
+  const parts = text.split(regex);
+
+  return (
+    <span>
+      {parts.map((part, i) =>
+        regex.test(part) ? (
+          <span
+            key={i}
+            className="text-cyan-300 font-extrabold bg-cyan-500/25 px-1 py-0.5 rounded shadow-[0_0_8px_rgba(6,182,212,0.4)]"
+          >
+            {part}
+          </span>
+        ) : (
+          <span key={i}>{part}</span>
+        )
+      )}
+    </span>
+  );
+}
 
 export const MusicStudioModal: React.FC<MusicStudioModalProps> = ({
   isOpen,
@@ -57,6 +91,7 @@ export const MusicStudioModal: React.FC<MusicStudioModalProps> = ({
   isPlaying,
 }) => {
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedTab, setSelectedTab] = useState("all");
   const [results, setResults] = useState<SongItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
@@ -64,18 +99,19 @@ export const MusicStudioModal: React.FC<MusicStudioModalProps> = ({
   // Auto search on initial open if empty
   useEffect(() => {
     if (isOpen && results.length === 0 && !hasSearched) {
-      handleSearch("Raanjhanaa");
+      handleSearch("Trending Bollywood Hits");
     }
   }, [isOpen]);
 
   if (!isOpen) return null;
 
-  const handleSearch = async (queryToSearch?: string) => {
+  const handleSearch = async (queryToSearch?: string, tabId?: string) => {
     const q = (queryToSearch !== undefined ? queryToSearch : searchQuery).trim();
     if (!q) return;
     setLoading(true);
     setHasSearched(true);
     if (queryToSearch) setSearchQuery(queryToSearch);
+    if (tabId) setSelectedTab(tabId);
 
     try {
       const res = await fetch(`/api/music/search?query=${encodeURIComponent(q)}`);
@@ -121,7 +157,7 @@ export const MusicStudioModal: React.FC<MusicStudioModalProps> = ({
         <div className="absolute -bottom-24 -left-24 w-60 h-60 bg-fuchsia-500/15 rounded-full blur-3xl pointer-events-none" />
 
         {/* Modal Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-white/10 shrink-0">
+        <div className="flex items-center justify-between pb-3 border-b border-white/10 shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-cyan-500 to-fuchsia-600 flex items-center justify-center shadow-[0_0_20px_rgba(6,182,212,0.4)]">
               <Disc3 className="w-5 h-5 text-white animate-spin" style={{ animationDuration: "10s" }} />
@@ -130,10 +166,10 @@ export const MusicStudioModal: React.FC<MusicStudioModalProps> = ({
               <div className="flex items-center gap-2">
                 <h2 className="text-lg font-bold text-white tracking-wide">JioSaavn 320kbps HD Music Studio</h2>
                 <span className="px-2 py-0.5 rounded-full bg-cyan-950 border border-cyan-400/40 text-[10px] font-semibold text-cyan-300">
-                  Pure Audio
+                  Priority Search
                 </span>
               </div>
-              <p className="text-xs text-zinc-400">Search millions of songs, direct background audio & lyrics</p>
+              <p className="text-xs text-zinc-400">Hindi New, Hindi Old, Bhojpuri, Phonk, Haryanvi & Punjabi in 320kbps HD</p>
             </div>
           </div>
 
@@ -146,7 +182,7 @@ export const MusicStudioModal: React.FC<MusicStudioModalProps> = ({
         </div>
 
         {/* Search Bar Input */}
-        <div className="mt-4 shrink-0">
+        <div className="mt-3 shrink-0">
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -159,7 +195,7 @@ export const MusicStudioModal: React.FC<MusicStudioModalProps> = ({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search any song, artist, album (e.g. Raanjhanaa, Kesariya, Arijit Singh)..."
+              placeholder="Search any song, artist, genre (e.g. Hindi Old, Bhojpuri, Phonk, Arijit)..."
               className="w-full pl-11 pr-24 py-3 bg-zinc-900/90 border border-white/15 focus:border-cyan-400/60 rounded-2xl text-sm text-white placeholder-zinc-500 outline-none transition-all shadow-inner focus:shadow-[0_0_20px_rgba(6,182,212,0.2)]"
             />
             <button
@@ -170,34 +206,43 @@ export const MusicStudioModal: React.FC<MusicStudioModalProps> = ({
               {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Search"}
             </button>
           </form>
+        </div>
 
-          {/* Quick Trending Filter Chips */}
-          <div className="flex items-center gap-1.5 mt-3 overflow-x-auto pb-1 scrollbar-none">
-            <span className="text-[11px] font-semibold text-zinc-400 flex items-center gap-1 shrink-0 mr-1">
-              <Flame className="w-3 h-3 text-orange-400" /> Trending:
-            </span>
-            {QUICK_TRENDING_CHIPS.map((chip, i) => (
-              <button
-                key={i}
-                onClick={() => handleSearch(chip)}
-                className="px-2.5 py-1 rounded-full bg-zinc-900 border border-white/10 hover:border-cyan-400/40 text-[11px] text-zinc-300 hover:text-cyan-300 whitespace-nowrap transition-all active:scale-95"
-              >
-                {chip}
-              </button>
-            ))}
-          </div>
+        {/* User-Requested Category Filter Tabs (Hindi New, Hindi Old, Bhojpuri, Phonk, Haryanvi, Punjabi) */}
+        <div className="flex items-center gap-2 mt-3 overflow-x-auto pb-1 scrollbar-none shrink-0">
+          {MUSIC_CATEGORY_TABS.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => handleSearch(tab.query, tab.id)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all active:scale-95 cursor-pointer ${
+                selectedTab === tab.id
+                  ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-black shadow-[0_0_15px_rgba(6,182,212,0.5)] font-bold"
+                  : "bg-zinc-900 border border-white/10 text-zinc-300 hover:border-cyan-400/40 hover:text-cyan-300"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Results Header */}
+        <div className="flex items-center justify-between mt-3 text-xs text-zinc-400 shrink-0 px-1">
+          <span>{results.length > 0 ? `${results.length} Songs Loaded` : "No Songs"}</span>
+          <span className="text-[10px] text-cyan-400">⚡ 320kbps HD Audio Available</span>
         </div>
 
         {/* Results Container */}
-        <div className="flex-1 overflow-y-auto mt-4 pr-1 space-y-2.5">
+        <div className="flex-1 overflow-y-auto mt-2 pr-1 space-y-2">
           {loading ? (
             <div className="flex flex-col items-center justify-center py-16 text-zinc-500 gap-3">
               <Loader2 className="w-8 h-8 animate-spin text-cyan-400" />
-              <p className="text-sm">JioSaavn se 320kbps HD streams fetch ho rahe hain...</p>
+              <p className="text-sm">JioSaavn se 320kbps HD songs fetch ho rahe hain...</p>
             </div>
           ) : results.length > 0 ? (
             results.map((song) => {
-              const isCurrentSong = currentPlayingSongName && currentPlayingSongName.toLowerCase().includes(song.songName.toLowerCase());
+              const isCurrentSong =
+                currentPlayingSongName &&
+                currentPlayingSongName.toLowerCase().includes(song.songName.toLowerCase());
               return (
                 <div
                   key={song.id}
@@ -223,10 +268,12 @@ export const MusicStudioModal: React.FC<MusicStudioModalProps> = ({
                       )}
                     </div>
 
-                    {/* Details */}
+                    {/* Details with Highlighted Matched Words */}
                     <div className="min-w-0">
                       <div className="font-bold text-sm text-white truncate group-hover:text-cyan-300 transition-colors flex items-center gap-2">
-                        <span>{song.songName}</span>
+                        <span>
+                          <HighlightText text={song.songName} query={searchQuery} />
+                        </span>
                         {song.hasLyrics && (
                           <span className="px-1.5 py-0.2 rounded bg-zinc-800 text-[9px] text-zinc-400 font-normal">
                             Lyrics
@@ -234,11 +281,21 @@ export const MusicStudioModal: React.FC<MusicStudioModalProps> = ({
                         )}
                       </div>
                       <div className="text-xs text-zinc-400 truncate mt-0.5">
-                        {song.artistName} {song.albumName ? `• ${song.albumName}` : ""}
+                        <HighlightText text={song.artistName} query={searchQuery} />{" "}
+                        {song.albumName ? (
+                          <>
+                            • <HighlightText text={song.albumName} query={searchQuery} />
+                          </>
+                        ) : null}
                       </div>
                       <div className="flex items-center gap-2 mt-1 text-[10px] text-zinc-500">
                         <span className="text-cyan-400 font-semibold">⚡ 320kbps HD</span>
-                        {song.durationSec ? <span>• {Math.floor(song.durationSec / 60)}:{(song.durationSec % 60).toString().padStart(2, '0')}</span> : null}
+                        {song.durationSec ? (
+                          <span>
+                            • {Math.floor(song.durationSec / 60)}:
+                            {(song.durationSec % 60).toString().padStart(2, "0")}
+                          </span>
+                        ) : null}
                       </div>
                     </div>
                   </div>
@@ -246,7 +303,7 @@ export const MusicStudioModal: React.FC<MusicStudioModalProps> = ({
                   {/* Play Action Button */}
                   <div className="shrink-0 ml-3">
                     <button
-                      className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${
+                      className={`w-9 h-9 rounded-full flex items-center justify-center transition-all cursor-pointer ${
                         isCurrentSong && isPlaying
                           ? "bg-cyan-400 text-black shadow-[0_0_15px_rgba(6,182,212,0.6)]"
                           : "bg-white/10 group-hover:bg-cyan-500 group-hover:text-black text-white"
