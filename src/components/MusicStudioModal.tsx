@@ -100,9 +100,18 @@ export const MusicStudioModal: React.FC<MusicStudioModalProps> = ({
   // Auto search on initial open if empty
   useEffect(() => {
     if (isOpen && results.length === 0 && !hasSearched) {
-      handleSearch("Trending Bollywood Hits");
+      handleSearch("Trending Bollywood Hits", "all");
     }
   }, [isOpen]);
+
+  // Real-time live debounced search as user types
+  useEffect(() => {
+    if (!isOpen || !searchQuery.trim() || selectedTab !== "all") return;
+    const timer = setTimeout(() => {
+      handleSearch(searchQuery, "all");
+    }, 380);
+    return () => clearTimeout(timer);
+  }, [searchQuery, isOpen, selectedTab]);
 
   if (!isOpen) return null;
 
@@ -195,7 +204,10 @@ export const MusicStudioModal: React.FC<MusicStudioModalProps> = ({
             <input
               type="text"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setSelectedTab("all");
+              }}
               placeholder="Search any song, artist, genre (e.g. Hindi Old, Bhojpuri, Phonk, Arijit)..."
               className="w-full pl-11 pr-24 py-3 bg-zinc-900/90 border border-white/15 focus:border-cyan-400/60 rounded-2xl text-sm text-white placeholder-zinc-500 outline-none transition-all shadow-inner focus:shadow-[0_0_20px_rgba(6,182,212,0.2)]"
             />
