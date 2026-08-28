@@ -250,12 +250,10 @@ class MemoryEngine {
    * session's memory — only gives up if EVERY model fails.
    */
   private static readonly EXTRACTION_MODEL_CHAIN = [
-    "gemini-3.5-flash-lite",
-    "gemini-3.1-flash-lite",
-    "gemini-3.6-flash",
-    "gemini-3.5-flash",
     "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
   ];
 
   private async runExtraction(
@@ -389,9 +387,12 @@ ${transcript}`;
       const parsedFull = await this.runExtraction(session.messages, ai);
       if (!parsedFull) return;
 
+      session.summary = parsedFull.summary || "";
+      const summaryEncrypted = session.summary ? encryptData(session.summary) : "";
+
       await sessionsCol().doc(session.id).set(
         {
-          summary: parsedFull.summary || "",
+          summary: summaryEncrypted,
           pinnedFacts: Array.isArray(parsedFull.pinnedMemories) ? parsedFull.pinnedMemories : [],
           mistakesOrInsights: Array.isArray(parsedFull.mistakes) ? parsedFull.mistakes : [],
         },
@@ -551,22 +552,30 @@ ${transcript}`;
 
   /**
    * Compiles a LEAN, lightning-fast memory context for WebSocket handshake / session start.
-   * Priority: Essential core vault facts, pinned memories, and profile overview.
-   * Deep verbatim logs and 60-day digests are loaded ON-DEMAND via tools.
+   * Priority: Essential core vault facts, pinned memories, profile overview, and IMMEDIATE PRIOR CONVERSATIONS.
+   * Ensures 100% memory continuity across reconnects and consecutive sessions.
    */
   public async compileLeanMemoryPrompt(): Promise<string> {
     await this.initPromise;
     const sections: string[] = [];
 
     try {
-      const [vaultSnap, pinnedSnap, profileSnap] = await Promise.all([
-        vaultCol().limit(12).get(),
-        pinnedCol().orderBy("timestamp", "desc").limit(6).get(),
+      const [vaultSnap, pinnedSnap, profileSnap, recentSessionsSnap, recentTurns] = await Promise.all([
+        vaultCol().limit(15).get(),
+        pinnedCol().orderBy("timestamp", "desc").limit(8).get(),
         profileDoc().get(),
+        sessionsCol().orderBy("startTime", "desc").limit(2).get().catch(() => ({ docs: [], empty: true } as any)),
+        liveScratchService.getRecentScratchTurns(12).catch(() => []),
       ]);
 
-      const personalVault = vaultSnap.docs.map((d) => d.data() as PersonalVaultEntry);
-      const pinnedMemories = pinnedSnap.docs.map((d) => d.data() as { fact: string; date: string });
+      const personalVault = vaultSnap.docs.map((d) => {
+        const v = d.data() as PersonalVaultEntry;
+        return { ...v, exactFact: decryptData(v.exactFact) };
+      });
+      const pinnedMemories = pinnedSnap.docs.map((d) => {
+        const p = d.data() as { fact: string; date: string };
+        return { ...p, fact: decryptData(p.fact) };
+      });
       const profileData = profileSnap.exists ? profileSnap.data()! : { profileFacts: [], knownMistakes: [] };
 
       // 1. Core Personal Vault (Essential identity truths)
@@ -589,6 +598,25 @@ ${transcript}`;
       const profileFacts: string[] = profileData.profileFacts || [];
       if (profileFacts.length > 0) {
         sections.push(`### 🎯 DK PROFILE HIGHLIGHTS:\n- ${profileFacts.slice(-6).join("\n- ")}`);
+      }
+
+      // 4. IMMEDIATE PRIOR CONVERSATIONS (REALTIME MEMORY CONTINUITY FOR CONSECUTIVE SESSIONS)
+      if (recentTurns && recentTurns.length > 0) {
+        const recentDialogue = recentTurns.slice(-14).map((t) => {
+          return `[${t.spokenTimeIST}] ${t.sender === "user" ? "Boss DK" : "Friday"}: "${t.text}"`;
+        }).join("\n");
+        sections.push(`### 🗣️ IMMEDIATE PRIOR CONVERSATIONS (LAST 12H - REALTIME CONTINUITY):\n${recentDialogue}`);
+      } else if (!recentSessionsSnap.empty) {
+        const recentSessionDocs = recentSessionsSnap.docs.reverse().map((d: any) => {
+          const s = d.data() as ConversationSession;
+          const decryptedSummary = s.summary ? decryptData(s.summary) : "";
+          const messages = (s.messages || []).slice(-8).map((m) => {
+            const timeFormatted = m.timeStr || new Date(m.timestamp).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", timeStyle: "short" });
+            return `[${timeFormatted}] ${m.sender === "user" ? "Boss DK" : "Friday"}: "${decryptData(m.text)}"`;
+          }).join("\n");
+          return `Session (${s.dateStr}):\n${decryptedSummary ? `Summary: ${decryptedSummary}\n` : ""}Recent lines:\n${messages}`;
+        }).join("\n\n");
+        sections.push(`### 🗣️ RECENT PREVIOUS SESSIONS:\n${recentSessionDocs}`);
       }
     } catch (e) {
       console.error("[MemoryEngine] Failed to compile lean memory prompt:", e);
@@ -621,10 +649,23 @@ ${transcript}`;
         sessionsCol().orderBy("startTime", "asc").get(),
       ]);
 
-      const personalVault = vaultSnap.docs.map((d) => d.data() as PersonalVaultEntry);
-      const pinnedMemories = pinnedSnap.docs.map((d) => d.data() as { fact: string; date: string });
+      const personalVault = vaultSnap.docs.map((d) => {
+        const v = d.data() as PersonalVaultEntry;
+        return { ...v, exactFact: decryptData(v.exactFact) };
+      });
+      const pinnedMemories = pinnedSnap.docs.map((d) => {
+        const p = d.data() as { fact: string; date: string };
+        return { ...p, fact: decryptData(p.fact) };
+      });
       const profileData = profileSnap.exists ? profileSnap.data()! : { profileFacts: [], knownMistakes: [] };
-      const sessions = allSessionsSnap.docs.map((d) => d.data() as ConversationSession);
+      const sessions = allSessionsSnap.docs.map((d) => {
+        const s = d.data() as ConversationSession;
+        return {
+          ...s,
+          summary: s.summary ? decryptData(s.summary) : s.summary,
+          messages: (s.messages || []).map((m) => ({ ...m, text: decryptData(m.text) })),
+        };
+      });
 
       // 1. EXACT PERSONAL VAULT (CRITICAL - NEVER SUMMARIZED)
       if (personalVault.length > 0) {

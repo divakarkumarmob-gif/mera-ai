@@ -43,6 +43,7 @@ import { telegramSecurityBotService } from "./src/services/telegramSecurityBotSe
 import { networkDeviceScannerService } from "./src/services/networkDeviceScannerService";
 import { jioSaavnService } from "./src/services/jioSaavnService";
 import { youtubeMusicService } from "./src/services/youtubeMusicService";
+import { calendarEventService } from "./src/services/calendarEventService";
 
 const PORT = Number(process.env.PORT) || 3000;
 const isProduction = process.env.NODE_ENV === "production";
@@ -1769,13 +1770,35 @@ async function startServer() {
         timeStyle: "medium",
       });
 
-      const [memoryContext, contactsList, voiceProfilesContext, bossRoutineContext, fridayLearningContext] = await Promise.all([
+      const [
+        memoryContext,
+        contactsList,
+        voiceProfilesContext,
+        bossRoutineContext,
+        fridayLearningContext,
+        calendarMeetingsRes,
+        activeRemindersList,
+      ] = await Promise.all([
         memoryEngine.compileLeanMemoryPrompt(),
         contactsService.compileContactsForPrompt(),
         voiceBiometricsService.compileVoiceProfilesPromptContext(),
         bossRoutineService.compileRoutinePromptContext(nowIST),
         fridayLearningService.compileLearningPromptContext(),
+        calendarEventService.getUpcomingMeetings().catch(() => ({ events: [] })),
+        toolsEngine.getReminders().catch(() => []),
       ]);
+
+      let activeScheduleContext = "";
+      const upcomingMeetings = (calendarMeetingsRes as any)?.events || [];
+      if (upcomingMeetings.length > 0) {
+        activeScheduleContext += `\n📅 ACTIVE/UPCOMING SCHEDULED MEETINGS & TASKS:\n` +
+          upcomingMeetings.map((e: any) => `- "${e.title}" at ${e.timeString}`).join("\n");
+      }
+      const pendingReminders = (activeRemindersList as any[])?.filter((r: any) => !r.isCompleted) || [];
+      if (pendingReminders.length > 0) {
+        activeScheduleContext += `\n⏰ PENDING REMINDERS & ALERTS:\n` +
+          pendingReminders.map((r: any) => `- "${r.task}" (Due: ${r.timeStr})`).join("\n");
+      }
 
       return `YOU ARE FRIDAY: DK's ultra-intelligent, warm, witty, human-like personal voice AI companion.
 
@@ -1852,8 +1875,9 @@ ${voiceProfilesContext}
 ${memoryContext}
 
 ============================================================
-🕒 ACTIVE HABIT & ROUTINE CONTEXT:
+🕒 ACTIVE HABIT, SCHEDULE & ROUTINE CONTEXT:
 ${bossRoutineContext}
+${activeScheduleContext}
 
 ${fridayLearningContext}
 
