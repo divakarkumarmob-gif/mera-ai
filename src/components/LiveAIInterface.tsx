@@ -1983,23 +1983,27 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     if (msg.report) {
                         setResearchReport(msg.report);
                     }
-                } else if (msg.type === 'play_music') {
+                } else if (msg.type === 'play_music' || msg.type === 'play_youtube_music') {
                     // Stop any ongoing native audio
                     stopMusicPlayback();
+                    const track = msg.track || msg;
+                    const isYt = !!(track.isYouTube || track.isYouTubeMusic || track.videoId || msg.type === 'play_youtube_music');
                     const trackInfo = {
-                        trackName: msg.trackName || 'Music Track',
-                        artistName: msg.artistName || 'YouTube Music',
-                        albumArt: msg.albumArt || (msg.videoId ? `https://img.youtube.com/vi/${msg.videoId}/hqdefault.jpg` : undefined),
-                        spotifyUrl: msg.spotifyUrl,
-                        youtubeMusicUrl: msg.youtubeMusicUrl || (msg.videoId ? `https://music.youtube.com/watch?v=${msg.videoId}` : undefined),
-                        embedUrl: msg.embedUrl || (msg.videoId ? `https://www.youtube-nocookie.com/embed/${msg.videoId}?autoplay=1&enablejsapi=1&controls=1&modestbranding=1&playsinline=1&rel=0` : undefined),
-                        videoId: msg.videoId,
+                        trackName: track.trackName || 'Music Track',
+                        artistName: track.artistName || (isYt ? 'YouTube Music' : 'Friday Music'),
+                        albumArt: track.albumArt || (track.videoId ? `https://img.youtube.com/vi/${track.videoId}/hqdefault.jpg` : undefined),
+                        spotifyUrl: track.spotifyUrl,
+                        youtubeMusicUrl: track.youtubeMusicUrl || (track.videoId ? `https://music.youtube.com/watch?v=${track.videoId}` : undefined),
+                        embedUrl: track.embedUrl || (track.videoId ? `https://www.youtube-nocookie.com/embed/${track.videoId}?autoplay=1&enablejsapi=1&controls=1&modestbranding=1&playsinline=1&rel=0` : undefined),
+                        videoId: track.videoId,
                         isFullSong: true,
-                        isYouTubeMusic: true,
-                        quality: msg.quality || 'YouTube Music HD',
-                        durationSec: msg.durationSec,
-                        audioUrl: msg.audioUrl,
-                        fallbackAudioUrl: msg.fallbackAudioUrl,
+                        isYouTube: isYt,
+                        isYouTubeMusic: isYt,
+                        isJioSaavn: !isYt && !!track.isJioSaavn,
+                        quality: track.quality || (isYt ? 'YouTube Pro HD' : 'JioSaavn 320kbps HD'),
+                        durationSec: track.durationSec,
+                        audioUrl: track.audioUrl || track.streamUrl,
+                        fallbackAudioUrl: track.fallbackAudioUrl,
                         isPlaying: true,
                         hasError: false,
                     };
@@ -2009,6 +2013,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         setNowPlayingMusic({
                             ...trackInfo,
                             isYouTubeMusic: true,
+                            isYouTube: true,
                             isPlaying: true,
                             hasError: false,
                         });

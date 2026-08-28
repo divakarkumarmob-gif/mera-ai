@@ -3623,14 +3623,11 @@ class PublicApisService {
       const ytResult = await youtubeMusicService.searchTracks(q, 10);
       if (ytResult.success && ytResult.tracks.length > 0) {
         const top = ytResult.tracks[0];
-        
-        // Also probe if high-speed 320kbps pure audio CDN is available via JioSaavn catalog
-        let audioDirectUrl = "";
+
+        // Try extracting direct high-quality YouTube audio stream
+        let directAudioUrl = "";
         try {
-          const saavnMatch = await jioSaavnService.searchSong(top.songName, 1);
-          if (saavnMatch.success && saavnMatch.songs.length > 0) {
-            audioDirectUrl = saavnMatch.songs[0].audio320kbps || saavnMatch.songs[0].audio160kbps;
-          }
+          directAudioUrl = (await youtubeMusicService.getAudioStreamUrl(top.videoId)) || "";
         } catch {}
 
         return {
@@ -3638,8 +3635,9 @@ class PublicApisService {
           trackName: top.songName,
           artistName: top.artistName,
           videoId: top.videoId,
-          audioUrl: audioDirectUrl || top.streamUrl,
-          directCdnUrl: audioDirectUrl || "",
+          audioUrl: directAudioUrl || `/api/youtube/stream-audio?v=${top.videoId}`,
+          directCdnUrl: directAudioUrl || "",
+          streamUrl: `/api/youtube/stream-audio?v=${top.videoId}`,
           youtubeMusicUrl: top.youtubeMusicUrl,
           youtubeUrl: top.youtubeUrl,
           embedUrl: top.embedUrl,
@@ -3649,9 +3647,10 @@ class PublicApisService {
           durationFormatted: top.durationFormatted,
           isFullSong: true,
           isYouTubeMusic: true,
-          quality: audioDirectUrl ? "YouTube Pro 320kbps HD Audio" : "YouTube Music Safe Stream",
+          isYouTube: true,
+          quality: "YouTube Pro HD Audio",
           source: "youtube_safe",
-          message: `Boss, "${top.songName}" (${top.artistName}) YouTube Safe Player par background audio me play ho raha hai! 🎵🔴`,
+          message: `Boss, "${top.songName}" (${top.artistName}) YouTube Pro Player par background audio me play ho raha hai! 🎵🔴`,
         };
       }
     } catch (e) {

@@ -876,6 +876,34 @@ async function startServer() {
     res.json(result);
   });
 
+  // ── YouTube Audio Stream Proxy Endpoint ──────────────────────────────────
+  app.get("/api/youtube/stream-audio", async (req, res) => {
+    const videoId = String(req.query.v || "");
+    if (!videoId) return res.status(400).json({ error: "videoId_required" });
+
+    try {
+      const streamUrl = await youtubeMusicService.getAudioStreamUrl(videoId);
+      if (streamUrl) {
+        return res.redirect(streamUrl);
+      }
+      return res.status(404).json({ error: "audio_stream_not_found" });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || "stream_fetch_failed" });
+    }
+  });
+
+  // ── Music Smart Queue Endpoint ──────────────────────────────────────────
+  app.get("/api/music/queue", async (req, res) => {
+    const { songName, artistName } = req.query || {};
+    try {
+      const query = String(songName || artistName || "Bollywood Hits");
+      const searchRes = await publicApisService.searchMusic(query);
+      return res.json({ success: true, queue: searchRes?.tracks || [] });
+    } catch (e: any) {
+      return res.json({ success: false, queue: [] });
+    }
+  });
+
   app.post("/api/telegram/send", async (req, res) => {
     const { chatId, text } = req.body || {};
     if (!chatId || !text) return res.status(400).json({ error: "chatId_and_text_required" });
