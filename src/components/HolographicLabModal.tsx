@@ -2,12 +2,13 @@
  * JARVIS Holographic 3D Machine & Spatial Studio
  * Real-time Google MediaPipe Hand Tracking (60 FPS) + Three.js WebGL Hologram Viewport
  * Features:
- *  - 3D Hand Depth Tracking (Z-Axis Push/Pull with Physical Hand Distance Estimation)
+ *  - 100% Precise Object & Part Grabbing via Three.js Raycaster & Proximity Physics
+ *  - Detachable Interactive Flame & Candle: Pinch flame, detach, carry anywhere in 3D, and snap to wick
  *  - Full 360° Hand Gyro Spatial Rotation (Roll, Pitch, Yaw)
- *  - True Object & Part Picking: Grab any corner, object, or machine component
- *  - Detachable Interactive Flame & Candle Physics: Carry fire in hand & place on candle
- *  - 3D Holographic Spatial Hand Reticle & Ground Depth Projection
- *  - Index Finger Air-Drawing Studio with Neon Palette & Primitives
+ *  - True 3D Hand Depth Tracking (Z-Axis Push/Pull with Physical Hand Scale & Z-depth)
+ *  - Rock-Solid Pinch State Hysteresis (Zero accidental drops)
+ *  - 3D Holographic Hand Reticle, Laser Beam & Ground Depth Shadow
+ *  - Dual Input: Seamless Hand Gestures + Mouse/Touch Picking
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
@@ -135,22 +136,25 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
   const animFrameIdRef = useRef<number | null>(null);
   const videoStreamRef = useRef<MediaStream | null>(null);
 
-  // 3D Spatial Hand Reticle & Depth Shadow
+  // 3D Spatial Hand Reticle, Laser Beam & Depth Shadow
   const handReticleMeshRef = useRef<THREE.Group | null>(null);
   const handShadowMeshRef = useRef<THREE.Mesh | null>(null);
+  const handBeamLineRef = useRef<THREE.Line | null>(null);
   const smoothedHandZRef = useRef<number>(0);
 
-  // Hand & Gesture Coordinates & Physics Locking Refs
+  // Hand & Gesture Tracking & Physics Refs
   const prevHandPosRef = useRef<{ x: number; y: number; z: number } | null>(null);
   const prevHandAngleRef = useRef<{ roll: number; pitch: number; yaw: number } | null>(null);
   const prevTwoHandsRef = useRef<{ cx: number; cy: number; angle: number; dist: number } | null>(null);
+  const isPinchingActiveRef = useRef<boolean>(false);
 
-  // Object-Specific Grab Ref
+  // Object-Specific Grab Ref (Stores grabbed Three.js Object & original attachment parent)
   const grabbedTargetRef = useRef<{
-    type: 'flame' | 'candle' | 'part' | 'model';
+    type: 'flame' | 'candle' | 'part' | 'model' | 'primitive';
     targetObject: THREE.Object3D;
     initialOffset: THREE.Vector3;
     initialObjectRot: THREE.Euler;
+    originalParent: THREE.Object3D | null;
     name: string;
   } | null>(null);
 
@@ -160,6 +164,7 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
   // Mouse / Pointer Interaction Refs
   const isPointerDraggingRef = useRef(false);
   const pointerStartPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const pointerGrabbedTargetRef = useRef<any>(null);
 
   // Available Presets
   const models = getAvailableModels();
@@ -191,7 +196,7 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     rendererRef.current = renderer;
 
-    // Lighting (Holographic Ambient + Dual Cyan/Magenta Lights + Warm Center)
+    // Lighting
     const ambientLight = new THREE.AmbientLight(0x00f0ff, 1.4);
     scene.add(ambientLight);
 
@@ -210,6 +215,7 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
 
     // Pivot Group for Models
     const pivot = new THREE.Group();
+    pivot.name = 'Main_Model_Pivot';
     scene.add(pivot);
     modelPivotRef.current = pivot;
 
@@ -220,26 +226,27 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
 
     // ── 3D Hand Depth Reticle & Spatial Cursor ──
     const reticleGroup = new THREE.Group();
+    reticleGroup.name = 'Hand_3D_Reticle';
     reticleGroup.visible = false;
 
     // Outer Reticle Torus
-    const outerRingGeo = new THREE.TorusGeometry(0.28, 0.02, 16, 32);
+    const outerRingGeo = new THREE.TorusGeometry(0.26, 0.025, 16, 32);
     const outerRingMat = new THREE.MeshBasicMaterial({ color: 0x00f0ff, transparent: true, opacity: 0.9 });
     const outerRing = new THREE.Mesh(outerRingGeo, outerRingMat);
     reticleGroup.add(outerRing);
 
     // Inner Glowing Core
-    const innerCoreGeo = new THREE.SphereGeometry(0.06, 16, 16);
+    const innerCoreGeo = new THREE.SphereGeometry(0.07, 16, 16);
     const innerCoreMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95 });
     const innerCore = new THREE.Mesh(innerCoreGeo, innerCoreMat);
     reticleGroup.add(innerCore);
 
     // Dynamic Z-Depth Depth Projection Shadow on Polar Floor
-    const shadowGeo = new THREE.RingGeometry(0.15, 0.28, 32);
+    const shadowGeo = new THREE.RingGeometry(0.15, 0.3, 32);
     const shadowMat = new THREE.MeshBasicMaterial({
       color: 0x00f0ff,
       transparent: true,
-      opacity: 0.4,
+      opacity: 0.45,
       side: THREE.DoubleSide
     });
     const shadowMesh = new THREE.Mesh(shadowGeo, shadowMat);
@@ -247,6 +254,14 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
     shadowMesh.position.y = -2.59;
     scene.add(shadowMesh);
     handShadowMeshRef.current = shadowMesh;
+
+    // Laser Beam Connecting Hand Reticle to Grabbed Object
+    const beamGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, 0)]);
+    const beamMat = new THREE.LineBasicMaterial({ color: 0xf59e0b, linewidth: 2, transparent: true, opacity: 0.85 });
+    const beamLine = new THREE.Line(beamGeo, beamMat);
+    beamLine.visible = false;
+    scene.add(beamLine);
+    handBeamLineRef.current = beamLine;
 
     scene.add(reticleGroup);
     handReticleMeshRef.current = reticleGroup;
@@ -260,7 +275,7 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
       animFrameIdRef.current = requestAnimationFrame(animate);
       const elapsedTime = clock.getElapsedTime();
 
-      // Internal model animations (spinning blades, candle flame flickers, etc.)
+      // Internal model animations (candle flame flickers, spinning blades, etc.)
       if (currentModelRef.current?.update) {
         currentModelRef.current.update(elapsedTime);
       }
@@ -271,27 +286,32 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
         !isPointerDraggingRef.current &&
         prevHandPosRef.current === null &&
         prevTwoHandsRef.current === null &&
-        grabbedTargetRef.current === null
+        grabbedTargetRef.current === null &&
+        pointerGrabbedTargetRef.current === null
       ) {
         modelPivotRef.current.rotation.y += 0.0012;
       }
 
-      // Rotate reticle for futuristic holographic visual feel
+      // Rotate reticle for holographic visual feel
       if (handReticleMeshRef.current && handReticleMeshRef.current.visible) {
-        outerRing.rotation.z += 0.03;
+        outerRing.rotation.z += 0.04;
       }
 
       // Update Telemetry display
       if (modelPivotRef.current) {
-        const targetObj = grabbedTargetRef.current ? grabbedTargetRef.current.targetObject : modelPivotRef.current;
+        const activeGrab = grabbedTargetRef.current || pointerGrabbedTargetRef.current;
+        const targetObj = activeGrab ? activeGrab.targetObject : modelPivotRef.current;
+        const worldPos = new THREE.Vector3();
+        targetObj.getWorldPosition(worldPos);
+
         setTelemetry({
-          posX: targetObj.position.x.toFixed(2),
-          posY: targetObj.position.y.toFixed(2),
-          posZ: (smoothedHandZRef.current || targetObj.position.z).toFixed(2),
+          posX: worldPos.x.toFixed(2),
+          posY: worldPos.y.toFixed(2),
+          posZ: worldPos.z.toFixed(2),
           roll: `${((targetObj.rotation.z * 180) / Math.PI % 360).toFixed(0)}°`,
           pitch: `${((targetObj.rotation.x * 180) / Math.PI % 360).toFixed(0)}°`,
-          held: grabbedTargetRef.current ? grabbedTargetRef.current.name : 'None',
-          depthStatus: `${(smoothedHandZRef.current >= 1 ? 'Near Front' : smoothedHandZRef.current <= -1 ? 'Deep Back' : 'Mid Center')} (${smoothedHandZRef.current.toFixed(2)}m)`
+          held: activeGrab ? activeGrab.name : 'None',
+          depthStatus: `${(smoothedHandZRef.current >= 0.8 ? 'Near Front' : smoothedHandZRef.current <= -0.8 ? 'Deep Back' : 'Mid Center')} (${smoothedHandZRef.current.toFixed(2)}m)`
         });
       }
 
@@ -305,15 +325,27 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
   const loadModelToScene = useCallback((modelId: string) => {
     if (!modelPivotRef.current || !sceneRef.current) return;
 
-    // Reset grabbed target
+    // Reset grabbed targets
     grabbedTargetRef.current = null;
+    pointerGrabbedTargetRef.current = null;
+    isPinchingActiveRef.current = false;
     setHeldObjectName('None');
+
+    if (handBeamLineRef.current) handBeamLineRef.current.visible = false;
 
     // Clear previous model meshes from pivot (keep airDrawGroup)
     for (let i = modelPivotRef.current.children.length - 1; i >= 0; i--) {
       const obj = modelPivotRef.current.children[i];
       if (obj !== airDrawGroupRef.current) {
         modelPivotRef.current.remove(obj);
+      }
+    }
+
+    // Also remove any detached objects that were reparented to scene
+    for (let i = sceneRef.current.children.length - 1; i >= 0; i--) {
+      const obj = sceneRef.current.children[i];
+      if (obj.name === 'Interactive_Fire_Flame' || obj.name === 'Candle_Assembly') {
+        sceneRef.current.remove(obj);
       }
     }
 
@@ -329,7 +361,7 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
     currentModelRef.current = model;
     modelPivotRef.current.add(model.group);
     modelPivotRef.current.position.set(0, 0, 0);
-    modelPivotRef.current.rotation.set(0.15, -0.25, 0);
+    modelPivotRef.current.rotation.set(0.12, -0.2, 0);
     modelPivotRef.current.scale.set(1, 1, 1);
     setExplodeFactor(0);
 
@@ -395,19 +427,22 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
 
   // ── 6. Flame Manipulation Actions (Candle & Fire Studio) ───────────────────
   const separateFlame = () => {
-    if (selectedModelId !== 'candle_fire' || !currentModelRef.current) return;
+    if (selectedModelId !== 'candle_fire' || !currentModelRef.current || !sceneRef.current) return;
     const cModel = currentModelRef.current as CandleFireModel;
     if (cModel.flameGroup) {
-      cModel.flameGroup.position.set(2.2, 1.2, 0.5); // Move flame to float beside candle
+      // Detach flame to root scene and float beside candle
+      sceneRef.current.attach(cModel.flameGroup);
+      cModel.flameGroup.position.set(2.4, 1.2, 0.8);
       cModel.isFlameAttached = false;
       setIsFlameAttached(false);
     }
   };
 
   const snapFlameToCandle = () => {
-    if (selectedModelId !== 'candle_fire' || !currentModelRef.current) return;
+    if (selectedModelId !== 'candle_fire' || !currentModelRef.current || !modelPivotRef.current) return;
     const cModel = currentModelRef.current as CandleFireModel;
-    if (cModel.setFlameState) {
+    if (cModel.flameGroup && cModel.group) {
+      cModel.group.attach(cModel.flameGroup);
       cModel.setFlameState(true, true);
       setIsFlameAttached(true);
       setIsFlameLit(true);
@@ -434,7 +469,46 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
     }
   };
 
-  // ── 7. Robust Euclidean Distance Helper for 3D Joints ───────────────────────
+  // ── 7. Helper: Find Top-Level Interactive Object / Part from Mesh ───────────
+  const findInteractiveTarget = useCallback((hitMesh: THREE.Object3D): {
+    targetObject: THREE.Object3D;
+    type: 'flame' | 'candle' | 'part' | 'primitive' | 'model';
+    name: string;
+  } => {
+    let curr: THREE.Object3D | null = hitMesh;
+
+    // Check ancestors
+    while (curr && curr !== sceneRef.current && curr !== modelPivotRef.current) {
+      if (curr.name === 'Interactive_Fire_Flame') {
+        return { targetObject: curr, type: 'flame', name: '🔥 Fire Flame' };
+      }
+      if (curr.name === 'Candle_Assembly') {
+        return { targetObject: curr, type: 'candle', name: '🕯️ Candle Body' };
+      }
+      if (curr.name.startsWith('Primitive_')) {
+        return { targetObject: curr, type: 'primitive', name: `Shape (${curr.name.split('_')[1]})` };
+      }
+
+      // Check if current matches any machine model part
+      if (currentModelRef.current?.parts) {
+        const foundPart = currentModelRef.current.parts.find((p) => p.mesh === curr);
+        if (foundPart) {
+          return { targetObject: curr, type: 'part', name: foundPart.name };
+        }
+      }
+
+      curr = curr.parent;
+    }
+
+    // Default: Main Model Pivot
+    return {
+      targetObject: modelPivotRef.current || hitMesh,
+      type: 'model',
+      name: currentModelRef.current?.name || 'Entire 3D Model'
+    };
+  }, []);
+
+  // ── 8. Robust Euclidean Distance Helper for 3D Joints ───────────────────────
   const getDistance3D = (p1: any, p2: any) => {
     const dx = p1.x - p2.x;
     const dy = p1.y - p2.y;
@@ -442,9 +516,9 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
     return Math.sqrt(dx * dx + dy * dy + dz * dz);
   };
 
-  // ── 8. MediaPipe Hands Results Processor with Depth & 360° Gyro Tracking ──
+  // ── 9. MediaPipe Hands Results Processor ────────────────────────────────────
   const handleHandResults = useCallback((results: HandResults) => {
-    if (!canvasHandRef.current) return;
+    if (!canvasHandRef.current || !cameraRef.current || !sceneRef.current) return;
 
     const canvas = canvasHandRef.current;
     const ctx = canvas.getContext('2d');
@@ -462,11 +536,16 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
       prevHandPosRef.current = null;
       prevHandAngleRef.current = null;
       prevTwoHandsRef.current = null;
-      grabbedTargetRef.current = null;
-      setHeldObjectName('None');
+      isPinchingActiveRef.current = false;
+
+      if (grabbedTargetRef.current) {
+        grabbedTargetRef.current = null;
+        setHeldObjectName('None');
+      }
 
       if (handReticleMeshRef.current) handReticleMeshRef.current.visible = false;
       if (handShadowMeshRef.current) handShadowMeshRef.current.visible = false;
+      if (handBeamLineRef.current) handBeamLineRef.current.visible = false;
       return;
     }
 
@@ -480,7 +559,10 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
     // ── GESTURE 1: Two-Hand 360° Spatial Gyro Steering & Zoom ──
     if (results.multiHandLandmarks.length >= 2) {
       grabbedTargetRef.current = null;
+      isPinchingActiveRef.current = false;
       setHeldObjectName('None');
+      if (handBeamLineRef.current) handBeamLineRef.current.visible = false;
+
       const hand1 = results.multiHandLandmarks[0][0]; // Wrist hand 1
       const hand2 = results.multiHandLandmarks[1][0]; // Wrist hand 2
 
@@ -491,19 +573,16 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
       const dist = Math.hypot(hand1.x - hand2.x, hand1.y - hand2.y);
 
       if (prevTwoHandsRef.current && modelPivotRef.current) {
-        // 1. Natural Yaw & Pitch: Follow hand movement 1:1
         const dx = (cx - prevTwoHandsRef.current.cx) * 6.5;
         const dy = (cy - prevTwoHandsRef.current.cy) * 6.5;
         modelPivotRef.current.rotation.y += dx;
         modelPivotRef.current.rotation.x += dy;
 
-        // 2. Continuous 360° Roll Steering
         let dAngle = angle - prevTwoHandsRef.current.angle;
         if (dAngle > Math.PI) dAngle -= Math.PI * 2;
         if (dAngle < -Math.PI) dAngle += Math.PI * 2;
         modelPivotRef.current.rotation.z += dAngle * 1.6;
 
-        // 3. Smooth Scaling
         const deltaDist = (dist - prevTwoHandsRef.current.dist) * 3.8;
         const newScale = THREE.MathUtils.clamp(
           modelPivotRef.current.scale.x + deltaDist,
@@ -535,32 +614,24 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
     const pinkyMcp = landmarks[17];
 
     // ── Depth (Z-Axis) Real-time Calculation ──
-    // Hand span in screen space (wrist to middle MCP + index to pinky MCP)
     const palmHeight = getDistance3D(wrist, middleMcp);
     const palmWidth = getDistance3D(indexMcp, pinkyMcp);
     const handSpan = (palmHeight + palmWidth) * 0.5;
 
-    // Normal hand span at resting webcam distance is ~0.20
-    // Moving hand closer -> handSpan rises to 0.40 -> depth pushes towards camera (+2.5)
-    // Moving hand farther -> handSpan drops to 0.08 -> depth pushes deep into scene (-3.0)
+    // Map hand span to 3D world depth (-3.5 to +3.0)
     const targetZ = ((handSpan - 0.20) / 0.12) * 2.6 + ((indexTip.z || 0) * -2.0);
     const clampedZ = THREE.MathUtils.clamp(targetZ, -3.8, 3.2);
-
-    // Smooth Exponential Moving Average for Z to eliminate jitter
     smoothedHandZRef.current = smoothedHandZRef.current * 0.75 + clampedZ * 0.25;
 
     // ── 360° Hand Orientation (Roll, Pitch, Yaw) ──
-    // 1. Hand Roll (wrist to middle tip tilt angle)
     const currentRoll = Math.atan2(middleMcp.y - wrist.y, (1 - middleMcp.x) - (1 - wrist.x)) - Math.PI / 2;
-    // 2. Hand Pitch (wrist to finger vertical forward tilt)
     const currentPitch = (middleMcp.y - wrist.y) * 2.5;
-    // 3. Hand Yaw (palm normal horizontal direction)
     const currentYaw = ((1 - pinkyMcp.x) - (1 - indexMcp.x)) * 3.0;
 
-    // Distance metrics (Rotation-invariant Euclidean distance from wrist)
+    // Distance metrics
     const pinchDist = getDistance3D(indexTip, thumbTip);
 
-    // Highly reliable, flicker-free finger extension checks
+    // Finger extension checks
     const isIndexExtended = getDistance3D(indexTip, wrist) > getDistance3D(indexPip, wrist) * 1.05 &&
                             getDistance3D(indexTip, wrist) > getDistance3D(middleTip, wrist) * 1.15;
 
@@ -568,26 +639,38 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
     const isRingCurled = getDistance3D(ringTip, wrist) < getDistance3D(wrist, indexPip) * 1.05;
     const isPinkyCurled = getDistance3D(pinkyTip, wrist) < getDistance3D(wrist, indexPip) * 1.05;
 
-    const isFist = isMiddleCurled && isRingCurled && isPinkyCurled && !isIndexExtended && pinchDist > 0.07;
-    const isPinching = pinchDist < 0.075;
-    const isPointingOnly = isIndexExtended && pinchDist > 0.08;
+    const isFist = isMiddleCurled && isRingCurled && isPinkyCurled && !isIndexExtended && pinchDist > 0.09;
+
+    // ── Rock-Solid Pinch State Hysteresis ──
+    // Trigger grab at < 0.088, keep holding until fingers open to > 0.13
+    if (!isPinchingActiveRef.current && pinchDist < 0.088) {
+      isPinchingActiveRef.current = true;
+    } else if (isPinchingActiveRef.current && pinchDist > 0.13) {
+      isPinchingActiveRef.current = false;
+    }
+    const isPinching = isPinchingActiveRef.current;
+    const isPointingOnly = isIndexExtended && !isPinching && pinchDist > 0.09;
     const isPalmOpen = !isMiddleCurled && !isRingCurled && !isPinkyCurled && !isIndexExtended && pinchDist > 0.15;
 
-    // Pinch Screen Coordinates (Mirrored X)
+    // Screen Coordinates (Mirrored X)
     const pinchScreenX = 1 - ((indexTip.x + thumbTip.x) / 2);
     const pinchScreenY = (indexTip.y + thumbTip.y) / 2;
+
+    // Three.js Normalized Device Coordinates (NDC: -1 to +1)
+    const ndcX = (pinchScreenX * 2) - 1;
+    const ndcY = -(pinchScreenY * 2) + 1;
 
     // 3D Three.js World Coordinates for Hand Cursor
     const worldX = (pinchScreenX - 0.5) * 7.2;
     const worldY = -(pinchScreenY - 0.5) * 5.4;
     const worldZ = smoothedHandZRef.current;
+    const handWorldPos = new THREE.Vector3(worldX, worldY, worldZ);
 
     // Update 3D Hand Reticle & Depth Floor Shadow
     if (handReticleMeshRef.current) {
       handReticleMeshRef.current.visible = true;
       handReticleMeshRef.current.position.set(worldX, worldY, worldZ);
 
-      // Color feedback on Reticle
       const reticleColor = isPinching ? 0xf59e0b : isPointingOnly ? 0xec4899 : 0x00f0ff;
       const ringMesh = handReticleMeshRef.current.children[0] as THREE.Mesh;
       if (ringMesh && (ringMesh.material as any).color) {
@@ -603,92 +686,110 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
       handShadowMeshRef.current.scale.set(shadowScale, shadowScale, shadowScale);
     }
 
-    const currentPos = { x: pinchScreenX, y: pinchScreenY, z: worldZ };
-
-    // ── GESTURE 2: Object-Level / Part-Level Pinch & Free 3D Carry with 360° Hand Gyro ──
-    if (isPinching && modelPivotRef.current) {
-      const pinchWorldPos = new THREE.Vector3(worldX, worldY, worldZ);
-
-      // If just started pinching, detect which object/part is closest!
+    // ── GESTURE 2: Accurate Raycast-Based Object & Part Grabbing ──
+    if (isPinching) {
+      // 1. If we just started pinching, detect exactly which object is targeted!
       if (grabbedTargetRef.current === null) {
-        let detectedObject: THREE.Object3D = modelPivotRef.current;
-        let detectedType: 'flame' | 'candle' | 'part' | 'model' = 'model';
-        let detectedName = 'Entire 3D Model';
+        const raycaster = new THREE.Raycaster();
+        raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), cameraRef.current);
 
-        // Check 1: Candle & Flame Model Special Handling
-        if (selectedModelIdRef.current === 'candle_fire' && currentModelRef.current) {
-          const cModel = currentModelRef.current as CandleFireModel;
-          if (cModel.flameGroup) {
-            // Get flame world position
-            const flameWorldPos = new THREE.Vector3();
-            cModel.flameGroup.getWorldPosition(flameWorldPos);
-            const distToFlame = pinchWorldPos.distanceTo(flameWorldPos);
-
-            // If pinched near the Flame (< 1.6 units)
-            if (distToFlame < 1.6) {
-              detectedObject = cModel.flameGroup;
-              detectedType = 'flame';
-              detectedName = '🔥 Fire Flame';
-              cModel.isFlameAttached = false;
-              setIsFlameAttached(false);
-            } else if (cModel.candleGroup) {
-              const candleWorldPos = new THREE.Vector3();
-              cModel.candleGroup.getWorldPosition(candleWorldPos);
-              const distToCandle = pinchWorldPos.distanceTo(candleWorldPos);
-              if (distToCandle < 2.2) {
-                detectedObject = cModel.candleGroup;
-                detectedType = 'candle';
-                detectedName = '🕯️ Candle Body';
-              }
-            }
+        // Collect all candidate interactive objects
+        const candidateObjects: THREE.Object3D[] = [];
+        if (modelPivotRef.current) candidateObjects.push(modelPivotRef.current);
+        // Also check any detached objects in scene
+        sceneRef.current.children.forEach((c) => {
+          if (c.name === 'Interactive_Fire_Flame' || c.name === 'Candle_Assembly' || c.name.startsWith('Primitive_')) {
+            candidateObjects.push(c);
           }
-        } else if (currentModelRef.current?.parts && currentModelRef.current.parts.length > 0) {
-          // Check 2: Check parts of any parametric model or spawned primitives
-          let closestPart: THREE.Object3D | null = null;
-          let minDistance = 1.8; // Grab radius
+        });
 
-          for (const part of currentModelRef.current.parts) {
-            const partWorldPos = new THREE.Vector3();
-            part.mesh.getWorldPosition(partWorldPos);
-            const dist = pinchWorldPos.distanceTo(partWorldPos);
-            if (dist < minDistance) {
-              minDistance = dist;
-              closestPart = part.mesh;
-              detectedName = part.name;
-              detectedType = 'part';
-            }
-          }
+        const intersects = raycaster.intersectObjects(candidateObjects, true);
+        let selectedTarget: { targetObject: THREE.Object3D; type: any; name: string } | null = null;
 
-          if (closestPart) {
-            detectedObject = closestPart;
+        if (intersects.length > 0) {
+          // Raycast Hit! Find the top-level part/object
+          for (const hit of intersects) {
+            // Ignore reticle or shadow
+            if (hit.object.name.includes('Hand_3D_Reticle') || hit.object === handShadowMeshRef.current) continue;
+            selectedTarget = findInteractiveTarget(hit.object);
+            if (selectedTarget) break;
           }
         }
 
-        // Lock grab initial offset & rotation
+        // Proximity Fallback: If raycast didn't hit direct geometry, check 3D distance to Flame or Candle
+        if (!selectedTarget && selectedModelIdRef.current === 'candle_fire' && currentModelRef.current) {
+          const cModel = currentModelRef.current as CandleFireModel;
+          if (cModel.flameGroup) {
+            const flameWorldPos = new THREE.Vector3();
+            cModel.flameGroup.getWorldPosition(flameWorldPos);
+            if (handWorldPos.distanceTo(flameWorldPos) < 2.5) {
+              selectedTarget = { targetObject: cModel.flameGroup, type: 'flame', name: '🔥 Fire Flame' };
+            }
+          }
+          if (!selectedTarget && cModel.candleGroup) {
+            const candleWorldPos = new THREE.Vector3();
+            cModel.candleGroup.getWorldPosition(candleWorldPos);
+            if (handWorldPos.distanceTo(candleWorldPos) < 3.0) {
+              selectedTarget = { targetObject: cModel.candleGroup, type: 'candle', name: '🕯️ Candle Body' };
+            }
+          }
+        }
+
+        // Final Fallback: Grab the entire model
+        if (!selectedTarget) {
+          selectedTarget = {
+            targetObject: modelPivotRef.current || sceneRef.current,
+            type: 'model',
+            name: currentModelRef.current?.name || 'Entire 3D Model'
+          };
+        }
+
+        const { targetObject, type, name } = selectedTarget;
+        const originalParent = targetObject.parent;
+
+        // Detach target to root scene preserving its exact world transform
+        if (targetObject !== sceneRef.current && targetObject.parent !== sceneRef.current) {
+          sceneRef.current.attach(targetObject);
+        }
+
+        // Compute 3D offset between target world position and hand position
+        const targetWorldPos = new THREE.Vector3();
+        targetObject.getWorldPosition(targetWorldPos);
+
         grabbedTargetRef.current = {
-          type: detectedType,
-          targetObject: detectedObject,
+          type,
+          targetObject,
           initialOffset: new THREE.Vector3(
-            detectedObject.position.x - worldX,
-            detectedObject.position.y - worldY,
-            detectedObject.position.z - worldZ
+            targetWorldPos.x - handWorldPos.x,
+            targetWorldPos.y - handWorldPos.y,
+            targetWorldPos.z - handWorldPos.z
           ),
-          initialObjectRot: detectedObject.rotation.clone(),
-          name: detectedName
+          initialObjectRot: targetObject.rotation.clone(),
+          originalParent,
+          name
         };
 
         prevHandAngleRef.current = { roll: currentRoll, pitch: currentPitch, yaw: currentYaw };
-        setHeldObjectName(detectedName);
+        setHeldObjectName(name);
+
+        if (type === 'flame') {
+          setIsFlameAttached(false);
+          if (currentModelRef.current && (currentModelRef.current as CandleFireModel).isFlameAttached !== undefined) {
+            (currentModelRef.current as CandleFireModel).isFlameAttached = false;
+          }
+        }
       }
 
-      // Move grabbed object smoothly in 3D Space (X, Y, Z Depth)
+      // 2. Smoothly Move & 360° Rotate the Grabbed Object
       if (grabbedTargetRef.current) {
         const { targetObject, initialOffset } = grabbedTargetRef.current;
-        targetObject.position.x = worldX + initialOffset.x;
-        targetObject.position.y = worldY + initialOffset.y;
-        targetObject.position.z = worldZ + initialOffset.z;
 
-        // Apply Hand 360° Gyro Rotation (Roll, Pitch, Yaw)
+        // 1:1 Physical Position Tracking in Full 3D Space (X, Y, Z Depth)
+        targetObject.position.x = handWorldPos.x + initialOffset.x;
+        targetObject.position.y = handWorldPos.y + initialOffset.y;
+        targetObject.position.z = handWorldPos.z + initialOffset.z;
+
+        // 360° Hand Gyro Rotation (Roll, Pitch, Yaw)
         if (prevHandAngleRef.current) {
           const deltaRoll = currentRoll - prevHandAngleRef.current.roll;
           const deltaPitch = currentPitch - prevHandAngleRef.current.pitch;
@@ -700,18 +801,27 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
         }
 
         prevHandAngleRef.current = { roll: currentRoll, pitch: currentPitch, yaw: currentYaw };
-        setActiveGesture(`🤏 Holding & Moving: ${grabbedTargetRef.current.name}`);
+        setActiveGesture(`🤏 Moving: ${grabbedTargetRef.current.name}`);
+
+        // Update Laser Beam Connecting Hand to Object
+        if (handBeamLineRef.current) {
+          handBeamLineRef.current.visible = true;
+          const objWorldPos = new THREE.Vector3();
+          targetObject.getWorldPosition(objWorldPos);
+          handBeamLineRef.current.geometry.setFromPoints([handWorldPos, objWorldPos]);
+        }
       }
 
-      prevHandPosRef.current = currentPos;
+      prevHandPosRef.current = { x: pinchScreenX, y: pinchScreenY, z: worldZ };
       return;
     } else {
-      // ── Pinch Released: Check for Candle Snap / Placement Physics ──
+      // ── Pinch Released: Handle Placement & Candle Snap Physics ──
       if (grabbedTargetRef.current) {
-        if (grabbedTargetRef.current.type === 'flame' && currentModelRef.current && selectedModelIdRef.current === 'candle_fire') {
+        const { targetObject, type } = grabbedTargetRef.current;
+
+        if (type === 'flame' && currentModelRef.current && selectedModelIdRef.current === 'candle_fire') {
           const cModel = currentModelRef.current as CandleFireModel;
           if (cModel.flameGroup && cModel.candleGroup) {
-            // Check distance between flame and candle wick position
             const candleWorldPos = new THREE.Vector3();
             cModel.candleGroup.getWorldPosition(candleWorldPos);
             const flameWorldPos = new THREE.Vector3();
@@ -720,21 +830,27 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
             const wickWorldTarget = candleWorldPos.clone().add(cModel.wickWorldPos);
             const distToWick = flameWorldPos.distanceTo(wickWorldTarget);
 
-            // Magnetic snap if flame is brought within 1.4 units of wick
-            if (distToWick < 1.4) {
+            // Magnetic snap to candle wick if brought within 2.0 units
+            if (distToWick < 2.0) {
+              if (cModel.group) {
+                cModel.group.attach(cModel.flameGroup);
+              }
               cModel.setFlameState(true, true);
               setIsFlameAttached(true);
               setIsFlameLit(true);
               setActiveGesture('✨ Flame Placed & Candle Lit!');
             } else {
+              // Leave flame floating detached in 3D mid-air
               setIsFlameAttached(false);
               setActiveGesture('🔥 Flame Placed in Mid-Air!');
             }
           }
         }
+
         grabbedTargetRef.current = null;
         prevHandAngleRef.current = null;
         setHeldObjectName('None');
+        if (handBeamLineRef.current) handBeamLineRef.current.visible = false;
       }
     }
 
@@ -748,12 +864,10 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
       if (!lastPoint || lastPoint.distanceTo(newPoint) > 0.035) {
         airDrawPointsRef.current.push(newPoint);
 
-        // Build glowing stroke mesh/line in airDrawGroup
         if (airDrawGroupRef.current && airDrawPointsRef.current.length >= 2) {
           const strokeColor = parseInt(drawColorRef.current.replace('#', '0x'), 16) || 0x00f0ff;
           const strokeThickness = drawThicknessRef.current;
 
-          // Dynamic 3D Glowing Tube
           if (strokeThickness >= 4 && airDrawPointsRef.current.length >= 3) {
             const curve = new THREE.CatmullRomCurve3(airDrawPointsRef.current.slice(-10));
             const tubeGeo = new THREE.TubeGeometry(curve, 16, strokeThickness * 0.015, 8, false);
@@ -787,7 +901,7 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
       ctx.shadowBlur = 25;
       ctx.fill();
 
-      prevHandPosRef.current = currentPos;
+      prevHandPosRef.current = { x: pinchScreenX, y: pinchScreenY, z: worldZ };
       return;
     }
 
@@ -795,18 +909,17 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
     if (isFist && modelPivotRef.current) {
       setActiveGesture('✊ Fist Grab & 360° Free Rotate');
       if (prevHandPosRef.current) {
-        const dx = (currentPos.x - prevHandPosRef.current.x) * 6.5;
-        const dy = (currentPos.y - prevHandPosRef.current.y) * 6.5;
+        const dx = (pinchScreenX - prevHandPosRef.current.x) * 6.5;
+        const dy = (pinchScreenY - prevHandPosRef.current.y) * 6.5;
         modelPivotRef.current.rotation.y += dx;
         modelPivotRef.current.rotation.x += dy;
 
-        // Apply Hand Roll to Model
         if (prevHandAngleRef.current) {
           const dRoll = currentRoll - prevHandAngleRef.current.roll;
           modelPivotRef.current.rotation.z += dRoll * 1.4;
         }
       }
-      prevHandPosRef.current = currentPos;
+      prevHandPosRef.current = { x: pinchScreenX, y: pinchScreenY, z: worldZ };
       prevHandAngleRef.current = { roll: currentRoll, pitch: currentPitch, yaw: currentYaw };
       return;
     }
@@ -822,9 +935,9 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
     setActiveGesture('Hover / Idle');
     prevHandPosRef.current = null;
     prevHandAngleRef.current = null;
-  }, []);
+  }, [findInteractiveTarget]);
 
-  // ── 9. Draw Glowing Neon Hand Skeleton ──────────────────────────────────────
+  // ── 10. Draw Glowing Neon Hand Skeleton ─────────────────────────────────────
   const drawHolographicHandSkeleton = (
     ctx: CanvasRenderingContext2D,
     landmarks: any[],
@@ -865,7 +978,7 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
     }
   };
 
-  // ── 10. Native Camera & MediaPipe Initialization ────────────────────────────
+  // ── 11. Native Camera & MediaPipe Initialization ────────────────────────────
   const startCameraAndHands = useCallback(async () => {
     if (!videoRef.current) return;
 
@@ -873,7 +986,6 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
       setHandTrackingStatus('initializing');
       setCameraPermissionError(null);
 
-      // 1. Initialize MediaPipe Hands
       const hands = new Hands({
         locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
       });
@@ -892,7 +1004,6 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
 
       mpHandsRef.current = hands;
 
-      // 2. Direct getUserMedia Pipeline
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           width: { ideal: 1280 },
@@ -910,7 +1021,6 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
 
       setHandTrackingStatus('active');
 
-      // 3. Continuous Video Frame Dispatch Loop
       const processFrame = async () => {
         if (videoRef.current && mpHandsRef.current && videoRef.current.readyState >= 2) {
           if (!isProcessingFrameRef.current) {
@@ -935,13 +1045,79 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
     }
   }, [handleHandResults]);
 
-  // ── 11. Mouse / Touch Orbit & Interaction Event Handlers ───────────────────
+  // ── 12. Mouse / Touch Direct Object Picking & Dragging ─────────────────────
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!canvas3dRef.current || !cameraRef.current || !sceneRef.current) return;
+
+    const rect = canvas3dRef.current.getBoundingClientRect();
+    const mouseX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    const mouseY = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(new THREE.Vector2(mouseX, mouseY), cameraRef.current);
+
+    const candidateObjects: THREE.Object3D[] = [];
+    if (modelPivotRef.current) candidateObjects.push(modelPivotRef.current);
+    sceneRef.current.children.forEach((c) => {
+      if (c.name === 'Interactive_Fire_Flame' || c.name === 'Candle_Assembly' || c.name.startsWith('Primitive_')) {
+        candidateObjects.push(c);
+      }
+    });
+
+    const intersects = raycaster.intersectObjects(candidateObjects, true);
+
+    if (intersects.length > 0) {
+      const selected = findInteractiveTarget(intersects[0].object);
+      if (selected && selected.type !== 'model') {
+        // Detach target to root scene
+        if (selected.targetObject.parent !== sceneRef.current) {
+          sceneRef.current.attach(selected.targetObject);
+        }
+
+        const targetWorldPos = new THREE.Vector3();
+        selected.targetObject.getWorldPosition(targetWorldPos);
+
+        pointerGrabbedTargetRef.current = {
+          type: selected.type,
+          targetObject: selected.targetObject,
+          name: selected.name,
+          dragPlane: new THREE.Plane(new THREE.Vector3(0, 0, 1), -targetWorldPos.z),
+          initialOffset: new THREE.Vector3()
+        };
+
+        const planeIntersect = new THREE.Vector3();
+        raycaster.ray.intersectPlane(pointerGrabbedTargetRef.current.dragPlane, planeIntersect);
+        pointerGrabbedTargetRef.current.initialOffset.subVectors(targetWorldPos, planeIntersect);
+
+        setHeldObjectName(selected.name);
+        setActiveGesture(`🖱️ Dragging: ${selected.name}`);
+        return;
+      }
+    }
+
+    // Default: Orbit entire view
     isPointerDraggingRef.current = true;
     pointerStartPosRef.current = { x: e.clientX, y: e.clientY };
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (pointerGrabbedTargetRef.current && cameraRef.current && canvas3dRef.current) {
+      const rect = canvas3dRef.current.getBoundingClientRect();
+      const mouseX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      const mouseY = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(new THREE.Vector2(mouseX, mouseY), cameraRef.current);
+
+      const planeIntersect = new THREE.Vector3();
+      if (raycaster.ray.intersectPlane(pointerGrabbedTargetRef.current.dragPlane, planeIntersect)) {
+        pointerGrabbedTargetRef.current.targetObject.position.copy(
+          planeIntersect.add(pointerGrabbedTargetRef.current.initialOffset)
+        );
+      }
+      return;
+    }
+
     if (!isPointerDraggingRef.current || !modelPivotRef.current) return;
 
     const dx = (e.clientX - pointerStartPosRef.current.x) * 0.008;
@@ -954,6 +1130,36 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
   };
 
   const handlePointerUp = () => {
+    if (pointerGrabbedTargetRef.current) {
+      const { targetObject, type } = pointerGrabbedTargetRef.current;
+      if (type === 'flame' && currentModelRef.current && selectedModelIdRef.current === 'candle_fire') {
+        const cModel = currentModelRef.current as CandleFireModel;
+        if (cModel.flameGroup && cModel.candleGroup) {
+          const candleWorldPos = new THREE.Vector3();
+          cModel.candleGroup.getWorldPosition(candleWorldPos);
+          const flameWorldPos = new THREE.Vector3();
+          cModel.flameGroup.getWorldPosition(flameWorldPos);
+
+          const wickWorldTarget = candleWorldPos.clone().add(cModel.wickWorldPos);
+          const distToWick = flameWorldPos.distanceTo(wickWorldTarget);
+
+          if (distToWick < 2.0) {
+            if (cModel.group) {
+              cModel.group.attach(cModel.flameGroup);
+            }
+            cModel.setFlameState(true, true);
+            setIsFlameAttached(true);
+            setIsFlameLit(true);
+            setActiveGesture('✨ Flame Placed & Candle Lit!');
+          } else {
+            setIsFlameAttached(false);
+            setActiveGesture('🔥 Flame Placed in Mid-Air!');
+          }
+        }
+      }
+      pointerGrabbedTargetRef.current = null;
+      setHeldObjectName('None');
+    }
     isPointerDraggingRef.current = false;
   };
 
@@ -1048,7 +1254,7 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
                 Mark-L 3D Spatial
               </span>
             </div>
-            <p className="text-xs text-slate-400">3D Depth Hand Control • 360° Gyro Grab • Candle & Fire Physics</p>
+            <p className="text-xs text-slate-400">Raycast Object Picking • True 3D Depth • 360° Gyro Hand Move</p>
           </div>
         </div>
 
@@ -1157,7 +1363,7 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
             </div>
 
             <div className="text-[11px] text-amber-200/90 leading-snug">
-              Pinch the <b>Fire Flame</b> to pick it up, carry it anywhere in 3D depth, and drop it on the candle wick!
+              Pinch or Click the <b>Fire Flame</b> to pick it up, carry it anywhere in 3D depth, and drop it on the candle wick!
             </div>
 
             {/* Flame Action Buttons */}
@@ -1195,7 +1401,7 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
             {/* Flame Glow Colors */}
             <div className="pt-1.5 border-t border-amber-500/20 flex items-center justify-between">
               <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">
-                Flame Flame Color:
+                Flame Color:
               </span>
               <div className="flex gap-1.5">
                 {[
@@ -1391,7 +1597,7 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
             onClick={() => {
               if (modelPivotRef.current) {
                 modelPivotRef.current.position.set(0, 0, 0);
-                modelPivotRef.current.rotation.set(0.15, -0.25, 0);
+                modelPivotRef.current.rotation.set(0.12, -0.2, 0);
                 modelPivotRef.current.scale.set(1, 1, 1);
               }
               if (selectedModelId === 'candle_fire') {
@@ -1413,12 +1619,12 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
             <HelpCircle className="w-3 h-3 text-cyan-400" />
             <span>JARVIS Spatial Controls:</span>
           </p>
-          <p>• 🤏 <b>Pinch Object / Flame</b>: Direct 1:1 Pick, 3D Depth Carry & 360° Turn</p>
+          <p>• 🤏 <b>Pinch Flame / Object</b>: Lock, Move anywhere in 3D & 360° Rotate</p>
           <p>• 📏 <b>Hand Depth (Z)</b>: Move hand closer/farther to push/pull in depth</p>
           <p>• 🔄 <b>Hand Wrist Tilt</b>: 360° Roll, Pitch & Yaw rotation</p>
           <p>• 👐 <b>2 Hands</b>: 360° Gyro Steering & Zoom</p>
           <p>• ✍️ <b>1 Index Finger</b>: Point to Air-Draw 3D Lines</p>
-          <p>• 🖱️ <b>Mouse/Touch</b>: Orbit Drag & Scroll Zoom</p>
+          <p>• 🖱️ <b>Mouse/Touch</b>: Direct Click & Drag any object or flame</p>
         </div>
       </div>
 
