@@ -854,6 +854,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         isFullSong?: boolean;
         quality?: string;
         songId?: string;
+        videoId?: string;
         hasLyrics?: boolean;
     }) => {
         // Push current song to history before starting new one
@@ -987,21 +988,43 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 isPlaying: true,
                 songId: song.songId,
                 hasLyrics: song.hasLyrics,
+                videoId: song.videoId,
             });
         }).catch(err => {
-            console.warn('[Music] Direct play catch:', err);
-            setNowPlayingMusic({
-                trackName: song.trackName,
-                artistName: song.artistName,
-                albumArt: song.albumArt,
-                audioUrl: directUrl,
-                isJioSaavn: song.isJioSaavn !== false && !song.isYouTube,
-                isYouTube: !!song.isYouTube,
-                isYouTubeMusic: !!song.isYouTube,
-                isPlaying: false,
-                songId: song.songId,
-                hasLyrics: song.hasLyrics,
-            });
+            console.warn('[Music] Direct HTML5 play failed, activating YouTube player fallback:', err);
+            // If YouTube song, fallback to YouTube IFrame player
+            if (song.isYouTube || song.videoId) {
+                setNowPlayingMusic({
+                    trackName: song.trackName,
+                    artistName: song.artistName,
+                    albumName: song.albumName,
+                    albumArt: song.albumArt,
+                    audioUrl: directUrl,
+                    videoId: song.videoId,
+                    isYouTube: true,
+                    isYouTubeMusic: true,
+                    isFullSong: true,
+                    quality: "YouTube Pro 1080p HD Audio",
+                    isPlaying: true,
+                    songId: song.songId,
+                    hasLyrics: song.hasLyrics,
+                });
+                try {
+                    const iframe = document.getElementById('youtube-iframe') as HTMLIFrameElement;
+                    iframe?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*');
+                } catch {}
+            } else {
+                setNowPlayingMusic({
+                    trackName: song.trackName,
+                    artistName: song.artistName,
+                    albumArt: song.albumArt,
+                    audioUrl: directUrl,
+                    isJioSaavn: song.isJioSaavn !== false,
+                    isPlaying: false,
+                    songId: song.songId,
+                    hasLyrics: song.hasLyrics,
+                });
+            }
         });
     }, [stopMusicPlayback, setupAudioDsp, fetchSmartQueue]);
 
