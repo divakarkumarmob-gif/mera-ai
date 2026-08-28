@@ -661,6 +661,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const [musicQueue, setMusicQueue] = useState<any[]>([]);
     const [musicHistory, setMusicHistory] = useState<any[]>([]);
     const [musicEqPreset, setMusicEqPreset] = useState("flat");
+    const [isMusicPlayerExpanded, setIsMusicPlayerExpanded] = useState(false);
     const musicDspAudioCtxRef = useRef<AudioContext | null>(null);
     const musicBassFilterRef = useRef<BiquadFilterNode | null>(null);
     const musicMidFilterRef = useRef<BiquadFilterNode | null>(null);
@@ -2514,116 +2515,61 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         </div>
                     )}
 
-                    {/* ── Stable Music Player UI Popup Widget ── */}
+                    {/* ── Mini Music Title Pill (Below Agent Face: Hidden big player by default) ── */}
                     <AnimatePresence>
-                        {nowPlayingMusic && (
+                        {nowPlayingMusic && !isMusicPlayerExpanded && (
                             <motion.div
-                                initial={{ opacity: 0, scale: 0.9, y: 10 }}
+                                initial={{ opacity: 0, scale: 0.92, y: 8 }}
                                 animate={{ opacity: 1, scale: 1, y: 0 }}
-                                exit={{ opacity: 0, scale: 0.9, y: 10 }}
-                                className="flex items-center gap-3 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-violet-950/90 via-purple-900/80 to-slate-900/90 border border-violet-500/60 text-violet-200 text-xs shadow-[0_0_30px_rgba(139,92,246,0.4)] backdrop-blur-md max-w-md w-full"
+                                exit={{ opacity: 0, scale: 0.92, y: 8 }}
+                                className="flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-gradient-to-r from-red-950/80 via-purple-950/70 to-slate-900/90 border border-red-500/40 text-xs shadow-[0_0_20px_rgba(239,68,68,0.25)] backdrop-blur-md max-w-sm w-full cursor-pointer hover:border-red-400 transition-all select-none"
+                                onClick={() => setIsMusicPlayerExpanded(true)}
+                                title="Click title to open full music player"
                             >
+                                {/* Animated Equalizer or Mini Album Art */}
                                 {nowPlayingMusic.albumArt ? (
                                     <img
                                         src={nowPlayingMusic.albumArt}
                                         alt={nowPlayingMusic.trackName}
-                                        className="w-9 h-9 rounded-lg object-cover border border-white/20 shrink-0"
+                                        className="w-6 h-6 rounded-full object-cover border border-white/20 shrink-0"
                                     />
                                 ) : (
-                                    <span className="flex gap-0.5 items-end h-4 shrink-0">
-                                        <span className={`w-1 bg-violet-400 rounded-full ${nowPlayingMusic.isPlaying ? 'animate-[bounce_0.8s_infinite]' : 'h-3'}`} style={{ height: nowPlayingMusic.isPlaying ? '60%' : '50%' }} />
-                                        <span className={`w-1 bg-violet-400 rounded-full ${nowPlayingMusic.isPlaying ? 'animate-[bounce_0.6s_infinite_0.2s]' : 'h-4'}`} style={{ height: nowPlayingMusic.isPlaying ? '100%' : '80%' }} />
-                                        <span className={`w-1 bg-violet-400 rounded-full ${nowPlayingMusic.isPlaying ? 'animate-[bounce_0.9s_infinite_0.4s]' : 'h-3'}`} style={{ height: nowPlayingMusic.isPlaying ? '75%' : '60%' }} />
+                                    <span className="flex gap-0.5 items-end h-3 shrink-0">
+                                        <span className={`w-0.5 bg-red-400 rounded-full ${nowPlayingMusic.isPlaying ? 'animate-[bounce_0.8s_infinite]' : 'h-2'}`} />
+                                        <span className={`w-0.5 bg-red-400 rounded-full ${nowPlayingMusic.isPlaying ? 'animate-[bounce_0.6s_infinite_0.2s]' : 'h-3'}`} />
+                                        <span className={`w-0.5 bg-red-400 rounded-full ${nowPlayingMusic.isPlaying ? 'animate-[bounce_0.9s_infinite_0.4s]' : 'h-2'}`} />
                                     </span>
                                 )}
-                                <div className="min-w-0 flex-1">
-                                    <div className="flex items-center gap-1.5">
-                                        <span className="font-bold text-white truncate text-xs">
-                                            {nowPlayingMusic.trackName}
+
+                                {/* Song Name & Artist (Click to expand) */}
+                                <div className="min-w-0 flex-1 flex items-center gap-1.5 overflow-hidden">
+                                    <span className="font-bold text-white truncate text-[11px] hover:text-red-300 transition-colors">
+                                        {nowPlayingMusic.trackName}
+                                    </span>
+                                    {nowPlayingMusic.artistName && (
+                                        <span className="text-slate-400 text-[10px] truncate hidden sm:inline">
+                                            • {nowPlayingMusic.artistName}
                                         </span>
-                                        <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-emerald-500/30 text-emerald-300 font-mono">
-                                            {nowPlayingMusic.isFullSong ? '✨ Full Song' : 'Music Track'}
-                                        </span>
-                                    </div>
-                                    <p className="text-slate-300 text-[11px] truncate">
-                                        {nowPlayingMusic.artistName || 'Playing Music'}
-                                    </p>
-                                    {nowPlayingMusic.hasError && (
-                                        <p className="text-rose-400 text-[10px] truncate font-medium mt-0.5">
-                                            ⚠️ {nowPlayingMusic.errorMessage || 'Direct stream unavailable — use links below'}
-                                        </p>
                                     )}
+                                    <span className="text-[9px] px-1 py-0.2 rounded-full bg-red-500/20 text-red-300 font-mono shrink-0">
+                                        {nowPlayingMusic.isYouTube ? '🔴 YT Pro' : '⚡ HD'}
+                                    </span>
                                 </div>
 
-                                <div className="flex items-center gap-1.5 shrink-0">
-                                    {(musicAudioRef.current || nowPlayingMusic.audioUrl || nowPlayingMusic.fallbackAudioUrl) && !nowPlayingMusic.isYouTubeMusic && (
-                                        <button
-                                            onClick={toggleMusicPlayPause}
-                                            className="px-2 py-1 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-semibold text-[11px] transition-colors shadow-sm cursor-pointer"
-                                            title={nowPlayingMusic.isPlaying ? "Pause" : "Play"}
-                                        >
-                                            {nowPlayingMusic.isPlaying ? '⏸ Pause' : '▶ Play'}
-                                        </button>
-                                    )}
-                                    {nowPlayingMusic.youtubeMusicUrl && (
-                                        <a
-                                            href={nowPlayingMusic.youtubeMusicUrl}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="px-2.5 py-1 rounded-xl bg-red-600/40 hover:bg-red-600/60 border border-red-500/50 text-red-200 text-[11px] font-semibold transition-all flex items-center gap-1"
-                                        >
-                                            <span>▶</span>
-                                            <span>YT Music</span>
-                                        </a>
-                                    )}
-                                    {nowPlayingMusic.spotifyUrl && (
-                                        <a
-                                            href={nowPlayingMusic.spotifyUrl}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="px-2 py-1 rounded-xl bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-500/50 text-emerald-200 text-[11px] font-semibold transition-all"
-                                        >
-                                            Spotify ↗
-                                        </a>
-                                    )}
-                                    <button
-                                        onClick={stopMusicPlayback}
-                                        className="p-1 rounded-lg bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white transition-colors cursor-pointer"
-                                        title="Close music player"
-                                    >
-                                        <X className="w-3.5 h-3.5" />
-                                    </button>
-                                </div>
-                            </motion.div>
-                        )}
-                    </AnimatePresence>
+                                {/* Play / Pause button right next to title */}
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        toggleMusicPlayPause();
+                                    }}
+                                    className="p-1.5 rounded-full bg-red-600/40 hover:bg-red-600/80 text-white font-semibold text-[11px] transition-all shadow-sm cursor-pointer shrink-0 active:scale-95"
+                                    title={nowPlayingMusic.isPlaying ? "Pause" : "Play"}
+                                >
+                                    {nowPlayingMusic.isPlaying ? '⏸' : '▶'}
+                                </button>
 
-                    {/* ── Embedded YouTube Music Ad-Free Player Card ── */}
-                    <AnimatePresence>
-                        {nowPlayingMusic?.isYouTubeMusic && nowPlayingMusic.embedUrl && (
-                            <motion.div
-                                initial={{ opacity: 0, scale: 0.9, y: 15 }}
-                                animate={{ opacity: 1, scale: 1, y: 0 }}
-                                exit={{ opacity: 0, scale: 0.9, y: 15 }}
-                                className="w-full max-w-md rounded-2xl overflow-hidden bg-slate-950/90 border border-red-500/40 shadow-[0_0_35px_rgba(239,68,68,0.25)] backdrop-blur-md p-3 space-y-2"
-                            >
-                                <div className="flex items-center justify-between px-1">
-                                    <div className="flex items-center gap-2">
-                                        <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
-                                        <span className="text-xs font-bold text-red-400">YouTube Music HD Live</span>
-                                    </div>
-                                    <span className="text-[10px] text-slate-400 font-mono">Ad-Free Stream</span>
-                                </div>
-                                <div className="aspect-video w-full rounded-xl overflow-hidden bg-black border border-slate-800">
-                                    <iframe
-                                        id="youtube-iframe"
-                                        src={nowPlayingMusic.embedUrl}
-                                        title={nowPlayingMusic.trackName}
-                                        allow="autoplay; encrypted-media; accelerometer; clipboard-write; gyroscope; picture-in-picture"
-                                        allowFullScreen
-                                        className="w-full h-full border-0"
-                                    />
-                                </div>
+                                {/* Chevron Up Indicator */}
+                                <span className="text-slate-400 text-[10px] shrink-0 font-bold">▲</span>
                             </motion.div>
                         )}
                     </AnimatePresence>
@@ -2951,50 +2897,53 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 )}
             </AnimatePresence>
 
-            {/* Floating Futuristic Music Capsule Widget */}
-            <MusicCapsule
-                nowPlaying={nowPlayingMusic ? {
-                    trackName: nowPlayingMusic.trackName,
-                    artistName: nowPlayingMusic.artistName || 'Artist',
-                    albumName: nowPlayingMusic.albumName,
-                    albumArt: nowPlayingMusic.albumArt,
-                    isPlaying: !!nowPlayingMusic.isPlaying,
-                    quality: nowPlayingMusic.quality,
-                    audioUrl: nowPlayingMusic.audioUrl,
-                    songId: nowPlayingMusic.songId,
-                    hasLyrics: nowPlayingMusic.hasLyrics,
-                } : null}
-                currentTime={musicCurrentTime}
-                duration={musicDuration}
-                queue={musicQueue}
-                eqPreset={musicEqPreset}
-                onPlayPause={toggleMusicPlayPause}
-                onStop={stopMusicPlayback}
-                onSeek={seekToMusic}
-                onSeekRelative={seekRelativeMusic}
-                onRestart={restartMusic}
-                onNextTrack={playNextQueueSong}
-                onPreviousTrack={playPrevQueueSong}
-                onSelectEqPreset={applyEqPreset}
-                onPlayQueueSong={(qSong) => {
-                    playDirectSong({
-                        trackName: qSong.songName,
-                        artistName: qSong.artistName,
-                        albumName: qSong.albumName,
-                        albumArt: qSong.albumArt500,
-                        audioUrl: qSong.audio320kbps,
-                        isJioSaavn: true,
-                        isFullSong: true,
-                        quality: "JioSaavn 320kbps Ultra-HD",
-                        songId: qSong.id,
-                    });
-                }}
-                onVolumeChange={(vol) => {
-                    if (musicAudioRef.current) {
-                        musicAudioRef.current.volume = vol;
-                    }
-                }}
-            />
+            {/* Floating Futuristic Music Capsule Widget (Only shown when expanded by user) */}
+            {isMusicPlayerExpanded && (
+                <MusicCapsule
+                    nowPlaying={nowPlayingMusic ? {
+                        trackName: nowPlayingMusic.trackName,
+                        artistName: nowPlayingMusic.artistName || 'Artist',
+                        albumName: nowPlayingMusic.albumName,
+                        albumArt: nowPlayingMusic.albumArt,
+                        isPlaying: !!nowPlayingMusic.isPlaying,
+                        quality: nowPlayingMusic.quality,
+                        audioUrl: nowPlayingMusic.audioUrl,
+                        songId: nowPlayingMusic.songId,
+                        hasLyrics: nowPlayingMusic.hasLyrics,
+                    } : null}
+                    currentTime={musicCurrentTime}
+                    duration={musicDuration}
+                    queue={musicQueue}
+                    eqPreset={musicEqPreset}
+                    onPlayPause={toggleMusicPlayPause}
+                    onStop={stopMusicPlayback}
+                    onMinimize={() => setIsMusicPlayerExpanded(false)}
+                    onSeek={seekToMusic}
+                    onSeekRelative={seekRelativeMusic}
+                    onRestart={restartMusic}
+                    onNextTrack={playNextQueueSong}
+                    onPreviousTrack={playPrevQueueSong}
+                    onSelectEqPreset={applyEqPreset}
+                    onPlayQueueSong={(qSong) => {
+                        playDirectSong({
+                            trackName: qSong.songName,
+                            artistName: qSong.artistName,
+                            albumName: qSong.albumName,
+                            albumArt: qSong.albumArt500,
+                            audioUrl: qSong.audio320kbps,
+                            isJioSaavn: true,
+                            isFullSong: true,
+                            quality: "JioSaavn 320kbps Ultra-HD",
+                            songId: qSong.id,
+                        });
+                    }}
+                    onVolumeChange={(vol) => {
+                        if (musicAudioRef.current) {
+                            musicAudioRef.current.volume = vol;
+                        }
+                    }}
+                />
+            )}
             {/* Music Studio Modal (JioSaavn 320kbps Search & Play) */}
             <MusicStudioModal
                 isOpen={showMusicStudio}

@@ -11,6 +11,7 @@ import {
   Sparkles,
   FileText,
   X,
+  Minus,
   RotateCcw,
   SkipForward,
   SkipBack,
@@ -65,6 +66,7 @@ interface MusicCapsuleProps {
   eqPreset?: string;
   onPlayPause: () => void;
   onStop: () => void;
+  onMinimize?: () => void;
   onSeek?: (timeSeconds: number) => void;
   onSeekRelative?: (deltaSeconds: number) => void;
   onRestart?: () => void;
@@ -91,6 +93,7 @@ export const MusicCapsule: React.FC<MusicCapsuleProps> = ({
   eqPreset = "flat",
   onPlayPause,
   onStop,
+  onMinimize,
   onSeek,
   onSeekRelative,
   onRestart,
@@ -220,6 +223,17 @@ export const MusicCapsule: React.FC<MusicCapsuleProps> = ({
               >
                 {isExpanded ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
               </button>
+
+              {/* Minimize to Mini Title Pill */}
+              {onMinimize && (
+                <button
+                  onClick={onMinimize}
+                  title="Minimize Player"
+                  className="p-1 rounded-lg hover:bg-white/10 text-zinc-400 hover:text-cyan-300 transition-colors"
+                >
+                  <Minus className="w-3.5 h-3.5" />
+                </button>
+              )}
 
               {/* Stop & Close */}
               <button
