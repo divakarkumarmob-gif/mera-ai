@@ -13,6 +13,7 @@ import { getWsUrl, getApiUrl } from '@/utils/api';
 import { wakeWordManager } from '@/utils/wakeWord';
 import { getAppToken, clearAppSession } from '@/utils/appSecurityClient';
 import { screenWakeLock } from '@/utils/screenWakeLock';
+import { mobileNotificationService } from '@/utils/mobileNotificationService';
 import { MusicCapsule } from './MusicCapsule';
 import { MusicStudioModal } from './MusicStudioModal';
 import { SongPreviewModal, PreviewCandidate } from './SongPreviewModal';
@@ -35,37 +36,45 @@ interface ToggleSwitchProps {
     disabled?: boolean;
 }
 
-function ToggleSwitch({ label, description, active, onToggle, activeColor = 'bg-purple-600', disabled }: ToggleSwitchProps) {
+function ToggleSwitch({ label, description, active, onToggle, activeColor = 'bg-[#10b981]', disabled }: ToggleSwitchProps) {
     return (
-        <div className="flex items-center justify-between gap-4 py-2 border-b border-white/5 last:border-0">
+        <div className="flex items-center justify-between gap-4 py-2.5 border-b border-white/5 last:border-0">
             <div className="min-w-0 flex-1">
                 <span className="text-white text-sm block font-medium leading-tight">{label}</span>
-                {description && <span className="text-slate-400 text-xs block mt-0.5">{description}</span>}
+                {description && <span className="text-slate-400 text-xs block mt-0.5 leading-normal">{description}</span>}
             </div>
-            <div className="flex flex-col items-center gap-1 shrink-0">
+            <button
+                type="button"
+                onClick={onToggle}
+                disabled={disabled}
+                className={`relative inline-flex items-center w-16 h-8 shrink-0 rounded-full transition-colors duration-300 ease-in-out cursor-pointer p-1 select-none active:scale-95 shadow-inner ${
+                    active ? (activeColor.startsWith('bg-') ? activeColor : 'bg-[#10b981]') : 'bg-slate-500'
+                } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                title={active ? "Switch OFF" : "Switch ON"}
+            >
+                {/* Text Label Inside Switch (ON on left, OFF on right) */}
                 <span
-                    className={`text-[9px] font-black tracking-widest px-2 py-0.5 rounded-full uppercase transition-all ${
-                        active
-                            ? 'bg-emerald-500/25 text-emerald-300 border border-emerald-500/50 shadow-[0_0_10px_rgba(16,185,129,0.35)]'
-                            : 'bg-slate-800 text-slate-400 border border-slate-700'
+                    className={`absolute text-[11px] font-black tracking-wider text-white select-none transition-opacity duration-200 ${
+                        active ? 'left-2.5 opacity-100' : 'opacity-0'
                     }`}
                 >
-                    {active ? 'ON' : 'OFF'}
+                    ON
                 </span>
-                <button
-                    onClick={onToggle}
-                    disabled={disabled}
-                    className={`w-12 h-7 rounded-full transition-all relative cursor-pointer active:scale-95 ${
-                        active ? activeColor : 'bg-slate-700'
-                    } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                <span
+                    className={`absolute text-[10px] font-black tracking-wider text-white select-none transition-opacity duration-200 ${
+                        !active ? 'right-2.5 opacity-100' : 'opacity-0'
+                    }`}
                 >
-                    <span
-                        className={`absolute top-1 w-5 h-5 rounded-full bg-white shadow-md transition-transform ${
-                            active ? 'translate-x-6' : 'translate-x-1'
-                        }`}
-                    />
-                </button>
-            </div>
+                    OFF
+                </span>
+
+                {/* Sliding Round Knob Button (Zero overflow, perfect alignment) */}
+                <span
+                    className={`inline-block w-6 h-6 rounded-full bg-white shadow-[0_2px_8px_rgba(0,0,0,0.35)] transform transition-transform duration-300 ease-in-out pointer-events-none ${
+                        active ? 'translate-x-8' : 'translate-x-0'
+                    }`}
+                />
+            </button>
         </div>
     );
 }
@@ -827,6 +836,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         setNowPlayingMusic(null);
         setMusicCurrentTime(0);
         setMusicDuration(0);
+        mobileNotificationService.clearMusicNotification();
     }, []);
 
     const playDirectSong = useCallback((song: {
@@ -1216,6 +1226,31 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
             }
         }
     }, [nowPlayingMusic, stopMusicPlayback, resumeMusicPlayback, pauseMusicPlayback, seekRelativeMusic, seekToMusic, playNextQueueSong, playPrevQueueSong]);
+
+    // ── Native Mobile Notification & Lock-Screen Player Bridge (Capacitor Android / iOS) ──
+    useEffect(() => {
+        mobileNotificationService.initialize({
+            onPlayPause: () => toggleMusicPlayPause(),
+            onNext: () => playNextQueueSong(),
+            onPrev: () => playPrevQueueSong(),
+            onStop: () => stopMusicPlayback(),
+        });
+    }, [toggleMusicPlayPause, playNextQueueSong, playPrevQueueSong, stopMusicPlayback]);
+
+    useEffect(() => {
+        if (nowPlayingMusic) {
+            mobileNotificationService.showMusicNotification({
+                trackName: nowPlayingMusic.trackName,
+                artistName: nowPlayingMusic.artistName,
+                albumArt: nowPlayingMusic.albumArt,
+                isPlaying: !!nowPlayingMusic.isPlaying,
+                isYouTube: !!nowPlayingMusic.isYouTube,
+                quality: nowPlayingMusic.quality,
+            });
+        } else {
+            mobileNotificationService.clearMusicNotification();
+        }
+    }, [nowPlayingMusic?.trackName, nowPlayingMusic?.isPlaying, nowPlayingMusic?.isYouTube, nowPlayingMusic?.artistName]);
 
     // ── Smooth Audio Ducking when Friday is speaking ──────────────────────────
     useEffect(() => {

@@ -203,17 +203,30 @@ export default function AppAccessSection() {
                                         <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-white/5">
                                             {/* Preference Toggle */}
                                             <button
+                                                type="button"
                                                 onClick={() => handleToggle(item.id)}
-                                                className={`w-11 h-6 rounded-full transition-all relative cursor-pointer active:scale-95 flex items-center px-0.5 ${
-                                                    isAllowed ? 'bg-cyan-500 shadow-[0_0_10px_rgba(6,182,212,0.4)]' : 'bg-slate-700'
+                                                className={`relative inline-flex items-center w-16 h-8 shrink-0 rounded-full transition-colors duration-300 ease-in-out cursor-pointer p-1 select-none active:scale-95 shadow-inner ${
+                                                    isAllowed ? 'bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.4)]' : 'bg-slate-600'
                                                 }`}
                                                 title={isAllowed ? 'Click to revoke preference' : 'Click to allow preference'}
                                             >
-                                                <motion.span
-                                                    layout
-                                                    transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-                                                    className={`w-5 h-5 rounded-full bg-white shadow-md block ${
-                                                        isAllowed ? 'translate-x-5' : 'translate-x-0'
+                                                <span
+                                                    className={`absolute text-[11px] font-black tracking-wider text-white select-none transition-opacity duration-200 ${
+                                                        isAllowed ? 'left-2.5 opacity-100' : 'opacity-0'
+                                                    }`}
+                                                >
+                                                    ON
+                                                </span>
+                                                <span
+                                                    className={`absolute text-[10px] font-black tracking-wider text-white select-none transition-opacity duration-200 ${
+                                                        !isAllowed ? 'right-2.5 opacity-100' : 'opacity-0'
+                                                    }`}
+                                                >
+                                                    OFF
+                                                </span>
+                                                <span
+                                                    className={`inline-block w-6 h-6 rounded-full bg-white shadow-[0_2px_8px_rgba(0,0,0,0.35)] transform transition-transform duration-300 ease-in-out pointer-events-none ${
+                                                        isAllowed ? 'translate-x-8' : 'translate-x-0'
                                                     }`}
                                                 />
                                             </button>
