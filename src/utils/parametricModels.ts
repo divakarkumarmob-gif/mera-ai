@@ -558,13 +558,259 @@ export function createBlankWorkspaceModel(): ParametricMachineModel {
   };
 }
 
+// ── 7. Interactive Candle & Detachable Fire Flame Fusion ───────────────────────
+
+export interface CandleFireModel extends ParametricMachineModel {
+  flameGroup: THREE.Group;
+  candleGroup: THREE.Group;
+  flameLight: THREE.PointLight;
+  isLit: boolean;
+  isFlameAttached: boolean;
+  wickWorldPos: THREE.Vector3;
+  setFlameColor: (colorHex: number) => void;
+  setFlameState: (attached: boolean, lit: boolean) => void;
+}
+
+export function createCandleFireModel(): CandleFireModel {
+  const group = new THREE.Group();
+  const parts: ParametricMachineModel['parts'] = [];
+
+  const brassMat = createHologramMaterial(0xf59e0b, 0.95);
+  const waxMat = new THREE.MeshStandardMaterial({
+    color: 0xfef08a,
+    emissive: 0xd97706,
+    emissiveIntensity: 0.25,
+    roughness: 0.35,
+    metalness: 0.1,
+    transparent: true,
+    opacity: 0.9,
+  });
+  const wickMat = new THREE.MeshStandardMaterial({
+    color: 0x1f2937,
+    roughness: 0.9,
+  });
+
+  // ── A. CANDLE HIERARCHY ──
+  const candleGroup = new THREE.Group();
+  candleGroup.name = 'Candle_Assembly';
+
+  // 1. Ornate Base Stand
+  const baseGeo = new THREE.CylinderGeometry(1.5, 1.8, 0.25, 32);
+  const baseMesh = new THREE.Mesh(baseGeo, brassMat);
+  baseMesh.position.set(0, -1.8, 0);
+  candleGroup.add(baseMesh);
+
+  // Stand Handle Ring
+  const handleGeo = new THREE.TorusGeometry(0.45, 0.08, 16, 32);
+  const handleMesh = new THREE.Mesh(handleGeo, brassMat);
+  handleMesh.rotation.y = Math.PI / 2;
+  handleMesh.position.set(1.6, -1.6, 0);
+  candleGroup.add(handleMesh);
+
+  // 2. Candle Wax Body (Cylinder with rounded melt rim)
+  const waxGeo = new THREE.CylinderGeometry(0.7, 0.78, 2.8, 32);
+  const waxMesh = new THREE.Mesh(waxGeo, waxMat);
+  waxMesh.position.set(0, -0.3, 0);
+  candleGroup.add(waxMesh);
+
+  // Wax Drips on side
+  const dripPositions = [
+    { x: 0.72, y: 0.7, z: 0.2, s: 0.18 },
+    { x: -0.68, y: 0.4, z: 0.35, s: 0.15 },
+    { x: 0.1, y: 0.2, z: -0.74, s: 0.22 },
+  ];
+  dripPositions.forEach((dp) => {
+    const dripGeo = new THREE.SphereGeometry(dp.s, 12, 12);
+    const dripMesh = new THREE.Mesh(dripGeo, waxMat);
+    dripMesh.position.set(dp.x, dp.y, dp.z);
+    dripMesh.scale.set(1, 2.2, 1);
+    candleGroup.add(dripMesh);
+  });
+
+  // 3. Candle Braided Wick
+  const wickGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.4, 16);
+  const wickMesh = new THREE.Mesh(wickGeo, wickMat);
+  wickMesh.position.set(0, 1.25, 0);
+  wickMesh.rotation.z = 0.08;
+  candleGroup.add(wickMesh);
+
+  group.add(candleGroup);
+
+  parts.push({
+    name: 'Candle & Brass Pedestal',
+    mesh: candleGroup,
+    originalPos: candleGroup.position.clone(),
+    explodeDir: new THREE.Vector3(0, -1.2, 0),
+  });
+
+  // ── B. DETACHABLE INTERACTIVE FIRE FLAME HIERARCHY ──
+  const flameGroup = new THREE.Group();
+  flameGroup.name = 'Interactive_Fire_Flame';
+  flameGroup.position.set(0, 1.85, 0); // Mounted on wick by default
+
+  // 1. Inner Plasma Core
+  const innerFlameGeo = new THREE.ConeGeometry(0.18, 0.65, 16);
+  innerFlameGeo.translate(0, 0.3, 0);
+  const innerFlameMat = new THREE.MeshStandardMaterial({
+    color: 0x60a5fa,
+    emissive: 0x93c5fd,
+    emissiveIntensity: 2.2,
+    roughness: 0.1,
+    transparent: true,
+    opacity: 0.95,
+  });
+  const innerFlameMesh = new THREE.Mesh(innerFlameGeo, innerFlameMat);
+  flameGroup.add(innerFlameMesh);
+
+  // 2. Outer Fire Envelope (Warm Glowing Orange/Gold Teardrop)
+  const outerFlameGeo = new THREE.ConeGeometry(0.36, 1.1, 24);
+  outerFlameGeo.translate(0, 0.45, 0);
+  const outerFlameMat = new THREE.MeshStandardMaterial({
+    color: 0xf97316,
+    emissive: 0xfbbf24,
+    emissiveIntensity: 1.8,
+    roughness: 0.2,
+    transparent: true,
+    opacity: 0.85,
+  });
+  const outerFlameMesh = new THREE.Mesh(outerFlameGeo, outerFlameMat);
+  flameGroup.add(outerFlameMesh);
+
+  // 3. Flame Halo & Spark Particles (Rising embers)
+  const sparkCount = 28;
+  const sparkGeo = new THREE.BufferGeometry();
+  const sparkPositions = new Float32Array(sparkCount * 3);
+  const sparkVelocities: { x: number; y: number; z: number; resetY: number }[] = [];
+
+  for (let i = 0; i < sparkCount; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const rad = Math.random() * 0.45;
+    sparkPositions[i * 3] = Math.cos(angle) * rad;
+    sparkPositions[i * 3 + 1] = Math.random() * 1.5;
+    sparkPositions[i * 3 + 2] = Math.sin(angle) * rad;
+
+    sparkVelocities.push({
+      x: (Math.random() - 0.5) * 0.015,
+      y: 0.02 + Math.random() * 0.03,
+      z: (Math.random() - 0.5) * 0.015,
+      resetY: Math.random() * 0.2,
+    });
+  }
+  sparkGeo.setAttribute('position', new THREE.BufferAttribute(sparkPositions, 3));
+
+  const sparkMat = new THREE.PointsMaterial({
+    color: 0xfef08a,
+    size: 0.08,
+    transparent: true,
+    opacity: 0.9,
+    blending: THREE.AdditiveBlending,
+  });
+  const sparkPoints = new THREE.Points(sparkGeo, sparkMat);
+  flameGroup.add(sparkPoints);
+
+  // 4. Dynamic Point Light (Flickering Flame Light Source)
+  const flameLight = new THREE.PointLight(0xf59e0b, 3.2, 12);
+  flameLight.position.set(0, 0.6, 0);
+  flameGroup.add(flameLight);
+
+  // Add Flame to main group
+  group.add(flameGroup);
+
+  parts.push({
+    name: 'Interactive Fire Flame',
+    mesh: flameGroup,
+    originalPos: flameGroup.position.clone(),
+    explodeDir: new THREE.Vector3(0, 1.8, 0),
+  });
+
+  let isLit = true;
+  let isFlameAttached = true;
+  const wickWorldPos = new THREE.Vector3(0, 1.85, 0);
+
+  const setFlameColor = (colorHex: number) => {
+    outerFlameMat.color.setHex(colorHex);
+    outerFlameMat.emissive.setHex(colorHex);
+    sparkMat.color.setHex(colorHex);
+    flameLight.color.setHex(colorHex);
+  };
+
+  const setFlameState = (attached: boolean, lit: boolean) => {
+    isFlameAttached = attached;
+    isLit = lit;
+    flameGroup.visible = lit;
+    flameLight.visible = lit;
+    if (attached) {
+      flameGroup.position.copy(wickWorldPos);
+    }
+  };
+
+  // Animation Update loop
+  const update = (time: number) => {
+    if (!isLit) return;
+
+    // Organic flame flicker and sway
+    const flicker1 = Math.sin(time * 18.0) * 0.06;
+    const flicker2 = Math.cos(time * 24.0) * 0.04;
+    const heightPulse = 1.0 + Math.sin(time * 12.0) * 0.08 + Math.sin(time * 28.0) * 0.04;
+
+    outerFlameMesh.scale.set(1.0 + flicker1, heightPulse, 1.0 + flicker2);
+    outerFlameMesh.rotation.z = Math.sin(time * 4.0) * 0.06;
+    innerFlameMesh.scale.set(1.0 + flicker2, heightPulse * 0.95, 1.0 + flicker1);
+
+    flameLight.intensity = 2.8 + Math.sin(time * 20.0) * 0.6 + Math.cos(time * 33.0) * 0.4;
+
+    // Animate rising ember sparks
+    const positions = sparkGeo.attributes.position.array as Float32Array;
+    for (let i = 0; i < sparkCount; i++) {
+      const idx = i * 3;
+      positions[idx + 1] += sparkVelocities[i].y;
+      positions[idx] += sparkVelocities[i].x;
+      positions[idx + 2] += sparkVelocities[i].z;
+
+      // Reset when spark reaches top
+      if (positions[idx + 1] > 1.8) {
+        const angle = Math.random() * Math.PI * 2;
+        const rad = Math.random() * 0.3;
+        positions[idx] = Math.cos(angle) * rad;
+        positions[idx + 1] = sparkVelocities[i].resetY;
+        positions[idx + 2] = Math.sin(angle) * rad;
+      }
+    }
+    sparkGeo.attributes.position.needsUpdate = true;
+  };
+
+  return {
+    id: 'candle_fire',
+    name: '🕯️ Candle & Detachable Fire Flame',
+    category: 'Interactive Physics & Fusion',
+    description: 'Separate candle & magical fire flame! Pinch to carry flame anywhere in 3D depth, 360° rotate, or place on candle wick.',
+    group,
+    parts,
+    flameGroup,
+    candleGroup,
+    flameLight,
+    isLit,
+    isFlameAttached,
+    wickWorldPos,
+    setFlameColor,
+    setFlameState,
+    update,
+  };
+}
+
 // ── Model Factory ─────────────────────────────────────────────────────────────
 
 export function getAvailableModels(): { id: string; name: string; category: string; description: string }[] {
   return [
     {
+      id: 'candle_fire',
+      name: '🕯️ Candle & Interactive Flame',
+      category: 'Interactive Physics',
+      description: 'Separate candle & fire! Pinch fire to carry in 3D depth, 360° rotate & place on candle wick.',
+    },
+    {
       id: 'blank_workspace',
-      name: '✨ Blank Workspace',
+      name: '✨ Blank Workspace (Freehand)',
       category: 'Open CAD Canvas',
       description: 'Clean spatial holographic workspace for freehand creation & sculpting.',
     },
@@ -609,6 +855,8 @@ export function getAvailableModels(): { id: string; name: string; category: stri
 
 export function loadModelById(id: string): ParametricMachineModel {
   switch (id) {
+    case 'candle_fire':
+      return createCandleFireModel();
     case 'blank_workspace':
       return createBlankWorkspaceModel();
     case 'quadcopter_drone':
@@ -624,3 +872,4 @@ export function loadModelById(id: string): ParametricMachineModel {
       return createArcReactorModel();
   }
 }
+
