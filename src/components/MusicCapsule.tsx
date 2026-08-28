@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Play, Pause, Square, Volume2, VolumeX, Maximize2, Minimize2, Music2, Sparkles, FileText, X } from "lucide-react";
+import { getApiUrl } from "@/utils/api";
 
 export interface NowPlayingTrack {
   trackName: string;
@@ -65,7 +66,7 @@ export const MusicCapsule: React.FC<MusicCapsuleProps> = ({
     setLoadingLyrics(true);
     setShowLyrics(true);
     try {
-      const res = await fetch(`/api/music/lyrics?query=${encodeURIComponent(nowPlaying.trackName + " " + nowPlaying.artistName)}`);
+      const res = await fetch(getApiUrl(`/api/music/lyrics?query=${encodeURIComponent(nowPlaying.trackName + " " + nowPlaying.artistName)}`));
       const data = await res.json();
       if (data.success && data.lyrics) {
         setLyricsText(data.lyrics);

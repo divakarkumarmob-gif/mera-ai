@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { X, Search, Play, Pause, Music2, Sparkles, Loader2, Disc3, Mic2, Flame, Heart, FileText } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { getApiUrl } from "@/utils/api";
 
 interface SongItem {
   id: string;
@@ -114,7 +115,7 @@ export const MusicStudioModal: React.FC<MusicStudioModalProps> = ({
     if (tabId) setSelectedTab(tabId);
 
     try {
-      const res = await fetch(`/api/music/search?query=${encodeURIComponent(q)}`);
+      const res = await fetch(getApiUrl(`/api/music/search?query=${encodeURIComponent(q)}`));
       const data = await res.json();
       if (data.success && Array.isArray(data.songs)) {
         setResults(data.songs);
