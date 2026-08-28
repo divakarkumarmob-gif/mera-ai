@@ -3624,23 +3624,16 @@ class PublicApisService {
       if (ytResult.success && ytResult.tracks.length > 0) {
         const top = ytResult.tracks[0];
 
-        // Try extracting direct high-quality YouTube audio stream
-        let directAudioUrl = "";
-        try {
-          directAudioUrl = (await youtubeMusicService.getAudioStreamUrl(top.videoId)) || "";
-        } catch {}
-
         return {
           success: true,
           trackName: top.songName,
           artistName: top.artistName,
           videoId: top.videoId,
-          audioUrl: directAudioUrl || `/api/youtube/stream-audio?v=${top.videoId}`,
-          directCdnUrl: directAudioUrl || "",
+          audioUrl: `/api/youtube/stream-audio?v=${top.videoId}`,
           streamUrl: `/api/youtube/stream-audio?v=${top.videoId}`,
           youtubeMusicUrl: top.youtubeMusicUrl,
           youtubeUrl: top.youtubeUrl,
-          embedUrl: top.embedUrl,
+          embedUrl: top.embedUrl || `https://www.youtube-nocookie.com/embed/${top.videoId}?autoplay=1&enablejsapi=1&controls=0&playsinline=1`,
           albumArt: top.albumArt,
           albumArtHighRes: top.albumArtHighRes,
           durationSec: top.durationSec,

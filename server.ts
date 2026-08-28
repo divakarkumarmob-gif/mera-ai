@@ -5722,11 +5722,34 @@ STYLE:
                     const rawPool: any[] = [];
                     const seenKeys = new Set<string>();
 
-                    // 1. Parallel Ingestion from both Spotify and JioSaavn Catalogs
-                    const [spotifyRes, jioRes] = await Promise.all([
+                    // 1. Parallel Ingestion from YouTube, Spotify, and JioSaavn Catalogs
+                    const [ytRes, spotifyRes, jioRes] = await Promise.all([
+                      youtubeMusicService.searchTracks(songQuery || "Top Hits", 10).catch(() => null),
                       publicApisService.searchMusic(songQuery || "Top Hits").catch(() => null),
                       jioSaavnService.searchSong(songQuery || "Top Hits", 12).catch(() => null),
                     ]);
+
+                    // Add YouTube Pro Candidates
+                    if (ytRes?.success && Array.isArray(ytRes.tracks)) {
+                      for (const y of ytRes.tracks) {
+                        const norm = (y.songName + " " + (y.artistName || "")).toLowerCase().replace(/[^a-z0-9]/g, '');
+                        if (!seenKeys.has(norm)) {
+                          seenKeys.add(norm);
+                          rawPool.push({
+                            id: `yt_${y.videoId}`,
+                            videoId: y.videoId,
+                            songName: y.songName,
+                            artistName: y.artistName || "YouTube Music",
+                            albumName: "YouTube Pro Safe",
+                            albumArt: y.albumArtHighRes || y.albumArt || `https://img.youtube.com/vi/${y.videoId}/hqdefault.jpg`,
+                            previewUrl: `/api/youtube/stream-audio?v=${y.videoId}`,
+                            embedUrl: y.embedUrl || `https://www.youtube-nocookie.com/embed/${y.videoId}?autoplay=1&enablejsapi=1&controls=0&playsinline=1`,
+                            source: 'youtube',
+                            durationSec: y.durationSec || 180,
+                          });
+                        }
+                      }
+                    }
 
                     // Add Spotify Candidates
                     if (spotifyRes?.success && Array.isArray(spotifyRes.tracks)) {

@@ -12,7 +12,9 @@ export interface PreviewCandidate {
   fullAudioUrl?: string;
   audio320kbps?: string;
   durationSec?: number;
-  source?: 'spotify' | 'jiosaavn';
+  source?: 'spotify' | 'jiosaavn' | 'youtube';
+  videoId?: string;
+  embedUrl?: string;
 }
 
 interface SongPreviewModalProps {
@@ -54,39 +56,42 @@ export const SongPreviewModal: React.FC<SongPreviewModalProps> = ({
     }
 
     const audioUrl = activeCandidate.previewUrl || activeCandidate.audio320kbps || activeCandidate.fullAudioUrl;
-    if (!audioUrl) return;
+    if (audioUrl && activeCandidate.source !== 'youtube') {
+      const audio = new Audio();
+      audio.src = audioUrl;
+      audio.volume = 0.85;
 
-    const audio = new Audio();
-    audio.src = audioUrl;
-    audio.volume = 0.85;
+      audio.ontimeupdate = () => {
+        setPreviewCurrentTime(audio.currentTime);
+        const dur = audio.duration || 30;
+        setPreviewProgress((audio.currentTime / Math.min(30, dur)) * 100);
+        if (audio.currentTime >= 30) {
+          audio.pause();
+          setIsPlayingPreview(false);
+        }
+      };
 
-    audio.ontimeupdate = () => {
-      setPreviewCurrentTime(audio.currentTime);
-      const dur = audio.duration || 30;
-      setPreviewProgress((audio.currentTime / Math.min(30, dur)) * 100);
-      if (audio.currentTime >= 30) {
-        audio.pause();
+      audio.onended = () => {
         setIsPlayingPreview(false);
-      }
-    };
+        setPreviewProgress(100);
+      };
 
-    audio.onended = () => {
-      setIsPlayingPreview(false);
-      setPreviewProgress(100);
-    };
+      audio.onerror = () => {
+        console.warn("[Preview] Preview audio failed to load on URL:", audioUrl);
+        setIsPlayingPreview(false);
+      };
 
-    audio.onerror = () => {
-      console.warn("[Preview] Preview audio failed to load on URL:", audioUrl);
-      setIsPlayingPreview(false);
-    };
-
-    previewAudioRef.current = audio;
-    audio.play().then(() => {
+      previewAudioRef.current = audio;
+      audio.play().then(() => {
+        setIsPlayingPreview(true);
+      }).catch(err => {
+        console.warn("[Preview] Autoplay preview catch:", err);
+        setIsPlayingPreview(false);
+      });
+    } else {
       setIsPlayingPreview(true);
-    }).catch(err => {
-      console.warn("[Preview] Autoplay preview catch:", err);
-      setIsPlayingPreview(false);
-    });
+      setPreviewProgress(0);
+    }
 
     return () => {
       if (previewAudioRef.current) {
@@ -98,6 +103,20 @@ export const SongPreviewModal: React.FC<SongPreviewModalProps> = ({
   }, [isOpen, currentIndex, activeCandidate]);
 
   const togglePreviewPlayPause = () => {
+    if (activeCandidate?.source === 'youtube' || activeCandidate?.videoId) {
+      try {
+        const iframe = document.getElementById('youtube-preview-iframe') as HTMLIFrameElement;
+        if (isPlayingPreview) {
+          iframe?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo', args: [] }), '*');
+          setIsPlayingPreview(false);
+        } else {
+          iframe?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*');
+          setIsPlayingPreview(true);
+        }
+      } catch {}
+      return;
+    }
+
     if (!previewAudioRef.current) return;
     if (isPlayingPreview) {
       previewAudioRef.current.pause();
@@ -122,6 +141,16 @@ export const SongPreviewModal: React.FC<SongPreviewModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xl animate-in fade-in duration-200">
+      {/* Hidden YouTube Preview IFrame */}
+      {activeCandidate.videoId && (
+        <iframe
+          id="youtube-preview-iframe"
+          src={`https://www.youtube-nocookie.com/embed/${activeCandidate.videoId}?autoplay=1&enablejsapi=1&controls=0&playsinline=1`}
+          className="fixed -top-[9999px] -left-[9999px] w-1 h-1 pointer-events-none"
+          allow="autoplay; encrypted-media"
+        />
+      )}
+
       <motion.div
         initial={{ scale: 0.95, opacity: 0, y: 20 }}
         animate={{ scale: 1, opacity: 1, y: 0 }}
@@ -180,7 +209,12 @@ export const SongPreviewModal: React.FC<SongPreviewModalProps> = ({
             {/* Candidate Metadata */}
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
-                {activeCandidate.source === "spotify" ? (
+                {activeCandidate.source === "youtube" ? (
+                  <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-rose-950/80 border border-rose-500/50 text-[10px] font-bold text-rose-300 shadow-[0_0_10px_rgba(244,63,94,0.3)]">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-ping" />
+                    <span>🔴 YouTube Pro Preview</span>
+                  </div>
+                ) : activeCandidate.source === "spotify" ? (
                   <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#1DB954]/20 border border-[#1DB954]/50 text-[10px] font-bold text-[#1ed760] shadow-[0_0_10px_rgba(29,185,84,0.3)]">
                     <span className="w-1.5 h-1.5 rounded-full bg-[#1ed760] animate-ping" />
                     <span>🟢 Spotify 30s Master Preview</span>

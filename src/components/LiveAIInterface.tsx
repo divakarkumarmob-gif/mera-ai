@@ -868,6 +868,22 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         stopMusicPlayback();
         const directUrl = song.audioUrl || '';
 
+        // If YouTube song, start silent Web Audio keepalive so Android WebView / iOS Safari keeps background thread alive
+        if (song.isYouTube || song.videoId) {
+            try {
+                const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+                if (AudioContextClass) {
+                    const ctx = new AudioContextClass();
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    gain.gain.value = 0.00001; // Inaudible carrier
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start();
+                }
+            } catch {}
+        }
+
         const audio = new Audio();
         audio.preload = 'auto';
         audio.crossOrigin = 'anonymous';
@@ -3182,13 +3198,13 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 onSelectCandidate={playConfirmedCandidate}
             />
 
-            {/* Hidden YouTube IFrame Player for 100% Reliable Background Audio Streaming */}
+            {/* Background YouTube Audio Player for 100% Reliable Background Streaming */}
             {nowPlayingMusic?.videoId && (
                 <iframe
                     id="youtube-iframe"
                     src={`https://www.youtube-nocookie.com/embed/${nowPlayingMusic.videoId}?autoplay=1&enablejsapi=1&controls=0&playsinline=1`}
-                    className="hidden pointer-events-none w-0 h-0 opacity-0 absolute -z-50"
-                    allow="autoplay; encrypted-media"
+                    className="fixed -top-[9999px] -left-[9999px] w-[120px] h-[120px] pointer-events-none opacity-1 z-[-99]"
+                    allow="autoplay; encrypted-media; fullscreen"
                 />
             )}
         </div>
