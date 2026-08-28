@@ -1768,9 +1768,9 @@ async function startServer() {
 ============================================================
 ⚡ ON-DEMAND SYSTEM & TOOL CALLING MANDATE (ज़िम्मेदार टूल कॉलिंग):
 - DO NOT hallucinate or guess data. Call the exact tool whenever DK asks for information or action:
-1. 🎵 MUSIC & AUDIO MANDATE (PRIMARY DEFAULT = JIOSAAVN 320KBPS HD AUDIO):
-   - For ANY general music/song requests ("gana chalao", "music play karo", "Kesariya sunao", "Ranjhanaa chalao", "background me music bajao", "Arijit ke gaane") -> ALWAYS Call 'play_music'. This streams direct 320kbps HD pure background audio from JioSaavn with the floating Music Capsule widget. DO NOT use YouTube embed for normal music requests!
-   - ONLY open or use YouTube IF AND ONLY IF DK explicitly mentions "YouTube" (e.g. "YouTube par chalao", "YouTube video dikhao").
+1. 🎵 MUSIC & AUDIO MANDATE (PRIMARY DEFAULT = YOUTUBE PRO SAFE BACKGROUND AUDIO):
+   - For ANY general music/song requests ("gana chalao", "desi boys chalao", "music play karo", "Kesariya sunao", "Ranjhanaa chalao", "background me music bajao", "Arijit ke gaane") -> ALWAYS Call 'play_youtube_music'. This streams pure YouTube Pro background audio with high-res album art in the floating Music Capsule and lock-screen notification player.
+   - ONLY use JioSaavn IF AND ONLY IF DK explicitly mentions "JioSaavn" / "Jio Saavn" / "Saavn" (e.g. "JioSaavn par chalao", "JioSaavn se bajao"). In that case, call 'play_music'.
    - "Gana band karo", "Stop", "Roko" -> Call 'stop_music' IMMEDIATELY.
    - "Pause karo", "Thodi der roko" -> Call 'pause_music'.
    - "Resume karo", "Continue karo", "Phir se chalao" -> Call 'resume_music'.
@@ -3456,23 +3456,23 @@ STYLE:
           },
         },
         {
-          name: "play_music",
-          description: "PRIMARY DEFAULT MUSIC TOOL: Play and stream direct pure JioSaavn 320kbps Ultra-HD background audio with floating Music Capsule widget whenever DK asks to listen to music (e.g. 'Kesariya gana chalao', 'Ranjhanaa sunao', 'gana chalao'). NEVER use YouTube embed unless DK explicitly says 'YouTube'.",
+          name: "play_youtube_music",
+          description: "PRIMARY DEFAULT MUSIC TOOL (YOUTUBE PRO SAFE): Play and stream pure background audio with high-res artwork from YouTube whenever DK asks to listen to music or songs (e.g. 'desi boys gana chalao', 'Kesariya sunao', 'music bajao', 'Arijit ke gane', 'gana chalao'). This is the DEFAULT engine.",
           parameters: {
             type: "OBJECT",
             properties: {
-              songName: { type: "STRING", description: "Song name or artist name to play" },
+              songName: { type: "STRING", description: "Song name, artist name, or query to play" },
             },
             required: ["songName"],
           },
         },
         {
-          name: "play_youtube_music",
-          description: "SAFE YOUTUBE PRO MUSIC TOOL: Play and stream pure background audio with high-res artwork from YouTube when DK explicitly asks for YouTube music or video songs (e.g. 'YouTube par gana chalao', 'YouTube se Arijit Singh ka gana bajao', 'YouTube background me play karo', 'play Kesariya on YouTube').",
+          name: "play_music",
+          description: "JIOSAAVN MUSIC TOOL: Play from JioSaavn ONLY when DK explicitly mentions 'JioSaavn' or 'Jio Saavn' (e.g. 'JioSaavn par Kesariya chalao', 'JioSaavn se gana bajao').",
           parameters: {
             type: "OBJECT",
             properties: {
-              songName: { type: "STRING", description: "Song name, artist name, or YouTube query to play" },
+              songName: { type: "STRING", description: "Song name or artist name to play on JioSaavn" },
             },
             required: ["songName"],
           },

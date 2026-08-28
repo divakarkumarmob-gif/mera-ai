@@ -41,10 +41,11 @@ interface MusicStudioModalProps {
   isPlaying?: boolean;
 }
 
-// User-specified exact genre categories + YouTube Pro Safe
+// User-specified exact genre categories + YouTube Pro Safe (DEFAULT)
 const MUSIC_CATEGORY_TABS = [
-  { id: "all", label: "✨ All", query: "Trending Bollywood Hits" },
   { id: "youtube_safe", label: "🔴 YouTube Pro", query: "Trending YouTube Hits" },
+  { id: "all", label: "✨ All", query: "Trending Bollywood Hits" },
+  { id: "jiosaavn_hd", label: "⚡ JioSaavn 320k", query: "Hindi Hits" },
   { id: "hindi_new", label: "🔥 Hindi New", query: "Hindi Hits" },
   { id: "hindi_old", label: "📻 Hindi Old", query: "Kishore Kumar Lata Mangeshkar" },
   { id: "bhojpuri", label: "🌾 Bhojpuri", query: "Bhojpuri" },
@@ -97,23 +98,23 @@ export const MusicStudioModal: React.FC<MusicStudioModalProps> = ({
   isPlaying,
 }) => {
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedTab, setSelectedTab] = useState("all");
+  const [selectedTab, setSelectedTab] = useState("youtube_safe");
   const [results, setResults] = useState<SongItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
 
-  // Auto search on initial open if empty
+  // Auto search on initial open if empty (Default: YouTube Pro)
   useEffect(() => {
     if (isOpen && results.length === 0 && !hasSearched) {
-      handleSearch("Trending Bollywood Hits", "all");
+      handleSearch("Trending YouTube Hits", "youtube_safe");
     }
   }, [isOpen]);
 
   // Real-time live debounced search as user types
   useEffect(() => {
-    if (!isOpen || !searchQuery.trim() || selectedTab !== "all") return;
+    if (!isOpen || !searchQuery.trim()) return;
     const timer = setTimeout(() => {
-      handleSearch(searchQuery, "all");
+      handleSearch(searchQuery, selectedTab);
     }, 380);
     return () => clearTimeout(timer);
   }, [searchQuery, isOpen, selectedTab]);

@@ -3811,13 +3811,60 @@ class PublicApisService {
     };
   }
 
-  // 51.1 Play & Stream FULL Music Track (Primary: JioSaavn 320kbps Pure Audio, Fallback: YouTube Music HD)
+  // 51.1 Play & Stream FULL Music Track (Primary: YouTube Pro Safe HD, Explicit / Fallback: JioSaavn)
   public async playMusic(songOrArtist: string): Promise<any> {
     const q = String(songOrArtist || "").trim();
+    const isExplicitJioSaavn = /\b(jiosaavn|jio saavn|saavn)\b/i.test(q);
+    const cleanQuery = q.replace(/\b(jiosaavn|jio saavn|saavn)\b/gi, "").trim() || q;
 
-    // 1. Primary: JioSaavn 320kbps HD Audio
+    if (isExplicitJioSaavn) {
+      // 1. Explicit JioSaavn request
+      try {
+        const saavnRes = await jioSaavnService.searchSong(cleanQuery);
+        if (saavnRes.success && saavnRes.topSong) {
+          const s = saavnRes.topSong;
+          const directAudio = s.audio320kbps || s.audio160kbps || s.audio96kbps;
+          const proxiedUrl = `/api/music/proxy-stream?url=${encodeURIComponent(directAudio)}`;
+
+          return {
+            success: true,
+            action: "play",
+            trackName: s.songName,
+            artistName: s.artistName,
+            albumName: s.albumName,
+            albumArt: s.albumArt500,
+            durationSec: s.durationSec,
+            isFullSong: true,
+            isJioSaavn: true,
+            quality: "JioSaavn 320kbps Ultra-HD",
+            audioUrl: directAudio,
+            fallbackAudioUrl: proxiedUrl,
+            directCdnUrl: directAudio,
+            hasLyrics: s.hasLyrics,
+            songId: s.id,
+            youtubeMusicUrl: `https://music.youtube.com/search?q=${encodeURIComponent(s.songName + " " + s.artistName)}`,
+            source: "jiosaavn_320kbps",
+            message: `Boss, "${s.songName}" (${s.artistName}) JioSaavn 320kbps Ultra-HD me play ho raha hai! 🎵✨`,
+          };
+        }
+      } catch (e) {
+        console.warn("[PublicApis] JioSaavn search error in playMusic:", e);
+      }
+    }
+
+    // 2. Default Primary: YouTube Pro Safe Background Audio
     try {
-      const saavnRes = await jioSaavnService.searchSong(q);
+      const ytRes = await this.searchYouTubeMusic(cleanQuery);
+      if (ytRes.success && (ytRes.videoId || ytRes.audioUrl)) {
+        return ytRes;
+      }
+    } catch (e) {
+      console.warn("[PublicApis] YouTube music search error in playMusic:", e);
+    }
+
+    // 3. Fallback: JioSaavn
+    try {
+      const saavnRes = await jioSaavnService.searchSong(cleanQuery);
       if (saavnRes.success && saavnRes.topSong) {
         const s = saavnRes.topSong;
         const directAudio = s.audio320kbps || s.audio160kbps || s.audio96kbps;
@@ -3845,17 +3892,7 @@ class PublicApisService {
         };
       }
     } catch (e) {
-      console.warn("[PublicApis] JioSaavn search error in playMusic:", e);
-    }
-
-    // 2. Secondary Fallback: YouTube Music HD
-    try {
-      const ytRes = await this.searchYouTubeMusic(q);
-      if (ytRes.success && ytRes.videoId) {
-        return ytRes;
-      }
-    } catch (e) {
-      console.warn("[PublicApis] YouTube music search error in playMusic:", e);
+      console.warn("[PublicApis] JioSaavn fallback error in playMusic:", e);
     }
 
     // 3. Fallback: Multi-Source Search
