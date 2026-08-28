@@ -36,6 +36,7 @@ import { recipeService } from "./recipeService";
 import { networkDeviceScannerService } from "./networkDeviceScannerService";
 import { googleMapsService } from "./googleMapsService";
 import { jioSaavnService } from "./jioSaavnService";
+import { youtubeMusicService } from "./youtubeMusicService";
 
 class PublicApisService {
   // 1. Weather — Powered by WeatherAPI.com (with Open-Meteo fallback)
@@ -3610,7 +3611,7 @@ class PublicApisService {
     return { success: false, message: `"${q}" ka YouTube link nahi mila.` };
   }
 
-  // 50.1 YouTube Music Embed Search — Free, Embedded, Ad-Free YouTube Music Streaming
+  // 50.1 YouTube Music Search — Free, Safe, Background Audio & Embed Streaming
   public async searchYouTubeMusic(songOrArtist: string): Promise<any> {
     let cleanQ = (songOrArtist || "").trim();
     cleanQ = cleanQ.replace(/\b(gana|gaana|baja|bajao|baji|chalao|play|song|music|sunao|laga|lagao)\b/gi, "").trim();
@@ -3618,54 +3619,43 @@ class PublicApisService {
     if (!q) return { success: false, message: "Song ya artist ka naam zaroori hai." };
 
     try {
-      // 1. Concurrently run YouTube Scraping and Direct 320kbps Audio Stream probe
-      const ytPromise = fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(q + " audio song")}`, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-          "Accept-Language": "en-US,en;q=0.9,hi;q=0.8",
-        },
-        signal: AbortSignal.timeout(5000),
-      }).then(r => r.ok ? r.text() : "").catch(() => "");
+      // Search via YouTube Music Service
+      const ytResult = await youtubeMusicService.searchTracks(q, 10);
+      if (ytResult.success && ytResult.tracks.length > 0) {
+        const top = ytResult.tracks[0];
+        
+        // Also probe if high-speed 320kbps pure audio CDN is available via JioSaavn catalog
+        let audioDirectUrl = "";
+        try {
+          const saavnMatch = await jioSaavnService.searchSong(top.songName, 1);
+          if (saavnMatch.success && saavnMatch.songs.length > 0) {
+            audioDirectUrl = saavnMatch.songs[0].audio320kbps || saavnMatch.songs[0].audio160kbps;
+          }
+        } catch {}
 
-      const saavnPromise = this.searchMusic(q).catch(() => null);
-
-      const [html, saavnRes] = await Promise.all([ytPromise, saavnPromise]);
-
-      let videoId = "";
-      let title = q;
-      let artist = "YouTube Music Artist";
-
-      if (html) {
-        const videoIdMatch = html.match(/"videoId":\s*"([a-zA-Z0-9_-]{11})"/);
-        if (videoIdMatch) videoId = videoIdMatch[1];
-        const titleMatch = html.match(/"title":\s*\{\s*"runs":\s*\[\s*\{\s*"text":\s*"([^"]+)"/);
-        if (titleMatch) title = titleMatch[1];
-        const channelMatch = html.match(/"ownerText":\s*\{\s*"runs":\s*\[\s*\{\s*"text":\s*"([^"]+)"/);
-        if (channelMatch) artist = channelMatch[1];
-      }
-
-      const directAudioUrl = saavnRes?.tracks?.[0]?.audioUrl;
-      const saavnTitle = saavnRes?.tracks?.[0]?.trackName;
-      const saavnArtist = saavnRes?.tracks?.[0]?.artistName;
-      if (videoId) {
         return {
           success: true,
-          trackName: title,
-          artistName: artist,
-          videoId: videoId,
-          youtubeMusicUrl: `https://music.youtube.com/watch?v=${videoId}`,
-          youtubeUrl: `https://www.youtube.com/watch?v=${videoId}`,
-          embedUrl: `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&enablejsapi=1&controls=1&modestbranding=1&playsinline=1&rel=0`,
-          albumArt: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
+          trackName: top.songName,
+          artistName: top.artistName,
+          videoId: top.videoId,
+          audioUrl: audioDirectUrl || top.streamUrl,
+          directCdnUrl: audioDirectUrl || "",
+          youtubeMusicUrl: top.youtubeMusicUrl,
+          youtubeUrl: top.youtubeUrl,
+          embedUrl: top.embedUrl,
+          albumArt: top.albumArt,
+          albumArtHighRes: top.albumArtHighRes,
+          durationSec: top.durationSec,
+          durationFormatted: top.durationFormatted,
           isFullSong: true,
           isYouTubeMusic: true,
-          quality: "YouTube Music HD",
-          source: "youtube_music",
-          message: `Boss, "${title}" (${artist}) YouTube Music par play ho raha hai! 🎵✨`,
+          quality: audioDirectUrl ? "YouTube Pro 320kbps HD Audio" : "YouTube Music Safe Stream",
+          source: "youtube_safe",
+          message: `Boss, "${top.songName}" (${top.artistName}) YouTube Safe Player par background audio me play ho raha hai! 🎵🔴`,
         };
       }
     } catch (e) {
-      console.warn("[PublicApis] YouTube Music search fallback:", e);
+      console.warn("[PublicApis] YouTube Music search error:", e);
     }
 
     return {

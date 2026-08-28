@@ -642,6 +642,8 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         embedUrl?: string;
         videoId?: string;
         isYouTubeMusic?: boolean;
+        isYouTube?: boolean;
+        isJioSaavn?: boolean;
         isFullSong?: boolean;
         quality?: string;
         durationSec?: number;
@@ -657,6 +659,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const [musicCurrentTime, setMusicCurrentTime] = useState(0);
     const [musicDuration, setMusicDuration] = useState(0);
     const [musicQueue, setMusicQueue] = useState<any[]>([]);
+    const [musicHistory, setMusicHistory] = useState<any[]>([]);
     const [musicEqPreset, setMusicEqPreset] = useState("flat");
     const musicDspAudioCtxRef = useRef<AudioContext | null>(null);
     const musicBassFilterRef = useRef<BiquadFilterNode | null>(null);
@@ -796,27 +799,88 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         albumArt?: string;
         audioUrl?: string;
         isJioSaavn?: boolean;
+        isYouTube?: boolean;
+        isYouTubeMusic?: boolean;
         isFullSong?: boolean;
         quality?: string;
         songId?: string;
         hasLyrics?: boolean;
     }) => {
+        // Push current song to history before starting new one
+        setNowPlayingMusic(current => {
+            if (current && current.trackName && current.trackName !== song.trackName) {
+                setMusicHistory(prevHist => [...prevHist.slice(-19), current]);
+            }
+            return current;
+        });
+
         stopMusicPlayback();
         const directUrl = song.audioUrl || '';
 
         const audio = new Audio();
         audio.preload = 'auto';
+        audio.crossOrigin = 'anonymous';
         if (directUrl) audio.src = directUrl;
         audio.volume = 0.85;
 
+        audio.onplay = () => {
+            setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: true } : null);
+            if ('mediaSession' in navigator) {
+                navigator.mediaSession.playbackState = 'playing';
+            }
+        };
+
+        audio.onpause = () => {
+            setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: false } : null);
+            if ('mediaSession' in navigator) {
+                navigator.mediaSession.playbackState = 'paused';
+            }
+        };
+
         audio.ontimeupdate = () => {
             setMusicCurrentTime(audio.currentTime);
+            if ('mediaSession' in navigator && audio.duration && !isNaN(audio.duration) && isFinite(audio.duration)) {
+                try {
+                    navigator.mediaSession.setPositionState({
+                        duration: audio.duration,
+                        playbackRate: audio.playbackRate || 1,
+                        position: Math.min(audio.currentTime, audio.duration),
+                    });
+                } catch {}
+            }
         };
+
         audio.ondurationchange = () => {
-            setMusicDuration(audio.duration || 0);
+            const dur = audio.duration || 0;
+            setMusicDuration(dur);
+            if ('mediaSession' in navigator && dur > 0 && !isNaN(dur) && isFinite(dur)) {
+                try {
+                    navigator.mediaSession.setPositionState({
+                        duration: dur,
+                        playbackRate: audio.playbackRate || 1,
+                        position: audio.currentTime || 0,
+                    });
+                } catch {}
+            }
         };
+
+        audio.onseeked = () => {
+            if ('mediaSession' in navigator && audio.duration && !isNaN(audio.duration)) {
+                try {
+                    navigator.mediaSession.setPositionState({
+                        duration: audio.duration,
+                        playbackRate: audio.playbackRate || 1,
+                        position: audio.currentTime,
+                    });
+                } catch {}
+            }
+        };
+
         audio.onended = () => {
             setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: false } : null);
+            if ('mediaSession' in navigator) {
+                navigator.mediaSession.playbackState = 'none';
+            }
             // Auto advance smart queue on song end
             setMusicQueue(prev => {
                 if (prev.length > 0) {
@@ -855,6 +919,9 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         setupAudioDsp(audio);
         fetchSmartQueue(song.trackName, song.artistName, song.albumName);
 
+        // Acquire Screen/Background WakeLock to prevent app/music sleep
+        screenWakeLock.requestLock().catch(() => {});
+
         audio.play().then(() => {
             setNowPlayingMusic({
                 trackName: song.trackName,
@@ -862,9 +929,11 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 albumName: song.albumName,
                 albumArt: song.albumArt,
                 audioUrl: directUrl,
-                isJioSaavn: true,
+                isJioSaavn: song.isJioSaavn !== false && !song.isYouTube,
+                isYouTube: !!song.isYouTube,
+                isYouTubeMusic: !!song.isYouTube,
                 isFullSong: true,
-                quality: song.quality || "JioSaavn 320kbps Ultra-HD",
+                quality: song.quality || (song.isYouTube ? "YouTube Pro Safe Audio" : "JioSaavn 320kbps Ultra-HD"),
                 isPlaying: true,
                 songId: song.songId,
                 hasLyrics: song.hasLyrics,
@@ -876,7 +945,9 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 artistName: song.artistName,
                 albumArt: song.albumArt,
                 audioUrl: directUrl,
-                isJioSaavn: true,
+                isJioSaavn: song.isJioSaavn !== false && !song.isYouTube,
+                isYouTube: !!song.isYouTube,
+                isYouTubeMusic: !!song.isYouTube,
                 isPlaying: false,
                 songId: song.songId,
                 hasLyrics: song.hasLyrics,
@@ -1014,53 +1085,92 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     }, [musicQueue, playDirectSong]);
 
     const playPrevQueueSong = useCallback(() => {
-        restartMusic();
-    }, [restartMusic]);
+        if (musicAudioRef.current && musicAudioRef.current.currentTime > 3) {
+            restartMusic();
+            return;
+        }
+        if (musicHistory.length > 0) {
+            const prevSong = musicHistory[musicHistory.length - 1];
+            setMusicHistory(prev => prev.slice(0, -1));
+            playDirectSong({
+                trackName: prevSong.trackName,
+                artistName: prevSong.artistName,
+                albumName: prevSong.albumName,
+                albumArt: prevSong.albumArt,
+                audioUrl: prevSong.audioUrl,
+                isJioSaavn: prevSong.isJioSaavn,
+                isYouTube: prevSong.isYouTube,
+                isFullSong: true,
+                quality: prevSong.quality || "Ultra-HD Audio",
+                songId: prevSong.songId,
+                hasLyrics: prevSong.hasLyrics,
+            });
+        } else {
+            restartMusic();
+        }
+    }, [musicHistory, restartMusic, playDirectSong]);
 
-    // ── MediaSession API for Background / Lockscreen Playback ─────────────────
+    // ── MediaSession API for Background, Lock-Screen & System Notification Player ──
     useEffect(() => {
         if (!nowPlayingMusic) {
             if ('mediaSession' in navigator) {
-                navigator.mediaSession.playbackState = 'none';
+                try {
+                    navigator.mediaSession.playbackState = 'none';
+                } catch {}
             }
             return;
         }
 
         if ('mediaSession' in navigator) {
             try {
+                const coverArt = nowPlayingMusic.albumArt || 'https://img.youtube.com/vi/default/hqdefault.jpg';
                 navigator.mediaSession.metadata = new MediaMetadata({
-                    title: nowPlayingMusic.trackName || 'Music Track',
-                    artist: nowPlayingMusic.artistName || 'Friday Music',
-                    album: nowPlayingMusic.albumName || (nowPlayingMusic.isYouTubeMusic ? 'YouTube Music HD' : 'JioSaavn 320kbps HD'),
-                    artwork: nowPlayingMusic.albumArt ? [
-                        { src: nowPlayingMusic.albumArt, sizes: '512x512', type: 'image/jpeg' },
-                        { src: nowPlayingMusic.albumArt, sizes: '256x256', type: 'image/jpeg' },
-                    ] : [],
+                    title: nowPlayingMusic.trackName || 'FRIDAY Music',
+                    artist: nowPlayingMusic.artistName || 'FRIDAY AI Assistant',
+                    album: nowPlayingMusic.albumName || (nowPlayingMusic.isYouTube ? 'YouTube Pro Safe' : 'JioSaavn 320kbps HD'),
+                    artwork: [
+                        { src: coverArt, sizes: '96x96', type: 'image/jpeg' },
+                        { src: coverArt, sizes: '128x128', type: 'image/jpeg' },
+                        { src: coverArt, sizes: '192x192', type: 'image/jpeg' },
+                        { src: coverArt, sizes: '256x256', type: 'image/jpeg' },
+                        { src: coverArt, sizes: '384x384', type: 'image/jpeg' },
+                        { src: coverArt, sizes: '512x512', type: 'image/jpeg' },
+                    ],
                 });
 
                 navigator.mediaSession.playbackState = nowPlayingMusic.isPlaying ? 'playing' : 'paused';
 
-                navigator.mediaSession.setActionHandler('play', () => resumeMusicPlayback());
-                navigator.mediaSession.setActionHandler('pause', () => pauseMusicPlayback());
-                navigator.mediaSession.setActionHandler('stop', () => stopMusicPlayback());
-                navigator.mediaSession.setActionHandler('seekbackward', (details) => {
+                const registerAction = (action: MediaSessionAction, handler: MediaSessionActionHandler | null) => {
+                    try {
+                        navigator.mediaSession.setActionHandler(action, handler);
+                    } catch (e) {
+                        console.warn(`[MediaSession] Action "${action}" registration skipped:`, e);
+                    }
+                };
+
+                registerAction('play', () => resumeMusicPlayback());
+                registerAction('pause', () => pauseMusicPlayback());
+                registerAction('stop', () => stopMusicPlayback());
+                registerAction('previoustrack', () => playPrevQueueSong());
+                registerAction('nexttrack', () => playNextQueueSong());
+                registerAction('seekbackward', (details) => {
                     seekRelativeMusic(-(details.seekOffset || 10));
                 });
-                navigator.mediaSession.setActionHandler('seekforward', (details) => {
+                registerAction('seekforward', (details) => {
                     seekRelativeMusic(details.seekOffset || 10);
                 });
-                navigator.mediaSession.setActionHandler('seekto', (details) => {
-                    if (details.seekTime !== undefined) seekToMusic(details.seekTime);
+                registerAction('seekto', (details) => {
+                    if (details.seekTime !== undefined && details.seekTime !== null) {
+                        seekToMusic(details.seekTime);
+                    }
                 });
-                navigator.mediaSession.setActionHandler('nexttrack', () => playNextQueueSong());
-                navigator.mediaSession.setActionHandler('previoustrack', () => playPrevQueueSong());
 
-                if (musicAudioRef.current && musicAudioRef.current.duration) {
+                if (musicAudioRef.current && musicAudioRef.current.duration && !isNaN(musicAudioRef.current.duration) && isFinite(musicAudioRef.current.duration)) {
                     try {
                         navigator.mediaSession.setPositionState({
                             duration: musicAudioRef.current.duration,
-                            playbackRate: 1,
-                            position: musicAudioRef.current.currentTime,
+                            playbackRate: musicAudioRef.current.playbackRate || 1,
+                            position: Math.min(musicAudioRef.current.currentTime, musicAudioRef.current.duration),
                         });
                     } catch {}
                 }
@@ -1919,53 +2029,20 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         setNowPlayingMusic(trackInfo);
                     }
                 } else if (msg.type === 'play_youtube_music' && msg.track) {
-                    stopMusicPlayback();
                     const track = msg.track;
                     const directAudio = track.audioUrl || (track.streamUrl && !track.streamUrl.includes('youtube-nocookie.com') ? track.streamUrl : undefined);
 
-                    const embedUrl = track.embedUrl || (track.videoId ? `https://www.youtube-nocookie.com/embed/${track.videoId}?autoplay=1&enablejsapi=1&controls=1&modestbranding=1&playsinline=1&rel=0` : undefined);
-
-                    const trackState = {
+                    playDirectSong({
                         trackName: track.trackName || 'YouTube Music Track',
                         artistName: track.artistName || 'YouTube Music',
-                        albumArt: track.albumArt || (track.videoId ? `https://img.youtube.com/vi/${track.videoId}/hqdefault.jpg` : undefined),
-                        embedUrl: embedUrl,
-                        videoId: track.videoId,
-                        isYouTubeMusic: true,
-                        isFullSong: true,
-                        isPlaying: true,
-                        quality: directAudio ? 'HD 320kbps Audio' : 'YouTube Music HD',
-                        youtubeMusicUrl: track.youtubeMusicUrl || (track.videoId ? `https://music.youtube.com/watch?v=${track.videoId}` : undefined),
+                        albumName: track.albumName || 'YouTube Pro Safe',
+                        albumArt: track.albumArtHighRes || track.albumArt || (track.videoId ? `https://img.youtube.com/vi/${track.videoId}/hqdefault.jpg` : undefined),
                         audioUrl: directAudio,
-                    };
-
-                    // Acquire Screen/Background WakeLock to prevent app/music sleep
-                    screenWakeLock.requestLock().catch(() => {});
-
-                    // Start background HTML5 Audio stream (works 24/7 with Screen OFF & App Minimized)
-                    if (directAudio) {
-                        try {
-                            const audio = new Audio();
-                            audio.crossOrigin = 'anonymous';
-                            audio.src = directAudio;
-                            audio.volume = 0.85;
-                            audio.onended = () => {
-                                setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: false } : null);
-                                screenWakeLock.releaseLock();
-                            };
-                            audio.onerror = () => {
-                                console.warn('[Music] Direct stream error, falling back to embedded player');
-                            };
-                            musicAudioRef.current = audio;
-                            audio.play().catch(err => {
-                                console.warn('[Music] Auto-play background audio warning:', err);
-                            });
-                        } catch (e) {
-                            console.warn('[Music] Background audio setup error:', e);
-                        }
-                    }
-
-                    setNowPlayingMusic(trackState);
+                        isYouTube: true,
+                        isFullSong: true,
+                        quality: track.quality || (directAudio ? 'YouTube Pro 320kbps HD Audio' : 'YouTube Music HD'),
+                        songId: track.id || track.videoId,
+                    });
                 } else if (msg.type === 'stop_music') {
                     stopMusicPlayback();
                 } else if (msg.type === 'pause_music') {

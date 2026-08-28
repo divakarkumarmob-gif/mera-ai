@@ -16,6 +16,9 @@ interface SongItem {
   audio160kbps: string;
   audio96kbps: string;
   hasLyrics: boolean;
+  isYouTube?: boolean;
+  videoId?: string;
+  streamUrl?: string;
 }
 
 interface MusicStudioModalProps {
@@ -28,6 +31,7 @@ interface MusicStudioModalProps {
     albumArt?: string;
     audioUrl?: string;
     isJioSaavn?: boolean;
+    isYouTube?: boolean;
     isFullSong?: boolean;
     quality?: string;
     songId?: string;
@@ -37,9 +41,10 @@ interface MusicStudioModalProps {
   isPlaying?: boolean;
 }
 
-// User-specified exact genre categories
+// User-specified exact genre categories + YouTube Pro Safe
 const MUSIC_CATEGORY_TABS = [
   { id: "all", label: "✨ All", query: "Trending Bollywood Hits" },
+  { id: "youtube_safe", label: "🔴 YouTube Pro", query: "Trending YouTube Hits" },
   { id: "hindi_new", label: "🔥 Hindi New", query: "Hindi Hits" },
   { id: "hindi_old", label: "📻 Hindi Old", query: "Kishore Kumar Lata Mangeshkar" },
   { id: "bhojpuri", label: "🌾 Bhojpuri", query: "Bhojpuri" },
@@ -121,15 +126,42 @@ export const MusicStudioModal: React.FC<MusicStudioModalProps> = ({
     setLoading(true);
     setHasSearched(true);
     if (queryToSearch) setSearchQuery(queryToSearch);
+    const activeTab = tabId || selectedTab;
     if (tabId) setSelectedTab(tabId);
 
     try {
-      const res = await fetch(getApiUrl(`/api/music/search?query=${encodeURIComponent(q)}`));
-      const data = await res.json();
-      if (data.success && Array.isArray(data.songs)) {
-        setResults(data.songs);
+      if (activeTab === "youtube_safe") {
+        const res = await fetch(getApiUrl(`/api/youtube/search-music?q=${encodeURIComponent(q)}`));
+        const data = await res.json();
+        if (data.success && Array.isArray(data.tracks)) {
+          const mapped: SongItem[] = data.tracks.map((t: any) => ({
+            id: t.id || t.videoId,
+            songName: t.songName,
+            albumName: t.albumName || "YouTube Music",
+            artistName: t.artistName,
+            durationSec: t.durationSec,
+            albumArt500: t.albumArtHighRes || t.albumArt,
+            albumArt150: t.albumArt,
+            audio320kbps: t.streamUrl || "",
+            audio160kbps: "",
+            audio96kbps: "",
+            hasLyrics: false,
+            isYouTube: true,
+            videoId: t.videoId,
+            streamUrl: t.streamUrl,
+          }));
+          setResults(mapped);
+        } else {
+          setResults([]);
+        }
       } else {
-        setResults([]);
+        const res = await fetch(getApiUrl(`/api/music/search?query=${encodeURIComponent(q)}`));
+        const data = await res.json();
+        if (data.success && Array.isArray(data.songs)) {
+          setResults(data.songs);
+        } else {
+          setResults([]);
+        }
       }
     } catch {
       setResults([]);
@@ -139,16 +171,17 @@ export const MusicStudioModal: React.FC<MusicStudioModalProps> = ({
   };
 
   const handleSongSelect = (song: SongItem) => {
-    const rawAudio = song.audio320kbps || song.audio160kbps || song.audio96kbps;
+    const rawAudio = song.audio320kbps || song.audio160kbps || song.audio96kbps || song.streamUrl;
     onPlaySong({
       trackName: song.songName,
       artistName: song.artistName,
       albumName: song.albumName,
       albumArt: song.albumArt500 || song.albumArt150,
       audioUrl: rawAudio,
-      isJioSaavn: true,
+      isJioSaavn: !song.isYouTube,
+      isYouTube: !!song.isYouTube,
       isFullSong: true,
-      quality: "JioSaavn 320kbps Ultra-HD",
+      quality: song.isYouTube ? "YouTube Pro Safe Audio" : "JioSaavn 320kbps Ultra-HD",
       songId: song.id,
       hasLyrics: song.hasLyrics,
     });
@@ -302,7 +335,14 @@ export const MusicStudioModal: React.FC<MusicStudioModalProps> = ({
                         ) : null}
                       </div>
                       <div className="flex items-center gap-2 mt-1 text-[10px] text-zinc-500">
-                        <span className="text-cyan-400 font-semibold">⚡ 320kbps HD</span>
+                        {song.isYouTube ? (
+                          <span className="text-red-400 font-semibold flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                            YouTube Pro Audio
+                          </span>
+                        ) : (
+                          <span className="text-cyan-400 font-semibold">⚡ 320kbps HD</span>
+                        )}
                         {song.durationSec ? (
                           <span>
                             • {Math.floor(song.durationSec / 60)}:

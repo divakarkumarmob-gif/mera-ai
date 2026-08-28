@@ -42,6 +42,7 @@ import { memoryBackupService } from "./src/services/memoryBackupService";
 import { telegramSecurityBotService } from "./src/services/telegramSecurityBotService";
 import { networkDeviceScannerService } from "./src/services/networkDeviceScannerService";
 import { jioSaavnService } from "./src/services/jioSaavnService";
+import { youtubeMusicService } from "./src/services/youtubeMusicService";
 
 const PORT = Number(process.env.PORT) || 3000;
 const isProduction = process.env.NODE_ENV === "production";
@@ -748,6 +749,38 @@ async function startServer() {
       const { youtubeService } = await import("./src/services/youtubeService");
       const qRes = await youtubeService.queryVideoTimestamp(String(url), String(question));
       res.json({ success: true, ...qRes });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || e });
+    }
+  });
+
+  // ── YouTube Safe Background Music & Stream Endpoints ──────────────────────
+  app.get("/api/youtube/search-music", async (req, res) => {
+    const q = String(req.query.q || req.query.query || "").trim();
+    if (!q) return res.status(400).json({ success: false, error: "Query is required" });
+    try {
+      const results = await youtubeMusicService.searchTracks(q, 15);
+      res.json(results);
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || e });
+    }
+  });
+
+  app.get("/api/youtube/stream-audio", async (req, res) => {
+    const videoId = String(req.query.v || req.query.videoId || "").trim();
+    if (!videoId) return res.status(400).json({ success: false, error: "Video ID is required" });
+    try {
+      const streamUrl = await youtubeMusicService.getAudioStreamUrl(videoId);
+      if (streamUrl) {
+        return res.redirect(302, streamUrl);
+      }
+      // If direct stream url is not available, return embed / fallback info
+      res.json({
+        success: false,
+        videoId,
+        fallbackEmbed: `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&enablejsapi=1`,
+        message: "Direct audio stream format not found, using embed fallback.",
+      });
     } catch (e: any) {
       res.status(500).json({ success: false, error: e?.message || e });
     }
@@ -3429,6 +3462,17 @@ STYLE:
             type: "OBJECT",
             properties: {
               songName: { type: "STRING", description: "Song name or artist name to play" },
+            },
+            required: ["songName"],
+          },
+        },
+        {
+          name: "play_youtube_music",
+          description: "SAFE YOUTUBE PRO MUSIC TOOL: Play and stream pure background audio with high-res artwork from YouTube when DK explicitly asks for YouTube music or video songs (e.g. 'YouTube par gana chalao', 'YouTube se Arijit Singh ka gana bajao', 'YouTube background me play karo', 'play Kesariya on YouTube').",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              songName: { type: "STRING", description: "Song name, artist name, or YouTube query to play" },
             },
             required: ["songName"],
           },
