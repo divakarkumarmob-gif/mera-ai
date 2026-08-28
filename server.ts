@@ -3847,6 +3847,20 @@ STYLE:
           },
         },
         {
+          name: "open_hologram_lab",
+          description: "Open the JARVIS Holographic 3D Hand Tracking & Machine Assembly Studio. Call when DK says '3D lab kholo', 'Hologram kholo', 'Design a drone / jet engine / arc reactor / robot arm / car', 'Structure banao', 'Air draw mode', 'Jarvis lab start karo', '3D model dikhao'.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              modelId: {
+                type: "STRING",
+                description: "Optional 3D model preset to load: 'arc_reactor', 'quadcopter_drone', 'jet_engine', 'robotic_arm', 'hypercar_chassis', or 'air_draw'",
+              },
+            },
+            required: [],
+          },
+        },
+        {
           name: "reject_coding_agent_plan",
           description: "Reject, deny, or stop the Coding Agent's task. Call when DK says 'Reject kar do', 'Deny karo', 'Roko', 'Nahi ye change mat karo', 'Task cancel karo'.",
           parameters: {
@@ -5228,6 +5242,24 @@ STYLE:
                   } catch (e: any) {
                     result = { success: false, message: `Music play fail hui: ${e?.message || e}` };
                   }
+                } else if (call.name === "open_hologram_lab") {
+                  const { modelId } = call.args || {};
+                  const payload = JSON.stringify({
+                    type: 'ui_toggle_command',
+                    setting: 'hologram_lab',
+                    state: true,
+                    modelId: modelId ? String(modelId) : 'arc_reactor',
+                  });
+                  try { clientWs.send(payload); } catch {}
+                  for (const client of connectedClients) {
+                    if (client !== clientWs && client.readyState === 1) {
+                      try { client.send(payload); } catch {}
+                    }
+                  }
+                  result = {
+                    success: true,
+                    message: `Boss, JARVIS Holographic 3D Lab launch kar diya hai! Spatial hand tracking active hai, aap haath se structure ko rotate, scale, air-draw aur explode kar sakte hain.`,
+                  };
                 } else if (call.name === "search_song_by_lyrics") {
                   const { lyrics, artistHint } = call.args || {};
                   try {

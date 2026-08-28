@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { X, Mic, Plus, Loader2, Settings, ChevronDown, Captions, MessageSquare, Square, Code2, Terminal, Shield, ShieldCheck, Trash2, Key, Check, AlertCircle, Send, Instagram, Download, Radio, Music, Sparkles, Sliders, Volume2, Bot, Layers } from 'lucide-react';
+import { X, Mic, Plus, Loader2, Settings, ChevronDown, Captions, MessageSquare, Square, Code2, Terminal, Shield, ShieldCheck, Trash2, Key, Check, AlertCircle, Send, Instagram, Download, Radio, Music, Sparkles, Sliders, Volume2, Bot, Layers, Cpu } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import AgentFace from './AgentFace';
 import ChatHistoryModal from './ChatHistoryModal';
@@ -9,6 +9,7 @@ import WebCrawlerStudioModal from './WebCrawlerStudioModal';
 import { YouTubeStudioModal } from './YouTubeStudioModal';
 import MemoryBackupModal from './MemoryBackupModal';
 import WifiRadarModal from './WifiRadarModal';
+import { HolographicLabModal } from './HolographicLabModal';
 import { getWsUrl, getApiUrl } from '@/utils/api';
 import { wakeWordManager } from '@/utils/wakeWord';
 import { getAppToken, clearAppSession } from '@/utils/appSecurityClient';
@@ -662,6 +663,8 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const [showBackupModal, setShowBackupModal] = useState(false);
     const [showWifiRadar, setShowWifiRadar] = useState(false);
     const [showMusicStudio, setShowMusicStudio] = useState(false);
+    const [showHologramLab, setShowHologramLab] = useState(false);
+    const [hologramInitialModel, setHologramInitialModel] = useState('arc_reactor');
     const [showSongPreviewModal, setShowSongPreviewModal] = useState(false);
     const [previewQuery, setPreviewQuery] = useState('');
     const [previewCandidates, setPreviewCandidates] = useState<PreviewCandidate[]>([]);
@@ -1883,6 +1886,9 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         setShowWhatsAppModal((prev) => (typeof state === 'boolean' ? state : !prev));
                     } else if (setting === 'settings') {
                         setShowSettings((prev) => (typeof state === 'boolean' ? state : !prev));
+                    } else if (setting === 'hologram_lab') {
+                        if (msg.modelId) setHologramInitialModel(msg.modelId);
+                        setShowHologramLab((prev) => (typeof state === 'boolean' ? state : !prev));
                     } else if (setting === 'music') {
                         if (state === false) stopMusicPlayback();
                     }
@@ -2324,6 +2330,16 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                             title={isScreenSharing ? 'Stop Screen Sharing' : 'Share Screen with Friday for Vision AI'}
                         >
                             <span>{isScreenSharing ? '🔴 Vision ON' : '🖥️ Vision'}</span>
+                        </button>
+
+                        {/* 🛸 JARVIS Holographic 3D Lab Capsule */}
+                        <button
+                            onClick={() => setShowHologramLab(true)}
+                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/50 text-cyan-300 text-xs font-semibold shadow-[0_0_18px_rgba(6,182,212,0.3)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95 hover:scale-105"
+                            title="JARVIS Holographic 3D Hand Tracking & CAD Lab"
+                        >
+                            <Cpu className="w-3.5 h-3.5 animate-pulse text-cyan-300" />
+                            <span>🛸 3D Lab</span>
                         </button>
 
                         {/* 7. Chat History Capsule */}
@@ -3123,6 +3139,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
             <WhatsAppPairModal isOpen={showWhatsAppModal} onClose={() => setShowWhatsAppModal(false)} />
             {showBackupModal && <MemoryBackupModal onClose={() => setShowBackupModal(false)} />}
             {showWifiRadar && <WifiRadarModal onClose={() => setShowWifiRadar(false)} />}
+            <HolographicLabModal isOpen={showHologramLab} onClose={() => setShowHologramLab(false)} initialModelId={hologramInitialModel} />
 
             {/* Deep Research Report Modal */}
             <AnimatePresence>

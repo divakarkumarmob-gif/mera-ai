@@ -15,6 +15,8 @@
     "@capacitor/local-notifications": "^8.3.1",
     "@capawesome/capacitor-background-task": "^8.0.2",
     "@google/genai": "^1.29.0",
+    "@mediapipe/camera_utils": "^0.3.1675466862",
+    "@mediapipe/hands": "^0.4.1675469240",
     "@tailwindcss/vite": "^4.1.14",
     "@types/cors": "^2.8.19",
     "@types/crypto-js": "^4.2.2",
@@ -45,12 +47,14 @@
     "react-dom": "^19.0.1",
     "tailwind-merge": "^3.5.0",
     "tailwindcss": "^4.1.14",
+    "three": "^0.185.1",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.3",
     "ws": "^8.21.0"
   },
   "devDependencies": {
-    "@types/nodemailer": "^8.0.1"
+    "@types/nodemailer": "^8.0.1",
+    "@types/three": "^0.185.4"
   }
 }
