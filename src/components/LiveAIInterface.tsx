@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { X, Mic, Plus, Loader2, Settings, ChevronDown, Captions, MessageSquare, Square, Code2, Terminal, Shield, ShieldCheck, Trash2, Key, Check, AlertCircle, Send, Instagram, Download, Radio } from 'lucide-react';
+import { X, Mic, Plus, Loader2, Settings, ChevronDown, Captions, MessageSquare, Square, Code2, Terminal, Shield, ShieldCheck, Trash2, Key, Check, AlertCircle, Send, Instagram, Download, Radio, Music, Sparkles, Sliders, Volume2, Bot, Layers } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import AgentFace from './AgentFace';
 import ChatHistoryModal from './ChatHistoryModal';
@@ -587,6 +587,42 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const [colorIndex, setColorIndex] = useState(0);
     const [selectedImages, setSelectedImages] = useState<{ id: string; file: File; status: 'uploading' | 'uploaded' }[]>([]);
     const [showSettings, setShowSettings] = useState(false);
+    const [openSettingsSection, setOpenSettingsSection] = useState<string | null>(null);
+    const [musicYtEnabled, setMusicYtEnabled] = useState<boolean>(() => {
+        if (typeof window !== "undefined") {
+            const saved = localStorage.getItem('music_yt_enabled');
+            return saved !== null ? saved === 'true' : true;
+        }
+        return true;
+    });
+    const [musicSaavnEnabled, setMusicSaavnEnabled] = useState<boolean>(() => {
+        if (typeof window !== "undefined") {
+            const saved = localStorage.getItem('music_saavn_enabled');
+            return saved !== null ? saved === 'true' : true;
+        }
+        return true;
+    });
+
+    const toggleSettingsSection = useCallback((sectionId: string) => {
+        setOpenSettingsSection(prev => prev === sectionId ? null : sectionId);
+    }, []);
+
+    const toggleMusicYtEngine = useCallback(() => {
+        setMusicYtEnabled(prev => {
+            const next = !prev;
+            localStorage.setItem('music_yt_enabled', String(next));
+            return next;
+        });
+    }, []);
+
+    const toggleMusicSaavnEngine = useCallback(() => {
+        setMusicSaavnEnabled(prev => {
+            const next = !prev;
+            localStorage.setItem('music_saavn_enabled', String(next));
+            return next;
+        });
+    }, []);
+
     const [selectedVoice, setSelectedVoice] = useState(() => localStorage.getItem('selectedVoice') || 'Aoede');
     const [showVoiceDropdown, setShowVoiceDropdown] = useState(false);
     const [thinkingLevel, setThinkingLevel] = useState('low');
@@ -2707,122 +2743,339 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: 20 }}
-                        className="absolute bottom-0 left-0 right-0 z-[2500] bg-[#0d1330] border-t border-purple-500/30 rounded-t-3xl p-6 max-h-[70vh] overflow-y-auto"
+                        className="absolute bottom-0 left-0 right-0 z-[2500] bg-[#0d1330]/95 backdrop-blur-2xl border-t border-purple-500/40 rounded-t-3xl p-5 sm:p-6 max-h-[78vh] overflow-y-auto shadow-[0_-10px_40px_rgba(0,0,0,0.8)]"
                     >
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-white font-bold text-lg">Settings</h3>
-                            <button onClick={() => setShowSettings(false)}><X className="w-5 h-5 text-slate-400" /></button>
+                        {/* Settings Header */}
+                        <div className="flex justify-between items-center mb-5 pb-3 border-b border-slate-800">
+                            <div className="flex items-center gap-2.5">
+                                <div className="p-2 rounded-xl bg-purple-600/20 border border-purple-500/40 text-purple-400">
+                                    <Settings className="w-5 h-5" />
+                                </div>
+                                <div>
+                                    <h3 className="text-white font-bold text-lg tracking-wide">Friday System Settings</h3>
+                                    <p className="text-xs text-slate-400">Manage Voice, Music Engines, Bots & Security</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setShowSettings(false)}
+                                className="p-1.5 rounded-xl hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
                         </div>
 
-                        <div className="space-y-5">
-                            <div>
-                                <label className="text-slate-400 text-xs uppercase tracking-wide">Voice</label>
-                                <div className="relative mt-1">
-                                    <button
-                                        onClick={() => setShowVoiceDropdown(!showVoiceDropdown)}
-                                        className="w-full flex items-center justify-between bg-slate-800/60 border border-slate-600 rounded-xl px-4 py-3 text-white"
-                                    >
-                                        {selectedVoice} <ChevronDown className="w-4 h-4" />
-                                    </button>
-                                    {showVoiceDropdown && (
-                                        <div className="absolute top-full mt-1 w-full bg-slate-800 border border-slate-600 rounded-xl overflow-hidden z-10">
-                                            {VOICES.map(v => (
-                                                <button
-                                                    key={v}
-                                                    onClick={() => { setSelectedVoice(v); setShowVoiceDropdown(false); }}
-                                                    className={`w-full text-left px-4 py-2 hover:bg-slate-700 ${v === selectedVoice ? 'text-purple-400' : 'text-white'}`}
-                                                >
-                                                    {v}
-                                                </button>
-                                            ))}
+                        {/* Accordion Categories Container */}
+                        <div className="space-y-3">
+
+                            {/* ── 1. 🗣️ AI Voice & Response Style ── */}
+                            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 overflow-hidden transition-all">
+                                <button
+                                    onClick={() => toggleSettingsSection('ai_voice')}
+                                    className="w-full flex items-center justify-between p-4 text-left hover:bg-slate-800/40 transition-colors select-none"
+                                >
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-2 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-400">
+                                            <Radio className="w-4 h-4" />
                                         </div>
+                                        <div>
+                                            <h4 className="text-sm font-semibold text-white">AI Voice & Response Style</h4>
+                                            <p className="text-[11px] text-slate-400">Voice personality, speed, length & intelligence</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 font-mono">
+                                            {selectedVoice}
+                                        </span>
+                                        <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${openSettingsSection === 'ai_voice' ? 'rotate-180 text-purple-400' : 'text-slate-400'}`} />
+                                    </div>
+                                </button>
+
+                                <AnimatePresence>
+                                    {openSettingsSection === 'ai_voice' && (
+                                        <motion.div
+                                            initial={{ height: 0, opacity: 0 }}
+                                            animate={{ height: 'auto', opacity: 1 }}
+                                            exit={{ height: 0, opacity: 0 }}
+                                            className="px-4 pb-4 pt-1 space-y-4 border-t border-slate-800/60"
+                                        >
+                                            {/* Voice Selector */}
+                                            <div>
+                                                <label className="text-slate-400 text-xs uppercase tracking-wide font-medium">Voice Model</label>
+                                                <div className="relative mt-1">
+                                                    <button
+                                                        onClick={() => setShowVoiceDropdown(!showVoiceDropdown)}
+                                                        className="w-full flex items-center justify-between bg-slate-800/80 border border-slate-700 rounded-xl px-4 py-2.5 text-white text-sm"
+                                                    >
+                                                        <span>{selectedVoice}</span> <ChevronDown className="w-4 h-4" />
+                                                    </button>
+                                                    {showVoiceDropdown && (
+                                                        <div className="absolute top-full mt-1 w-full bg-slate-800 border border-slate-600 rounded-xl overflow-hidden z-20 shadow-2xl">
+                                                            {VOICES.map(v => (
+                                                                <button
+                                                                    key={v}
+                                                                    onClick={() => { setSelectedVoice(v); setShowVoiceDropdown(false); }}
+                                                                    className={`w-full text-left px-4 py-2 text-sm hover:bg-slate-700 ${v === selectedVoice ? 'text-purple-400 font-bold bg-purple-500/10' : 'text-white'}`}
+                                                                >
+                                                                    {v}
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            {/* Thinking Level */}
+                                            <div>
+                                                <label className="text-slate-400 text-xs uppercase tracking-wide font-medium">Thinking Depth</label>
+                                                <div className="flex gap-2 mt-1">
+                                                    {THINKING_LEVELS.map(level => (
+                                                        <button
+                                                            key={level}
+                                                            onClick={() => setThinkingLevel(level)}
+                                                            className={`flex-1 py-2 rounded-xl text-xs font-semibold border capitalize transition-all ${thinkingLevel === level ? 'bg-purple-600 border-purple-500 text-white shadow-[0_0_15px_rgba(147,51,234,0.4)]' : 'bg-slate-800/60 border-slate-700 text-slate-300 hover:bg-slate-800'}`}
+                                                        >
+                                                            {level}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+
+                                            {/* Answer Length */}
+                                            <div>
+                                                <label className="text-slate-400 text-xs uppercase tracking-wide font-medium">Answer Length</label>
+                                                <div className="flex gap-2 mt-1">
+                                                    {['short', 'detailed'].map(len => (
+                                                        <button
+                                                            key={len}
+                                                            onClick={() => setAnswerLength(len)}
+                                                            className={`flex-1 py-2 rounded-xl text-xs font-semibold border capitalize transition-all ${answerLength === len ? 'bg-purple-600 border-purple-500 text-white shadow-[0_0_15px_rgba(147,51,234,0.4)]' : 'bg-slate-800/60 border-slate-700 text-slate-300 hover:bg-slate-800'}`}
+                                                        >
+                                                            {len}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+
+                                            <ToggleSwitch
+                                                label="Careful / Accurate Mode"
+                                                description="Double-checks facts and calculations before speaking"
+                                                active={accurateMode}
+                                                onToggle={() => setAccurateMode(!accurateMode)}
+                                                activeColor="bg-purple-600"
+                                            />
+
+                                            <ToggleSwitch
+                                                label="Google Search Grounding"
+                                                description="Live web search integration for real-time information"
+                                                active={googleSearchMode}
+                                                onToggle={() => setGoogleSearchMode(!googleSearchMode)}
+                                                activeColor="bg-blue-600"
+                                            />
+
+                                            <ToggleSwitch
+                                                label="Live Subtitles (Captions)"
+                                                description="Display real-time speech-to-text subtitles on screen"
+                                                active={showCaptions}
+                                                onToggle={() => setShowCaptions(!showCaptions)}
+                                                activeColor="bg-emerald-600"
+                                            />
+                                        </motion.div>
                                     )}
-                                </div>
+                                </AnimatePresence>
                             </div>
 
-                            <div>
-                                <label className="text-slate-400 text-xs uppercase tracking-wide">Thinking Level</label>
-                                <div className="flex gap-2 mt-1">
-                                    {THINKING_LEVELS.map(level => (
-                                        <button
-                                            key={level}
-                                            onClick={() => setThinkingLevel(level)}
-                                            className={`flex-1 py-2 rounded-xl border capitalize ${thinkingLevel === level ? 'bg-purple-600 border-purple-500 text-white' : 'bg-slate-800/60 border-slate-600 text-slate-300'}`}
+                            {/* ── 2. 🎵 Music & Streaming Engine (NEW) ── */}
+                            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 overflow-hidden transition-all">
+                                <button
+                                    onClick={() => toggleSettingsSection('music_engine')}
+                                    className="w-full flex items-center justify-between p-4 text-left hover:bg-slate-800/40 transition-colors select-none"
+                                >
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-2 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400">
+                                            <Music className="w-4 h-4" />
+                                        </div>
+                                        <div>
+                                            <h4 className="text-sm font-semibold text-white">Music & Streaming Engine</h4>
+                                            <p className="text-[11px] text-slate-400">Configure YouTube Pro & JioSaavn 320k providers</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/20 text-red-300 font-mono">
+                                            {musicYtEnabled && musicSaavnEnabled ? 'YT Pro (Default)' : musicYtEnabled ? 'YT Only' : musicSaavnEnabled ? 'JioSaavn Only' : 'Auto'}
+                                        </span>
+                                        <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${openSettingsSection === 'music_engine' ? 'rotate-180 text-red-400' : 'text-slate-400'}`} />
+                                    </div>
+                                </button>
+
+                                <AnimatePresence>
+                                    {openSettingsSection === 'music_engine' && (
+                                        <motion.div
+                                            initial={{ height: 0, opacity: 0 }}
+                                            animate={{ height: 'auto', opacity: 1 }}
+                                            exit={{ height: 0, opacity: 0 }}
+                                            className="px-4 pb-4 pt-1 space-y-3.5 border-t border-slate-800/60"
                                         >
-                                            {level}
-                                        </button>
-                                    ))}
-                                </div>
+                                            {/* YouTube Pro Toggle */}
+                                            <ToggleSwitch
+                                                label="🔴 YouTube Pro Safe Audio Stream"
+                                                description="Ad-free pure background stream, HD thumbnails & multi-resolution artwork"
+                                                active={musicYtEnabled}
+                                                onToggle={toggleMusicYtEngine}
+                                                activeColor="bg-red-600"
+                                            />
+
+                                            {/* JioSaavn 320k Toggle */}
+                                            <ToggleSwitch
+                                                label="⚡ JioSaavn 320kbps Ultra-HD Stream"
+                                                description="Lossless 320kbps pure studio audio stream & high-speed CDN delivery"
+                                                active={musicSaavnEnabled}
+                                                onToggle={toggleMusicSaavnEngine}
+                                                activeColor="bg-emerald-600"
+                                            />
+
+                                            {/* Engine Priority Status Notice */}
+                                            <div className="p-3 rounded-xl bg-slate-800/70 border border-slate-700/70 text-xs text-slate-300 space-y-1">
+                                                <div className="flex items-center gap-1.5 font-bold text-white text-[11px]">
+                                                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                                                    <span>Streaming Priority Rule:</span>
+                                                </div>
+                                                <p className="text-[11px] text-slate-400 leading-relaxed">
+                                                    {musicYtEnabled && musicSaavnEnabled && "• Dono engines ON hain: By default YouTube Pro se song fetch hoga, aur 'JioSaavn' bolne par JioSaavn se chalega."}
+                                                    {musicYtEnabled && !musicSaavnEnabled && "• Sirf YouTube Pro ON hai: Sabhi songs YouTube Pro se fetch honge."}
+                                                    {!musicYtEnabled && musicSaavnEnabled && "• Sirf JioSaavn ON hai: Sabhi songs direct JioSaavn 320kbps se fetch honge."}
+                                                    {!musicYtEnabled && !musicSaavnEnabled && "• Dono OFF nahi ho sakte — system auto fallback to YouTube Pro karega."}
+                                                </p>
+                                            </div>
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
                             </div>
 
-                            <div>
-                                <label className="text-slate-400 text-xs uppercase tracking-wide">Answer Length</label>
-                                <div className="flex gap-2 mt-1">
-                                    {['short', 'detailed'].map(len => (
-                                        <button
-                                            key={len}
-                                            onClick={() => setAnswerLength(len)}
-                                            className={`flex-1 py-2 rounded-xl border capitalize ${answerLength === len ? 'bg-purple-600 border-purple-500 text-white' : 'bg-slate-800/60 border-slate-600 text-slate-300'}`}
+                            {/* ── 3. 🎙️ Audio & Voice Biometrics ── */}
+                            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 overflow-hidden transition-all">
+                                <button
+                                    onClick={() => toggleSettingsSection('audio_biometrics')}
+                                    className="w-full flex items-center justify-between p-4 text-left hover:bg-slate-800/40 transition-colors select-none"
+                                >
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-2 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400">
+                                            <Mic className="w-4 h-4" />
+                                        </div>
+                                        <div>
+                                            <h4 className="text-sm font-semibold text-white">Audio & Voice Biometrics</h4>
+                                            <p className="text-[11px] text-slate-400">Wake word & Boss voice recognition security</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-mono">
+                                            {wakeWordActive ? 'Wake Word ON' : 'Manual'}
+                                        </span>
+                                        <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${openSettingsSection === 'audio_biometrics' ? 'rotate-180 text-cyan-400' : 'text-slate-400'}`} />
+                                    </div>
+                                </button>
+
+                                <AnimatePresence>
+                                    {openSettingsSection === 'audio_biometrics' && (
+                                        <motion.div
+                                            initial={{ height: 0, opacity: 0 }}
+                                            animate={{ height: 'auto', opacity: 1 }}
+                                            exit={{ height: 0, opacity: 0 }}
+                                            className="px-4 pb-4 pt-1 space-y-4 border-t border-slate-800/60"
                                         >
-                                            {len}
-                                        </button>
-                                    ))}
-                                </div>
+                                            <ToggleSwitch
+                                                label="Wake Word ('Hello Friday')"
+                                                description="Say 'Hello Friday' anytime to instantly wake assistant without touching screen"
+                                                active={wakeWordActive}
+                                                onToggle={() => {
+                                                    const next = !wakeWordActive;
+                                                    setWakeWordActive(next);
+                                                    localStorage.setItem('wakeWordActive', String(next));
+                                                }}
+                                                activeColor="bg-cyan-500"
+                                            />
+
+                                            {/* Boss Voice Biometrics & Recognition Manager */}
+                                            <VoiceBiometricsManager />
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
                             </div>
 
-                            <ToggleSwitch
-                                label="Careful / Accurate Mode"
-                                description="Double-checks facts and calculations before speaking"
-                                active={accurateMode}
-                                onToggle={() => setAccurateMode(!accurateMode)}
-                                activeColor="bg-purple-600"
-                            />
+                            {/* ── 4. 💬 Messaging & Social Bots ── */}
+                            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 overflow-hidden transition-all">
+                                <button
+                                    onClick={() => toggleSettingsSection('messaging_bots')}
+                                    className="w-full flex items-center justify-between p-4 text-left hover:bg-slate-800/40 transition-colors select-none"
+                                >
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
+                                            <MessageSquare className="w-4 h-4" />
+                                        </div>
+                                        <div>
+                                            <h4 className="text-sm font-semibold text-white">Messaging & Social Bots</h4>
+                                            <p className="text-[11px] text-slate-400">WhatsApp Baileys bridge, Telegram & Instagram</p>
+                                        </div>
+                                    </div>
+                                    <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${openSettingsSection === 'messaging_bots' ? 'rotate-180 text-emerald-400' : 'text-slate-400'}`} />
+                                </button>
 
-                            <ToggleSwitch
-                                label="Google Search Grounding"
-                                description="Live web search integration for real-time information"
-                                active={googleSearchMode}
-                                onToggle={() => setGoogleSearchMode(!googleSearchMode)}
-                                activeColor="bg-blue-600"
-                            />
+                                <AnimatePresence>
+                                    {openSettingsSection === 'messaging_bots' && (
+                                        <motion.div
+                                            initial={{ height: 0, opacity: 0 }}
+                                            animate={{ height: 'auto', opacity: 1 }}
+                                            exit={{ height: 0, opacity: 0 }}
+                                            className="px-4 pb-4 pt-1 space-y-4 border-t border-slate-800/60"
+                                        >
+                                            {/* Baileys Backup WhatsApp Toggle */}
+                                            <BaileysToggle />
 
-                            <ToggleSwitch
-                                label="Wake Word ('Hello Friday')"
-                                description="Say 'Hello Friday' anytime to instantly wake assistant"
-                                active={wakeWordActive}
-                                onToggle={() => {
-                                    const next = !wakeWordActive;
-                                    setWakeWordActive(next);
-                                    localStorage.setItem('wakeWordActive', String(next));
-                                }}
-                                activeColor="bg-cyan-500"
-                            />
+                                            {/* Friday Telegram Bot Card */}
+                                            <TelegramBotCard />
 
-                            <ToggleSwitch
-                                label="Live Subtitles (Captions)"
-                                description="Display real-time speech-to-text subtitles"
-                                active={showCaptions}
-                                onToggle={() => setShowCaptions(!showCaptions)}
-                                activeColor="bg-emerald-600"
-                            />
+                                            {/* Friday Instagram Direct Bot Card */}
+                                            <InstagramBotCard />
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
+                            </div>
 
-                            {/* Baileys Backup WhatsApp Toggle */}
-                            <BaileysToggle />
+                            {/* ── 5. 🛡️ Security, OSINT & Permissions ── */}
+                            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 overflow-hidden transition-all">
+                                <button
+                                    onClick={() => toggleSettingsSection('security_osint')}
+                                    className="w-full flex items-center justify-between p-4 text-left hover:bg-slate-800/40 transition-colors select-none"
+                                >
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-2 rounded-xl bg-blue-500/10 border border-blue-500/30 text-blue-400">
+                                            <ShieldCheck className="w-4 h-4" />
+                                        </div>
+                                        <div>
+                                            <h4 className="text-sm font-semibold text-white">Security, OSINT & Permissions</h4>
+                                            <p className="text-[11px] text-slate-400">Device permissions, system access & network radar</p>
+                                        </div>
+                                    </div>
+                                    <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${openSettingsSection === 'security_osint' ? 'rotate-180 text-blue-400' : 'text-slate-400'}`} />
+                                </button>
 
-                            {/* Boss Voice Biometrics & Recognition Manager */}
-                            <VoiceBiometricsManager />
+                                <AnimatePresence>
+                                    {openSettingsSection === 'security_osint' && (
+                                        <motion.div
+                                            initial={{ height: 0, opacity: 0 }}
+                                            animate={{ height: 'auto', opacity: 1 }}
+                                            exit={{ height: 0, opacity: 0 }}
+                                            className="px-4 pb-4 pt-1 space-y-4 border-t border-slate-800/60"
+                                        >
+                                            {/* Friday App Access & Device Permissions Manager */}
+                                            <AppAccessSection />
 
-                            {/* Friday Telegram Bot Card */}
-                            <TelegramBotCard />
+                                            {/* Friday Cyber Security & OSINT Suite Card */}
+                                            <CyberSecurityCard />
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
+                            </div>
 
-                            {/* Friday Instagram Direct Bot Card */}
-                            <InstagramBotCard />
-
-                            {/* Friday App Access & Device Permissions Manager */}
-                            <AppAccessSection />
-
-                            {/* Friday Cyber Security & OSINT Suite Card */}
-                            <CyberSecurityCard />
                         </div>
                     </motion.div>
                 )}

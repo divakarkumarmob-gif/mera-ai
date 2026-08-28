@@ -98,15 +98,25 @@ export const MusicStudioModal: React.FC<MusicStudioModalProps> = ({
   isPlaying,
 }) => {
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedTab, setSelectedTab] = useState("youtube_safe");
+  const [selectedTab, setSelectedTab] = useState(() => {
+    if (typeof window !== "undefined") {
+      const isYt = localStorage.getItem("music_yt_enabled") !== "false";
+      return isYt ? "youtube_safe" : "jiosaavn_hd";
+    }
+    return "youtube_safe";
+  });
   const [results, setResults] = useState<SongItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
 
-  // Auto search on initial open if empty (Default: YouTube Pro)
+  // Auto search on initial open if empty (Default: respects settings)
   useEffect(() => {
     if (isOpen && results.length === 0 && !hasSearched) {
-      handleSearch("Trending YouTube Hits", "youtube_safe");
+      const isYt = localStorage.getItem("music_yt_enabled") !== "false";
+      const defaultTab = isYt ? "youtube_safe" : "jiosaavn_hd";
+      const defaultQuery = isYt ? "Trending YouTube Hits" : "Trending Bollywood Hits";
+      setSelectedTab(defaultTab);
+      handleSearch(defaultQuery, defaultTab);
     }
   }, [isOpen]);
 

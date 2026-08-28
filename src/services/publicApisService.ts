@@ -3811,14 +3811,41 @@ class PublicApisService {
     };
   }
 
-  // 51.1 Play & Stream FULL Music Track (Primary: YouTube Pro Safe HD, Explicit / Fallback: JioSaavn)
-  public async playMusic(songOrArtist: string): Promise<any> {
+  // 51.1 Play & Stream FULL Music Track (Configurable Engine Priority: YouTube Pro Safe vs JioSaavn)
+  public async playMusic(
+    songOrArtist: string,
+    options?: { forceEngine?: "youtube" | "jiosaavn"; ytEnabled?: boolean; saavnEnabled?: boolean }
+  ): Promise<any> {
     const q = String(songOrArtist || "").trim();
     const isExplicitJioSaavn = /\b(jiosaavn|jio saavn|saavn)\b/i.test(q);
     const cleanQuery = q.replace(/\b(jiosaavn|jio saavn|saavn)\b/gi, "").trim() || q;
 
-    if (isExplicitJioSaavn) {
-      // 1. Explicit JioSaavn request
+    let ytEnabled = true;
+    let saavnEnabled = true;
+    if (typeof window !== "undefined" && typeof window.localStorage !== "undefined") {
+      const savedYt = localStorage.getItem("music_yt_enabled");
+      if (savedYt !== null) ytEnabled = savedYt === "true";
+      const savedSaavn = localStorage.getItem("music_saavn_enabled");
+      if (savedSaavn !== null) saavnEnabled = savedSaavn === "true";
+    }
+    if (options?.ytEnabled !== undefined) ytEnabled = options.ytEnabled;
+    if (options?.saavnEnabled !== undefined) saavnEnabled = options.saavnEnabled;
+    if (options?.forceEngine === "youtube") {
+      ytEnabled = true;
+      saavnEnabled = false;
+    }
+    if (options?.forceEngine === "jiosaavn") {
+      ytEnabled = false;
+      saavnEnabled = true;
+    }
+
+    // If both disabled, auto-protect fallback to at least YouTube
+    if (!ytEnabled && !saavnEnabled) {
+      ytEnabled = true;
+    }
+
+    // 1. Explicit JioSaavn OR Only JioSaavn is enabled
+    if ((isExplicitJioSaavn || !ytEnabled) && saavnEnabled) {
       try {
         const saavnRes = await jioSaavnService.searchSong(cleanQuery);
         if (saavnRes.success && saavnRes.topSong) {
@@ -3852,47 +3879,51 @@ class PublicApisService {
       }
     }
 
-    // 2. Default Primary: YouTube Pro Safe Background Audio
-    try {
-      const ytRes = await this.searchYouTubeMusic(cleanQuery);
-      if (ytRes.success && (ytRes.videoId || ytRes.audioUrl)) {
-        return ytRes;
+    // 2. Default Primary: YouTube Pro Safe (if enabled)
+    if (ytEnabled) {
+      try {
+        const ytRes = await this.searchYouTubeMusic(cleanQuery);
+        if (ytRes.success && (ytRes.videoId || ytRes.audioUrl)) {
+          return ytRes;
+        }
+      } catch (e) {
+        console.warn("[PublicApis] YouTube music search error in playMusic:", e);
       }
-    } catch (e) {
-      console.warn("[PublicApis] YouTube music search error in playMusic:", e);
     }
 
-    // 3. Fallback: JioSaavn
-    try {
-      const saavnRes = await jioSaavnService.searchSong(cleanQuery);
-      if (saavnRes.success && saavnRes.topSong) {
-        const s = saavnRes.topSong;
-        const directAudio = s.audio320kbps || s.audio160kbps || s.audio96kbps;
-        const proxiedUrl = `/api/music/proxy-stream?url=${encodeURIComponent(directAudio)}`;
+    // 3. Fallback: JioSaavn (if enabled)
+    if (saavnEnabled) {
+      try {
+        const saavnRes = await jioSaavnService.searchSong(cleanQuery);
+        if (saavnRes.success && saavnRes.topSong) {
+          const s = saavnRes.topSong;
+          const directAudio = s.audio320kbps || s.audio160kbps || s.audio96kbps;
+          const proxiedUrl = `/api/music/proxy-stream?url=${encodeURIComponent(directAudio)}`;
 
-        return {
-          success: true,
-          action: "play",
-          trackName: s.songName,
-          artistName: s.artistName,
-          albumName: s.albumName,
-          albumArt: s.albumArt500,
-          durationSec: s.durationSec,
-          isFullSong: true,
-          isJioSaavn: true,
-          quality: "JioSaavn 320kbps Ultra-HD",
-          audioUrl: directAudio,
-          fallbackAudioUrl: proxiedUrl,
-          directCdnUrl: directAudio,
-          hasLyrics: s.hasLyrics,
-          songId: s.id,
-          youtubeMusicUrl: `https://music.youtube.com/search?q=${encodeURIComponent(s.songName + " " + s.artistName)}`,
-          source: "jiosaavn_320kbps",
-          message: `Boss, "${s.songName}" (${s.artistName}) JioSaavn 320kbps Ultra-HD me play ho raha hai! 🎵✨`,
-        };
+          return {
+            success: true,
+            action: "play",
+            trackName: s.songName,
+            artistName: s.artistName,
+            albumName: s.albumName,
+            albumArt: s.albumArt500,
+            durationSec: s.durationSec,
+            isFullSong: true,
+            isJioSaavn: true,
+            quality: "JioSaavn 320kbps Ultra-HD",
+            audioUrl: directAudio,
+            fallbackAudioUrl: proxiedUrl,
+            directCdnUrl: directAudio,
+            hasLyrics: s.hasLyrics,
+            songId: s.id,
+            youtubeMusicUrl: `https://music.youtube.com/search?q=${encodeURIComponent(s.songName + " " + s.artistName)}`,
+            source: "jiosaavn_320kbps",
+            message: `Boss, "${s.songName}" (${s.artistName}) JioSaavn 320kbps Ultra-HD me play ho raha hai! 🎵✨`,
+          };
+        }
+      } catch (e) {
+        console.warn("[PublicApis] JioSaavn fallback error in playMusic:", e);
       }
-    } catch (e) {
-      console.warn("[PublicApis] JioSaavn fallback error in playMusic:", e);
     }
 
     // 3. Fallback: Multi-Source Search
