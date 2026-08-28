@@ -1905,7 +1905,7 @@ STYLE:
       answerLength: string,
       googleSearchMode: boolean
     ) => {
-      const effectiveThinking = accurateMode || googleSearchMode ? "high" : thinkingLevel;
+      const effectiveThinking = thinkingLevel || (accurateMode ? "medium" : "low");
       const systemInstruction = await buildSystemInstruction(effectiveThinking, accurateMode, answerLength, googleSearchMode);
 
       let inputTranscriptBuffer = "";
@@ -4304,8 +4304,7 @@ STYLE:
             for (const part of parts) {
               if (part.inlineData?.data) {
                 hasAudio = true;
-                safeSend(JSON.stringify({ type: "speaking" }));
-                safeSend(JSON.stringify({ audio: part.inlineData.data }));
+                safeSend(JSON.stringify({ type: "speaking", audio: part.inlineData.data }));
               }
             }
 
@@ -6898,20 +6897,16 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
             voiceConfig: { prebuiltVoiceConfig: { voiceName: voice || "Aoede" } },
           },
           thinkingConfig: {
-            thinkingLevel: (["low", "medium", "high"].includes(effectiveThinking) ? effectiveThinking : "high") as any,
+            thinkingLevel: (["low", "medium", "high"].includes(effectiveThinking) ? effectiveThinking : "low") as any,
           },
-          // VAD tuning: previously left on Gemini's generic defaults. Tuned
-          // here instead of guessed — high start-sensitivity so it notices
-          // DK starting to speak quickly, but LOW end-sensitivity + a
-          // moderate silence window so a normal mid-sentence pause isn't
-          // mistaken for "DK stopped talking", which was a contributor to
-          // the choppy audio / falsely-interrupted turns.
+          // VAD tuning: High start & end sensitivity + 220ms silence duration
+          // for instant, snappy voice turn-taking without awkward pauses.
           realtimeInputConfig: {
             automaticActivityDetection: {
               startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_HIGH,
-              endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_LOW,
-              silenceDurationMs: 380,
-              prefixPaddingMs: 120,
+              endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_HIGH,
+              silenceDurationMs: 240,
+              prefixPaddingMs: 60,
             },
           },
           tools: [
@@ -6978,7 +6973,7 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
     let reconnectAttempts = 0;
     const MAX_RECONNECT_ATTEMPTS = 3;
     let lastVoice = "Aoede";
-    let lastThinkingLevel = "high";
+    let lastThinkingLevel = "low";
     let lastAccurateMode = false;
     let lastAnswerLength: string | undefined;
     let lastGoogleSearchMode = false;
@@ -7057,7 +7052,7 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
         console.log(`[Server] 🎙️ init received (session=${sessionId}), (re)creating Gemini Live session...`);
         // Track params for auto-reconnect
         lastVoice = parsedData.voice || "Aoede";
-        lastThinkingLevel = parsedData.thinkingLevel || "high";
+        lastThinkingLevel = parsedData.thinkingLevel || "low";
         lastAccurateMode = !!parsedData.accurateMode;
         lastAnswerLength = parsedData.answerLength;
         lastGoogleSearchMode = !!parsedData.googleSearchMode;
