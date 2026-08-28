@@ -502,10 +502,72 @@ export function createCarChassisModel(): ParametricMachineModel {
   };
 }
 
+// ── 6. Blank Hologram Workspace ───────────────────────────────────────────────
+
+export function createBlankWorkspaceModel(): ParametricMachineModel {
+  const group = new THREE.Group();
+  const parts: ParametricMachineModel['parts'] = [];
+
+  // Glowing 3D Axis Orientation Widget at Origin
+  const axisGroup = new THREE.Group();
+
+  // X Axis (Red/Magenta)
+  const xLineGeo = new THREE.CylinderGeometry(0.04, 0.04, 2.0, 16);
+  const xMat = createHologramMaterial(0xff0055, 0.9);
+  const xMesh = new THREE.Mesh(xLineGeo, xMat);
+  xMesh.rotation.z = -Math.PI / 2;
+  xMesh.position.x = 1.0;
+  axisGroup.add(xMesh);
+
+  // Y Axis (Green/Cyan)
+  const yLineGeo = new THREE.CylinderGeometry(0.04, 0.04, 2.0, 16);
+  const yMat = createHologramMaterial(0x00ff88, 0.9);
+  const yMesh = new THREE.Mesh(yLineGeo, yMat);
+  yMesh.position.y = 1.0;
+  axisGroup.add(yMesh);
+
+  // Z Axis (Blue/Cyan)
+  const zLineGeo = new THREE.CylinderGeometry(0.04, 0.04, 2.0, 16);
+  const zMat = createHologramMaterial(0x00f0ff, 0.9);
+  const zMesh = new THREE.Mesh(zLineGeo, zMat);
+  zMesh.rotation.x = Math.PI / 2;
+  zMesh.position.z = 1.0;
+  axisGroup.add(zMesh);
+
+  // Center Origin Anchor
+  const originGeo = new THREE.SphereGeometry(0.15, 16, 16);
+  const originMat = createHologramMaterial(0xffffff, 0.95);
+  const originMesh = new THREE.Mesh(originGeo, originMat);
+  axisGroup.add(originMesh);
+
+  group.add(axisGroup);
+  parts.push({
+    name: '3D Spatial Coordinate Origin',
+    mesh: axisGroup,
+    originalPos: axisGroup.position.clone(),
+    explodeDir: new THREE.Vector3(0, 0, 0),
+  });
+
+  return {
+    id: 'blank_workspace',
+    name: '✨ Blank Workspace',
+    category: 'Open CAD Canvas',
+    description: 'Clean spatial holographic coordinate system for freehand air-drawing and custom building.',
+    group,
+    parts,
+  };
+}
+
 // ── Model Factory ─────────────────────────────────────────────────────────────
 
 export function getAvailableModels(): { id: string; name: string; category: string; description: string }[] {
   return [
+    {
+      id: 'blank_workspace',
+      name: '✨ Blank Workspace',
+      category: 'Open CAD Canvas',
+      description: 'Clean spatial holographic workspace for freehand creation & sculpting.',
+    },
     {
       id: 'arc_reactor',
       name: 'Mark-L Arc Reactor Core',
@@ -547,6 +609,8 @@ export function getAvailableModels(): { id: string; name: string; category: stri
 
 export function loadModelById(id: string): ParametricMachineModel {
   switch (id) {
+    case 'blank_workspace':
+      return createBlankWorkspaceModel();
     case 'quadcopter_drone':
       return createQuadcopterModel();
     case 'jet_engine':

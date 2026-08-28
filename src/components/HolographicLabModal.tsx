@@ -90,7 +90,7 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
 
   // Hand & Gesture Coordinates Refs
   const prevHandPosRef = useRef<{ x: number; y: number; z: number } | null>(null);
-  const prevTwoHandDistRef = useRef<number | null>(null);
+  const prevTwoHandsRef = useRef<{ cx: number; cy: number; angle: number; dist: number } | null>(null);
   const mpHandsRef = useRef<Hands | null>(null);
   const isProcessingFrameRef = useRef(false);
 
@@ -165,7 +165,7 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
       }
 
       // Idle smooth floating oscillation when not dragging
-      if (modelPivotRef.current && !isPointerDraggingRef.current && prevHandPosRef.current === null) {
+      if (modelPivotRef.current && !isPointerDraggingRef.current && prevHandPosRef.current === null && prevTwoHandsRef.current === null) {
         modelPivotRef.current.rotation.y += 0.0025;
       }
 
@@ -240,7 +240,37 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
     });
   };
 
-  // ── 4. Robust Euclidean Distance Helper for 3D Joints ───────────────────────
+  // ── 4. Quick Clear Drawn Lines / Air-Draw Canvas ───────────────────────────
+  const clearAirDrawPoints = () => {
+    airDrawPointsRef.current = [];
+    if (airDrawLineRef.current) {
+      airDrawLineRef.current.geometry.dispose();
+      airDrawLineRef.current.geometry = new THREE.BufferGeometry().setFromPoints([]);
+    }
+  };
+
+  // ── 5. Spawn 3D Primitives into Blank Workspace ────────────────────────────
+  const spawnPrimitive = (type: 'cube' | 'sphere' | 'cylinder' | 'torus') => {
+    if (!modelPivotRef.current) return;
+
+    const mat = createHologramMaterial(0x00f0ff, 0.9, false);
+    let geo: THREE.BufferGeometry;
+
+    if (type === 'cube') geo = new THREE.BoxGeometry(1.2, 1.2, 1.2);
+    else if (type === 'sphere') geo = new THREE.SphereGeometry(0.8, 24, 24);
+    else if (type === 'cylinder') geo = new THREE.CylinderGeometry(0.6, 0.6, 1.5, 24);
+    else geo = new THREE.TorusGeometry(0.9, 0.25, 16, 48);
+
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(
+      (Math.random() - 0.5) * 2,
+      (Math.random() - 0.5) * 2,
+      (Math.random() - 0.5) * 2
+    );
+    modelPivotRef.current.add(mesh);
+  };
+
+  // ── 5. Robust Euclidean Distance Helper for 3D Joints ───────────────────────
   const getDistance3D = (p1: any, p2: any) => {
     const dx = p1.x - p2.x;
     const dy = p1.y - p2.y;
@@ -248,7 +278,7 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
     return Math.sqrt(dx * dx + dy * dy + dz * dz);
   };
 
-  // ── 5. MediaPipe Hands Results Processor ────────────────────────────────────
+  // ── 6. MediaPipe Hands Results Processor ────────────────────────────────────
   const handleHandResults = useCallback((results: HandResults) => {
     if (!canvasHandRef.current) return;
 
@@ -267,7 +297,7 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
       setHandTrackingStatus('no_hand');
       setActiveGesture('Hover / Idle');
       prevHandPosRef.current = null;
-      prevTwoHandDistRef.current = null;
+      prevTwoHandsRef.current = null;
       return;
     }
 
@@ -278,26 +308,44 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
       drawHolographicHandSkeleton(ctx, landmarks, canvas.width, canvas.height);
     }
 
-    // ── GESTURE 1: Two-Hand Zoom / Scale ──
+    // ── GESTURE 1: Two-Hand 360° Steering, Orbit & Zoom ──
     if (results.multiHandLandmarks.length >= 2) {
       const hand1 = results.multiHandLandmarks[0][0]; // Wrist hand 1
       const hand2 = results.multiHandLandmarks[1][0]; // Wrist hand 2
 
+      const cx = (hand1.x + hand2.x) / 2;
+      const cy = (hand1.y + hand2.y) / 2;
+      const angle = Math.atan2(hand2.y - hand1.y, hand2.x - hand1.x);
       const dist = Math.hypot(hand1.x - hand2.x, hand1.y - hand2.y);
-      if (prevTwoHandDistRef.current !== null && modelPivotRef.current) {
-        const delta = (dist - prevTwoHandDistRef.current) * 4.0;
+
+      if (prevTwoHandsRef.current && modelPivotRef.current) {
+        // 1. Horizontal / Vertical Shift -> 360° Orbit Rotation (Yaw & Pitch)
+        const dx = (cx - prevTwoHandsRef.current.cx) * 8.5;
+        const dy = (cy - prevTwoHandsRef.current.cy) * 8.5;
+        modelPivotRef.current.rotation.y += dx;
+        modelPivotRef.current.rotation.x += dy;
+
+        // 2. Hand Tilt Angle -> 360° Roll Steering (Z-axis rotation)
+        let dAngle = angle - prevTwoHandsRef.current.angle;
+        if (dAngle > Math.PI) dAngle -= Math.PI * 2;
+        if (dAngle < -Math.PI) dAngle += Math.PI * 2;
+        modelPivotRef.current.rotation.z += dAngle * 2.0;
+
+        // 3. Distance Delta -> Scale / Zoom
+        const deltaDist = (dist - prevTwoHandsRef.current.dist) * 4.5;
         const newScale = THREE.MathUtils.clamp(
-          modelPivotRef.current.scale.x + delta,
-          0.35,
-          3.2
+          modelPivotRef.current.scale.x + deltaDist,
+          0.3,
+          3.5
         );
         modelPivotRef.current.scale.set(newScale, newScale, newScale);
       }
-      prevTwoHandDistRef.current = dist;
-      setActiveGesture('👐 Two-Hand Scale / Zoom');
+
+      prevTwoHandsRef.current = { cx, cy, angle, dist };
+      setActiveGesture('👐 Two-Hand 360° Steering & Orbit');
       return;
     } else {
-      prevTwoHandDistRef.current = null;
+      prevTwoHandsRef.current = null;
     }
 
     // ── Primary Hand (Single Hand Gestures) ──
@@ -324,22 +372,65 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
     // Classifications
     const isFist = isIndexCurled && isMiddleCurled && isRingCurled && isPinkyCurled;
     const isPointingOnly = !isIndexCurled && isMiddleCurled && isRingCurled && isPinkyCurled;
-    const isPinching = pinchDist < 0.08;
+    const isPinching = pinchDist < 0.085;
     const isPalmOpen = !isIndexCurled && !isMiddleCurled && !isRingCurled && !isPinkyCurled && pinchDist > 0.14;
 
     const currentPos = { x: indexTip.x, y: indexTip.y, z: indexTip.z || 0 };
 
-    // ── GESTURE 2: Air-Drawing (In Air-Draw Mode with pointing index finger) ──
-    if (isAirDrawModeRef.current && (isPointingOnly || isPinching) && modelPivotRef.current) {
-      setActiveGesture('✍️ Air-Draw 3D Wireframe');
+    // ── GESTURE 2: Air-Drawing 3D Holographic Wireframe (Single Index Finger) ──
+    if ((isAirDrawModeRef.current || isPointingOnly) && !isFist && !isPinching && modelPivotRef.current) {
+      setActiveGesture('✍️ Index Pointing • Air-Drawing 3D');
+
+      // Map 2D camera coords to 3D Three.js world coordinates
       const worldX = (1 - indexTip.x - 0.5) * 6.5;
       const worldY = -(indexTip.y - 0.5) * 5.0;
-      const worldZ = (indexTip.z || 0) * 4.0;
+      const worldZ = (indexTip.z || 0) * 3.5;
 
-      airDrawPointsRef.current.push(new THREE.Vector3(worldX, worldY, worldZ));
-      if (airDrawLineRef.current && airDrawPointsRef.current.length > 1) {
-        airDrawLineRef.current.geometry.setFromPoints(airDrawPointsRef.current);
+      const newPoint = new THREE.Vector3(worldX, worldY, worldZ);
+      const lastPoint = airDrawPointsRef.current[airDrawPointsRef.current.length - 1];
+
+      if (!lastPoint || lastPoint.distanceTo(newPoint) > 0.04) {
+        airDrawPointsRef.current.push(newPoint);
+
+        // Recreate/update line geometry cleanly in Three.js
+        if (airDrawLineRef.current) {
+          airDrawLineRef.current.geometry.dispose();
+          airDrawLineRef.current.geometry = new THREE.BufferGeometry().setFromPoints(airDrawPointsRef.current);
+          airDrawLineRef.current.geometry.computeBoundingSphere();
+        } else {
+          const material = new THREE.LineBasicMaterial({
+            color: 0x00f0ff,
+            linewidth: 4,
+            transparent: true,
+            opacity: 0.95,
+          });
+          const geo = new THREE.BufferGeometry().setFromPoints(airDrawPointsRef.current);
+          const line = new THREE.Line(geo, material);
+          modelPivotRef.current.add(line);
+          airDrawLineRef.current = line;
+        }
       }
+
+      // Draw Glowing Laser Emitter on 2D Overlay
+      const canvasW = canvas.width;
+      const canvasH = canvas.height;
+      const tipX = (1 - indexTip.x) * canvasW;
+      const tipY = indexTip.y * canvasH;
+
+      ctx.beginPath();
+      ctx.arc(tipX, tipY, 10, 0, Math.PI * 2);
+      ctx.fillStyle = '#f59e0b';
+      ctx.shadowColor = '#00f0ff';
+      ctx.shadowBlur = 20;
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.arc(tipX, tipY, 18, 0, Math.PI * 2);
+      ctx.strokeStyle = '#00f0ff';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      prevHandPosRef.current = currentPos;
       return;
     }
 
@@ -724,8 +815,69 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
           </div>
         </div>
 
-        {/* Viewport Toggles */}
-        <div className="space-y-1 pt-2 border-t border-slate-800">
+        {/* Viewport & Air-Draw Tools */}
+        <div className="space-y-1.5 pt-2 border-t border-slate-800">
+          <div className="flex gap-1.5">
+            <button
+              onClick={() => {
+                const next = !isAirDrawMode;
+                setIsAirDrawMode(next);
+                isAirDrawModeRef.current = next;
+              }}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-xl text-xs font-bold transition-all border cursor-pointer ${
+                isAirDrawMode
+                  ? 'bg-amber-500/25 border-amber-400 text-amber-300 shadow-[0_0_15px_rgba(245,158,11,0.4)]'
+                  : 'bg-slate-900/80 border-slate-800 text-slate-300 hover:bg-slate-800'
+              }`}
+            >
+              <PenTool className="w-3.5 h-3.5" />
+              <span>{isAirDrawMode ? 'Air-Draw ON' : 'Air-Draw Mode'}</span>
+            </button>
+
+            <button
+              onClick={clearAirDrawPoints}
+              className="px-2.5 py-1.5 rounded-xl bg-slate-900/80 hover:bg-rose-950 border border-slate-800 hover:border-rose-500/50 text-[11px] text-slate-400 hover:text-rose-300 transition-colors cursor-pointer"
+              title="Clear Air-Drawn Lines"
+            >
+              Clear
+            </button>
+          </div>
+
+          {/* Quick Spawn Primitives (When on Blank Workspace or Air Draw) */}
+          {(selectedModelId === 'blank_workspace' || selectedModelId === 'air_draw') && (
+            <div className="p-2 rounded-xl bg-slate-900/80 border border-cyan-500/30 space-y-1.5">
+              <span className="text-[10px] text-cyan-300 font-bold uppercase tracking-wider block">
+                Spawn 3D Shapes:
+              </span>
+              <div className="grid grid-cols-4 gap-1">
+                <button
+                  onClick={() => spawnPrimitive('cube')}
+                  className="py-1 rounded-lg bg-cyan-950/60 hover:bg-cyan-900 border border-cyan-500/40 text-[10px] text-cyan-200 font-semibold cursor-pointer"
+                >
+                  Cube
+                </button>
+                <button
+                  onClick={() => spawnPrimitive('sphere')}
+                  className="py-1 rounded-lg bg-cyan-950/60 hover:bg-cyan-900 border border-cyan-500/40 text-[10px] text-cyan-200 font-semibold cursor-pointer"
+                >
+                  Sphere
+                </button>
+                <button
+                  onClick={() => spawnPrimitive('cylinder')}
+                  className="py-1 rounded-lg bg-cyan-950/60 hover:bg-cyan-900 border border-cyan-500/40 text-[10px] text-cyan-200 font-semibold cursor-pointer"
+                >
+                  Cylinder
+                </button>
+                <button
+                  onClick={() => spawnPrimitive('torus')}
+                  className="py-1 rounded-lg bg-cyan-950/60 hover:bg-cyan-900 border border-cyan-500/40 text-[10px] text-cyan-200 font-semibold cursor-pointer"
+                >
+                  Torus
+                </button>
+              </div>
+            </div>
+          )}
+
           <button
             onClick={() => setShowCameraBg(!showCameraBg)}
             className="w-full flex items-center justify-between p-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-xs text-slate-200 transition-colors cursor-pointer"
@@ -760,13 +912,13 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
         <div className="p-2.5 rounded-xl bg-cyan-950/40 border border-cyan-500/30 text-[11px] text-cyan-300/90 space-y-1">
           <p className="font-bold text-white uppercase text-[10px] tracking-wider flex items-center gap-1">
             <HelpCircle className="w-3 h-3 text-cyan-400" />
-            <span>Interactive Controls:</span>
+            <span>JARVIS Holographic Controls:</span>
           </p>
-          <p>• ✊ <b>Fist</b>: Rotate Hologram 360°</p>
-          <p>• 🤏 <b>Pinch</b>: Pick & Move Structure</p>
-          <p>• 👐 <b>2 Hands</b>: Stretch to Scale / Zoom</p>
-          <p>• ✍️ <b>Point</b>: Air-Draw in Space</p>
-          <p>• 🖱️ <b>Mouse/Touch</b>: Click & Drag to Orbit</p>
+          <p>• 👐 <b>2 Hands</b>: 360° Steering, Orbit & Zoom</p>
+          <p>• ✍️ <b>1 Index Finger</b>: Point to Air-Draw 3D</p>
+          <p>• ✊ <b>Fist</b>: 360° Rotate Single Hand</p>
+          <p>• 🤏 <b>Pinch</b>: Pick & Move Object</p>
+          <p>• 🖱️ <b>Mouse/Touch</b>: Drag to Orbit & Wheel Zoom</p>
         </div>
       </div>
 
