@@ -5044,7 +5044,7 @@ STYLE:
                   } catch (e: any) {
                     result = { success: false, message: `Reddit search fail hui: ${e?.message || e}` };
                   }
-                } else if (call.name === "search_music" || call.name === "play_music" || call.name === "play_youtube_music") {
+                } else if (call.name === "play_youtube_music") {
                   const songQuery = String(
                     call.args?.songName ||
                     call.args?.songOrArtist ||
@@ -5073,7 +5073,49 @@ STYLE:
                       }
                     }
                   } catch (e: any) {
-                    result = { success: false, message: `Music search fail hui: ${e?.message || e}` };
+                    result = { success: false, message: `YouTube music fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "search_music" || call.name === "play_music") {
+                  const songQuery = String(
+                    call.args?.songName ||
+                    call.args?.songOrArtist ||
+                    call.args?.song ||
+                    call.args?.query ||
+                    call.args?.track ||
+                    call.args?.title ||
+                    call.args?.name ||
+                    call.args?.artist ||
+                    ""
+                  ).trim();
+
+                  try {
+                    result = await publicApisService.playMusic(songQuery);
+                    if (result.success) {
+                      const payload = JSON.stringify({
+                        type: 'play_music',
+                        trackName: result.trackName,
+                        artistName: result.artistName,
+                        albumArt: result.albumArt,
+                        audioUrl: result.audioUrl,
+                        directCdnUrl: result.directCdnUrl,
+                        isJioSaavn: !!result.isJioSaavn,
+                        hasLyrics: !!result.hasLyrics,
+                        songId: result.songId,
+                        spotifyUrl: result.spotifyUrl,
+                        youtubeMusicUrl: result.youtubeMusicUrl,
+                        isFullSong: result.isFullSong,
+                        quality: result.quality,
+                        durationSec: result.durationSec,
+                      });
+                      try { clientWs.send(payload); } catch {}
+                      for (const client of connectedClients) {
+                        if (client !== clientWs && client.readyState === 1) {
+                          try { client.send(payload); } catch {}
+                        }
+                      }
+                    }
+                  } catch (e: any) {
+                    result = { success: false, message: `Music play fail hui: ${e?.message || e}` };
                   }
                 } else if (call.name === "search_song_by_lyrics") {
                   const { lyrics, artistHint } = call.args || {};
@@ -5447,34 +5489,6 @@ STYLE:
                     result = await toolsEngine.setMessengerContactRole(String(contactId || ""), role);
                   } catch (e: any) {
                     result = { success: false, message: `Messenger role update fail hua: ${e?.message || e}` };
-                  }
-                } else if (call.name === "play_music") {
-                  const { songName } = call.args || {};
-                  try {
-                    result = await publicApisService.playMusic(String(songName || ""));
-                    if (result.success) {
-                      clientWs.send(JSON.stringify({
-                        type: 'play_music',
-                        trackName: result.trackName,
-                        artistName: result.artistName,
-                        albumArt: result.albumArt,
-                        audioUrl: result.audioUrl,
-                        videoId: result.videoId,
-                        embedUrl: result.embedUrl,
-                        isYouTubeMusic: !!result.isYouTubeMusic || !!result.videoId,
-                        isJioSaavn: !!result.isJioSaavn,
-                        hasLyrics: !!result.hasLyrics,
-                        songId: result.songId,
-                        directCdnUrl: result.directCdnUrl,
-                        spotifyUrl: result.spotifyUrl,
-                        youtubeMusicUrl: result.youtubeMusicUrl,
-                        isFullSong: result.isFullSong,
-                        quality: result.quality,
-                        durationSec: result.durationSec,
-                      }));
-                    }
-                  } catch (e: any) {
-                    result = { success: false, message: `Music play fail hui: ${e?.message || e}` };
                   }
                 } else if (call.name === "stop_music") {
                   try {
