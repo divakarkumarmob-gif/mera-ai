@@ -1,14 +1,16 @@
 /**
- * JARVIS Holographic 3D Machine & Spatial Studio
+ * JARVIS Holographic 3D Machine & Spatial Studio with FRIDAY AI Voice Integration
  * Real-time Google MediaPipe Hand Tracking (60 FPS) + Three.js WebGL Hologram Viewport
  * Features:
- *  - 100% Precise Object & Part Grabbing via Three.js Raycaster & Proximity Physics
- *  - Detachable Interactive Flame & Candle: Pinch flame, detach, carry anywhere in 3D, and snap to wick
- *  - Full 360° Hand Gyro Spatial Rotation (Roll, Pitch, Yaw)
- *  - True 3D Hand Depth Tracking (Z-Axis Push/Pull with Physical Hand Scale & Z-depth)
- *  - Rock-Solid Pinch State Hysteresis (Zero accidental drops)
- *  - 3D Holographic Hand Reticle, Laser Beam & Ground Depth Shadow
- *  - Dual Input: Seamless Hand Gestures + Mouse/Touch Picking
+ *  - 🤖 FRIDAY Voice Command Integration (Natural Hindi/English/Hinglish speech recognition & TTS)
+ *  - 🏷️ 3D Floating Part Labels & Callout Arrows: Real-time 3D-to-2D projected annotations
+ *  - 🎯 Part Selection & Focus Isolation: "Friday, select flame", "Selected ke alawa sab hatao", "Sab wapas lao"
+ *  - 🔄 Voice-Driven 360° Angle Turn: "90 degree turn karo", "360 ghumao", "Tilt up"
+ *  - 🎨 Voice Color Shifting: "Change color to red / cyan / gold / purple"
+ *  - ➕ Dynamic Add & Remove Parts: "Add cube", "Remove selected"
+ *  - 🕯️ Candle & Flame Physics: Detach, 3D move, 360° rotate, and snap to wick
+ *  - 📏 3D Hand Depth Tracking (Z-Axis Push/Pull with Physical Scale)
+ *  - 🤏 Rock-Solid Raycast Picking & Selective Hand Pinch Control
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
@@ -29,7 +31,17 @@ import {
   Trash2,
   Flame,
   Zap,
-  Move3d
+  Move3d,
+  Mic,
+  MicOff,
+  Eye,
+  EyeOff,
+  CornerDownRight,
+  Send,
+  Volume2,
+  VolumeX,
+  CheckCircle2,
+  Compass
 } from 'lucide-react';
 import {
   getAvailableModels,
@@ -46,6 +58,15 @@ interface HolographicLabModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialModelId?: string;
+}
+
+interface PartAnnotation {
+  id: string;
+  name: string;
+  worldPos: THREE.Vector3;
+  screenPos: { x: number; y: number; visible: boolean };
+  mesh: THREE.Object3D;
+  isSelected: boolean;
 }
 
 export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
@@ -70,6 +91,16 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
   const [flameColorHex, setFlameColorHex] = useState<string>('#f97316');
   const [heldObjectName, setHeldObjectName] = useState<string>('None');
 
+  // FRIDAY AI Voice & Selection State
+  const [selectedPartName, setSelectedPartName] = useState<string | null>(null);
+  const [isIsolatedMode, setIsIsolatedMode] = useState<boolean>(false);
+  const [showAnnotations, setShowAnnotations] = useState<boolean>(true);
+  const [annotations, setAnnotations] = useState<PartAnnotation[]>([]);
+  const [isListeningVoice, setIsListeningVoice] = useState<boolean>(false);
+  const [voiceQueryInput, setVoiceQueryInput] = useState<string>('');
+  const [fridayStatusText, setFridayStatusText] = useState<string>('FRIDAY AI: Standing by for voice commands...');
+  const [fridayTtsEnabled, setFridayTtsEnabled] = useState<boolean>(true);
+
   // Telemetry HUD
   const [telemetry, setTelemetry] = useState({
     posX: '0.00',
@@ -78,10 +109,11 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
     roll: '0°',
     pitch: '0°',
     held: 'None',
+    selectedPart: 'None',
     depthStatus: 'Mid (0.00m)'
   });
 
-  // ── Refs for State (Prevent stale closures in 60fps MediaPipe loop) ──
+  // ── Refs for State (Prevent stale closures in 60fps MediaPipe / Speech loop) ──
   const isAirDrawModeRef = useRef(false);
   const selectedModelIdRef = useRef(initialModelId);
   const explodeFactorRef = useRef(0);
@@ -89,35 +121,21 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
   const drawColorRef = useRef('#00f0ff');
   const isFlameLitRef = useRef(true);
   const isFlameAttachedRef = useRef(true);
+  const selectedPartNameRef = useRef<string | null>(null);
+  const showAnnotationsRef = useRef(true);
+  const isIsolatedModeRef = useRef(false);
 
   // Sync refs with state
-  useEffect(() => {
-    isAirDrawModeRef.current = isAirDrawMode;
-  }, [isAirDrawMode]);
-
-  useEffect(() => {
-    selectedModelIdRef.current = selectedModelId;
-  }, [selectedModelId]);
-
-  useEffect(() => {
-    explodeFactorRef.current = explodeFactor;
-  }, [explodeFactor]);
-
-  useEffect(() => {
-    drawThicknessRef.current = drawThickness;
-  }, [drawThickness]);
-
-  useEffect(() => {
-    drawColorRef.current = drawColor;
-  }, [drawColor]);
-
-  useEffect(() => {
-    isFlameLitRef.current = isFlameLit;
-  }, [isFlameLit]);
-
-  useEffect(() => {
-    isFlameAttachedRef.current = isFlameAttached;
-  }, [isFlameAttached]);
+  useEffect(() => { isAirDrawModeRef.current = isAirDrawMode; }, [isAirDrawMode]);
+  useEffect(() => { selectedModelIdRef.current = selectedModelId; }, [selectedModelId]);
+  useEffect(() => { explodeFactorRef.current = explodeFactor; }, [explodeFactor]);
+  useEffect(() => { drawThicknessRef.current = drawThickness; }, [drawThickness]);
+  useEffect(() => { drawColorRef.current = drawColor; }, [drawColor]);
+  useEffect(() => { isFlameLitRef.current = isFlameLit; }, [isFlameLit]);
+  useEffect(() => { isFlameAttachedRef.current = isFlameAttached; }, [isFlameAttached]);
+  useEffect(() => { selectedPartNameRef.current = selectedPartName; }, [selectedPartName]);
+  useEffect(() => { showAnnotationsRef.current = showAnnotations; }, [showAnnotations]);
+  useEffect(() => { isIsolatedModeRef.current = isIsolatedMode; }, [isIsolatedMode]);
 
   // DOM Refs
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -136,10 +154,11 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
   const animFrameIdRef = useRef<number | null>(null);
   const videoStreamRef = useRef<MediaStream | null>(null);
 
-  // 3D Spatial Hand Reticle, Laser Beam & Depth Shadow
+  // 3D Spatial Hand Reticle, Laser Beam & Highlight Box
   const handReticleMeshRef = useRef<THREE.Group | null>(null);
   const handShadowMeshRef = useRef<THREE.Mesh | null>(null);
   const handBeamLineRef = useRef<THREE.Line | null>(null);
+  const selectionHighlightBoxRef = useRef<THREE.BoxHelper | null>(null);
   const smoothedHandZRef = useRef<number>(0);
 
   // Hand & Gesture Tracking & Physics Refs
@@ -148,7 +167,7 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
   const prevTwoHandsRef = useRef<{ cx: number; cy: number; angle: number; dist: number } | null>(null);
   const isPinchingActiveRef = useRef<boolean>(false);
 
-  // Object-Specific Grab Ref (Stores grabbed Three.js Object & original attachment parent)
+  // Object-Specific Grab Ref
   const grabbedTargetRef = useRef<{
     type: 'flame' | 'candle' | 'part' | 'model' | 'primitive';
     targetObject: THREE.Object3D;
@@ -166,8 +185,28 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
   const pointerStartPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const pointerGrabbedTargetRef = useRef<any>(null);
 
+  // Speech Recognition Ref
+  const speechRecognitionRef = useRef<any>(null);
+
   // Available Presets
   const models = getAvailableModels();
+
+  // ── FRIDAY Speech Response Helper (TTS) ────────────────────────────────────
+  const speakFriday = useCallback((text: string) => {
+    setFridayStatusText(`FRIDAY: "${text}"`);
+    if (!fridayTtsEnabled || typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    try {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1.05;
+      utterance.pitch = 1.0;
+      // Prefer friendly English/Hindi voice if available
+      const voices = window.speechSynthesis.getVoices();
+      const preferred = voices.find((v) => v.name.includes('Google') || v.name.includes('Natural') || v.lang.includes('en'));
+      if (preferred) utterance.voice = preferred;
+      window.speechSynthesis.speak(utterance);
+    } catch {}
+  }, [fridayTtsEnabled]);
 
   // ── 1. Setup Three.js Hologram Scene ────────────────────────────────────────
   const initThreeScene = useCallback(() => {
@@ -263,6 +302,14 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
     scene.add(beamLine);
     handBeamLineRef.current = beamLine;
 
+    // 3D Selection Highlight Wireframe Box
+    const dummyObj = new THREE.Object3D();
+    scene.add(dummyObj);
+    const boxHelper = new THREE.BoxHelper(dummyObj, 0xfbbf24);
+    boxHelper.visible = false;
+    scene.add(boxHelper);
+    selectionHighlightBoxRef.current = boxHelper;
+
     scene.add(reticleGroup);
     handReticleMeshRef.current = reticleGroup;
 
@@ -297,6 +344,24 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
         outerRing.rotation.z += 0.04;
       }
 
+      // Update Selection Box Helper if a part is focused
+      if (selectionHighlightBoxRef.current && selectedPartNameRef.current) {
+        const foundMesh = findMeshByName(selectedPartNameRef.current);
+        if (foundMesh && foundMesh.visible) {
+          selectionHighlightBoxRef.current.setFromObject(foundMesh);
+          selectionHighlightBoxRef.current.visible = true;
+        } else {
+          selectionHighlightBoxRef.current.visible = false;
+        }
+      } else if (selectionHighlightBoxRef.current) {
+        selectionHighlightBoxRef.current.visible = false;
+      }
+
+      // Project 3D Part Annotations to 2D Screen for Holographic Floating Badges
+      if (showAnnotationsRef.current && cameraRef.current && containerRef.current) {
+        updatePartAnnotations();
+      }
+
       // Update Telemetry display
       if (modelPivotRef.current) {
         const activeGrab = grabbedTargetRef.current || pointerGrabbedTargetRef.current;
@@ -311,6 +376,7 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
           roll: `${((targetObj.rotation.z * 180) / Math.PI % 360).toFixed(0)}°`,
           pitch: `${((targetObj.rotation.x * 180) / Math.PI % 360).toFixed(0)}°`,
           held: activeGrab ? activeGrab.name : 'None',
+          selectedPart: selectedPartNameRef.current || 'None',
           depthStatus: `${(smoothedHandZRef.current >= 0.8 ? 'Near Front' : smoothedHandZRef.current <= -0.8 ? 'Deep Back' : 'Mid Center')} (${smoothedHandZRef.current.toFixed(2)}m)`
         });
       }
@@ -321,17 +387,135 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
     animate();
   }, []);
 
-  // ── 2. Load Model into Three.js ─────────────────────────────────────────────
+  // ── 2. Helper: Find Mesh by Name Across Scene ──────────────────────────────
+  const findMeshByName = (name: string): THREE.Object3D | null => {
+    if (!sceneRef.current) return null;
+
+    if (name === '🔥 Fire Flame' || name === 'Interactive Fire Flame' || name === 'Interactive_Fire_Flame') {
+      const cModel = currentModelRef.current as CandleFireModel;
+      return cModel?.flameGroup || sceneRef.current.getObjectByName('Interactive_Fire_Flame') || null;
+    }
+    if (name === '🕯️ Candle Body' || name === 'Candle & Brass Pedestal' || name === 'Candle_Assembly') {
+      const cModel = currentModelRef.current as CandleFireModel;
+      return cModel?.candleGroup || sceneRef.current.getObjectByName('Candle_Assembly') || null;
+    }
+
+    if (currentModelRef.current?.parts) {
+      const p = currentModelRef.current.parts.find((part) => part.name.toLowerCase() === name.toLowerCase());
+      if (p) return p.mesh;
+    }
+
+    let found: THREE.Object3D | null = null;
+    sceneRef.current.traverse((child) => {
+      if (child.name.toLowerCase() === name.toLowerCase() || (child as any).name?.includes(name)) {
+        found = child;
+      }
+    });
+
+    return found;
+  };
+
+  // ── 3. Update 3D-to-2D Part Annotations & Arrow Callouts ─────────────────────
+  const updatePartAnnotations = () => {
+    if (!cameraRef.current || !containerRef.current) return;
+    const width = containerRef.current.clientWidth || window.innerWidth;
+    const height = containerRef.current.clientHeight || window.innerHeight;
+
+    const list: PartAnnotation[] = [];
+
+    // 1. Candle & Flame Items
+    if (selectedModelIdRef.current === 'candle_fire' && currentModelRef.current) {
+      const cModel = currentModelRef.current as CandleFireModel;
+      if (cModel.flameGroup && cModel.flameGroup.visible) {
+        const flamePos = new THREE.Vector3();
+        cModel.flameGroup.getWorldPosition(flamePos);
+        flamePos.y += 0.5; // Top of flame
+        const p = projectToScreen(flamePos, cameraRef.current, width, height);
+        list.push({
+          id: 'flame',
+          name: '🔥 Fire Flame',
+          worldPos: flamePos,
+          screenPos: p,
+          mesh: cModel.flameGroup,
+          isSelected: selectedPartNameRef.current === '🔥 Fire Flame'
+        });
+      }
+
+      if (cModel.candleGroup && cModel.candleGroup.visible) {
+        const candlePos = new THREE.Vector3();
+        cModel.candleGroup.getWorldPosition(candlePos);
+        candlePos.y += 0.2;
+        const p = projectToScreen(candlePos, cameraRef.current, width, height);
+        list.push({
+          id: 'candle',
+          name: '🕯️ Candle Wax Body',
+          worldPos: candlePos,
+          screenPos: p,
+          mesh: cModel.candleGroup,
+          isSelected: selectedPartNameRef.current === '🕯️ Candle Wax Body'
+        });
+      }
+    } else if (currentModelRef.current?.parts) {
+      // 2. Machine Model Parts
+      currentModelRef.current.parts.forEach((part, idx) => {
+        if (!part.mesh.visible) return;
+        const partPos = new THREE.Vector3();
+        part.mesh.getWorldPosition(partPos);
+        const p = projectToScreen(partPos, cameraRef.current!, width, height);
+        list.push({
+          id: `part_${idx}`,
+          name: part.name,
+          worldPos: partPos,
+          screenPos: p,
+          mesh: part.mesh,
+          isSelected: selectedPartNameRef.current === part.name
+        });
+      });
+    }
+
+    // 3. Spawned Primitives
+    if (sceneRef.current) {
+      sceneRef.current.traverse((child) => {
+        if (child.name.startsWith('Primitive_') && child.visible) {
+          const primPos = new THREE.Vector3();
+          child.getWorldPosition(primPos);
+          const p = projectToScreen(primPos, cameraRef.current!, width, height);
+          const label = `Shape (${child.name.split('_')[1]})`;
+          list.push({
+            id: child.name,
+            name: label,
+            worldPos: primPos,
+            screenPos: p,
+            mesh: child,
+            isSelected: selectedPartNameRef.current === label
+          });
+        }
+      });
+    }
+
+    setAnnotations(list);
+  };
+
+  const projectToScreen = (worldPos: THREE.Vector3, camera: THREE.PerspectiveCamera, width: number, height: number) => {
+    const v = worldPos.clone().project(camera);
+    const x = (v.x * 0.5 + 0.5) * width;
+    const y = (-(v.y * 0.5) + 0.5) * height;
+    return { x, y, visible: v.z < 1 };
+  };
+
+  // ── 4. Load Model into Three.js ─────────────────────────────────────────────
   const loadModelToScene = useCallback((modelId: string) => {
     if (!modelPivotRef.current || !sceneRef.current) return;
 
-    // Reset grabbed targets
     grabbedTargetRef.current = null;
     pointerGrabbedTargetRef.current = null;
     isPinchingActiveRef.current = false;
+    setSelectedPartName(null);
+    setIsIsolatedMode(false);
     setHeldObjectName('None');
 
     if (handBeamLineRef.current) handBeamLineRef.current.visible = false;
+    if (selectionHighlightBoxRef.current) selectionHighlightBoxRef.current.visible = false;
 
     // Clear previous model meshes from pivot (keep airDrawGroup)
     for (let i = modelPivotRef.current.children.length - 1; i >= 0; i--) {
@@ -341,10 +525,10 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
       }
     }
 
-    // Also remove any detached objects that were reparented to scene
+    // Remove detached objects from scene
     for (let i = sceneRef.current.children.length - 1; i >= 0; i--) {
       const obj = sceneRef.current.children[i];
-      if (obj.name === 'Interactive_Fire_Flame' || obj.name === 'Candle_Assembly') {
+      if (obj.name === 'Interactive_Fire_Flame' || obj.name === 'Candle_Assembly' || obj.name.startsWith('Primitive_')) {
         sceneRef.current.remove(obj);
       }
     }
@@ -365,15 +549,16 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
     modelPivotRef.current.scale.set(1, 1, 1);
     setExplodeFactor(0);
 
-    // If Candle & Flame Model, sync flame states
     if (modelId === 'candle_fire' && (model as CandleFireModel).setFlameState) {
       const cModel = model as CandleFireModel;
       setIsFlameLit(cModel.isLit);
       setIsFlameAttached(cModel.isFlameAttached);
     }
-  }, []);
 
-  // ── 3. Apply Exploded Assembly Factor ───────────────────────────────────────
+    speakFriday(`Loaded 3D Holographic Model: ${model.name}. All parts indexed.`);
+  }, [speakFriday]);
+
+  // ── 5. Apply Exploded Assembly Factor ───────────────────────────────────────
   const applyExplodeFactor = (factor: number) => {
     setExplodeFactor(factor);
     explodeFactorRef.current = factor;
@@ -387,23 +572,403 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
     });
   };
 
-  // ── 4. Quick Clear Air-Draw Canvas ──────────────────────────────────────────
-  const clearAirDrawPoints = () => {
-    airDrawPointsRef.current = [];
-    if (airDrawGroupRef.current) {
-      while (airDrawGroupRef.current.children.length > 0) {
-        const obj = airDrawGroupRef.current.children[0] as any;
-        if (obj.geometry) obj.geometry.dispose();
-        if (obj.material) {
-          if (Array.isArray(obj.material)) obj.material.forEach((m: any) => m.dispose());
-          else obj.material.dispose();
+  // ── 6. Select Part & Isolate / Restore Operations ───────────────────────────
+  const selectPart = (partName: string | null) => {
+    setSelectedPartName(partName);
+    selectedPartNameRef.current = partName;
+    if (partName) {
+      speakFriday(`Selected component: ${partName}. Ready for move or 360° turn.`);
+    } else {
+      speakFriday(`Selection cleared.`);
+    }
+  };
+
+  const isolateSelectedPart = () => {
+    if (!selectedPartNameRef.current) {
+      speakFriday(`Please select a component first before isolating.`);
+      return;
+    }
+
+    setIsIsolatedMode(true);
+    isIsolatedModeRef.current = true;
+
+    // Hide all meshes except the selected one
+    const selectedMesh = findMeshByName(selectedPartNameRef.current);
+
+    if (selectedModelIdRef.current === 'candle_fire' && currentModelRef.current) {
+      const cModel = currentModelRef.current as CandleFireModel;
+      if (cModel.flameGroup) cModel.flameGroup.visible = (selectedMesh === cModel.flameGroup);
+      if (cModel.candleGroup) cModel.candleGroup.visible = (selectedMesh === cModel.candleGroup);
+    } else if (currentModelRef.current?.parts) {
+      currentModelRef.current.parts.forEach((p) => {
+        p.mesh.visible = (p.mesh === selectedMesh);
+      });
+    }
+
+    if (sceneRef.current) {
+      sceneRef.current.traverse((child) => {
+        if (child.name.startsWith('Primitive_')) {
+          child.visible = (child === selectedMesh);
         }
-        airDrawGroupRef.current.remove(obj);
+      });
+    }
+
+    speakFriday(`Isolated component "${selectedPartNameRef.current}". All other components removed from view.`);
+  };
+
+  const restoreAllParts = () => {
+    setIsIsolatedMode(false);
+    isIsolatedModeRef.current = false;
+
+    if (selectedModelIdRef.current === 'candle_fire' && currentModelRef.current) {
+      const cModel = currentModelRef.current as CandleFireModel;
+      if (cModel.flameGroup) cModel.flameGroup.visible = isFlameLitRef.current;
+      if (cModel.candleGroup) cModel.candleGroup.visible = true;
+    } else if (currentModelRef.current?.parts) {
+      currentModelRef.current.parts.forEach((p) => {
+        p.mesh.visible = true;
+      });
+    }
+
+    if (sceneRef.current) {
+      sceneRef.current.traverse((child) => {
+        if (child.name.startsWith('Primitive_')) {
+          child.visible = true;
+        }
+      });
+    }
+
+    speakFriday(`All components restored to viewport.`);
+  };
+
+  const turnSelectedPart = (deg: number, axis: 'x' | 'y' | 'z' = 'y') => {
+    const rad = (deg * Math.PI) / 180;
+    const target = selectedPartNameRef.current ? findMeshByName(selectedPartNameRef.current) : modelPivotRef.current;
+    if (target) {
+      target.rotation[axis] += rad;
+      const targetName = selectedPartNameRef.current || currentModelRef.current?.name || 'Entire 3D Model';
+      speakFriday(`Turned ${targetName} by ${deg}° on ${axis.toUpperCase()}-axis.`);
+    }
+  };
+
+  const setSelectedPartExactRotation = (deg: number, axis: 'x' | 'y' | 'z') => {
+    const rad = (deg * Math.PI) / 180;
+    const target = selectedPartNameRef.current ? findMeshByName(selectedPartNameRef.current) : modelPivotRef.current;
+    if (target) {
+      target.rotation[axis] = rad;
+    }
+  };
+
+  const moveSelectedPart = (dx: number, dy: number, dz: number) => {
+    const target = selectedPartNameRef.current ? findMeshByName(selectedPartNameRef.current) : modelPivotRef.current;
+    if (target && sceneRef.current) {
+      if (target !== modelPivotRef.current && target.parent !== sceneRef.current) {
+        sceneRef.current.attach(target);
+      }
+      target.position.x += dx;
+      target.position.y += dy;
+      target.position.z += dz;
+      speakFriday(`Moved ${selectedPartNameRef.current || 'model'} by (${dx > 0 ? '+' : ''}${dx}, ${dy > 0 ? '+' : ''}${dy}, ${dz > 0 ? '+' : ''}${dz}).`);
+    }
+  };
+
+  const changeSelectedColor = (hex: string) => {
+    const target = selectedPartNameRef.current ? findMeshByName(selectedPartNameRef.current) : null;
+    const colorInt = parseInt(hex.replace('#', '0x'), 16);
+
+    if (selectedPartNameRef.current === '🔥 Fire Flame' || (target && target.name === 'Interactive_Fire_Flame')) {
+      handleFlameColorChange(hex);
+      speakFriday(`Changed flame plasma color.`);
+      return;
+    }
+
+    if (target) {
+      target.traverse((child: any) => {
+        if (child.isMesh && child.material) {
+          if (Array.isArray(child.material)) {
+            child.material.forEach((m: any) => {
+              if (m.color) m.color.setHex(colorInt);
+              if (m.emissive) m.emissive.setHex(colorInt);
+            });
+          } else {
+            if (child.material.color) child.material.color.setHex(colorInt);
+            if (child.material.emissive) child.material.emissive.setHex(colorInt);
+          }
+        }
+      });
+      speakFriday(`Color changed for ${selectedPartNameRef.current}.`);
+    } else {
+      setDrawColor(hex);
+      speakFriday(`Studio accent color updated.`);
+    }
+  };
+
+  const removeSelectedPart = () => {
+    if (!selectedPartNameRef.current) return;
+    const target = findMeshByName(selectedPartNameRef.current);
+    if (target) {
+      target.visible = false;
+      speakFriday(`Removed ${selectedPartNameRef.current} from workspace.`);
+      setSelectedPartName(null);
+    }
+  };
+
+  // ── 7. FRIDAY AI Natural Language Voice Command Processor ──────────────────
+  const processVoiceCommand = (cmdText: string) => {
+    const text = cmdText.toLowerCase().trim();
+    if (!text) return;
+
+    setFridayStatusText(`FRIDAY Heard: "${cmdText}"`);
+
+    // 1. Select Commands: "select flame", "select candle", "select fan", "select core"
+    if (text.includes('select') || text.includes('pakad') || text.includes('chun')) {
+      if (text.includes('flame') || text.includes('fire') || text.includes('aag')) {
+        selectPart('🔥 Fire Flame');
+        return;
+      }
+      if (text.includes('candle') || text.includes('mombatti') || text.includes('wax')) {
+        selectPart('🕯️ Candle Wax Body');
+        return;
+      }
+      if (text.includes('fan') || text.includes('compressor') || text.includes('blade')) {
+        selectPart('Titanium Compressor Fan Stage');
+        return;
+      }
+      if (text.includes('core') || text.includes('reactor') || text.includes('palladium')) {
+        selectPart('Palladium Energy Core');
+        return;
+      }
+      if (text.includes('coil')) {
+        selectPart('Copper Electromagnetic Coils (10x)');
+        return;
+      }
+      if (text.includes('drone') || text.includes('rotor') || text.includes('arm')) {
+        selectPart('Rotor Arm & Motor Assembly #1');
+        return;
+      }
+      if (text.includes('gimbal') || text.includes('camera')) {
+        selectPart('4K Optical Gimbal Sensor');
+        return;
+      }
+      if (text.includes('wing') || text.includes('aero')) {
+        selectPart('Active Aerodynamic Downforce Wing');
+        return;
+      }
+      if (text.includes('wheel')) {
+        selectPart('Front-Right Wheel & Brake Caliper');
+        return;
+      }
+      if (text.includes('cube') || text.includes('box')) {
+        selectPart('Shape (cube)');
+        return;
+      }
+      if (text.includes('sphere') || text.includes('gola')) {
+        selectPart('Shape (sphere)');
+        return;
+      }
+
+      if (currentModelRef.current?.parts && currentModelRef.current.parts.length > 0) {
+        selectPart(currentModelRef.current.parts[0].name);
+        return;
+      }
+    }
+
+    // 2. Isolate / Remove Other Parts ("Selected ke alawa sab hatao")
+    if (
+      text.includes('alawa') ||
+      text.includes('isolate') ||
+      text.includes('remove unselected') ||
+      text.includes('hide other') ||
+      text.includes('baki sab hatao') ||
+      text.includes('baki remove')
+    ) {
+      isolateSelectedPart();
+      return;
+    }
+
+    // 3. Restore All Items ("Jitne item the sab wapas lao")
+    if (
+      text.includes('wapas lao') ||
+      text.includes('restore') ||
+      text.includes('sab lao') ||
+      text.includes('show all') ||
+      text.includes('bring back') ||
+      text.includes('reset visibility')
+    ) {
+      restoreAllParts();
+      return;
+    }
+
+    // 4. XYZ 3-Axis Precision Rotation: "Friday, Z axis par 30 degree ghumao", "X axis par 45 degree", "Y axis 90 degree"
+    if (
+      text.includes('axis') ||
+      text.includes('degree') ||
+      text.includes('turn') ||
+      text.includes('ghumao') ||
+      text.includes('rotate') ||
+      text.includes('tilt') ||
+      text.includes('roll') ||
+      text.includes('pitch') ||
+      text.includes('yaw')
+    ) {
+      // Regex 1: "z axis par 30 degree", "z pe 45 deg", "x axis 30", "z axis -30"
+      const axisFirstMatch = text.match(/([xyz])\s*(?:axis|pe|par|axis\s*par|axis\s*pe)?\s*(-?\d+)/i);
+      // Regex 2: "30 degree z axis par", "45 deg on x axis", "90 on y"
+      const degFirstMatch = text.match(/(-?\d+)\s*(?:deg|degree|°)?\s*(?:on|in|par|pe)?\s*([xyz])\s*(?:axis)?/i);
+
+      if (axisFirstMatch) {
+        const axis = axisFirstMatch[1].toLowerCase() as 'x' | 'y' | 'z';
+        const deg = parseFloat(axisFirstMatch[2]);
+        turnSelectedPart(deg, axis);
+        return;
+      } else if (degFirstMatch) {
+        const deg = parseFloat(degFirstMatch[1]);
+        const axis = degFirstMatch[2].toLowerCase() as 'x' | 'y' | 'z';
+        turnSelectedPart(deg, axis);
+        return;
+      }
+
+      // If axis is specified without explicit number, or angle is specified with directional keyword
+      let targetAxis: 'x' | 'y' | 'z' = 'y';
+      if (text.includes('z axis') || text.includes('z par') || text.includes('roll')) targetAxis = 'z';
+      else if (text.includes('x axis') || text.includes('x par') || text.includes('pitch') || text.includes('tilt') || text.includes('upar') || text.includes('neeche')) targetAxis = 'x';
+      else if (text.includes('y axis') || text.includes('y par') || text.includes('yaw') || text.includes('left') || text.includes('right')) targetAxis = 'y';
+
+      // Extract degree number
+      const numMatch = text.match(/(-?\d+)/);
+      let deg = numMatch ? parseFloat(numMatch[1]) : 30;
+
+      if (text.includes('360')) deg = 360;
+      else if (text.includes('180')) deg = 180;
+      else if (text.includes('90')) deg = 90;
+      else if (text.includes('45')) deg = 45;
+      else if (text.includes('30')) deg = 30;
+
+      if (text.includes('left') || text.includes('ulta') || text.includes('anti') || text.includes('baye')) {
+        deg = -Math.abs(deg);
+      }
+
+      turnSelectedPart(deg, targetAxis);
+      return;
+    }
+
+    // 5. Move Directions: Left, Right, Up, Down, Forward, Back
+    if (text.includes('move') || text.includes('hatao') || text.includes('idhar') || text.includes('udhar') || text.includes('sarkao')) {
+      let dx = 0, dy = 0, dz = 0;
+      if (text.includes('left') || text.includes('baye')) dx = -1.2;
+      if (text.includes('right') || text.includes('daye')) dx = 1.2;
+      if (text.includes('up') || text.includes('upar')) dy = 1.0;
+      if (text.includes('down') || text.includes('neeche')) dy = -1.0;
+      if (text.includes('forward') || text.includes('aage') || text.includes('front')) dz = 1.2;
+      if (text.includes('back') || text.includes('peeche') || text.includes('deep')) dz = -1.2;
+
+      if (dx === 0 && dy === 0 && dz === 0) dy = 1.0;
+      moveSelectedPart(dx, dy, dz);
+      return;
+    }
+
+    // 6. Color Changes
+    if (text.includes('color') || text.includes('rang')) {
+      if (text.includes('red') || text.includes('lal')) changeSelectedColor('#ef4444');
+      else if (text.includes('cyan') || text.includes('sky') || text.includes('blue') || text.includes('neela')) changeSelectedColor('#00f0ff');
+      else if (text.includes('gold') || text.includes('yellow') || text.includes('pila')) changeSelectedColor('#f59e0b');
+      else if (text.includes('green') || text.includes('hara')) changeSelectedColor('#10b981');
+      else if (text.includes('purple') || text.includes('violet') || text.includes('baigani')) changeSelectedColor('#a855f7');
+      else if (text.includes('pink') || text.includes('gulabi')) changeSelectedColor('#ec4899');
+      else if (text.includes('orange') || text.includes('narangi')) changeSelectedColor('#f97316');
+      else if (text.includes('white') || text.includes('safed')) changeSelectedColor('#ffffff');
+      else changeSelectedColor('#00f0ff');
+      return;
+    }
+
+    // 7. Add / Spawn 3D Shapes
+    if (text.includes('add') || text.includes('spawn') || text.includes('banao') || text.includes('dalo')) {
+      if (text.includes('cube') || text.includes('box')) { spawnPrimitive('cube'); speakFriday('Added 3D Holographic Cube.'); return; }
+      if (text.includes('sphere') || text.includes('gola')) { spawnPrimitive('sphere'); speakFriday('Added 3D Sphere.'); return; }
+      if (text.includes('cylinder')) { spawnPrimitive('cylinder'); speakFriday('Added 3D Cylinder.'); return; }
+      if (text.includes('torus') || text.includes('ring')) { spawnPrimitive('torus'); speakFriday('Added 3D Torus Ring.'); return; }
+      spawnPrimitive('cube');
+      speakFriday('Added new 3D primitive shape.');
+      return;
+    }
+
+    // 8. Delete / Remove
+    if (text.includes('remove') || text.includes('delete') || text.includes('hata do')) {
+      removeSelectedPart();
+      return;
+    }
+
+    // 9. Candle & Fire Specific
+    if (text.includes('separate flame') || text.includes('aag alag')) {
+      separateFlame();
+      speakFriday('Fire flame detached from candle.');
+      return;
+    }
+    if (text.includes('snap') || text.includes('light candle') || text.includes('mombatti jalao') || text.includes('aag lagao')) {
+      snapFlameToCandle();
+      speakFriday('Flame snapped onto candle wick and ignited.');
+      return;
+    }
+    if (text.includes('blow') || text.includes('bujhao') || text.includes('extinguish')) {
+      toggleFlameLit();
+      speakFriday(isFlameLit ? 'Flame extinguished.' : 'Flame ignited.');
+      return;
+    }
+
+    // Default Fallback
+    speakFriday(`Command acknowledged: "${cmdText}". Executing spatial update.`);
+  };
+
+  // ── 8. Voice Recognition Toggle ────────────────────────────────────────────
+  const toggleVoiceListening = () => {
+    if (isListeningVoice) {
+      if (speechRecognitionRef.current) {
+        try { speechRecognitionRef.current.stop(); } catch {}
+      }
+      setIsListeningVoice(false);
+    } else {
+      const SpeechClass = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
+      if (!SpeechClass) {
+        speakFriday('Speech recognition not supported in this browser. You can type commands directly.');
+        return;
+      }
+      try {
+        const sr = new SpeechClass();
+        sr.continuous = false;
+        sr.interimResults = false;
+        sr.lang = 'en-IN';
+
+        sr.onstart = () => {
+          setIsListeningVoice(true);
+          setFridayStatusText('FRIDAY: Listening... (e.g. "Select flame", "90 degree ghumao", "Sab wapas lao")');
+        };
+
+        sr.onresult = (e: any) => {
+          const transcript = e.results[0][0].transcript;
+          setVoiceQueryInput(transcript);
+          processVoiceCommand(transcript);
+          setIsListeningVoice(false);
+        };
+
+        sr.onerror = (err: any) => {
+          console.warn('[Speech Recognition] Error:', err);
+          setIsListeningVoice(false);
+        };
+
+        sr.onend = () => {
+          setIsListeningVoice(false);
+        };
+
+        speechRecognitionRef.current = sr;
+        sr.start();
+      } catch (e) {
+        console.warn('Speech init catch:', e);
+        setIsListeningVoice(false);
       }
     }
   };
 
-  // ── 5. Spawn 3D Primitives into Blank Workspace ────────────────────────────
+  // ── 9. Spawn 3D Primitives ──────────────────────────────────────────────────
   const spawnPrimitive = (type: 'cube' | 'sphere' | 'cylinder' | 'torus') => {
     if (!modelPivotRef.current) return;
 
@@ -425,16 +990,16 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
     modelPivotRef.current.add(mesh);
   };
 
-  // ── 6. Flame Manipulation Actions (Candle & Fire Studio) ───────────────────
+  // ── 10. Flame Actions ───────────────────────────────────────────────────────
   const separateFlame = () => {
     if (selectedModelId !== 'candle_fire' || !currentModelRef.current || !sceneRef.current) return;
     const cModel = currentModelRef.current as CandleFireModel;
     if (cModel.flameGroup) {
-      // Detach flame to root scene and float beside candle
       sceneRef.current.attach(cModel.flameGroup);
       cModel.flameGroup.position.set(2.4, 1.2, 0.8);
       cModel.isFlameAttached = false;
       setIsFlameAttached(false);
+      speakFriday('Flame separated from candle.');
     }
   };
 
@@ -446,6 +1011,7 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
       cModel.setFlameState(true, true);
       setIsFlameAttached(true);
       setIsFlameLit(true);
+      speakFriday('Flame snapped to candle wick.');
     }
   };
 
@@ -469,7 +1035,7 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
     }
   };
 
-  // ── 7. Helper: Find Top-Level Interactive Object / Part from Mesh ───────────
+  // ── 11. Helper: Find Top-Level Interactive Object from Mesh ────────────────
   const findInteractiveTarget = useCallback((hitMesh: THREE.Object3D): {
     targetObject: THREE.Object3D;
     type: 'flame' | 'candle' | 'part' | 'primitive' | 'model';
@@ -477,19 +1043,17 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
   } => {
     let curr: THREE.Object3D | null = hitMesh;
 
-    // Check ancestors
     while (curr && curr !== sceneRef.current && curr !== modelPivotRef.current) {
       if (curr.name === 'Interactive_Fire_Flame') {
         return { targetObject: curr, type: 'flame', name: '🔥 Fire Flame' };
       }
       if (curr.name === 'Candle_Assembly') {
-        return { targetObject: curr, type: 'candle', name: '🕯️ Candle Body' };
+        return { targetObject: curr, type: 'candle', name: '🕯️ Candle Wax Body' };
       }
       if (curr.name.startsWith('Primitive_')) {
         return { targetObject: curr, type: 'primitive', name: `Shape (${curr.name.split('_')[1]})` };
       }
 
-      // Check if current matches any machine model part
       if (currentModelRef.current?.parts) {
         const foundPart = currentModelRef.current.parts.find((p) => p.mesh === curr);
         if (foundPart) {
@@ -500,7 +1064,6 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
       curr = curr.parent;
     }
 
-    // Default: Main Model Pivot
     return {
       targetObject: modelPivotRef.current || hitMesh,
       type: 'model',
@@ -508,7 +1071,6 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
     };
   }, []);
 
-  // ── 8. Robust Euclidean Distance Helper for 3D Joints ───────────────────────
   const getDistance3D = (p1: any, p2: any) => {
     const dx = p1.x - p2.x;
     const dy = p1.y - p2.y;
@@ -516,7 +1078,7 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
     return Math.sqrt(dx * dx + dy * dy + dz * dz);
   };
 
-  // ── 9. MediaPipe Hands Results Processor ────────────────────────────────────
+  // ── 12. MediaPipe Hands Results Processor ───────────────────────────────────
   const handleHandResults = useCallback((results: HandResults) => {
     if (!canvasHandRef.current || !cameraRef.current || !sceneRef.current) return;
 
@@ -551,22 +1113,20 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
 
     setHandTrackingStatus('active');
 
-    // Draw glowing holographic skeleton for each detected hand
     for (const landmarks of results.multiHandLandmarks) {
       drawHolographicHandSkeleton(ctx, landmarks, canvas.width, canvas.height);
     }
 
-    // ── GESTURE 1: Two-Hand 360° Spatial Gyro Steering & Zoom ──
+    // ── GESTURE 1: Two-Hand 360° Gyro Steering & Zoom ──
     if (results.multiHandLandmarks.length >= 2) {
       grabbedTargetRef.current = null;
       isPinchingActiveRef.current = false;
       setHeldObjectName('None');
       if (handBeamLineRef.current) handBeamLineRef.current.visible = false;
 
-      const hand1 = results.multiHandLandmarks[0][0]; // Wrist hand 1
-      const hand2 = results.multiHandLandmarks[1][0]; // Wrist hand 2
+      const hand1 = results.multiHandLandmarks[0][0];
+      const hand2 = results.multiHandLandmarks[1][0];
 
-      // Mirrored center coordinates for natural interaction
       const cx = 1 - ((hand1.x + hand2.x) / 2);
       const cy = (hand1.y + hand2.y) / 2;
       const angle = Math.atan2(hand2.y - hand1.y, (1 - hand2.x) - (1 - hand1.x));
@@ -600,7 +1160,7 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
       prevTwoHandsRef.current = null;
     }
 
-    // ── Primary Hand (Single Hand Gestures) ──
+    // ── Primary Hand ──
     const landmarks = results.multiHandLandmarks[0];
     const wrist = landmarks[0];
     const thumbTip = landmarks[4];
@@ -613,25 +1173,22 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
     const pinkyTip = landmarks[20];
     const pinkyMcp = landmarks[17];
 
-    // ── Depth (Z-Axis) Real-time Calculation ──
+    // Depth (Z-Axis) Real-time Calculation
     const palmHeight = getDistance3D(wrist, middleMcp);
     const palmWidth = getDistance3D(indexMcp, pinkyMcp);
     const handSpan = (palmHeight + palmWidth) * 0.5;
 
-    // Map hand span to 3D world depth (-3.5 to +3.0)
     const targetZ = ((handSpan - 0.20) / 0.12) * 2.6 + ((indexTip.z || 0) * -2.0);
     const clampedZ = THREE.MathUtils.clamp(targetZ, -3.8, 3.2);
     smoothedHandZRef.current = smoothedHandZRef.current * 0.75 + clampedZ * 0.25;
 
-    // ── 360° Hand Orientation (Roll, Pitch, Yaw) ──
+    // 360° Hand Orientation (Roll, Pitch, Yaw)
     const currentRoll = Math.atan2(middleMcp.y - wrist.y, (1 - middleMcp.x) - (1 - wrist.x)) - Math.PI / 2;
     const currentPitch = (middleMcp.y - wrist.y) * 2.5;
     const currentYaw = ((1 - pinkyMcp.x) - (1 - indexMcp.x)) * 3.0;
 
-    // Distance metrics
     const pinchDist = getDistance3D(indexTip, thumbTip);
 
-    // Finger extension checks
     const isIndexExtended = getDistance3D(indexTip, wrist) > getDistance3D(indexPip, wrist) * 1.05 &&
                             getDistance3D(indexTip, wrist) > getDistance3D(middleTip, wrist) * 1.15;
 
@@ -641,8 +1198,7 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
 
     const isFist = isMiddleCurled && isRingCurled && isPinkyCurled && !isIndexExtended && pinchDist > 0.09;
 
-    // ── Rock-Solid Pinch State Hysteresis ──
-    // Trigger grab at < 0.088, keep holding until fingers open to > 0.13
+    // Pinch Hysteresis
     if (!isPinchingActiveRef.current && pinchDist < 0.088) {
       isPinchingActiveRef.current = true;
     } else if (isPinchingActiveRef.current && pinchDist > 0.13) {
@@ -652,21 +1208,18 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
     const isPointingOnly = isIndexExtended && !isPinching && pinchDist > 0.09;
     const isPalmOpen = !isMiddleCurled && !isRingCurled && !isPinkyCurled && !isIndexExtended && pinchDist > 0.15;
 
-    // Screen Coordinates (Mirrored X)
     const pinchScreenX = 1 - ((indexTip.x + thumbTip.x) / 2);
     const pinchScreenY = (indexTip.y + thumbTip.y) / 2;
 
-    // Three.js Normalized Device Coordinates (NDC: -1 to +1)
     const ndcX = (pinchScreenX * 2) - 1;
     const ndcY = -(pinchScreenY * 2) + 1;
 
-    // 3D Three.js World Coordinates for Hand Cursor
     const worldX = (pinchScreenX - 0.5) * 7.2;
     const worldY = -(pinchScreenY - 0.5) * 5.4;
     const worldZ = smoothedHandZRef.current;
     const handWorldPos = new THREE.Vector3(worldX, worldY, worldZ);
 
-    // Update 3D Hand Reticle & Depth Floor Shadow
+    // Update 3D Reticle
     if (handReticleMeshRef.current) {
       handReticleMeshRef.current.visible = true;
       handReticleMeshRef.current.position.set(worldX, worldY, worldZ);
@@ -686,37 +1239,47 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
       handShadowMeshRef.current.scale.set(shadowScale, shadowScale, shadowScale);
     }
 
-    // ── GESTURE 2: Accurate Raycast-Based Object & Part Grabbing ──
+    // ── GESTURE 2: Object & Selective Part Grabbing ──
     if (isPinching) {
-      // 1. If we just started pinching, detect exactly which object is targeted!
       if (grabbedTargetRef.current === null) {
-        const raycaster = new THREE.Raycaster();
-        raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), cameraRef.current);
-
-        // Collect all candidate interactive objects
-        const candidateObjects: THREE.Object3D[] = [];
-        if (modelPivotRef.current) candidateObjects.push(modelPivotRef.current);
-        // Also check any detached objects in scene
-        sceneRef.current.children.forEach((c) => {
-          if (c.name === 'Interactive_Fire_Flame' || c.name === 'Candle_Assembly' || c.name.startsWith('Primitive_')) {
-            candidateObjects.push(c);
-          }
-        });
-
-        const intersects = raycaster.intersectObjects(candidateObjects, true);
         let selectedTarget: { targetObject: THREE.Object3D; type: any; name: string } | null = null;
 
-        if (intersects.length > 0) {
-          // Raycast Hit! Find the top-level part/object
-          for (const hit of intersects) {
-            // Ignore reticle or shadow
-            if (hit.object.name.includes('Hand_3D_Reticle') || hit.object === handShadowMeshRef.current) continue;
-            selectedTarget = findInteractiveTarget(hit.object);
-            if (selectedTarget) break;
+        // If a specific part is currently selected / focused by Friday voice:
+        if (selectedPartNameRef.current) {
+          const focusedMesh = findMeshByName(selectedPartNameRef.current);
+          if (focusedMesh) {
+            selectedTarget = {
+              targetObject: focusedMesh,
+              type: 'part',
+              name: selectedPartNameRef.current
+            };
           }
         }
 
-        // Proximity Fallback: If raycast didn't hit direct geometry, check 3D distance to Flame or Candle
+        // Raycasting check if no explicit part lock
+        if (!selectedTarget) {
+          const raycaster = new THREE.Raycaster();
+          raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), cameraRef.current);
+
+          const candidateObjects: THREE.Object3D[] = [];
+          if (modelPivotRef.current) candidateObjects.push(modelPivotRef.current);
+          sceneRef.current.children.forEach((c) => {
+            if (c.name === 'Interactive_Fire_Flame' || c.name === 'Candle_Assembly' || c.name.startsWith('Primitive_')) {
+              candidateObjects.push(c);
+            }
+          });
+
+          const intersects = raycaster.intersectObjects(candidateObjects, true);
+          if (intersects.length > 0) {
+            for (const hit of intersects) {
+              if (hit.object.name.includes('Hand_3D_Reticle') || hit.object === handShadowMeshRef.current) continue;
+              selectedTarget = findInteractiveTarget(hit.object);
+              if (selectedTarget) break;
+            }
+          }
+        }
+
+        // Proximity Fallback
         if (!selectedTarget && selectedModelIdRef.current === 'candle_fire' && currentModelRef.current) {
           const cModel = currentModelRef.current as CandleFireModel;
           if (cModel.flameGroup) {
@@ -726,16 +1289,9 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
               selectedTarget = { targetObject: cModel.flameGroup, type: 'flame', name: '🔥 Fire Flame' };
             }
           }
-          if (!selectedTarget && cModel.candleGroup) {
-            const candleWorldPos = new THREE.Vector3();
-            cModel.candleGroup.getWorldPosition(candleWorldPos);
-            if (handWorldPos.distanceTo(candleWorldPos) < 3.0) {
-              selectedTarget = { targetObject: cModel.candleGroup, type: 'candle', name: '🕯️ Candle Body' };
-            }
-          }
         }
 
-        // Final Fallback: Grab the entire model
+        // Default: Model Pivot
         if (!selectedTarget) {
           selectedTarget = {
             targetObject: modelPivotRef.current || sceneRef.current,
@@ -747,12 +1303,10 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
         const { targetObject, type, name } = selectedTarget;
         const originalParent = targetObject.parent;
 
-        // Detach target to root scene preserving its exact world transform
         if (targetObject !== sceneRef.current && targetObject.parent !== sceneRef.current) {
           sceneRef.current.attach(targetObject);
         }
 
-        // Compute 3D offset between target world position and hand position
         const targetWorldPos = new THREE.Vector3();
         targetObject.getWorldPosition(targetWorldPos);
 
@@ -771,25 +1325,20 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
 
         prevHandAngleRef.current = { roll: currentRoll, pitch: currentPitch, yaw: currentYaw };
         setHeldObjectName(name);
+        setSelectedPartName(name);
 
         if (type === 'flame') {
           setIsFlameAttached(false);
-          if (currentModelRef.current && (currentModelRef.current as CandleFireModel).isFlameAttached !== undefined) {
-            (currentModelRef.current as CandleFireModel).isFlameAttached = false;
-          }
         }
       }
 
-      // 2. Smoothly Move & 360° Rotate the Grabbed Object
       if (grabbedTargetRef.current) {
         const { targetObject, initialOffset } = grabbedTargetRef.current;
 
-        // 1:1 Physical Position Tracking in Full 3D Space (X, Y, Z Depth)
         targetObject.position.x = handWorldPos.x + initialOffset.x;
         targetObject.position.y = handWorldPos.y + initialOffset.y;
         targetObject.position.z = handWorldPos.z + initialOffset.z;
 
-        // 360° Hand Gyro Rotation (Roll, Pitch, Yaw)
         if (prevHandAngleRef.current) {
           const deltaRoll = currentRoll - prevHandAngleRef.current.roll;
           const deltaPitch = currentPitch - prevHandAngleRef.current.pitch;
@@ -803,7 +1352,6 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
         prevHandAngleRef.current = { roll: currentRoll, pitch: currentPitch, yaw: currentYaw };
         setActiveGesture(`🤏 Moving: ${grabbedTargetRef.current.name}`);
 
-        // Update Laser Beam Connecting Hand to Object
         if (handBeamLineRef.current) {
           handBeamLineRef.current.visible = true;
           const objWorldPos = new THREE.Vector3();
@@ -815,7 +1363,6 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
       prevHandPosRef.current = { x: pinchScreenX, y: pinchScreenY, z: worldZ };
       return;
     } else {
-      // ── Pinch Released: Handle Placement & Candle Snap Physics ──
       if (grabbedTargetRef.current) {
         const { targetObject, type } = grabbedTargetRef.current;
 
@@ -830,7 +1377,6 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
             const wickWorldTarget = candleWorldPos.clone().add(cModel.wickWorldPos);
             const distToWick = flameWorldPos.distanceTo(wickWorldTarget);
 
-            // Magnetic snap to candle wick if brought within 2.0 units
             if (distToWick < 2.0) {
               if (cModel.group) {
                 cModel.group.attach(cModel.flameGroup);
@@ -839,8 +1385,8 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
               setIsFlameAttached(true);
               setIsFlameLit(true);
               setActiveGesture('✨ Flame Placed & Candle Lit!');
+              speakFriday('Flame snapped onto candle wick.');
             } else {
-              // Leave flame floating detached in 3D mid-air
               setIsFlameAttached(false);
               setActiveGesture('🔥 Flame Placed in Mid-Air!');
             }
@@ -854,7 +1400,7 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
       }
     }
 
-    // ── GESTURE 3: Air-Drawing 3D Wireframe (Single Index Finger Point) ──
+    // ── GESTURE 3: Air-Drawing ──
     if ((isAirDrawModeRef.current || isPointingOnly) && !isFist && !isPinching && modelPivotRef.current) {
       setActiveGesture('✍️ Index Pointing • Air-Drawing');
 
@@ -888,24 +1434,11 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
         }
       }
 
-      // Draw Glowing Laser Emitter on 2D Overlay
-      const canvasW = canvas.width;
-      const canvasH = canvas.height;
-      const tipX = (1 - indexTip.x) * canvasW;
-      const tipY = indexTip.y * canvasH;
-
-      ctx.beginPath();
-      ctx.arc(tipX, tipY, drawThicknessRef.current * 1.5 + 4, 0, Math.PI * 2);
-      ctx.fillStyle = drawColorRef.current;
-      ctx.shadowColor = drawColorRef.current;
-      ctx.shadowBlur = 25;
-      ctx.fill();
-
       prevHandPosRef.current = { x: pinchScreenX, y: pinchScreenY, z: worldZ };
       return;
     }
 
-    // ── GESTURE 4: Single Hand Fist Grab & 360° Orbit Rotation ──
+    // ── GESTURE 4: Single Hand Fist Grab & 360° Free Rotate ──
     if (isFist && modelPivotRef.current) {
       setActiveGesture('✊ Fist Grab & 360° Free Rotate');
       if (prevHandPosRef.current) {
@@ -924,7 +1457,6 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
       return;
     }
 
-    // ── GESTURE 5: Palm Open (Inspect View) ──
     if (isPalmOpen) {
       setActiveGesture('🖐️ Open Palm (Inspect)');
       prevHandPosRef.current = null;
@@ -935,9 +1467,9 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
     setActiveGesture('Hover / Idle');
     prevHandPosRef.current = null;
     prevHandAngleRef.current = null;
-  }, [findInteractiveTarget]);
+  }, [findInteractiveTarget, speakFriday]);
 
-  // ── 10. Draw Glowing Neon Hand Skeleton ─────────────────────────────────────
+  // ── 13. Neon Hand Skeleton ──────────────────────────────────────────────────
   const drawHolographicHandSkeleton = (
     ctx: CanvasRenderingContext2D,
     landmarks: any[],
@@ -978,7 +1510,7 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
     }
   };
 
-  // ── 11. Native Camera & MediaPipe Initialization ────────────────────────────
+  // ── 14. Native Camera & MediaPipe Initialization ────────────────────────────
   const startCameraAndHands = useCallback(async () => {
     if (!videoRef.current) return;
 
@@ -1045,7 +1577,7 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
     }
   }, [handleHandResults]);
 
-  // ── 12. Mouse / Touch Direct Object Picking & Dragging ─────────────────────
+  // ── 15. Pointer Interaction Handlers ────────────────────────────────────────
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!canvas3dRef.current || !cameraRef.current || !sceneRef.current) return;
 
@@ -1069,7 +1601,6 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
     if (intersects.length > 0) {
       const selected = findInteractiveTarget(intersects[0].object);
       if (selected && selected.type !== 'model') {
-        // Detach target to root scene
         if (selected.targetObject.parent !== sceneRef.current) {
           sceneRef.current.attach(selected.targetObject);
         }
@@ -1090,12 +1621,12 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
         pointerGrabbedTargetRef.current.initialOffset.subVectors(targetWorldPos, planeIntersect);
 
         setHeldObjectName(selected.name);
+        setSelectedPartName(selected.name);
         setActiveGesture(`🖱️ Dragging: ${selected.name}`);
         return;
       }
     }
 
-    // Default: Orbit entire view
     isPointerDraggingRef.current = true;
     pointerStartPosRef.current = { x: e.clientX, y: e.clientY };
   };
@@ -1131,7 +1662,7 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
 
   const handlePointerUp = () => {
     if (pointerGrabbedTargetRef.current) {
-      const { targetObject, type } = pointerGrabbedTargetRef.current;
+      const { type } = pointerGrabbedTargetRef.current;
       if (type === 'flame' && currentModelRef.current && selectedModelIdRef.current === 'candle_fire') {
         const cModel = currentModelRef.current as CandleFireModel;
         if (cModel.flameGroup && cModel.candleGroup) {
@@ -1170,7 +1701,7 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
     modelPivotRef.current.scale.set(newScale, newScale, newScale);
   };
 
-  // ── Lifecycle: Initialize Everything ─────────────────────────────────────────
+  // ── Lifecycle ───────────────────────────────────────────────────────────────
   useEffect(() => {
     if (isOpen) {
       initThreeScene();
@@ -1178,22 +1709,21 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
     }
 
     return () => {
-      // Cleanup Three.js
       if (animFrameIdRef.current) {
         cancelAnimationFrame(animFrameIdRef.current);
       }
       if (rendererRef.current) {
         rendererRef.current.dispose();
       }
-      // Cleanup Camera Stream
       if (videoStreamRef.current) {
         videoStreamRef.current.getTracks().forEach((t) => t.stop());
         videoStreamRef.current = null;
       }
       if (mpHandsRef.current) {
-        try {
-          mpHandsRef.current.close();
-        } catch {}
+        try { mpHandsRef.current.close(); } catch {}
+      }
+      if (speechRecognitionRef.current) {
+        try { speechRecognitionRef.current.stop(); } catch {}
       }
     };
   }, [isOpen, initThreeScene, startCameraAndHands]);
@@ -1225,7 +1755,7 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
         className="absolute inset-0 w-full h-full pointer-events-none z-10"
       />
 
-      {/* ── 3D WebGL Canvas (Three.js Hologram with Dual Hand & Pointer Support) ── */}
+      {/* ── 3D WebGL Canvas (Three.js Hologram) ── */}
       <canvas
         ref={canvas3dRef}
         onPointerDown={handlePointerDown}
@@ -1236,11 +1766,90 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
         className="absolute inset-0 w-full h-full z-20 cursor-grab active:cursor-grabbing touch-none"
       />
 
+      {/* ── 3D Floating Part Labels & Callout Arrows (HUD Overlay) ── */}
+      {showAnnotations && (
+        <div className="absolute inset-0 pointer-events-none z-25 overflow-hidden">
+          <svg className="absolute inset-0 w-full h-full">
+            <defs>
+              <marker id="arrowhead" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+                <polygon points="0 0, 6 3, 0 6" fill="#00f0ff" />
+              </marker>
+              <marker id="arrowhead-selected" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+                <polygon points="0 0, 6 3, 0 6" fill="#fbbf24" />
+              </marker>
+            </defs>
+            {annotations.map((ann) => {
+              if (!ann.screenPos.visible) return null;
+              const isSel = ann.isSelected;
+              // Leader line from label box (offset +50, -40) to projected 3D point
+              const labelX = Math.min(window.innerWidth - 180, Math.max(20, ann.screenPos.x + 60));
+              const labelY = Math.min(window.innerHeight - 80, Math.max(80, ann.screenPos.y - 40));
+
+              return (
+                <g key={ann.id}>
+                  {/* Glowing Leader Line with Arrowhead */}
+                  <line
+                    x1={labelX}
+                    y1={labelY + 12}
+                    x2={ann.screenPos.x}
+                    y2={ann.screenPos.y}
+                    stroke={isSel ? '#fbbf24' : '#00f0ff'}
+                    strokeWidth={isSel ? '2' : '1.5'}
+                    strokeDasharray={isSel ? 'none' : '4,3'}
+                    markerEnd={isSel ? 'url(#arrowhead-selected)' : 'url(#arrowhead)'}
+                    className="transition-all duration-75"
+                  />
+                  {/* Target 3D Point Reticle */}
+                  <circle
+                    cx={ann.screenPos.x}
+                    cy={ann.screenPos.y}
+                    r={isSel ? 6 : 4}
+                    fill={isSel ? '#fbbf24' : '#00f0ff'}
+                    stroke="#ffffff"
+                    strokeWidth="1.5"
+                    className={isSel ? 'animate-ping' : ''}
+                  />
+                </g>
+              );
+            })}
+          </svg>
+
+          {/* HTML Interactive Badges for Labels */}
+          {annotations.map((ann) => {
+            if (!ann.screenPos.visible) return null;
+            const isSel = ann.isSelected;
+            const labelX = Math.min(window.innerWidth - 180, Math.max(20, ann.screenPos.x + 60));
+            const labelY = Math.min(window.innerHeight - 80, Math.max(80, ann.screenPos.y - 40));
+
+            return (
+              <div
+                key={`badge_${ann.id}`}
+                style={{ transform: `translate(${labelX}px, ${labelY}px)` }}
+                onClick={() => selectPart(ann.name)}
+                className={`absolute top-0 left-0 pointer-events-auto px-2.5 py-1 rounded-xl text-[11px] font-bold border backdrop-blur-md cursor-pointer transition-all flex items-center gap-1.5 shadow-lg ${
+                  isSel
+                    ? 'bg-amber-500/25 border-amber-400 text-amber-200 shadow-[0_0_20px_rgba(245,158,11,0.5)] scale-105 ring-2 ring-amber-400/50'
+                    : 'bg-black/75 border-cyan-500/40 text-cyan-200 hover:border-cyan-300 hover:bg-slate-900/90'
+                }`}
+              >
+                <CornerDownRight className={`w-3 h-3 ${isSel ? 'text-amber-400' : 'text-cyan-400'}`} />
+                <span className="truncate max-w-[140px]">{ann.name}</span>
+                {isSel && (
+                  <span className="text-[9px] px-1 py-0.2 rounded bg-amber-500 text-black font-black uppercase">
+                    Locked
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {/* ── Scanlines Hologram Grid Overlay ── */}
       <div className="absolute inset-0 bg-[linear-gradient(to_bottom,transparent_50%,rgba(0,240,255,0.03)_51%)] bg-[length:100%_4px] pointer-events-none z-20" />
 
-      {/* ── TOP BAR: JARVIS Header, Status & Close ── */}
-      <div className="relative z-30 flex items-center justify-between p-4 bg-gradient-to-b from-black/80 to-transparent backdrop-blur-md border-b border-cyan-500/30">
+      {/* ── TOP BAR: JARVIS Header, Voice Status & Close ── */}
+      <div className="relative z-30 flex items-center justify-between p-4 bg-gradient-to-b from-black/85 to-transparent backdrop-blur-md border-b border-cyan-500/30">
         <div className="flex items-center gap-3">
           <div className="p-2 rounded-xl bg-cyan-500/20 border border-cyan-400/50 text-cyan-300 shadow-[0_0_20px_rgba(6,182,212,0.5)]">
             <Cpu className="w-5 h-5 animate-pulse" />
@@ -1251,19 +1860,19 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
                 JARVIS HOLOGRAPHIC 3D LAB
               </h2>
               <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-mono border border-cyan-500/40">
-                Mark-L 3D Spatial
+                FRIDAY AI Connected
               </span>
             </div>
-            <p className="text-xs text-slate-400">Raycast Object Picking • True 3D Depth • 360° Gyro Hand Move</p>
+            <p className="text-xs text-slate-400">Voice Control • Part Selection & Isolation • 360° Angle Turn • Annotations</p>
           </div>
         </div>
 
         {/* Live Tracking Status & Active Held Badge */}
         <div className="flex items-center gap-2 sm:gap-3">
-          {heldObjectName !== 'None' && (
-            <div className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-500/20 border border-amber-500/50 text-amber-300 text-xs font-bold animate-pulse">
+          {selectedPartName && (
+            <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-500/20 border border-amber-500/50 text-amber-300 text-xs font-bold shadow-[0_0_15px_rgba(245,158,11,0.25)]">
               <Zap className="w-3.5 h-3.5" />
-              <span>Holding: {heldObjectName}</span>
+              <span>Locked: {selectedPartName}</span>
             </div>
           )}
 
@@ -1290,7 +1899,74 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
         </div>
       </div>
 
-      {/* ── CAMERA ERROR NOTICE (If permission rejected) ── */}
+      {/* ── FRIDAY AI VOICE COMMAND FLOATING CAPSULE BAR ── */}
+      <div className="relative z-30 mx-4 mt-2 p-2.5 rounded-2xl bg-gradient-to-r from-slate-900/90 via-cyan-950/80 to-slate-900/90 border border-cyan-500/40 backdrop-blur-xl shadow-[0_0_30px_rgba(0,240,255,0.2)] flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2.5 flex-1 min-w-[280px]">
+          <button
+            onClick={toggleVoiceListening}
+            className={`p-2 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
+              isListeningVoice
+                ? 'bg-rose-500 text-white animate-pulse shadow-[0_0_20px_rgba(244,63,94,0.6)]'
+                : 'bg-cyan-500/20 hover:bg-cyan-500/40 border border-cyan-400/60 text-cyan-300'
+            }`}
+            title="Toggle Speech Recognition"
+          >
+            {isListeningVoice ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
+            <span>{isListeningVoice ? 'Listening...' : 'Voice AI'}</span>
+          </button>
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              processVoiceCommand(voiceQueryInput);
+              setVoiceQueryInput('');
+            }}
+            className="flex-1 flex items-center gap-1 bg-black/60 border border-cyan-500/30 rounded-xl px-2.5 py-1 focus-within:border-cyan-400"
+          >
+            <input
+              type="text"
+              value={voiceQueryInput}
+              onChange={(e) => setVoiceQueryInput(e.target.value)}
+              placeholder='Bol kar ya type karein: "Select flame", "90 degree ghumao", "Baki sab hatao", "Sab wapas lao"...'
+              className="w-full bg-transparent text-xs text-white placeholder-slate-400 outline-none"
+            />
+            <button type="submit" className="text-cyan-400 hover:text-white p-1">
+              <Send className="w-3.5 h-3.5" />
+            </button>
+          </form>
+        </div>
+
+        {/* FRIDAY Status Pill & Fast Action Buttons */}
+        <div className="flex items-center gap-2">
+          <div className="text-[11px] font-mono text-cyan-300 max-w-xs truncate hidden lg:block bg-black/40 px-2.5 py-1 rounded-lg border border-cyan-500/20">
+            {fridayStatusText}
+          </div>
+
+          <button
+            onClick={() => setFridayTtsEnabled(!fridayTtsEnabled)}
+            className={`p-1.5 rounded-lg border text-xs cursor-pointer ${
+              fridayTtsEnabled ? 'bg-cyan-500/20 border-cyan-400 text-cyan-300' : 'bg-slate-800 border-slate-700 text-slate-500'
+            }`}
+            title={fridayTtsEnabled ? 'Friday Voice Audio ON' : 'Friday Voice Audio Muted'}
+          >
+            {fridayTtsEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+          </button>
+
+          <button
+            onClick={() => setShowAnnotations(!showAnnotations)}
+            className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-bold flex items-center gap-1 cursor-pointer ${
+              showAnnotations
+                ? 'bg-cyan-500/20 border-cyan-400 text-cyan-200 shadow-[0_0_10px_rgba(6,182,212,0.3)]'
+                : 'bg-slate-900 border-slate-700 text-slate-400'
+            }`}
+          >
+            {showAnnotations ? <Eye className="w-3.5 h-3.5 text-cyan-400" /> : <EyeOff className="w-3.5 h-3.5" />}
+            <span>3D Labels & Arrows</span>
+          </button>
+        </div>
+      </div>
+
+      {/* ── CAMERA ERROR NOTICE ── */}
       {cameraPermissionError && (
         <div className="relative z-30 mx-4 mt-2 p-3 rounded-2xl bg-rose-950/80 border border-rose-500/50 text-rose-200 text-xs flex items-center justify-between shadow-lg">
           <div className="flex items-center gap-2">
@@ -1307,7 +1983,7 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
       )}
 
       {/* ── LEFT SIDEBAR: 3D Model Presets ── */}
-      <div className="absolute left-4 top-24 z-30 w-64 max-h-[calc(100vh-180px)] overflow-y-auto space-y-2 p-3 rounded-2xl bg-black/75 backdrop-blur-xl border border-cyan-500/30 shadow-[0_0_30px_rgba(0,0,0,0.8)]">
+      <div className="absolute left-4 top-36 z-30 w-64 max-h-[calc(100vh-230px)] overflow-y-auto space-y-2 p-3 rounded-2xl bg-black/75 backdrop-blur-xl border border-cyan-500/30 shadow-[0_0_30px_rgba(0,0,0,0.8)]">
         <div className="flex items-center gap-2 pb-2 border-b border-slate-800 text-cyan-400 text-xs font-bold uppercase tracking-wider">
           <Layers className="w-3.5 h-3.5" />
           <span>Interactive 3D Objects</span>
@@ -1342,11 +2018,139 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
         </div>
       </div>
 
-      {/* ── RIGHT SIDEBAR: Candle & Fire Controls, Studio & Gestures Guide ── */}
-      <div className="absolute right-4 top-24 z-30 w-72 max-h-[calc(100vh-180px)] overflow-y-auto space-y-3 p-3.5 rounded-2xl bg-black/80 backdrop-blur-xl border border-cyan-500/30 shadow-[0_0_30px_rgba(0,0,0,0.8)]">
-        <div className="flex items-center gap-2 pb-2 border-b border-slate-800 text-cyan-400 text-xs font-bold uppercase tracking-wider">
-          <Sliders className="w-3.5 h-3.5" />
-          <span>3D Spatial Controls</span>
+      {/* ── RIGHT SIDEBAR: Friday Part Control, Isolation, Angles & Colors ── */}
+      <div className="absolute right-4 top-36 z-30 w-72 max-h-[calc(100vh-230px)] overflow-y-auto space-y-3 p-3.5 rounded-2xl bg-black/80 backdrop-blur-xl border border-cyan-500/30 shadow-[0_0_30px_rgba(0,0,0,0.8)]">
+        
+        {/* ── SELECTED PART / COMPONENT MANAGER ── */}
+        <div className="p-3 rounded-xl bg-slate-900/90 border border-cyan-500/40 space-y-2.5">
+          <div className="flex items-center justify-between text-xs font-bold text-cyan-300 border-b border-slate-800 pb-1.5">
+            <span className="flex items-center gap-1.5">
+              <Compass className="w-4 h-4 text-amber-400 animate-spin" />
+              <span>Selected Part Actions</span>
+            </span>
+            <span className="text-[10px] font-mono text-slate-400">
+              {selectedPartName ? '1 Focused' : 'None'}
+            </span>
+          </div>
+
+          <div className="text-xs text-white font-bold p-2 rounded-lg bg-black/60 border border-cyan-500/30 flex items-center justify-between">
+            <span className="truncate">{selectedPartName || 'Select a part or flame below'}</span>
+            {selectedPartName && (
+              <button onClick={() => selectPart(null)} className="text-[10px] text-rose-400 hover:underline">
+                Clear
+              </button>
+            )}
+          </div>
+
+          {/* Isolate & Restore Buttons */}
+          <div className="grid grid-cols-2 gap-1.5 pt-1">
+            <button
+              onClick={isolateSelectedPart}
+              className="py-1.5 px-2 rounded-lg bg-amber-600/30 hover:bg-amber-600/50 border border-amber-400 text-[11px] text-amber-200 font-bold transition-all flex items-center justify-center gap-1 cursor-pointer"
+              title="Hide all other parts and keep only selected"
+            >
+              <span>Selected Ke Alawa Hatao</span>
+            </button>
+
+            <button
+              onClick={restoreAllParts}
+              className="py-1.5 px-2 rounded-lg bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-400 text-[11px] text-emerald-200 font-bold transition-all flex items-center justify-center gap-1 cursor-pointer"
+              title="Show all hidden parts"
+            >
+              <span>Sab Wapas Lao</span>
+            </button>
+          </div>
+
+          {/* 360° XYZ 3-Axis Angle Turn Quick Controls */}
+          <div className="space-y-2 pt-1.5 border-t border-slate-800">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-amber-400 font-bold uppercase tracking-wider block">
+                XYZ 3-Axis Spatial Gyro:
+              </span>
+              <span className="text-[9px] text-slate-400 font-mono">
+                {selectedPartName ? 'Focused Part' : 'Entire Model'}
+              </span>
+            </div>
+
+            {/* X-Axis (Pitch / Tilt Up-Down) */}
+            <div className="p-1.5 rounded-lg bg-black/40 border border-red-500/20 space-y-1">
+              <div className="flex justify-between text-[10px] text-red-300 font-semibold">
+                <span>🔴 X-Axis (Pitch / Up-Down)</span>
+                <button onClick={() => turnSelectedPart(30, 'x')} className="text-red-400 hover:underline">+30° Step</button>
+              </div>
+              <div className="grid grid-cols-4 gap-1">
+                <button onClick={() => turnSelectedPart(-45, 'x')} className="py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[9px] text-red-200">-45°</button>
+                <button onClick={() => turnSelectedPart(30, 'x')} className="py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[9px] text-red-200">+30°</button>
+                <button onClick={() => turnSelectedPart(45, 'x')} className="py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[9px] text-red-200">+45°</button>
+                <button onClick={() => turnSelectedPart(90, 'x')} className="py-0.5 rounded bg-red-950/60 border border-red-500/40 text-[9px] text-red-300 font-bold">+90°</button>
+              </div>
+            </div>
+
+            {/* Y-Axis (Yaw / Turn Left-Right) */}
+            <div className="p-1.5 rounded-lg bg-black/40 border border-cyan-500/20 space-y-1">
+              <div className="flex justify-between text-[10px] text-cyan-300 font-semibold">
+                <span>🔵 Y-Axis (Yaw / Left-Right)</span>
+                <button onClick={() => turnSelectedPart(30, 'y')} className="text-cyan-400 hover:underline">+30° Step</button>
+              </div>
+              <div className="grid grid-cols-4 gap-1">
+                <button onClick={() => turnSelectedPart(-90, 'y')} className="py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[9px] text-cyan-200">-90°</button>
+                <button onClick={() => turnSelectedPart(30, 'y')} className="py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[9px] text-cyan-200">+30°</button>
+                <button onClick={() => turnSelectedPart(90, 'y')} className="py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[9px] text-cyan-200">+90°</button>
+                <button onClick={() => turnSelectedPart(360, 'y')} className="py-0.5 rounded bg-cyan-950/60 border border-cyan-500/40 text-[9px] text-cyan-300 font-bold">360°</button>
+              </div>
+            </div>
+
+            {/* Z-Axis (Roll / Side Tilt) */}
+            <div className="p-1.5 rounded-lg bg-black/40 border border-emerald-500/20 space-y-1">
+              <div className="flex justify-between text-[10px] text-emerald-300 font-semibold">
+                <span>🟢 Z-Axis (Roll / Side Tilt)</span>
+                <button onClick={() => turnSelectedPart(30, 'z')} className="text-emerald-400 hover:underline">+30° Step</button>
+              </div>
+              <div className="grid grid-cols-4 gap-1">
+                <button onClick={() => turnSelectedPart(-30, 'z')} className="py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[9px] text-emerald-200">-30°</button>
+                <button onClick={() => turnSelectedPart(30, 'z')} className="py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[9px] text-emerald-200">+30°</button>
+                <button onClick={() => turnSelectedPart(45, 'z')} className="py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[9px] text-emerald-200">+45°</button>
+                <button onClick={() => turnSelectedPart(90, 'z')} className="py-0.5 rounded bg-emerald-950/60 border border-emerald-500/40 text-[9px] text-emerald-300 font-bold">+90°</button>
+              </div>
+            </div>
+          </div>
+
+          {/* Color Shifting for Selected Part */}
+          <div className="pt-1.5 border-t border-slate-800 flex items-center justify-between">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+              <Palette className="w-3 h-3 text-amber-400" />
+              <span>Change Color</span>
+            </span>
+            <div className="flex gap-1.5">
+              {[
+                { hex: '#00f0ff', name: 'Cyan' },
+                { hex: '#f59e0b', name: 'Gold' },
+                { hex: '#ef4444', name: 'Red' },
+                { hex: '#10b981', name: 'Emerald' },
+                { hex: '#a855f7', name: 'Purple' },
+                { hex: '#ffffff', name: 'White' },
+              ].map((c) => (
+                <button
+                  key={c.hex}
+                  onClick={() => changeSelectedColor(c.hex)}
+                  style={{ backgroundColor: c.hex }}
+                  className="w-4 h-4 rounded-full transition-transform hover:scale-125 cursor-pointer ring-1 ring-white/30"
+                  title={c.name}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* Remove / Delete Part Button */}
+          {selectedPartName && (
+            <button
+              onClick={removeSelectedPart}
+              className="w-full py-1 rounded-lg bg-rose-950/60 hover:bg-rose-900 border border-rose-600/50 text-rose-300 text-[11px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer"
+            >
+              <Trash2 className="w-3 h-3" />
+              <span>Remove This Part</span>
+            </button>
+          )}
         </div>
 
         {/* ── CANDLE & FIRE SPECIAL INTERACTIVE PANEL ── */}
@@ -1355,18 +2159,13 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
             <div className="flex items-center justify-between text-xs font-bold text-amber-300 border-b border-amber-500/30 pb-1.5">
               <span className="flex items-center gap-1.5">
                 <Flame className="w-4 h-4 text-orange-400 animate-bounce" />
-                <span>Candle & Fire Fusion Lab</span>
+                <span>Candle & Fire Studio</span>
               </span>
               <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-200">
-                {isFlameAttached ? 'Flame on Wick' : 'Flame Detached'}
+                {isFlameAttached ? 'On Wick' : 'Detached'}
               </span>
             </div>
 
-            <div className="text-[11px] text-amber-200/90 leading-snug">
-              Pinch or Click the <b>Fire Flame</b> to pick it up, carry it anywhere in 3D depth, and drop it on the candle wick!
-            </div>
-
-            {/* Flame Action Buttons */}
             <div className="grid grid-cols-2 gap-1.5">
               <button
                 onClick={separateFlame}
@@ -1381,169 +2180,55 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
                 className="py-1.5 px-2 rounded-lg bg-amber-600/40 hover:bg-amber-600/60 border border-amber-400 text-[11px] text-amber-100 font-bold transition-all flex items-center justify-center gap-1 cursor-pointer shadow-[0_0_10px_rgba(245,158,11,0.3)]"
               >
                 <Flame className="w-3.5 h-3.5 text-amber-300" />
-                <span>Snap to Candle</span>
+                <span>Snap to Wick</span>
               </button>
             </div>
 
-            <div className="flex items-center justify-between pt-1">
-              <button
-                onClick={toggleFlameLit}
-                className={`flex-1 py-1 rounded-lg text-[10px] font-bold transition-all border cursor-pointer ${
-                  isFlameLit
-                    ? 'bg-red-500/20 border-red-400 text-red-300'
-                    : 'bg-emerald-500/20 border-emerald-400 text-emerald-300'
-                }`}
-              >
-                {isFlameLit ? '💨 Blow Out Flame' : '✨ Light Flame'}
-              </button>
-            </div>
-
-            {/* Flame Glow Colors */}
-            <div className="pt-1.5 border-t border-amber-500/20 flex items-center justify-between">
-              <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">
-                Flame Color:
-              </span>
-              <div className="flex gap-1.5">
-                {[
-                  { hex: '#f97316', name: 'Fire Orange' },
-                  { hex: '#00f0ff', name: 'Cyan Plasma' },
-                  { hex: '#a855f7', name: 'Cosmic Purple' },
-                  { hex: '#10b981', name: 'Emerald Fire' },
-                ].map((c) => (
-                  <button
-                    key={c.hex}
-                    onClick={() => handleFlameColorChange(c.hex)}
-                    style={{ backgroundColor: c.hex }}
-                    className={`w-4 h-4 rounded-full transition-transform cursor-pointer ${
-                      flameColorHex === c.hex ? 'scale-125 ring-2 ring-white shadow-md' : 'opacity-80 hover:opacity-100'
-                    }`}
-                    title={c.name}
-                  />
-                ))}
-              </div>
-            </div>
+            <button
+              onClick={toggleFlameLit}
+              className={`w-full py-1 rounded-lg text-[10px] font-bold transition-all border cursor-pointer ${
+                isFlameLit
+                  ? 'bg-red-500/20 border-red-400 text-red-300'
+                  : 'bg-emerald-500/20 border-emerald-400 text-emerald-300'
+              }`}
+            >
+              {isFlameLit ? '💨 Blow Out Flame' : '✨ Light Flame'}
+            </button>
           </div>
         )}
 
-        {/* ── Air-Draw Stroke Thickness & Color Palette ── */}
-        <div className="p-2.5 rounded-xl bg-slate-900/90 border border-cyan-500/30 space-y-2">
-          <div className="flex items-center justify-between text-xs font-semibold text-slate-200">
-            <span className="flex items-center gap-1.5 text-cyan-300">
-              <PenTool className="w-3.5 h-3.5" />
-              <span>3D Stroke Thickness</span>
-            </span>
-            <span className="font-mono text-cyan-400 font-bold">{drawThickness}px</span>
-          </div>
-
+        {/* Quick Spawn 3D Shapes */}
+        <div className="p-2.5 rounded-xl bg-slate-900/80 border border-cyan-500/30 space-y-1.5">
+          <span className="text-[10px] text-cyan-300 font-bold uppercase tracking-wider block">
+            Add 3D Primitives:
+          </span>
           <div className="grid grid-cols-4 gap-1">
-            {[
-              { label: '1px Fine', val: 1 },
-              { label: '4px Med', val: 4 },
-              { label: '8px Bold', val: 8 },
-              { label: '14px Tube', val: 14 },
-            ].map((t) => (
-              <button
-                key={t.val}
-                onClick={() => setDrawThickness(t.val)}
-                className={`py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-                  drawThickness === t.val
-                    ? 'bg-cyan-500 text-slate-950 shadow-[0_0_10px_rgba(6,182,212,0.5)]'
-                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Color Palette */}
-          <div className="pt-1.5 border-t border-slate-800 flex items-center justify-between">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
-              <Palette className="w-3 h-3 text-amber-400" />
-              <span>Glow Color</span>
-            </span>
-            <div className="flex gap-1.5">
-              {[
-                { hex: '#00f0ff', name: 'Cyan' },
-                { hex: '#f59e0b', name: 'Gold' },
-                { hex: '#ec4899', name: 'Pink' },
-                { hex: '#10b981', name: 'Emerald' },
-                { hex: '#a855f7', name: 'Purple' },
-                { hex: '#ffffff', name: 'White' },
-              ].map((c) => (
-                <button
-                  key={c.hex}
-                  onClick={() => setDrawColor(c.hex)}
-                  style={{ backgroundColor: c.hex }}
-                  className={`w-4 h-4 rounded-full transition-transform cursor-pointer ${
-                    drawColor === c.hex ? 'scale-125 ring-2 ring-white shadow-md' : 'opacity-80 hover:opacity-100'
-                  }`}
-                  title={c.name}
-                />
-              ))}
-            </div>
-          </div>
-
-          <div className="flex gap-1.5 pt-1">
             <button
-              onClick={() => {
-                const next = !isAirDrawMode;
-                setIsAirDrawMode(next);
-                isAirDrawModeRef.current = next;
-              }}
-              className={`flex-1 py-1 rounded-lg text-[11px] font-bold transition-all border cursor-pointer ${
-                isAirDrawMode
-                  ? 'bg-amber-500/25 border-amber-400 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.4)]'
-                  : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
-              }`}
+              onClick={() => spawnPrimitive('cube')}
+              className="py-1 rounded-lg bg-cyan-950/60 hover:bg-cyan-900 border border-cyan-500/40 text-[10px] text-cyan-200 font-semibold cursor-pointer"
             >
-              {isAirDrawMode ? 'Air-Draw: ACTIVE' : 'Toggle Air-Draw'}
+              Cube
             </button>
             <button
-              onClick={clearAirDrawPoints}
-              className="px-2.5 py-1 rounded-lg bg-rose-950/60 hover:bg-rose-900 border border-rose-700/50 text-[11px] text-rose-300 font-semibold transition-colors flex items-center gap-1 cursor-pointer"
-              title="Clear all drawn strokes"
+              onClick={() => spawnPrimitive('sphere')}
+              className="py-1 rounded-lg bg-cyan-950/60 hover:bg-cyan-900 border border-cyan-500/40 text-[10px] text-cyan-200 font-semibold cursor-pointer"
             >
-              <Trash2 className="w-3 h-3" />
-              <span>Clear</span>
+              Sphere
+            </button>
+            <button
+              onClick={() => spawnPrimitive('cylinder')}
+              className="py-1 rounded-lg bg-cyan-950/60 hover:bg-cyan-900 border border-cyan-500/40 text-[10px] text-cyan-200 font-semibold cursor-pointer"
+            >
+              Cylinder
+            </button>
+            <button
+              onClick={() => spawnPrimitive('torus')}
+              className="py-1 rounded-lg bg-cyan-950/60 hover:bg-cyan-900 border border-cyan-500/40 text-[10px] text-cyan-200 font-semibold cursor-pointer"
+            >
+              Torus
             </button>
           </div>
         </div>
-
-        {/* Quick Spawn Primitives (Blank Workspace / Air Draw) */}
-        {(selectedModelId === 'blank_workspace' || selectedModelId === 'air_draw') && (
-          <div className="p-2.5 rounded-xl bg-slate-900/80 border border-cyan-500/30 space-y-1.5">
-            <span className="text-[10px] text-cyan-300 font-bold uppercase tracking-wider block">
-              Spawn 3D Shapes:
-            </span>
-            <div className="grid grid-cols-4 gap-1">
-              <button
-                onClick={() => spawnPrimitive('cube')}
-                className="py-1 rounded-lg bg-cyan-950/60 hover:bg-cyan-900 border border-cyan-500/40 text-[10px] text-cyan-200 font-semibold cursor-pointer"
-              >
-                Cube
-              </button>
-              <button
-                onClick={() => spawnPrimitive('sphere')}
-                className="py-1 rounded-lg bg-cyan-950/60 hover:bg-cyan-900 border border-cyan-500/40 text-[10px] text-cyan-200 font-semibold cursor-pointer"
-              >
-                Sphere
-              </button>
-              <button
-                onClick={() => spawnPrimitive('cylinder')}
-                className="py-1 rounded-lg bg-cyan-950/60 hover:bg-cyan-900 border border-cyan-500/40 text-[10px] text-cyan-200 font-semibold cursor-pointer"
-              >
-                Cylinder
-              </button>
-              <button
-                onClick={() => spawnPrimitive('torus')}
-                className="py-1 rounded-lg bg-cyan-950/60 hover:bg-cyan-900 border border-cyan-500/40 text-[10px] text-cyan-200 font-semibold cursor-pointer"
-              >
-                Torus
-              </button>
-            </div>
-          </div>
-        )}
 
         {/* Exploded View Slider */}
         {selectedModelId !== 'candle_fire' && (
@@ -1603,6 +2288,8 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
               if (selectedModelId === 'candle_fire') {
                 snapFlameToCandle();
               }
+              restoreAllParts();
+              speakFriday('3D Orientation reset.');
             }}
             className="w-full flex items-center justify-between p-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-xs text-slate-200 transition-colors cursor-pointer"
           >
@@ -1613,18 +2300,17 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
           </button>
         </div>
 
-        {/* Gestures Guide */}
+        {/* Gestures & Voice Guide */}
         <div className="p-2.5 rounded-xl bg-cyan-950/40 border border-cyan-500/30 text-[11px] text-cyan-300/90 space-y-1">
           <p className="font-bold text-white uppercase text-[10px] tracking-wider flex items-center gap-1">
             <HelpCircle className="w-3 h-3 text-cyan-400" />
-            <span>JARVIS Spatial Controls:</span>
+            <span>FRIDAY Voice & Hand Commands:</span>
           </p>
-          <p>• 🤏 <b>Pinch Flame / Object</b>: Lock, Move anywhere in 3D & 360° Rotate</p>
-          <p>• 📏 <b>Hand Depth (Z)</b>: Move hand closer/farther to push/pull in depth</p>
-          <p>• 🔄 <b>Hand Wrist Tilt</b>: 360° Roll, Pitch & Yaw rotation</p>
-          <p>• 👐 <b>2 Hands</b>: 360° Gyro Steering & Zoom</p>
-          <p>• ✍️ <b>1 Index Finger</b>: Point to Air-Draw 3D Lines</p>
-          <p>• 🖱️ <b>Mouse/Touch</b>: Direct Click & Drag any object or flame</p>
+          <p>• 🗣️ <b>Voice Select</b>: "Select flame / candle / core"</p>
+          <p>• 🗣️ <b>Voice Isolate</b>: "Selected ke alawa sab hatao"</p>
+          <p>• 🗣️ <b>Voice Restore</b>: "Jitne item the sab wapas lao"</p>
+          <p>• 🗣️ <b>Voice Turn</b>: "360 ghumao", "90 degree turn"</p>
+          <p>• 🤏 <b>Pinch</b>: 1:1 Pick, 3D Depth Carry & Rotate</p>
         </div>
       </div>
 
@@ -1635,7 +2321,7 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
           <span>Y: <b className="text-cyan-300">{telemetry.posY}</b></span>
           <span>DEPTH (Z): <b className="text-amber-300">{telemetry.posZ}</b></span>
           <span>ROLL: <b className="text-cyan-300">{telemetry.roll}</b></span>
-          <span>DEPTH ZONE: <b className="text-emerald-300">{telemetry.depthStatus}</b></span>
+          <span>FOCUSED: <b className="text-amber-400">{telemetry.selectedPart}</b></span>
           {telemetry.held !== 'None' && (
             <span className="text-orange-400 font-bold">HELD: {telemetry.held}</span>
           )}
@@ -1643,7 +2329,7 @@ export const HolographicLabModal: React.FC<HolographicLabModalProps> = ({
 
         <div className="text-[11px] text-cyan-400 font-semibold flex items-center gap-1.5">
           <Sparkles className="w-3.5 h-3.5" />
-          <span>Spatial Precision Tracking Active @ 60 FPS</span>
+          <span>FRIDAY Spatial Precision Engine @ 60 FPS</span>
         </div>
       </div>
     </div>
