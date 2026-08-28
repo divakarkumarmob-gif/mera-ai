@@ -94,44 +94,82 @@ class JioSaavnService {
   }
 
   /**
-   * YouTube-Grade Relevance & Popularity scoring for search result ranking
-   * (Exact Title > Popularity Log Boost > StartsWith > Actor/Starring > Artist > Major Label)
+   * YouTube-Grade Relevance & Popularity scoring — Entity-Aware Mind-Reader Edition
+   * Strips actor/singer tokens from query before title match, so "sehra bandh ke amir khan"
+   * correctly ranks "Main Sehra Bandh Ke" (Aamir Khan 1990) above "Main Sehra Bandh Ke Aaunga" (Bhojpuri).
    */
   private scoreSong(song: JioSaavnSong, query: string): number {
-    const q = query.toLowerCase().trim();
+    const q = query.toLowerCase().replace(/[^a-z0-9\s]/g, " ").trim();
     if (!q) return 0;
-    const title = (song.songName || "").toLowerCase().trim();
-    const artist = (song.artistName || "").toLowerCase().trim();
-    const album = (song.albumName || "").toLowerCase().trim();
-    const starring = (song.starring || "").toLowerCase().trim();
-    const label = (song.label || "").toLowerCase().trim();
+
+    // --- Entity Lists (same as rankCandidatesMindReader) ---
+    const ACTORS = ["aamir khan", "amir khan", "aamir", "amir", "salman khan", "salman", "shah rukh khan", "shahrukh khan", "shah rukh", "shahrukh", "srk", "akshay kumar", "akshay", "ranbir kapoor", "ranbir", "hrithik roshan", "hrithik", "govinda", "amitabh bachchan", "amitabh", "ajay devgn", "ajay", "emraan hashmi", "emraan", "kartik aaryan", "kartik"];
+    const SINGERS = ["arijit singh", "arijit", "arjit", "udit narayan", "udit", "sonu nigam", "sonu", "shreya ghoshal", "shreya", "kishore kumar", "kishore", "lata mangeshkar", "lata", "mohammed rafi", "rafi", "alka yagnik", "alka", "kk", "diljit dosanjh", "diljit", "badshah", "honey singh", "honey", "pritam", "ar rahman", "rahman", "anirudh", "jubin nautiyal", "jubin", "atif aslam", "atif", "darshan raval", "sidhu moose wala"];
+
+    // Strip entity tokens → isolate the pure title portion of the query
+    let titleQuery = q;
+    for (const a of ACTORS) titleQuery = titleQuery.replace(new RegExp(`\\b${a}\\b`, "gi"), "");
+    for (const s of SINGERS) titleQuery = titleQuery.replace(new RegExp(`\\b${s}\\b`, "gi"), "");
+    titleQuery = titleQuery.replace(/\s+/g, " ").trim();
+    const effectiveQuery = titleQuery.length >= 3 ? titleQuery : q;
+
+    const title = (song.songName || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").trim();
+    const artist = (song.artistName || "").toLowerCase();
+    const album = (song.albumName || "").toLowerCase();
+    const starring = (song.starring || "").toLowerCase();
+    const label = (song.label || "").toLowerCase();
 
     let score = 0;
-    if (title === q) score += 1200;
-    else if (title.startsWith(q)) score += 700;
-    else if (title.includes(q)) score += 400;
 
-    if (artist.includes(q)) score += 300;
-    if (starring.includes(q)) score += 280;
-    if (album.includes(q)) score += 150;
+    // 1. Title matching — against stripped title-only query
+    if (title === effectiveQuery || title === `main ${effectiveQuery}` || `main ${title}` === effectiveQuery) {
+      score += 1200;
+    } else if (title.startsWith(effectiveQuery) || effectiveQuery.startsWith(title)) {
+      score += 750;
+    } else if (title.includes(effectiveQuery) && effectiveQuery.length >= 4) {
+      score += 500;
+    } else {
+      const qTokens = q.split(/\s+/).filter(Boolean);
+      const titleTokens = title.split(/\s+/).filter(Boolean);
+      const matchCount = qTokens.filter((t) => titleTokens.includes(t)).length;
+      if (qTokens.length > 0) score += Math.round((matchCount / qTokens.length) * 450);
+    }
 
-    const tokens = q.split(/\s+/).filter((t) => t.length > 1);
-    for (const t of tokens) {
-      if (title.includes(t)) score += 80;
+    // 2. Artist / starring token matching
+    const qTokens = q.split(/\s+/).filter((t) => t.length > 1);
+    for (const t of qTokens) {
       if (artist.includes(t)) score += 50;
       if (starring.includes(t)) score += 45;
       if (album.includes(t)) score += 25;
     }
 
-    // Popularity log-scale multiplier (YouTube RankBrain style)
+    // 3. Entity boost — actor match (+850), singer match (+750)
+    for (const act of ACTORS) {
+      if (q.includes(act) && (starring.includes(act) || artist.includes(act) || album.includes(act))) {
+        score += 850;
+        break;
+      }
+    }
+    for (const sng of SINGERS) {
+      if (q.includes(sng) && (artist.includes(sng) || album.includes(sng) || starring.includes(sng))) {
+        score += 750;
+        break;
+      }
+    }
+
+    // 4. Popularity log-scale (YouTube RankBrain style)
     if (song.playCount && song.playCount > 0) {
       score += Math.min(500, Math.round(Math.log10(song.playCount) * 55));
     }
 
-    // Official Major Music Label boost
+    // 5. Official label boost
     if (/t-series|sony music|zee music|saregama|yrf|tips|speed records|universal|erossoundtrack|panchratan/i.test(label)) {
       score += 100;
     }
+
+    // 6. Penalize karaoke / instrumental unless explicitly searched
+    if (!q.includes("instrumental") && title.includes("instrumental")) score -= 250;
+    if (!q.includes("karaoke") && title.includes("karaoke")) score -= 350;
 
     return score;
   }
