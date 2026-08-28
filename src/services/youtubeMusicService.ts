@@ -257,17 +257,47 @@ class YouTubeMusicService {
     };
   }
 
+  private readonly PIPED_INSTANCES = [
+    "https://pipedapi.kavin.rocks",
+    "https://api.piped.privacydev.net",
+    "https://pipedapi.leptons.xyz",
+    "https://piped-api.garudalinux.org",
+  ];
+
   /**
    * Extracts direct playable audio stream URL for a given YouTube Video ID.
    */
   public async getAudioStreamUrl(videoId: string): Promise<string | null> {
     if (!videoId) return null;
 
-    // 1. Try Invidious direct audio stream endpoints
+    // 1. Try Piped API (Fast, Reliable 160kbps/256kbps audio stream)
+    for (const inst of this.PIPED_INSTANCES) {
+      try {
+        const pipedRes = await fetch(`${inst}/streams/${videoId}`, {
+          signal: AbortSignal.timeout(3500),
+          headers: { "User-Agent": this.USER_AGENTS[0] },
+        });
+        if (pipedRes.ok) {
+          const pipedData = await pipedRes.json();
+          const audioStreams = pipedData?.audioStreams || [];
+          if (Array.isArray(audioStreams) && audioStreams.length > 0) {
+            // Sort by bitrate descending
+            audioStreams.sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0));
+            if (audioStreams[0]?.url) {
+              return audioStreams[0].url;
+            }
+          }
+        }
+      } catch {
+        // Try next Piped instance
+      }
+    }
+
+    // 2. Try Invidious direct audio stream endpoints
     for (const inst of this.INVIDIOUS_INSTANCES) {
       try {
         const infoRes = await fetch(`${inst}/api/v1/videos/${videoId}`, {
-          signal: AbortSignal.timeout(4000),
+          signal: AbortSignal.timeout(3500),
         });
         if (infoRes.ok) {
           const info = await infoRes.json();

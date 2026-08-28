@@ -1988,13 +1988,15 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     stopMusicPlayback();
                     const track = msg.track || msg;
                     const isYt = !!(track.isYouTube || track.isYouTubeMusic || track.videoId || msg.type === 'play_youtube_music');
+                    const audioStream = track.audioUrl || track.streamUrl || (track.videoId ? `/api/youtube/stream-audio?v=${track.videoId}` : '');
                     const trackInfo = {
                         trackName: track.trackName || 'Music Track',
                         artistName: track.artistName || (isYt ? 'YouTube Music' : 'Friday Music'),
-                        albumArt: track.albumArt || (track.videoId ? `https://img.youtube.com/vi/${track.videoId}/hqdefault.jpg` : undefined),
+                        albumName: track.albumName,
+                        albumArt: track.albumArtHighRes || track.albumArt || (track.videoId ? `https://img.youtube.com/vi/${track.videoId}/hqdefault.jpg` : undefined),
                         spotifyUrl: track.spotifyUrl,
                         youtubeMusicUrl: track.youtubeMusicUrl || (track.videoId ? `https://music.youtube.com/watch?v=${track.videoId}` : undefined),
-                        embedUrl: track.embedUrl || (track.videoId ? `https://www.youtube-nocookie.com/embed/${track.videoId}?autoplay=1&enablejsapi=1&controls=1&modestbranding=1&playsinline=1&rel=0` : undefined),
+                        embedUrl: track.embedUrl || (track.videoId ? `https://www.youtube-nocookie.com/embed/${track.videoId}?autoplay=1&enablejsapi=1&controls=0&playsinline=1` : undefined),
                         videoId: track.videoId,
                         isFullSong: true,
                         isYouTube: isYt,
@@ -2002,130 +2004,13 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         isJioSaavn: !isYt && !!track.isJioSaavn,
                         quality: track.quality || (isYt ? 'YouTube Pro HD' : 'JioSaavn 320kbps HD'),
                         durationSec: track.durationSec,
-                        audioUrl: track.audioUrl || track.streamUrl,
+                        audioUrl: audioStream,
                         fallbackAudioUrl: track.fallbackAudioUrl,
                         isPlaying: true,
                         hasError: false,
                     };
 
-                    // If YouTube video / embed is present (Primary & 100% reliable)
-                    if (trackInfo.embedUrl || trackInfo.videoId) {
-                        setNowPlayingMusic({
-                            ...trackInfo,
-                            isYouTubeMusic: true,
-                            isYouTube: true,
-                            isPlaying: true,
-                            hasError: false,
-                        });
-                        return;
-                    }
-
-                    const primaryAudioUrl = msg.audioUrl || msg.streamUrl;
-                    const fallbackAudioUrl = msg.fallbackAudioUrl || msg.fallbackUrl;
-
-                    const attemptPlayback = (srcUrl: string, isFallbackAttempt = false, isProxyAttempt = false) => {
-                        try {
-                            if (musicAudioRef.current) {
-                                musicAudioRef.current.pause();
-                                musicAudioRef.current = null;
-                            }
-                            const audio = new Audio();
-                            // Do NOT set audio.crossOrigin = 'anonymous' because it causes CDNs to reject CORS!
-                            audio.src = srcUrl;
-                            audio.volume = 0.85;
-
-                            audio.onended = () => {
-                                setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: false } : null);
-                            };
-
-                            audio.onerror = (e) => {
-                                console.warn('[Music] Audio stream error on source:', srcUrl, e);
-                                if (!isProxyAttempt && srcUrl.startsWith('http')) {
-                                    console.log('[Music] Attempting server audio proxy stream...');
-                                    const proxyUrl = getApiUrl(`/api/music/proxy-stream?url=${encodeURIComponent(srcUrl)}`);
-                                    attemptPlayback(proxyUrl, isFallbackAttempt, true);
-                                } else if (!isFallbackAttempt && fallbackAudioUrl && fallbackAudioUrl !== srcUrl) {
-                                    console.log('[Music] Attempting fallback audio stream URL...');
-                                    attemptPlayback(fallbackAudioUrl, true, false);
-                                } else if (msg.videoId || msg.embedUrl || trackInfo.embedUrl) {
-                                    console.log('[Music] Direct stream failed, falling back to YouTube Music embed');
-                                    if (musicAudioRef.current) {
-                                        musicAudioRef.current.pause();
-                                        musicAudioRef.current = null;
-                                    }
-                                    setNowPlayingMusic({
-                                        ...trackInfo,
-                                        isYouTubeMusic: true,
-                                        isPlaying: true,
-                                        hasError: false,
-                                    });
-                                } else {
-                                    setNowPlayingMusic(prev => prev ? {
-                                        ...prev,
-                                        hasError: true,
-                                        isPlaying: false,
-                                        errorMessage: 'Audio stream failed to load. Use Spotify or YouTube link below.'
-                                    } : null);
-                                }
-                            };
-
-                            musicAudioRef.current = audio;
-
-                            const playPromise = audio.play();
-                            if (playPromise !== undefined) {
-                                playPromise.then(() => {
-                                    setNowPlayingMusic(prev => prev ? { ...prev, isPlaying: true, hasError: false } : null);
-                                }).catch((err) => {
-                                    console.warn('[Music] Autoplay prevented or start failed:', err);
-                                    setNowPlayingMusic(prev => prev ? {
-                                        ...prev,
-                                        isPlaying: false,
-                                        hasError: false,
-                                        errorMessage: 'Click ▶ Play to start audio'
-                                    } : null);
-                                });
-                            }
-
-                            setNowPlayingMusic({
-                                ...trackInfo,
-                                isPlaying: true,
-                            });
-                        } catch (e) {
-                            console.warn('[Music] Error initializing Audio player:', e);
-                            setNowPlayingMusic({
-                                ...trackInfo,
-                                hasError: true,
-                                errorMessage: 'Failed to initialize audio player',
-                            });
-                        }
-                    };
-
-                    if (primaryAudioUrl) {
-                        attemptPlayback(primaryAudioUrl);
-                    } else if (msg.videoId || msg.embedUrl) {
-                        setNowPlayingMusic({
-                            ...trackInfo,
-                            isYouTubeMusic: true,
-                            isPlaying: true,
-                        });
-                    } else {
-                        setNowPlayingMusic(trackInfo);
-                    }
-                } else if (msg.type === 'play_youtube_music' && msg.track) {
-                    const track = msg.track;
-                    const directAudio = track.audioUrl || (track.streamUrl && !track.streamUrl.includes('youtube-nocookie.com') ? track.streamUrl : undefined);
-
-                    playDirectSong({
-                        trackName: track.trackName || 'YouTube Music Track',
-                        artistName: track.artistName || 'YouTube Music',
-                        albumName: track.albumName || 'YouTube Pro Safe',
-                        albumArt: track.albumArtHighRes || track.albumArt || (track.videoId ? `https://img.youtube.com/vi/${track.videoId}/hqdefault.jpg` : undefined),
-                        audioUrl: directAudio,
-                        isYouTube: true,
-                        isFullSong: true,
-                        quality: track.quality || (directAudio ? 'YouTube Pro 320kbps HD Audio' : 'YouTube Music HD'),
-                        songId: track.id || track.videoId,
-                    });
+                    playDirectSong(trackInfo);
                 } else if (msg.type === 'stop_music') {
                     stopMusicPlayback();
                 } else if (msg.type === 'pause_music') {
@@ -3271,9 +3156,18 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 currentIndex={activePreviewIndex}
                 onClose={() => setShowSongPreviewModal(false)}
                 onNextPreview={() => setActivePreviewIndex(prev => (previewCandidates.length > 0 ? (prev + 1) % previewCandidates.length : 0))}
-                onPrevPreview={() => setActivePreviewIndex(prev => (previewCandidates.length > 0 ? (prev - 1 + previewCandidates.length) % previewCandidates.length : 0))}
                 onSelectCandidate={playConfirmedCandidate}
             />
+
+            {/* Hidden YouTube IFrame Player for 100% Reliable Background Audio Streaming */}
+            {nowPlayingMusic?.videoId && (
+                <iframe
+                    id="youtube-iframe"
+                    src={`https://www.youtube-nocookie.com/embed/${nowPlayingMusic.videoId}?autoplay=1&enablejsapi=1&controls=0&playsinline=1`}
+                    className="hidden pointer-events-none w-0 h-0 opacity-0 absolute -z-50"
+                    allow="autoplay; encrypted-media"
+                />
+            )}
         </div>
     );
 }
