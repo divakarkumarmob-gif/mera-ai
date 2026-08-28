@@ -16,6 +16,7 @@ import { screenWakeLock } from '@/utils/screenWakeLock';
 import { MusicCapsule } from './MusicCapsule';
 import { MusicStudioModal } from './MusicStudioModal';
 import { SongPreviewModal, PreviewCandidate } from './SongPreviewModal';
+import AppAccessSection from './AppAccessSection';
 
 interface LiveAIInterfaceProps {
     onClose: () => void;
@@ -2793,6 +2794,9 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
 
                             {/* Friday Instagram Direct Bot Card */}
                             <InstagramBotCard />
+
+                            {/* Friday App Access & Device Permissions Manager */}
+                            <AppAccessSection />
 
                             {/* Friday Cyber Security & OSINT Suite Card */}
                             <CyberSecurityCard />

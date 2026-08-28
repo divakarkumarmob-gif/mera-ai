@@ -36,7 +36,7 @@ class EmergencySosService {
         if (found && found.phone) {
           phone = found.phone.replace(/\D/g, "").slice(-10);
         }
-      } catch {}
+      } catch { }
       if (!phone) {
         const digits = rawTarget.replace(/\D/g, "");
         phone = digits.length >= 10 ? digits.slice(-10) : digits;
