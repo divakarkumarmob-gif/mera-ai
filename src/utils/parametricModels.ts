@@ -798,6 +798,324 @@ export function createCandleFireModel(): CandleFireModel {
   };
 }
 
+// ── 9. Quantum Bohr Atom & Orbital Electron Shells ───────────────────────────
+
+export function createQuantumAtomModel(): ParametricMachineModel {
+  const group = new THREE.Group();
+  const parts: ParametricMachineModel['parts'] = [];
+
+  const cyanGlowMat = createHologramMaterial(0x00f0ff, 0.95);
+  const goldGlowMat = createHologramMaterial(0xf59e0b, 0.95);
+  const magentaGlowMat = createHologramMaterial(0xec4899, 0.95);
+  const emeraldGlowMat = createHologramMaterial(0x10b981, 0.95);
+
+  // 1. Central Nucleus Cluster (Protons & Neutrons)
+  const nucleusGroup = new THREE.Group();
+  nucleusGroup.name = 'Atomic_Nucleus';
+
+  const centralCoreGeo = new THREE.SphereGeometry(0.55, 24, 24);
+  const centralCoreMat = new THREE.MeshStandardMaterial({
+    color: 0xff0055,
+    emissive: 0xff0044,
+    emissiveIntensity: 1.6,
+    roughness: 0.2,
+    transparent: true,
+    opacity: 0.95
+  });
+  const centralCore = new THREE.Mesh(centralCoreGeo, centralCoreMat);
+  nucleusGroup.add(centralCore);
+
+  // Sub-nucleons
+  for (let i = 0; i < 6; i++) {
+    const ang = (i / 6) * Math.PI * 2;
+    const nucGeo = new THREE.SphereGeometry(0.24, 16, 16);
+    const nucMat = i % 2 === 0 ? goldGlowMat : cyanGlowMat;
+    const nuc = new THREE.Mesh(nucGeo, nucMat);
+    nuc.position.set(Math.cos(ang) * 0.45, Math.sin(ang) * 0.45, (Math.random() - 0.5) * 0.4);
+    nucleusGroup.add(nuc);
+  }
+  group.add(nucleusGroup);
+  parts.push({
+    name: '⚛️ Atomic Nucleus (Protons/Neutrons)',
+    mesh: nucleusGroup,
+    originalPos: new THREE.Vector3(0, 0, 0),
+    explodeDir: new THREE.Vector3(0, 0, 0),
+  });
+
+  // 2. Orbital Rings & Orbiting Electrons
+  const orbitalRings: { ringMesh: THREE.Mesh; electrons: THREE.Mesh[]; axis: THREE.Vector3; speed: number }[] = [];
+
+  const orbitalConfigs = [
+    { radius: 1.8, tiltX: Math.PI / 3, tiltY: 0, tiltZ: 0, mat: cyanGlowMat, color: 0x00f0ff, name: 'K-Shell Orbital Ring #1' },
+    { radius: 2.5, tiltX: -Math.PI / 3, tiltY: Math.PI / 4, tiltZ: 0, mat: goldGlowMat, color: 0xf59e0b, name: 'L-Shell Orbital Ring #2' },
+    { radius: 3.2, tiltX: 0, tiltY: Math.PI / 3, tiltZ: Math.PI / 4, mat: magentaGlowMat, color: 0xec4899, name: 'M-Shell Orbital Ring #3' },
+  ];
+
+  orbitalConfigs.forEach((cfg, idx) => {
+    const ringGeo = new THREE.TorusGeometry(cfg.radius, 0.03, 16, 64);
+    const ringMesh = new THREE.Mesh(ringGeo, cfg.mat);
+    ringMesh.rotation.set(cfg.tiltX, cfg.tiltY, cfg.tiltZ);
+    group.add(ringMesh);
+    parts.push({
+      name: cfg.name,
+      mesh: ringMesh,
+      originalPos: ringMesh.position.clone(),
+      explodeDir: new THREE.Vector3(0, (idx - 1) * 1.5, 0),
+    });
+
+    // Orbiting Electron Spheres on each ring
+    const electrons: THREE.Mesh[] = [];
+    const numElectrons = 2 + idx;
+    for (let e = 0; e < numElectrons; e++) {
+      const eleGeo = new THREE.SphereGeometry(0.18, 16, 16);
+      const eleMat = new THREE.MeshStandardMaterial({
+        color: cfg.color,
+        emissive: cfg.color,
+        emissiveIntensity: 1.8,
+        roughness: 0.1,
+        transparent: true,
+        opacity: 0.95
+      });
+      const eleMesh = new THREE.Mesh(eleGeo, eleMat);
+      eleMesh.name = `Electron_${idx}_${e}`;
+      group.add(eleMesh);
+      electrons.push(eleMesh);
+      parts.push({
+        name: `⚡ Orbiting Electron #${idx + 1}-${e + 1}`,
+        mesh: eleMesh,
+        originalPos: eleMesh.position.clone(),
+        explodeDir: new THREE.Vector3((e - 1) * 1.2, 0, (idx - 1) * 1.2),
+      });
+    }
+
+    orbitalRings.push({
+      ringMesh,
+      electrons,
+      axis: new THREE.Vector3(Math.cos(cfg.tiltX), Math.sin(cfg.tiltY), Math.sin(cfg.tiltZ)).normalize(),
+      speed: 1.8 + idx * 0.6
+    });
+  });
+
+  // 3. Valence Electron Cloud Sphere
+  const cloudGeo = new THREE.SphereGeometry(3.6, 24, 24);
+  const cloudMat = createGlowMaterial(0x00f0ff);
+  cloudMat.opacity = 0.18;
+  const cloudMesh = new THREE.Mesh(cloudGeo, cloudMat);
+  group.add(cloudMesh);
+  parts.push({
+    name: '🌐 Outer Valence Probability Field',
+    mesh: cloudMesh,
+    originalPos: cloudMesh.position.clone(),
+    explodeDir: new THREE.Vector3(0, 0, 0),
+  });
+
+  const update = (time: number) => {
+    nucleusGroup.rotation.y = time * 0.4;
+    nucleusGroup.rotation.x = Math.sin(time * 0.6) * 0.2;
+
+    orbitalRings.forEach((orb, ringIdx) => {
+      const cfg = orbitalConfigs[ringIdx];
+      const count = orb.electrons.length;
+      orb.electrons.forEach((ele, eIdx) => {
+        const theta = time * orb.speed + (eIdx / count) * Math.PI * 2;
+        // Position on tilted torus
+        const localPos = new THREE.Vector3(
+          Math.cos(theta) * cfg.radius,
+          Math.sin(theta) * cfg.radius,
+          0
+        );
+        localPos.applyEuler(new THREE.Euler(cfg.tiltX, cfg.tiltY, cfg.tiltZ));
+        ele.position.copy(localPos);
+        ele.rotation.y = time * 2.0;
+      });
+    });
+  };
+
+  return {
+    id: 'quantum_atom',
+    name: '⚛️ Quantum Bohr Atom & Orbitals',
+    category: 'Quantum Physics & Science',
+    description: 'Interactive Bohr Atom with orbiting valence electrons, quantum energy shells, and central nucleus.',
+    group,
+    parts,
+    update,
+  };
+}
+
+// ── 10. DNA Double Helix Macromolecule ────────────────────────────────────────
+
+export function createDnaHelixModel(): ParametricMachineModel {
+  const group = new THREE.Group();
+  const parts: ParametricMachineModel['parts'] = [];
+
+  const cyanMat = createHologramMaterial(0x00f0ff, 0.95);
+  const goldMat = createHologramMaterial(0xf59e0b, 0.95);
+  const magentaMat = createHologramMaterial(0xec4899, 0.95);
+  const emeraldMat = createHologramMaterial(0x10b981, 0.95);
+
+  const strand1Group = new THREE.Group();
+  const strand2Group = new THREE.Group();
+  const basePairsGroup = new THREE.Group();
+
+  const numSteps = 28;
+  const height = 6.0;
+  const radius = 1.4;
+  const turns = 2.5;
+
+  for (let i = 0; i < numSteps; i++) {
+    const t = i / (numSteps - 1);
+    const y = (t - 0.5) * height;
+    const angle = t * Math.PI * 2 * turns;
+
+    const x1 = Math.cos(angle) * radius;
+    const z1 = Math.sin(angle) * radius;
+    const x2 = Math.cos(angle + Math.PI) * radius;
+    const z2 = Math.sin(angle + Math.PI) * radius;
+
+    // Strand 1 Backbone Node
+    const node1Geo = new THREE.SphereGeometry(0.18, 16, 16);
+    const node1 = new THREE.Mesh(node1Geo, cyanMat);
+    node1.position.set(x1, y, z1);
+    strand1Group.add(node1);
+
+    // Strand 2 Backbone Node
+    const node2Geo = new THREE.SphereGeometry(0.18, 16, 16);
+    const node2 = new THREE.Mesh(node2Geo, goldMat);
+    node2.position.set(x2, y, z2);
+    strand2Group.add(node2);
+
+    // Base Pair Connector Rung
+    const p1 = new THREE.Vector3(x1, y, z1);
+    const p2 = new THREE.Vector3(x2, y, z2);
+    const mid = p1.clone().lerp(p2, 0.5);
+    const dist = p1.distanceTo(p2);
+
+    const rungGeo = new THREE.CylinderGeometry(0.06, 0.06, dist, 12);
+    const rungMat = i % 2 === 0 ? emeraldMat : magentaMat;
+    const rung = new THREE.Mesh(rungGeo, rungMat);
+    rung.position.copy(mid);
+    rung.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), p2.clone().sub(p1).normalize());
+    basePairsGroup.add(rung);
+  }
+
+  group.add(strand1Group);
+  group.add(strand2Group);
+  group.add(basePairsGroup);
+
+  parts.push({
+    name: '🧬 Sugar-Phosphate Strand #1 (5’ to 3’)',
+    mesh: strand1Group,
+    originalPos: new THREE.Vector3(0, 0, 0),
+    explodeDir: new THREE.Vector3(-1.5, 0, 0),
+  });
+
+  parts.push({
+    name: '🧬 Sugar-Phosphate Strand #2 (3’ to 5’)',
+    mesh: strand2Group,
+    originalPos: new THREE.Vector3(0, 0, 0),
+    explodeDir: new THREE.Vector3(1.5, 0, 0),
+  });
+
+  parts.push({
+    name: '🔗 Hydrogen Base Pairs (A-T & G-C)',
+    mesh: basePairsGroup,
+    originalPos: new THREE.Vector3(0, 0, 0),
+    explodeDir: new THREE.Vector3(0, 0, 1.5),
+  });
+
+  const update = (time: number) => {
+    group.rotation.y = time * 0.35;
+  };
+
+  return {
+    id: 'dna_helix',
+    name: '🧬 DNA Double Helix Structure',
+    category: 'Biotechnology & Genetics',
+    description: 'Double helix macromolecule containing genetic instructions with complementary base pairs.',
+    group,
+    parts,
+    update,
+  };
+}
+
+// ── 11. Orbital Communications Satellite ─────────────────────────────────────
+
+export function createSatelliteModel(): ParametricMachineModel {
+  const group = new THREE.Group();
+  const parts: ParametricMachineModel['parts'] = [];
+
+  const cyanMat = createHologramMaterial(0x00f0ff, 0.95);
+  const goldMat = createHologramMaterial(0xf59e0b, 0.95);
+  const panelMat = createHologramMaterial(0x0284c7, 0.9);
+
+  // 1. Central Bus Core
+  const busGeo = new THREE.BoxGeometry(1.4, 2.0, 1.4);
+  const busMesh = new THREE.Mesh(busGeo, cyanMat);
+  group.add(busMesh);
+  parts.push({
+    name: '🛰️ Satellite Main Avionics Core',
+    mesh: busMesh,
+    originalPos: busMesh.position.clone(),
+    explodeDir: new THREE.Vector3(0, 0, 0),
+  });
+
+  // 2. High-Gain Parabolic Dish Antenna
+  const dishGeo = new THREE.SphereGeometry(1.1, 24, 12, 0, Math.PI * 2, 0, Math.PI * 0.35);
+  const dishMesh = new THREE.Mesh(dishGeo, goldMat);
+  dishMesh.position.set(0, 1.6, 0);
+  dishMesh.rotation.x = Math.PI;
+  group.add(dishMesh);
+  parts.push({
+    name: '📡 High-Gain Parabolic Transceiver',
+    mesh: dishMesh,
+    originalPos: dishMesh.position.clone(),
+    explodeDir: new THREE.Vector3(0, 1.8, 0),
+  });
+
+  // 3. Left Solar Array Wing
+  const leftWingGroup = new THREE.Group();
+  const leftPanelGeo = new THREE.BoxGeometry(3.0, 1.2, 0.08);
+  const leftPanel = new THREE.Mesh(leftPanelGeo, panelMat);
+  leftPanel.position.set(-2.4, 0, 0);
+  leftWingGroup.add(leftPanel);
+  group.add(leftWingGroup);
+  parts.push({
+    name: '☀️ Port Solar Panel Array',
+    mesh: leftWingGroup,
+    originalPos: leftWingGroup.position.clone(),
+    explodeDir: new THREE.Vector3(-2.0, 0, 0),
+  });
+
+  // 4. Right Solar Array Wing
+  const rightWingGroup = new THREE.Group();
+  const rightPanelGeo = new THREE.BoxGeometry(3.0, 1.2, 0.08);
+  const rightPanel = new THREE.Mesh(rightPanelGeo, panelMat);
+  rightPanel.position.set(2.4, 0, 0);
+  rightWingGroup.add(rightPanel);
+  group.add(rightWingGroup);
+  parts.push({
+    name: '☀️ Starboard Solar Panel Array',
+    mesh: rightWingGroup,
+    originalPos: rightWingGroup.position.clone(),
+    explodeDir: new THREE.Vector3(2.0, 0, 0),
+  });
+
+  const update = (time: number) => {
+    group.rotation.y = time * 0.2;
+    dishMesh.rotation.y = Math.sin(time * 0.8) * 0.3;
+  };
+
+  return {
+    id: 'satellite_orbit',
+    name: '🛰️ Orbital Communications Satellite',
+    category: 'Aerospace & Telecommunications',
+    description: 'Deep space satellite with high-gain parabolic antenna and dual photovoltaic solar arrays.',
+    group,
+    parts,
+    update,
+  };
+}
+
 // ── Model Factory ─────────────────────────────────────────────────────────────
 
 export function getAvailableModels(): { id: string; name: string; category: string; description: string }[] {
@@ -809,10 +1127,22 @@ export function getAvailableModels(): { id: string; name: string; category: stri
       description: 'Separate candle & fire! Pinch fire to carry in 3D depth, 360° rotate & place on candle wick.',
     },
     {
-      id: 'blank_workspace',
-      name: '✨ Blank Workspace (Freehand)',
-      category: 'Open CAD Canvas',
-      description: 'Clean spatial holographic workspace for freehand creation & sculpting.',
+      id: 'quantum_atom',
+      name: '⚛️ Quantum Bohr Atom',
+      category: 'Quantum Physics',
+      description: 'Interactive Bohr Atom with orbiting valence electrons, quantum energy shells, and central nucleus.',
+    },
+    {
+      id: 'dna_helix',
+      name: '🧬 DNA Double Helix',
+      category: 'Biotechnology',
+      description: 'Double helix macromolecule containing genetic instructions with complementary base pairs.',
+    },
+    {
+      id: 'satellite_orbit',
+      name: '🛰️ Orbital Satellite',
+      category: 'Aerospace',
+      description: 'Deep space satellite with high-gain parabolic antenna and dual photovoltaic solar arrays.',
     },
     {
       id: 'arc_reactor',
@@ -845,6 +1175,12 @@ export function getAvailableModels(): { id: string; name: string; category: stri
       description: 'Electric hypercar chassis with carbon monocoque and active aero.',
     },
     {
+      id: 'blank_workspace',
+      name: '✨ Blank Workspace (Freehand)',
+      category: 'Open CAD Canvas',
+      description: 'Clean spatial holographic workspace for freehand creation & sculpting.',
+    },
+    {
       id: 'air_draw',
       name: 'Air-Draw Custom 3D Space',
       category: 'Generative CAD',
@@ -857,6 +1193,12 @@ export function loadModelById(id: string): ParametricMachineModel {
   switch (id) {
     case 'candle_fire':
       return createCandleFireModel();
+    case 'quantum_atom':
+      return createQuantumAtomModel();
+    case 'dna_helix':
+      return createDnaHelixModel();
+    case 'satellite_orbit':
+      return createSatelliteModel();
     case 'blank_workspace':
       return createBlankWorkspaceModel();
     case 'quadcopter_drone':
