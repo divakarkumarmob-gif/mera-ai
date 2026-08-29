@@ -571,25 +571,16 @@ async function playAudioChunk(
         source.buffer = buffer;
         source.connect(audioCtx.destination);
 
-        const now = audioCtx.currentTime;
-        // Jitter Buffer: When a new speech turn begins or the previous buffer drained,
-        // add a tiny 80ms safety cushion so network packet jitter does not cause stutter or clicks.
-        let startTime: number;
-        if (nextStartTime.current < now) {
-            startTime = now + 0.08;
-        } else {
-            startTime = nextStartTime.current;
-        }
-
+        const startTime = Math.max(audioCtx.currentTime, nextStartTime.current);
         source.start(startTime);
         nextStartTime.current = startTime + buffer.duration;
         isAiSpeaking.current = true;
 
         source.onended = () => {
-            if (audioCtx.currentTime >= nextStartTime.current - 0.05) {
+            if (audioCtx.currentTime >= nextStartTime.current - 0.08) {
                 isAiSpeaking.current = false;
                 if (speakingCooldownUntilRef) {
-                    speakingCooldownUntilRef.current = Date.now() + 300; // 300ms safety cooldown
+                    speakingCooldownUntilRef.current = Date.now() + 400; // 400ms safety cooldown
                 }
             }
         };
@@ -1715,7 +1706,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         highpass.connect(lowpass);
         lowpass.connect(compressor);
 
-        processor.current = inputAudioCtx.current.createScriptProcessor(2048, 1, 1);
+        processor.current = inputAudioCtx.current.createScriptProcessor(4096, 1, 1);
         compressor.connect(processor.current);
         processor.current.connect(inputAudioCtx.current.destination);
 

@@ -1905,7 +1905,7 @@ STYLE:
       answerLength: string,
       googleSearchMode: boolean
     ) => {
-      const effectiveThinking = thinkingLevel || (accurateMode ? "medium" : "low");
+      const effectiveThinking = accurateMode || googleSearchMode ? "high" : (thinkingLevel || "high");
       const systemInstruction = await buildSystemInstruction(effectiveThinking, accurateMode, answerLength, googleSearchMode);
 
       let inputTranscriptBuffer = "";
@@ -4304,7 +4304,8 @@ STYLE:
             for (const part of parts) {
               if (part.inlineData?.data) {
                 hasAudio = true;
-                safeSend(JSON.stringify({ type: "speaking", audio: part.inlineData.data }));
+                safeSend(JSON.stringify({ type: "speaking" }));
+                safeSend(JSON.stringify({ audio: part.inlineData.data }));
               }
             }
 
@@ -6897,16 +6898,17 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
             voiceConfig: { prebuiltVoiceConfig: { voiceName: voice || "Aoede" } },
           },
           thinkingConfig: {
-            thinkingLevel: (["low", "medium", "high"].includes(effectiveThinking) ? effectiveThinking : "low") as any,
+            thinkingLevel: (["low", "medium", "high"].includes(effectiveThinking) ? effectiveThinking : "high") as any,
           },
-          // VAD tuning: High start & end sensitivity + 220ms silence duration
-          // for instant, snappy voice turn-taking without awkward pauses.
+          // VAD tuning: High start-sensitivity to quickly capture speech start,
+          // with LOW end-sensitivity and 500ms silence duration so normal pauses
+          // and natural breathing are not falsely cut off.
           realtimeInputConfig: {
             automaticActivityDetection: {
               startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_HIGH,
-              endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_HIGH,
-              silenceDurationMs: 240,
-              prefixPaddingMs: 60,
+              endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_LOW,
+              silenceDurationMs: 500,
+              prefixPaddingMs: 160,
             },
           },
           tools: [
@@ -6973,7 +6975,7 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
     let reconnectAttempts = 0;
     const MAX_RECONNECT_ATTEMPTS = 3;
     let lastVoice = "Aoede";
-    let lastThinkingLevel = "low";
+    let lastThinkingLevel = "high";
     let lastAccurateMode = false;
     let lastAnswerLength: string | undefined;
     let lastGoogleSearchMode = false;
@@ -7052,7 +7054,7 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
         console.log(`[Server] 🎙️ init received (session=${sessionId}), (re)creating Gemini Live session...`);
         // Track params for auto-reconnect
         lastVoice = parsedData.voice || "Aoede";
-        lastThinkingLevel = parsedData.thinkingLevel || "low";
+        lastThinkingLevel = parsedData.thinkingLevel || "high";
         lastAccurateMode = !!parsedData.accurateMode;
         lastAnswerLength = parsedData.answerLength;
         lastGoogleSearchMode = !!parsedData.googleSearchMode;
