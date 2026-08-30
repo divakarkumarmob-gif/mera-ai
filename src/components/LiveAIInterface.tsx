@@ -1896,7 +1896,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                             setStatus("Session band ho gaya. Say 'Hello Friday' to wake.");
                         }, delay);
                     }
-                } else if (msg.type === 'init_ack') {
+                } else if (msg.type === 'init_ack' || msg.type === 'ready') {
                     isInitializedRef.current = true;
                     isAiSpeaking.current = false;
                     isAiThinkingRef.current = false;
@@ -1910,6 +1910,11 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                         pendingImagePayloadsRef.current = [];
                         queued.forEach(img => sendImageToWebSocket(img));
                     }
+                } else if (msg.type === 'session_reconnecting') {
+                    setStatus(`Reconnecting AI (attempt ${msg.attempt || 1})...`);
+                } else if (msg.type === 'session_reconnected') {
+                    isInitializedRef.current = true;
+                    setStatus("Listening...");
                 } else if (msg.type === 'ui_toggle_command') {
                     const { setting, state } = msg;
                     if (setting === 'captions') {

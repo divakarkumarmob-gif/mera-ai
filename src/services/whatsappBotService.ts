@@ -957,13 +957,21 @@ YOUR RULES FOR GENERATING THE WHATSAPP REPLY:
         if (connection === "close") {
           this.stopKeepAlive();
           const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
-          const shouldReconnect = statusCode !== DisconnectReason?.loggedOut;
+          const isLoggedOut = statusCode === DisconnectReason?.loggedOut || statusCode === 401;
+          const shouldReconnect = !isLoggedOut;
           this.isConnected = false;
           this.qrCodeDataUrl = null;
           this.pairingCode = null;
           this.pairingCodeMode = false;
           console.log(`[WhatsAppBot] Connection closed (statusCode=${statusCode}). Reconnect: ${shouldReconnect}`);
-          if (shouldReconnect) this.scheduleReconnect(5000);
+          if (isLoggedOut) {
+            console.log("[WhatsAppBot] Session logged out on WhatsApp mobile. Clearing stale credentials from Firestore...");
+            if (this.clearAuthFn) {
+              this.clearAuthFn().catch((err) => console.warn("[WhatsAppBot] Error clearing auth:", err));
+            }
+          } else if (shouldReconnect) {
+            this.scheduleReconnect(5000);
+          }
         } else if (connection === "open") {
           this.isConnected = true;
           this.pairingCode = null;

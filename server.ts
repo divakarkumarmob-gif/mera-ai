@@ -7502,6 +7502,8 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
 
     // ── Auto-reconnect: re-create session if Gemini drops mid-conversation ─
     let isReconnecting = false;
+    let isInitializingSession = false;
+    let hasEverConnected = false;
     let reconnectAttempts = 0;
     const MAX_RECONNECT_ATTEMPTS = 3;
     let lastVoice = "Aoede";
@@ -7511,7 +7513,7 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
     let lastGoogleSearchMode = false;
 
     const autoReconnect = async () => {
-      if (isReconnecting || clientWs.readyState !== 1) return;
+      if (isReconnecting || isInitializingSession || clientWs.readyState !== 1) return;
       if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
         console.warn(`[Server] Max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}) reached for session=${sessionId}.`);
         safeSend(JSON.stringify({ error: "session_reconnect_failed", message: "Boss, connection dobara nahi ban saki. Page refresh karo." }));
@@ -7533,6 +7535,7 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
           lastAnswerLength, lastGoogleSearchMode
         );
         currentSession = newSession;
+        hasEverConnected = true;
         isReconnecting = false;
         reconnectAttempts = 0;
         safeSend(JSON.stringify({ type: "session_reconnected" }));
@@ -7581,6 +7584,11 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
       }
 
       if (parsedData.type === "init") {
+        if (isInitializingSession) {
+          console.log(`[Server] ⏳ Session initialization already in progress (session=${sessionId}), ignoring duplicate init.`);
+          return;
+        }
+        isInitializingSession = true;
         console.log(`[Server] 🎙️ init received (session=${sessionId}), (re)creating Gemini Live session...`);
         // Track params for auto-reconnect
         lastVoice = parsedData.voice || "Aoede";
@@ -7590,7 +7598,11 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
         lastGoogleSearchMode = !!parsedData.googleSearchMode;
 
         try {
-          if (currentSession) await currentSession.close();
+          if (currentSession) {
+            const oldSession = currentSession;
+            currentSession = undefined;
+            try { await oldSession.close(); } catch {}
+          }
           const myToken = ++currentSessionToken;
           const newSession = await createSession(
             parsedData.voice,
@@ -7607,10 +7619,13 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
           if (myToken !== currentSessionToken) {
             console.warn("[Server] Discarding stale Gemini Live session from a superseded init request.");
             try { (newSession as any).close(); } catch {}
+            isInitializingSession = false;
             return;
           }
 
           currentSession = newSession;
+          hasEverConnected = true;
+          isInitializingSession = false;
           isReconnecting = false;
           reconnectAttempts = 0;
           safeSend(JSON.stringify({ type: "init_ack" }));
@@ -7623,6 +7638,7 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
         } catch (err: any) {
           console.error("Failed to create Gemini Live session:", err);
           currentSession = undefined;
+          isInitializingSession = false;
           safeSend(JSON.stringify({ error: "session_init_failed", message: err?.message || String(err) }));
         }
         return;
@@ -7633,8 +7649,12 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
           pendingImages.push(parsedData);
           return;
         }
-        // If session is gone but client is still connected, try reconnect
-        if (!isReconnecting) {
+        // If session is still in middle of initial handshake, drop audio silently (mic warm-up)
+        if (isInitializingSession) {
+          return;
+        }
+        // If session was established previously but dropped, reconnect
+        if (hasEverConnected && !isReconnecting) {
           autoReconnect();
         }
         return;

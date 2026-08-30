@@ -99,6 +99,12 @@ class TelegramSecurityBotService {
       return;
     }
 
+    const mainBotToken = (process.env.TELEGRAM_BOT_TOKEN || "").trim();
+    if (this.token === mainBotToken) {
+      console.log("[SecurityBot] TELEGRAM_SECURITY_BOT_TOKEN is identical to TELEGRAM_BOT_TOKEN. Skipping duplicate polling to prevent 409 Conflict.");
+      return;
+    }
+
     try {
       try {
         await this.callApi("deleteWebhook", { drop_pending_updates: false }, 10000);
