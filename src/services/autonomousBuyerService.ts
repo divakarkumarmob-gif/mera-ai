@@ -5,11 +5,13 @@
  * 1. One-time interactive Login Session setup for Flipkart, Amazon & Meesho.
  * 2. Login status verification and 1-Click Logout session clearance.
  * 3. 100% Autonomous Headless COD (Cash on Delivery) order execution.
+ * 4. Maximum Stealth: Strips '--enable-automation', patches 'navigator.webdriver',
+ *    and uses native Chrome binary with user's real home IP to prevent account bans.
  */
 
 import fs from "fs";
 import path from "path";
-import puppeteer, { Browser } from "puppeteer-core";
+import puppeteer, { Browser, Page } from "puppeteer-core";
 import { sendWhatsAppUnified } from "./whatsappService";
 import { telegramBotService } from "./telegramBotService";
 
@@ -72,6 +74,39 @@ class AutonomousBuyerService {
   }
 
   /**
+   * Injects anti-bot stealth scripts into page before any DOM or script executes
+   */
+  private async applyStealthPagePatches(page: Page): Promise<void> {
+    await page.evaluateOnNewDocument(() => {
+      // 1. Hide navigator.webdriver
+      Object.defineProperty(navigator, "webdriver", {
+        get: () => undefined,
+      });
+
+      // 2. Mock chrome object
+      (window as any).chrome = {
+        app: { isInstalled: false, InstallState: { DISABLED: "disabled", INSTALLED: "installed", NOT_INSTALLED: "not_installed" }, RunningState: { CANNOT_RUN: "cannot_run", READY_TO_RUN: "ready_to_run", RUNNING: "running" } },
+        runtime: {
+          OnInstalledReason: { CHROME_UPDATE: "chrome_update", INSTALL: "install", SHARED_MODULE_UPDATE: "shared_module_update", UPDATE: "update" },
+          OnRestartRequiredReason: { APP_UPDATE: "app_update", OS_UPDATE: "os_update", PERIODIC: "periodic" },
+          PlatformArch: { ARM: "arm", ARM64: "arm64", MIPS: "mips", MIPS64: "mips64", X86_32: "x86-32", X86_64: "x86-64" },
+          PlatformNaclArch: { ARM: "arm", MIPS: "mips", MIPS64: "mips64", X86_32: "x86-32", X86_64: "x86-64" },
+          PlatformOs: { ANDROID: "android", CROS: "cros", LINUX: "linux", MAC: "mac", OPENBSD: "openbsd", WIN: "win" },
+          RequestUpdateCheckStatus: { NO_UPDATE: "no_update", THROTTLED: "throttled", UPDATE_AVAILABLE: "update_available" },
+        },
+      };
+
+      // 3. Mock languages & plugins
+      Object.defineProperty(navigator, "languages", {
+        get: () => ["en-IN", "en-GB", "en-US", "hi"],
+      });
+      Object.defineProperty(navigator, "plugins", {
+        get: () => [1, 2, 3, 4, 5],
+      });
+    });
+  }
+
+  /**
    * Clears/deletes the stored browser cookies and tokens for the given store (Logout)
    */
   public async logoutStore(store: EcomStoreType): Promise<{ success: boolean; message: string }> {
@@ -113,17 +148,20 @@ class AutonomousBuyerService {
       executablePath: execPath,
       userDataDir,
       headless: false, // Visible window for OTP/mobile entry
+      ignoreDefaultArgs: ["--enable-automation"],
       defaultViewport: null,
       args: [
         "--start-maximized",
         "--no-sandbox",
         "--disable-setuid-sandbox",
         "--disable-blink-features=AutomationControlled",
+        "--disable-infobars",
       ],
     });
 
     const pages = await browser.pages();
     const page = pages[0] || (await browser.newPage());
+    await this.applyStealthPagePatches(page);
 
     await page.goto(loginUrl, { waitUntil: "networkidle2", timeout: 45000 }).catch(() => {});
 
@@ -140,7 +178,6 @@ class AutonomousBuyerService {
     const execPath = this.getExecutablePath();
     const userDataDir = this.getStoreSessionDir(store);
 
-    // If session folder doesn't have default profile data, it's not logged in
     const defaultProfileDir = path.join(userDataDir, "Default");
     if (!fs.existsSync(defaultProfileDir)) {
       return {
@@ -156,10 +193,17 @@ class AutonomousBuyerService {
         executablePath: execPath,
         userDataDir,
         headless: true,
-        args: ["--no-sandbox", "--disable-blink-features=AutomationControlled"],
+        ignoreDefaultArgs: ["--enable-automation"],
+        args: [
+          "--no-sandbox",
+          "--disable-blink-features=AutomationControlled",
+          "--disable-infobars",
+        ],
       });
 
       const page = await browser.newPage();
+      await this.applyStealthPagePatches(page);
+
       let testUrl = "https://www.flipkart.com/account";
       if (store === "amazon") testUrl = "https://www.amazon.in/gp/css/homepage.html";
       else if (store === "meesho") testUrl = "https://www.meesho.com/profile";
@@ -225,16 +269,19 @@ class AutonomousBuyerService {
         executablePath: execPath,
         userDataDir,
         headless: false,
+        ignoreDefaultArgs: ["--enable-automation"],
         defaultViewport: null,
         args: [
           "--start-maximized",
           "--no-sandbox",
           "--disable-setuid-sandbox",
           "--disable-blink-features=AutomationControlled",
+          "--disable-infobars",
         ],
       });
 
       const page = await browser.newPage();
+      await this.applyStealthPagePatches(page);
       await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36");
 
       // Step 1: Open Product
