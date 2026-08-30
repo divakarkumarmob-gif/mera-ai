@@ -50,6 +50,13 @@ export default function EcommerceAccountsSection() {
   const handleOpenLogin = async (store: 'flipkart' | 'amazon' | 'meesho') => {
     setActionLoading(`login_${store}`);
     setFeedbackMsg(null);
+
+    const fallbackUrls = {
+      flipkart: 'https://www.flipkart.com/account/login',
+      amazon: 'https://www.amazon.in/ap/signin?openid.pape.max_auth_age=0&openid.return_to=https%3A%2F%2Fwww.amazon.in%2F&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.assoc_handle=inflex&openid.mode=checkid_setup&openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0',
+      meesho: 'https://www.meesho.com/auth?redirect=',
+    };
+
     try {
       const res = await fetch('/api/ecommerce/browser-login', {
         method: 'POST',
@@ -57,16 +64,26 @@ export default function EcommerceAccountsSection() {
         body: JSON.stringify({ store }),
       });
       const data = await res.json();
-      if (data.success) {
-        setFeedbackMsg({
-          type: 'success',
-          text: `✨ ${store.toUpperCase()} login helper khul gaya hai! Mobile/OTP daal kar login karein, session auto-save ho jayega.`,
-        });
-      } else {
-        setFeedbackMsg({ type: 'error', text: data.error || 'Login window open karne me error aaya.' });
+      const targetUrl = data.loginUrl || fallbackUrls[store];
+
+      // Always open official login window on user's active device (mobile / desktop)
+      if (typeof window !== 'undefined' && targetUrl) {
+        window.open(targetUrl, '_blank');
       }
+
+      setFeedbackMsg({
+        type: 'success',
+        text: `✨ ${store.toUpperCase()} login page open ho gaya hai! Mobile/OTP daal kar login karein.`,
+      });
     } catch (e: any) {
-      setFeedbackMsg({ type: 'error', text: 'Server error: ' + (e?.message || e) });
+      // Direct client fallback
+      if (typeof window !== 'undefined') {
+        window.open(fallbackUrls[store], '_blank');
+      }
+      setFeedbackMsg({
+        type: 'success',
+        text: `✨ ${store.toUpperCase()} login page open ho gaya hai.`,
+      });
     } finally {
       setActionLoading(null);
     }

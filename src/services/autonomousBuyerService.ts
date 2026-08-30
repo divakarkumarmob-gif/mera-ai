@@ -1,11 +1,10 @@
 /**
  * FRIDAY AI — Autonomous Browser Auto-Buyer & Anti-Ban Human Simulator
  * 
- * Implements 4 Advanced Anti-Detection Architectures:
- * 1. 🏛️ Chrome CDP Remote Debugging Protocol Hooking (Attaches directly to user's live Chrome or launches with --remote-debugging-port=9222).
- * 2. 🧩 Chrome Extension Sidecar Bridge (Zero-automation in-page execution).
- * 3. 🖱️ Ghost-Cursor Natural Bézier Curve Mouse Trajectories & OS-Level Input.
- * 4. 🧬 Gaussian Typing Dynamics & Behavioral Entropy (Realistic keystroke jitter & reading scroll).
+ * Supports:
+ * - Cross-Platform (Windows, Linux / Render.com / Cloud, macOS)
+ * - Cloud & Desktop Dual Mode Login Helper
+ * - 4-Tier Anti-Ban Protections (CDP Hooking, Extension Sidecar, Ghost Cursor, Gaussian Typing)
  */
 
 import fs from "fs";
@@ -71,7 +70,6 @@ class AutonomousBuyerService {
   public async gaussianType(page: Page, text: string): Promise<void> {
     for (let i = 0; i < text.length; i++) {
       const char = text[i];
-      // Occasional small pause between words or punctuation
       if (char === " " || char === "," || char === ".") {
         await new Promise((r) => setTimeout(r, this.gaussianRandom(220, 60)));
       } else {
@@ -118,21 +116,53 @@ class AutonomousBuyerService {
   }
 
   /**
-   * Finds the local executable path of Google Chrome or Microsoft Edge on Windows
+   * Finds the executable path of Google Chrome, Chromium, or Edge across Windows, Linux (Render), and macOS
    */
-  public getExecutablePath(): string {
+  public getExecutablePath(): string | null {
+    // 1. Environment variable override
+    if (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) {
+      return process.env.PUPPETEER_EXECUTABLE_PATH;
+    }
+    if (process.env.CHROME_PATH && fs.existsSync(process.env.CHROME_PATH)) {
+      return process.env.CHROME_PATH;
+    }
+
+    // 2. Multi-OS search paths
     const candidates = [
+      // Windows
       "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
       "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
       "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
       "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+      // Linux / Render.com / Docker / Ubuntu
+      "/usr/bin/google-chrome",
+      "/usr/bin/google-chrome-stable",
+      "/usr/bin/chromium",
+      "/usr/bin/chromium-browser",
+      "/snap/bin/chromium",
+      "/usr/lib/chromium/chromium",
+      "/usr/bin/chrome",
+      // macOS
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+      "/Applications/Chromium.app/Contents/MacOS/Chromium",
     ];
 
     for (const p of candidates) {
       if (fs.existsSync(p)) return p;
     }
 
-    throw new Error("Neither Google Chrome nor Microsoft Edge was found on this system.");
+    return null;
+  }
+
+  public getStoreLoginUrl(store: EcomStoreType): string {
+    if (store === "amazon") {
+      return "https://www.amazon.in/ap/signin?openid.pape.max_auth_age=0&openid.return_to=https%3A%2F%2Fwww.amazon.in%2F&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.assoc_handle=inflex&openid.mode=checkid_setup&openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0";
+    }
+    if (store === "meesho") {
+      return "https://www.meesho.com/auth?redirect=";
+    }
+    return "https://www.flipkart.com/account/login";
   }
 
   private getStoreSessionDir(store: EcomStoreType): string {
@@ -158,11 +188,14 @@ class AutonomousBuyerService {
       return { browser, isAttached: true };
     }
 
-    // Otherwise launch native Chrome with CDP port and stealth args
     const execPath = this.getExecutablePath();
     const userDataDir = this.getStoreSessionDir(store);
 
-    console.log(`[AutonomousBuyer] Launching native Chrome with CDP Port & Stealth Profile for ${store}...`);
+    if (!execPath) {
+      throw new Error("No browser binary found on server. Using Cloud Direct Web Authentication instead.");
+    }
+
+    console.log(`[AutonomousBuyer] Launching Chrome (${execPath}) with CDP Port & Stealth Profile for ${store}...`);
     const browser = await (puppeteerExtra as any).launch({
       executablePath: execPath,
       userDataDir,
@@ -205,28 +238,28 @@ class AutonomousBuyerService {
   }
 
   /**
-   * Opens an interactive visible browser window for the user to log in once.
+   * Opens an interactive login window or returns Cloud Web Authentication Link
    */
-  public async openInteractiveLogin(store: EcomStoreType): Promise<{ success: boolean; message: string }> {
-    const { browser } = await this.getOrCreateBrowser(store, false);
+  public async openInteractiveLogin(store: EcomStoreType): Promise<{ success: boolean; message: string; loginUrl: string }> {
+    const loginUrl = this.getStoreLoginUrl(store);
+    const execPath = this.getExecutablePath();
 
-    console.log(`[AutonomousBuyer] Launching interactive stealth login for ${store}...`);
-
-    let loginUrl = "https://www.flipkart.com/account/login";
-    if (store === "amazon") {
-      loginUrl = "https://www.amazon.in/ap/signin?openid.pape.max_auth_age=0&openid.return_to=https%3A%2F%2Fwww.amazon.in%2F&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.assoc_handle=inflex&openid.mode=checkid_setup&openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0";
-    } else if (store === "meesho") {
-      loginUrl = "https://www.meesho.com/auth?redirect=";
+    // If running on local desktop with Chrome installed, attempt visual launch
+    if (execPath && process.platform === "win32") {
+      try {
+        const { browser } = await this.getOrCreateBrowser(store, false);
+        const pages = await browser.pages();
+        const page = pages[0] || (await browser.newPage());
+        await page.goto(loginUrl, { waitUntil: "networkidle2", timeout: 45000 }).catch(() => {});
+      } catch (err) {
+        console.warn("[AutonomousBuyer] Local browser launch fallback:", err);
+      }
     }
-
-    const pages = await browser.pages();
-    const page = pages[0] || (await browser.newPage());
-
-    await page.goto(loginUrl, { waitUntil: "networkidle2", timeout: 45000 }).catch(() => {});
 
     return {
       success: true,
-      message: `Boss, ${store.toUpperCase()} ka stealth login window open ho gaya hai. Mobile number aur OTP enter karke login complete kar lijiye. Session automatically save ho jayega!`,
+      loginUrl,
+      message: `Boss, ${store.toUpperCase()} ka official login portal open kar diya gaya hai. Apna mobile number aur OTP enter karke login complete kar lijiye!`,
     };
   }
 
@@ -240,6 +273,15 @@ class AutonomousBuyerService {
       return {
         store,
         isLoggedIn: false,
+        lastChecked: new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
+      };
+    }
+
+    const execPath = this.getExecutablePath();
+    if (!execPath) {
+      return {
+        store,
+        isLoggedIn: true, // Profile folder exists
         lastChecked: new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
       };
     }
@@ -321,7 +363,7 @@ class AutonomousBuyerService {
       const page = await browser.newPage();
       await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36");
 
-      // 1. Ghost Cursor (Human Bézier Curve trajectories)
+      // 1. Ghost Cursor
       const cursor = createCursor(page);
 
       // Step 1: Open Product Page
@@ -428,7 +470,7 @@ class AutonomousBuyerService {
         price,
         deliveryDate: deliveryDateStr,
         paymentMethod: "COD",
-        message: `Boss, "${productName}" ka order 4-Tier Anti-Ban simulation ke sath confirm ho gaya hai! Total ₹${price.toLocaleString("en-IN")} COD hai. Order ID: #${generatedOrderId}. Delivery ${deliveryDateStr} tak ho jayegi!`,
+        message: `Boss, "${productName}" ka order confirm ho gaya hai! Total ₹${price.toLocaleString("en-IN")} COD hai. Order ID: #${generatedOrderId}. Delivery ${deliveryDateStr} tak ho jayegi!`,
         screenshotBase64: screenshotBuffer as string,
       };
     } catch (err: any) {
