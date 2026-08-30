@@ -1915,6 +1915,9 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 } else if (msg.type === 'session_reconnected') {
                     isInitializedRef.current = true;
                     setStatus("Listening...");
+                } else if (msg.error === 'MISSING_GEMINI_KEY' || msg.error === 'INVALID_GEMINI_KEY') {
+                    if (initAckTimeoutRef.current) { clearTimeout(initAckTimeoutRef.current); initAckTimeoutRef.current = null; }
+                    setStatus(msg.message || "🚨 GEMINI_API_KEY Missing! Check .env or Render Dashboard");
                 } else if (msg.type === 'ui_toggle_command') {
                     const { setting, state } = msg;
                     if (setting === 'captions') {

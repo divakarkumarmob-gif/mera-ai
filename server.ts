@@ -284,6 +284,14 @@ async function startServer() {
       answerLength: string,
       googleSearchMode: boolean
     ) => {
+      const apiKey = (process.env.GEMINI_API_KEY || "").trim();
+      if (!apiKey || apiKey === "placeholder-gemini-key") {
+        const errorMsg = "🚨 GEMINI_API_KEY missing hai! Kripya .env file ya Render Dashboard (Environment Variables) me valid GEMINI_API_KEY set karein.";
+        console.error(`[Server] ${errorMsg}`);
+        safeSend(JSON.stringify({ error: "MISSING_GEMINI_KEY", message: errorMsg }));
+        throw new Error(errorMsg);
+      }
+
       const effectiveThinking = accurateMode || googleSearchMode ? "high" : (thinkingLevel || "high");
       const systemInstruction = buildLiveSystemInstruction({
         thinkingLevel: effectiveThinking,
@@ -313,6 +321,14 @@ async function startServer() {
             console.warn(`[Server] 🔌 Gemini Live session CLOSED (session=${sessionId}) code=${evt?.code} reason=${evt?.reason || "n/a"}`);
             if (currentSession === thisSessionRef) {
               currentSession = undefined;
+              // If closed due to Invalid/Missing API key (1008), do NOT loop reconnect
+              if (evt?.code === 1008 || String(evt?.reason || "").includes("unregistered callers")) {
+                safeSend(JSON.stringify({
+                  error: "INVALID_GEMINI_KEY",
+                  message: "🚨 Google Gemini API Key invalid ya expire ho gayi hai. Kripya naya API Key set karein.",
+                }));
+                return;
+              }
               autoReconnect();
             }
           },
