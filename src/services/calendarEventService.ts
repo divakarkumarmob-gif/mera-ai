@@ -141,10 +141,11 @@ class CalendarEventService {
     try {
       const snap = await calendarCollection()
         .where("isCompleted", "==", false)
-        .orderBy("eventTimestamp", "asc")
         .get();
 
-      events = snap.docs.map((d) => d.data() as CalendarEventItem);
+      events = snap.docs
+        .map((d) => d.data() as CalendarEventItem)
+        .sort((a, b) => (a.eventTimestamp || 0) - (b.eventTimestamp || 0));
     } catch (err: any) {
       console.warn("[CalendarEvent] Firestore fetch error, using in-memory store:", err?.message || err);
       events = Array.from(this.inMemoryEvents.values())

@@ -118,9 +118,10 @@ class ToolsEngine {
     try {
       const snap = await remindersCollection()
         .where("isCompleted", "==", false)
-        .where("dueTimestamp", "<=", now)
         .get();
-      return snap.docs.map((d) => d.data() as ReminderItem);
+      return snap.docs
+        .map((d) => d.data() as ReminderItem)
+        .filter((r) => r.dueTimestamp <= now);
     } catch {
       return Array.from(this.inMemoryReminders.values()).filter(
         (r) => !r.isCompleted && r.dueTimestamp <= now

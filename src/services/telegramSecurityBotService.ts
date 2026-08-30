@@ -51,19 +51,27 @@ class TelegramSecurityBotService {
     return null;
   }
 
-  private async callApi(method: string, body?: any): Promise<any> {
+  private async callApi(method: string, body?: any, timeoutMs = 35000): Promise<any> {
     if (!this.token) throw new Error("TELEGRAM_SECURITY_BOT_TOKEN is not configured.");
     const url = `https://api.telegram.org/bot${this.token}/${method}`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    const json = await res.json();
-    if (!json.ok) {
-      throw new Error(json.description || `Telegram API ${method} failed`);
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: body ? JSON.stringify(body) : undefined,
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      const json = await res.json();
+      if (!json.ok) {
+        throw new Error(json.description || `Telegram API ${method} failed`);
+      }
+      return json.result;
+    } catch (err: any) {
+      if (err?.name === "TimeoutError" || /fetch failed|ECONNRESET|ETIMEDOUT|socket/i.test(err?.message || "")) {
+        throw new Error(`NETWORK_TIMEOUT: ${err?.message || "Connection timed out"}`);
+      }
+      throw err;
     }
-    return json.result;
   }
 
   public async sendMessage(chatId: number, text: string, keyboard?: any): Promise<any> {
@@ -92,7 +100,11 @@ class TelegramSecurityBotService {
     }
 
     try {
-      const me = await this.callApi("getMe");
+      try {
+        await this.callApi("deleteWebhook", { drop_pending_updates: false }, 10000);
+      } catch {}
+
+      const me = await this.callApi("getMe", undefined, 10000);
       this.botUsername = me.username;
       console.log(`[SecurityBot] 🛡️ Security Sentinel connected as @${this.botUsername} (ID: ${me.id})`);
 
@@ -106,7 +118,7 @@ class TelegramSecurityBotService {
           { command: "status", description: "📊 System Security Shield Status" },
           { command: "logout", description: "🚪 Lock Session & Exit" },
         ],
-      });
+      }, 10000);
 
       this.startPolling();
     } catch (e: any) {
@@ -117,15 +129,18 @@ class TelegramSecurityBotService {
   private startPolling(): void {
     if (this.isRunning) return;
     this.isRunning = true;
+    let consecutiveErrors = 0;
 
     const poll = async () => {
       if (!this.isRunning) return;
       try {
         const updates = await this.callApi("getUpdates", {
           offset: this.pollingOffset,
-          timeout: 25,
+          timeout: 20,
           allowed_updates: ["message", "callback_query"],
-        });
+        }, 35000);
+
+        consecutiveErrors = 0;
 
         if (Array.isArray(updates)) {
           for (const update of updates) {
@@ -136,8 +151,13 @@ class TelegramSecurityBotService {
           }
         }
       } catch (err: any) {
-        // Sleep on error
-        await new Promise((r) => setTimeout(r, 4000));
+        consecutiveErrors++;
+        const isTimeout = /NETWORK_TIMEOUT|fetch failed|timeout/i.test(err?.message || "");
+        const backoffMs = Math.min(15000, 1000 * Math.pow(1.5, Math.min(consecutiveErrors, 6)));
+        if (!isTimeout || consecutiveErrors >= 5) {
+          console.warn(`[SecurityBot] Polling issue (attempt ${consecutiveErrors}):`, err?.message || err);
+        }
+        await new Promise((r) => setTimeout(r, backoffMs));
       }
       setTimeout(poll, 300);
     };
