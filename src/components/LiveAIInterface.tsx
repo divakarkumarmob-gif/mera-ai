@@ -1915,9 +1915,6 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 } else if (msg.type === 'session_reconnected') {
                     isInitializedRef.current = true;
                     setStatus("Listening...");
-                } else if (msg.error === 'MISSING_GEMINI_KEY' || msg.error === 'INVALID_GEMINI_KEY') {
-                    if (initAckTimeoutRef.current) { clearTimeout(initAckTimeoutRef.current); initAckTimeoutRef.current = null; }
-                    setStatus(msg.message || "🚨 GEMINI_API_KEY Missing! Check .env or Render Dashboard");
                 } else if (msg.type === 'ui_toggle_command') {
                     const { setting, state } = msg;
                     if (setting === 'captions') {
@@ -1956,6 +1953,22 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     setEcommerceActiveIndex(typeof msg.index === 'number' ? msg.index : 0);
                 } else if (msg.type === 'ecommerce_close_deck') {
                     setEcommerceDeckProducts([]);
+                } else if (msg.type === 'session_reconnecting') {
+                    isInitializedRef.current = false;
+                    isAiSpeaking.current = false;
+                    isAiThinkingRef.current = false;
+                    aiTurnActiveRef.current = false;
+                    clearTimeout((window as any).__thinkingTimeout);
+                    resetTypewriter();
+                    setStatus("⚡ AI reconnecting...");
+                } else if (msg.type === 'session_reconnected') {
+                    isInitializedRef.current = true;
+                    isAiSpeaking.current = false;
+                    isAiThinkingRef.current = false;
+                    aiTurnActiveRef.current = false;
+                    turnCompletePendingRef.current = false;
+                    speakingCooldownUntilRef.current = 0;
+                    setStatus("Listening...");
                 } else if (msg.error === 'session_reconnect_failed') {
                     setStatus("Connection lost. Please refresh the page.");
                     setIsRecording(false);

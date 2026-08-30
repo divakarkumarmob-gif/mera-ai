@@ -237,14 +237,11 @@ async function startServer() {
   // ---------------------------------------------------------------------------
   // WebSocket Live AI Connection Handler (Gemini Live Session)
   // ---------------------------------------------------------------------------
-  wss.on("connection", (clientWs, req: any) => {
+  wss.on("connection", (clientWs, req) => {
     console.log("[Server] Client connected to live session");
     connectedClients.add(clientWs);
 
-    const urlParams = new URLSearchParams((req.url || "").split("?")[1] || "");
-    const initialToken = urlParams.get("token");
-    let isAuthorized = initialToken ? appSecurityService.verifySessionToken(initialToken) : false;
-
+    let isAuthorized = false;
     const authTimeout = setTimeout(() => {
       if (!isAuthorized) {
         console.warn("[Server] 🚫 Closing unauthorized WebSocket (Auth Timeout 10s)");
@@ -287,16 +284,8 @@ async function startServer() {
       answerLength: string,
       googleSearchMode: boolean
     ) => {
-      const apiKey = (process.env.GEMINI_API_KEY || "").trim();
-      if (!apiKey || apiKey === "placeholder-gemini-key") {
-        const errorMsg = "🚨 GEMINI_API_KEY missing hai! Kripya .env file ya Render Dashboard (Environment Variables) me valid GEMINI_API_KEY set karein.";
-        console.error(`[Server] ${errorMsg}`);
-        safeSend(JSON.stringify({ error: "MISSING_GEMINI_KEY", message: errorMsg }));
-        throw new Error(errorMsg);
-      }
-
       const effectiveThinking = accurateMode || googleSearchMode ? "high" : (thinkingLevel || "high");
-      const systemInstruction = buildLiveSystemInstruction({
+      const systemInstruction = await buildLiveSystemInstruction({
         thinkingLevel: effectiveThinking,
         accurateMode,
         answerLength,
@@ -324,14 +313,6 @@ async function startServer() {
             console.warn(`[Server] 🔌 Gemini Live session CLOSED (session=${sessionId}) code=${evt?.code} reason=${evt?.reason || "n/a"}`);
             if (currentSession === thisSessionRef) {
               currentSession = undefined;
-              // If closed due to Invalid/Missing API key (1008), do NOT loop reconnect
-              if (evt?.code === 1008 || String(evt?.reason || "").includes("unregistered callers")) {
-                safeSend(JSON.stringify({
-                  error: "INVALID_GEMINI_KEY",
-                  message: "🚨 Google Gemini API Key invalid ya expire ho gayi hai. Kripya naya API Key set karein.",
-                }));
-                return;
-              }
               autoReconnect();
             }
           },
@@ -596,22 +577,6 @@ async function startServer() {
           }
         } else if (parsedData.image) {
           await processImageInput(parsedData);
-        } else if (parsedData.type === "text_input" && parsedData.text) {
-          saveMessage("user", parsedData.text).catch((e) => console.error("[Server] Failed to save text_input message:", e));
-          memoryEngine.recordMessage(sessionId, "user", parsedData.text);
-          currentSession.sendClientContent({
-            turns: [{ role: "user", parts: [{ text: parsedData.text }] }],
-            turnComplete: true,
-          });
-        } else if (parsedData.type === "trigger_reply") {
-          try {
-            currentSession.sendClientContent({
-              turns: [{ role: "user", parts: [{ text: "Jawab do, please reply now to what I just said." }] }],
-              turnComplete: true,
-            });
-          } catch (e) {
-            console.error("Failed to trigger reply:", e);
-          }
         }
       } catch (err) {
         console.error("Error processing client input:", err);
