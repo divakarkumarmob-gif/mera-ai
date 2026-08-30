@@ -2129,13 +2129,17 @@ async function startServer() {
 4. 🛒 E-COMMERCE SHOPPING, ORDERING & BUY-LINK MANDATE (FLIPKART, AMAZON, MEESHO):
    - Price comparison & horizontal cards deck ("football ka price batao", "laptop prices compare karo") -> Call 'compare_product_prices' (query).
    - Advance/highlight product in deck ("agla dikhao", "dusra product", "next product", "2nd wala") -> Call 'highlight_ecommerce_product' (index).
-   - ⚡ WHEN DK SAYS "YE PRODUCT ORDER KAR DO" / "YE BUY KARO" / "ORDER KARO" (ORDERING PROTOCOL):
-     * ALWAYS FIRST ASK DK CLEARLY FOR CONFIRMATION:
-       "Boss, order main direct place kar doon (Cash on Delivery se), ya direct Buy Link aapke WhatsApp aur Telegram par bhej doon jisse aap 1-tap me direct order page par chale jayein?"
-     * IF DK REPLIES "Tum order karo" / "Haa tum karo" / "Direct order karo" / "COD se karo":
-       -> Call 'place_ecommerce_order' (productName, price, paymentMethod: 'COD', store, productUrl).
-     * IF DK REPLIES "Link bhej do" / "Link send karo" / "WhatsApp par bhejo" / "Telegram par link do":
+   - ⚡ MANDATORY ZERO-BAN SAFETY & ORDERING PROTOCOL:
+     * When DK says "tum khud order karo" / "direct order karo" / "ye product order kar do":
+       -> FRIDAY MUST FIRST WARN DK HONESTLY & EXPLAIN THE SAFE METHOD:
+          "Boss, automated bot ordering se aapka Flipkart/Amazon account block hone ka risk ho sakta hai. Sabse safe tarika ye hai ki main aapke WhatsApp aur Telegram par 1-tap direct Order Link bhej doon jisse aap bina kisi risk ke 1 second me order kar sakein. Kya main phir bhi apne end se direct order kar doon, ya safe link bhej doon?"
+     * If DK chooses "Link bhej do" / "WhatsApp par bhejo" / "Telegram par link do" / "Safe tarika use karo":
        -> Call 'send_product_buy_link' (productName, price, store, productUrl).
+     * If DK insists "Haa tum hi order karo" / "Direct tum order place karo":
+       -> FRIDAY MUST ASK FOR APP PASSWORD / VOICE PIN BEFORE PROCEEDING:
+          "Theek hai boss, direct autonomous order confirm karne ke liye kripya apna App Password ya Voice PIN batayein."
+       -> When DK speaks the PIN:
+          -> Call 'place_ecommerce_order' (productName, price, paymentMethod: 'COD', store, productUrl, authorizationPin: pin).
    - Log expense -> Call 'track_expense_entry' or 'add_expense' (amount, category, note).
    - Expense summary -> Call 'get_daily_expense_summary' or 'get_expense_summary'.
    - Shopping deals & prices (Amazon/Flipkart/Meesho) -> Call 'search_product_deals'.
@@ -5345,8 +5349,21 @@ STYLE:
                     result = { success: false, message: `Highlight product fail hua: ${e?.message || e}` };
                   }
                 } else if (call.name === "place_ecommerce_order") {
-                  const { productName, price, paymentMethod, store, productUrl, deliveryAddress } = call.args || {};
+                  const { productName, price, paymentMethod, store, productUrl, deliveryAddress, authorizationPin } = call.args || {};
                   try {
+                    if (authorizationPin) {
+                      const pinCheck = await voiceBiometricsService.verifyVoicePin(String(authorizationPin));
+                      if (!pinCheck.valid) {
+                        result = {
+                          success: false,
+                          message: "Boss, diya gaya App Password / Voice PIN galat hai! Security authorization fail ho gaya.",
+                          instructionForFriday: "Diya gaya password/PIN galat hai. Boss ko batao ki PIN match nahi hua isliye order hold par hai.",
+                        };
+                        functionResponses.push({ id: call.id, name: call.name, response: { output: result } });
+                        continue;
+                      }
+                    }
+
                     const isCod = String(paymentMethod || "").toUpperCase().includes("COD") ||
                                   String(paymentMethod || "").toLowerCase().includes("cash");
                     const method = isCod ? "COD" : "ONLINE_UPI";
