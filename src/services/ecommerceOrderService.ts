@@ -278,6 +278,56 @@ class EcommerceOrderService {
   }
 
   /**
+   * Dispatches the direct 1-click buy link for a specific individual product to WhatsApp and Telegram
+   */
+  public async sendDirectBuyLink(options: {
+    productName: string;
+    price: number;
+    store: string;
+    productUrl: string;
+    originalPrice?: number;
+    discountPercentage?: number;
+    rating?: number;
+  }): Promise<{ success: boolean; speechMessage: string; message: string }> {
+    const { productName, price, store, productUrl, originalPrice, discountPercentage, rating } = options;
+
+    const waText = `🛍️ *DIRECT PRODUCT BUY LINK — FRIDAY AI*\n\n📦 *Product:* ${productName}\n💰 *Live Price:* *₹${price.toLocaleString("en-IN")}* ${originalPrice && originalPrice > price ? `(MRP: ₹${originalPrice.toLocaleString("en-IN")})` : ""}${discountPercentage ? ` • ${discountPercentage}% OFF` : ""}${rating ? ` • ⭐ ${rating}` : ""}\n🛒 *Store:* ${store}\n\n👉 *Tap to Buy Directly:* ${productUrl}\n\n_Boss, link par tap karte hi official ${store} page khul jayega jahan se aap 1-tap me order kar sakte hain._`;
+
+    // 1. Send to WhatsApp
+    try {
+      await sendWhatsAppUnified(this.getOwnerPhone(), waText);
+    } catch (err) {
+      console.warn("[EcommerceOrder] WhatsApp buy link dispatch error:", err);
+    }
+
+    // 2. Send to Telegram with 1-Tap Inline URL Button
+    const tgChatId = this.getBossTelegramChatId();
+    if (tgChatId) {
+      const tgText = `🛍️ *Direct Product Buy Link*\n\n📦 *${productName}*\n💰 *Price:* ₹${price.toLocaleString("en-IN")}\n🛒 *Store:* ${store}`;
+      const keyboard = {
+        inline_keyboard: [
+          [
+            { text: `🛒 Buy Now on ${store} ↗`, url: productUrl },
+          ],
+        ],
+      };
+      try {
+        await telegramBotService.sendMessage(tgChatId, tgText, keyboard);
+      } catch (err) {
+        console.warn("[EcommerceOrder] Telegram buy link dispatch error:", err);
+      }
+    }
+
+    const speechMessage = `Boss, maine "${productName}" ka direct buy link aapke WhatsApp aur Telegram par bhej diya hai! Link tap karte hi direct official product page khul jayega.`;
+
+    return {
+      success: true,
+      speechMessage,
+      message: speechMessage,
+    };
+  }
+
+  /**
    * Retrieves an order by ID
    */
   public async getOrderById(orderId: string): Promise<EcomOrder | null> {

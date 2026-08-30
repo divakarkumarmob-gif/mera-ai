@@ -15,7 +15,9 @@ import {
   Banknote,
   CheckCircle2,
   QrCode,
-  Smartphone
+  Smartphone,
+  Send,
+  Share2
 } from 'lucide-react';
 import { EcomProduct } from '@/services/productPriceService';
 
@@ -41,6 +43,7 @@ export const ProductDeckCarousel: React.FC<ProductDeckCarouselProps> = ({
   const [selectedOrderProduct, setSelectedOrderProduct] = useState<EcomProduct | null>(null);
   const [orderSubmitting, setOrderSubmitting] = useState(false);
   const [orderSuccessData, setOrderSuccessData] = useState<any | null>(null);
+  const [buyLinkSent, setBuyLinkSent] = useState(false);
 
   // Automatically scroll the currently spoken/active product card into center view
   useEffect(() => {
@@ -125,6 +128,34 @@ export const ProductDeckCarousel: React.FC<ProductDeckCarouselProps> = ({
       }
     } catch (err) {
       console.error('Order creation failed:', err);
+    } finally {
+      setOrderSubmitting(false);
+    }
+  };
+
+  const handleSendBuyLink = async () => {
+    if (!selectedOrderProduct) return;
+    setOrderSubmitting(true);
+    try {
+      const res = await fetch('/api/ecommerce/send-buy-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          productName: selectedOrderProduct.title,
+          price: selectedOrderProduct.price,
+          store: selectedOrderProduct.store,
+          productUrl: selectedOrderProduct.productUrl,
+          originalPrice: selectedOrderProduct.originalPrice,
+          discountPercentage: selectedOrderProduct.discountPercentage,
+          rating: selectedOrderProduct.rating,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setBuyLinkSent(true);
+      }
+    } catch (err) {
+      console.error('Send buy link failed:', err);
     } finally {
       setOrderSubmitting(false);
     }
@@ -298,12 +329,13 @@ export const ProductDeckCarousel: React.FC<ProductDeckCarouselProps> = ({
                         <ExternalLink className="w-3 h-3" />
                       </a>
 
-                      {/* Autonomous Order Button */}
+                      {/* Buy / Order Actions Button */}
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
                           setSelectedOrderProduct(item);
                           setOrderSuccessData(null);
+                          setBuyLinkSent(false);
                         }}
                         className={`py-1.5 px-2 rounded-xl text-[11px] font-black flex items-center justify-center gap-1 transition-all duration-200 cursor-pointer shadow-md ${
                           isActive
@@ -312,7 +344,7 @@ export const ProductDeckCarousel: React.FC<ProductDeckCarouselProps> = ({
                         }`}
                       >
                         <Zap className="w-3 h-3 fill-current" />
-                        <span>Order Now</span>
+                        <span>Order / Buy</span>
                       </button>
                     </div>
                   </div>
@@ -321,7 +353,7 @@ export const ProductDeckCarousel: React.FC<ProductDeckCarouselProps> = ({
             })}
           </div>
 
-          {/* ── INTERACTIVE ORDER & PAYMENT MODAL ─────────────────────────────────── */}
+          {/* ── INTERACTIVE ORDER & BUY LINK MODAL ─────────────────────────────────── */}
           <AnimatePresence>
             {selectedOrderProduct && (
               <motion.div
@@ -334,69 +366,127 @@ export const ProductDeckCarousel: React.FC<ProductDeckCarouselProps> = ({
                   onClick={() => {
                     setSelectedOrderProduct(null);
                     setOrderSuccessData(null);
+                    setBuyLinkSent(false);
                   }}
                   className="absolute top-3 right-3 p-1.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white"
                 >
                   <X className="w-4 h-4" />
                 </button>
 
-                {!orderSuccessData ? (
+                {!orderSuccessData && !buyLinkSent ? (
                   <div className="w-full max-w-sm">
                     <div className="w-10 h-10 rounded-2xl bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 flex items-center justify-center mx-auto mb-2">
                       <Zap className="w-5 h-5" />
                     </div>
 
                     <h3 className="text-base font-black text-white mb-1">
-                      Choose Payment Method
+                      Choose Order & Buy Option
                     </h3>
                     <p className="text-xs text-slate-400 mb-1 line-clamp-1">
                       {selectedOrderProduct.title}
                     </p>
-                    <p className="text-xl font-black text-cyan-300 mb-4">
+                    <p className="text-xl font-black text-cyan-300 mb-3">
                       Total: ₹{selectedOrderProduct.price.toLocaleString('en-IN')}
                     </p>
 
-                    <div className="space-y-2.5">
-                      {/* Option 1: Cash on Delivery (COD) */}
+                    <div className="space-y-2">
+                      {/* Option 1: Send Direct Buy Link to WhatsApp & Telegram */}
+                      <button
+                        disabled={orderSubmitting}
+                        onClick={handleSendBuyLink}
+                        className="w-full p-2.5 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-700 hover:from-purple-500 hover:to-indigo-600 text-white font-bold text-xs flex items-center justify-between border border-purple-400/40 shadow-lg cursor-pointer transition-all active:scale-98 disabled:opacity-50"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <Send className="w-4 h-4 text-purple-300" />
+                          <div className="text-left">
+                            <div className="font-extrabold text-white">Send Buy Link to WhatsApp & TG</div>
+                            <div className="text-[10px] text-purple-200">100% Safe • Direct Official Page Link</div>
+                          </div>
+                        </div>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-950/60 border border-purple-400/40 font-mono font-black text-purple-300">
+                          SAFE 0%
+                        </span>
+                      </button>
+
+                      {/* Option 2: Cash on Delivery (COD) */}
                       <button
                         disabled={orderSubmitting}
                         onClick={() => handlePlaceOrder('COD')}
-                        className="w-full p-3 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white font-bold text-xs flex items-center justify-between border border-emerald-400/40 shadow-lg cursor-pointer transition-all active:scale-98 disabled:opacity-50"
+                        className="w-full p-2.5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white font-bold text-xs flex items-center justify-between border border-emerald-400/40 shadow-lg cursor-pointer transition-all active:scale-98 disabled:opacity-50"
                       >
                         <div className="flex items-center gap-2.5">
-                          <Banknote className="w-5 h-5 text-emerald-300" />
+                          <Banknote className="w-4 h-4 text-emerald-300" />
                           <div className="text-left">
                             <div className="font-extrabold text-white">Cash on Delivery (COD)</div>
                             <div className="text-[10px] text-emerald-200">Pay cash or UPI at delivery time</div>
                           </div>
                         </div>
                         <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950/60 border border-emerald-400/40 font-mono font-black">
-                          100% AUTO
+                          AUTO
                         </span>
                       </button>
 
-                      {/* Option 2: Online UPI Payment (PhonePe / GPay / Paytm) */}
+                      {/* Option 3: Online UPI Payment (PhonePe / GPay / Paytm) */}
                       <button
                         disabled={orderSubmitting}
                         onClick={() => handlePlaceOrder('ONLINE_UPI')}
-                        className="w-full p-3 rounded-2xl bg-gradient-to-r from-cyan-600 to-blue-700 hover:from-cyan-500 hover:to-blue-600 text-white font-bold text-xs flex items-center justify-between border border-cyan-400/40 shadow-lg cursor-pointer transition-all active:scale-98 disabled:opacity-50"
+                        className="w-full p-2.5 rounded-2xl bg-gradient-to-r from-cyan-600 to-blue-700 hover:from-cyan-500 hover:to-blue-600 text-white font-bold text-xs flex items-center justify-between border border-cyan-400/40 shadow-lg cursor-pointer transition-all active:scale-98 disabled:opacity-50"
                       >
                         <div className="flex items-center gap-2.5">
-                          <CreditCard className="w-5 h-5 text-cyan-300" />
+                          <CreditCard className="w-4 h-4 text-cyan-300" />
                           <div className="text-left">
                             <div className="font-extrabold text-white">Online UPI (PhonePe / GPay)</div>
-                            <div className="text-[10px] text-cyan-200">Instant links to WhatsApp & Telegram</div>
+                            <div className="text-[10px] text-cyan-200">Instant deep links to WhatsApp & TG</div>
                           </div>
                         </div>
                         <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-950/60 border border-cyan-400/40 font-mono font-black">
-                          FAST
+                          UPI
                         </span>
                       </button>
                     </div>
 
-                    <p className="text-[10px] text-slate-500 mt-3">
-                      ⚡ WhatsApp & Telegram alerts will be sent automatically to Boss.
+                    <p className="text-[10px] text-slate-500 mt-2.5">
+                      ⚡ Instant confirmation & tracking receipt will be sent to Boss.
                     </p>
+                  </div>
+                ) : buyLinkSent ? (
+                  <div className="w-full max-w-sm">
+                    <div className="w-12 h-12 rounded-full bg-purple-500/20 border border-purple-500/40 text-purple-400 flex items-center justify-center mx-auto mb-2 animate-bounce">
+                      <Send className="w-6 h-6" />
+                    </div>
+
+                    <h3 className="text-base font-black text-white mb-1">
+                      Buy Link Dispatched!
+                    </h3>
+                    <p className="text-xs text-slate-300 mb-3">
+                      Direct product buy link has been sent to your <b>WhatsApp</b> and <b>Telegram</b>!
+                    </p>
+
+                    <div className="bg-slate-900 border border-purple-500/30 rounded-xl p-3 mb-3 text-left">
+                      <div className="flex items-center justify-between gap-2 mb-1.5">
+                        <span className="text-xs font-bold text-white truncate">{selectedOrderProduct.title}</span>
+                        <span className="text-xs font-black text-purple-300 shrink-0">₹{selectedOrderProduct.price.toLocaleString('en-IN')}</span>
+                      </div>
+                      <a
+                        href={selectedOrderProduct.productUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-full py-1.5 px-3 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold text-center flex items-center justify-center gap-1 mt-2"
+                      >
+                        <span>Open on {selectedOrderProduct.store} Now</span>
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                    </div>
+
+                    <button
+                      onClick={() => {
+                        setSelectedOrderProduct(null);
+                        setBuyLinkSent(false);
+                      }}
+                      className="w-full py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold"
+                    >
+                      Done
+                    </button>
                   </div>
                 ) : (
                   <div className="w-full max-w-sm">
@@ -452,6 +542,7 @@ export const ProductDeckCarousel: React.FC<ProductDeckCarouselProps> = ({
                       onClick={() => {
                         setSelectedOrderProduct(null);
                         setOrderSuccessData(null);
+                        setBuyLinkSent(false);
                       }}
                       className="w-full py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold"
                     >

@@ -385,6 +385,27 @@ async function startServer() {
     }
   });
 
+  app.post("/api/ecommerce/send-buy-link", async (req, res) => {
+    try {
+      const { productName, price, store, productUrl, originalPrice, discountPercentage, rating } = req.body;
+      if (!productUrl || !productName) {
+        return res.status(400).json({ ok: false, error: "productUrl and productName are required" });
+      }
+      const result = await ecommerceOrderService.sendDirectBuyLink({
+        productName: String(productName),
+        price: Number(price) || 0,
+        store: String(store || "Online Store"),
+        productUrl: String(productUrl),
+        originalPrice: originalPrice ? Number(originalPrice) : undefined,
+        discountPercentage: discountPercentage ? Number(discountPercentage) : undefined,
+        rating: rating ? Number(rating) : undefined,
+      });
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "Failed to send buy link" });
+    }
+  });
+
   // ── Public Web UPI 1-Click Pay & QR Portal ─────────────────────────────────
   app.get("/pay/:orderId", async (req, res) => {
     try {
@@ -3678,6 +3699,20 @@ STYLE:
           },
         },
         {
+          name: "send_product_buy_link",
+          description: "Send direct 1-click single product purchase/buy link directly to Boss's WhatsApp and Telegram with an inline buy button. Use when DK says 'is product ka buy link bhejo', 'link WhatsApp par send karo', 'direct link bhej do', etc.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              productName: { type: "STRING", description: "The product title" },
+              price: { type: "NUMBER", description: "The product price in INR" },
+              store: { type: "STRING", description: "The store name ('Amazon', 'Flipkart', 'Meesho')" },
+              productUrl: { type: "STRING", description: "The direct individual product page URL" },
+            },
+            required: ["productName", "price", "store", "productUrl"],
+          },
+        },
+        {
           name: "analyze_document",
           description: "Analyze a PDF, resume, contract, research paper, or technical specification. Use when DK asks to analyze, review, or summarize a document.",
           parameters: {
@@ -5345,6 +5380,23 @@ STYLE:
                     };
                   } catch (e: any) {
                     result = { success: false, message: `Login window open karne me error: ${e?.message || e}` };
+                  }
+                } else if (call.name === "send_product_buy_link") {
+                  const { productName, price, store, productUrl } = call.args || {};
+                  try {
+                    const linkRes = await ecommerceOrderService.sendDirectBuyLink({
+                      productName: String(productName || "Product"),
+                      price: Number(price) || 0,
+                      store: String(store || "Store"),
+                      productUrl: String(productUrl || ""),
+                    });
+                    result = {
+                      success: true,
+                      message: linkRes.speechMessage,
+                      instructionForFriday: linkRes.speechMessage,
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `Buy link dispatch error: ${e?.message || e}` };
                   }
                 } else if (call.name === "get_github_repo_info") {
                   const { owner, repo } = call.args || {};
