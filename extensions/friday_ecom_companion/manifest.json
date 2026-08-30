@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "FRIDAY AI — E-Commerce Auto-Buyer Companion",
+  "version": "1.0.0",
+  "description": "Zero-ban sidecar bridge for FRIDAY AI to execute assisted 1-click orders inside your active Chrome browser.",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "*://*.flipkart.com/*",
+    "*://*.amazon.in/*",
+    "*://*.meesho.com/*",
+    "http://127.0.0.1:5000/*",
+    "http://localhost:5000/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.flipkart.com/*",
+        "*://*.amazon.in/*",
+        "*://*.meesho.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "FRIDAY AI Companion"
+  }
+}

@@ -2126,7 +2126,16 @@ async function startServer() {
    - Send WhatsApp to contact -> Call 'send_whatsapp_to_contact' (contactNameOrPhone, messageText).
    - Read incoming WhatsApp messages -> Call 'get_whatsapp_messages' (messageType: 'personal'|'group'|'all').
    - Send Telegram message / to contact -> Call 'send_telegram_to_contact' or 'send_telegram_message'.
-4. 💰 EXPENSES & DEALS:
+4. 🛒 E-COMMERCE SHOPPING, ORDERING & BUY-LINK MANDATE (FLIPKART, AMAZON, MEESHO):
+   - Price comparison & horizontal cards deck ("football ka price batao", "laptop prices compare karo") -> Call 'compare_product_prices' (query).
+   - Advance/highlight product in deck ("agla dikhao", "dusra product", "next product", "2nd wala") -> Call 'highlight_ecommerce_product' (index).
+   - ⚡ WHEN DK SAYS "YE PRODUCT ORDER KAR DO" / "YE BUY KARO" / "ORDER KARO" (ORDERING PROTOCOL):
+     * ALWAYS FIRST ASK DK CLEARLY FOR CONFIRMATION:
+       "Boss, order main direct place kar doon (Cash on Delivery se), ya direct Buy Link aapke WhatsApp aur Telegram par bhej doon jisse aap 1-tap me direct order page par chale jayein?"
+     * IF DK REPLIES "Tum order karo" / "Haa tum karo" / "Direct order karo" / "COD se karo":
+       -> Call 'place_ecommerce_order' (productName, price, paymentMethod: 'COD', store, productUrl).
+     * IF DK REPLIES "Link bhej do" / "Link send karo" / "WhatsApp par bhejo" / "Telegram par link do":
+       -> Call 'send_product_buy_link' (productName, price, store, productUrl).
    - Log expense -> Call 'track_expense_entry' or 'add_expense' (amount, category, note).
    - Expense summary -> Call 'get_daily_expense_summary' or 'get_expense_summary'.
    - Shopping deals & prices (Amazon/Flipkart/Meesho) -> Call 'search_product_deals'.
