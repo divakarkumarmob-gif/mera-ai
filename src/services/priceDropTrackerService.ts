@@ -1,6 +1,12 @@
 import { db } from "./firebaseAdmin";
 import { sendWhatsAppUnified } from "./whatsappService";
 
+export interface PriceHistoryPoint {
+  price: number;
+  timestamp: string;
+  store?: string;
+}
+
 export interface TrackedProductItem {
   id: string;
   productName: string;
@@ -11,6 +17,8 @@ export interface TrackedProductItem {
   priceDropAmount: number;
   lastChecked: string;
   isAlertTriggered: boolean;
+  store?: string;
+  priceHistory?: PriceHistoryPoint[];
 }
 
 const priceCollection = () => db.collection("price_trackers");
@@ -18,12 +26,37 @@ const priceCollection = () => db.collection("price_trackers");
 class PriceDropTrackerService {
   // In-memory cache for fast access and offline resilience
   private inMemoryTrackers: Map<string, TrackedProductItem> = new Map();
+  private autoTrackerHandle: NodeJS.Timeout | null = null;
+  private isCheckingLive = false;
+
+  constructor() {
+    // Load initial products from Firestore
+    this.getTrackedProducts().catch(() => {});
+  }
+
+  /**
+   * Start periodic background price checking (default: every 1 hour)
+   */
+  public startAutoTracker(intervalMinutes = 60) {
+    if (this.autoTrackerHandle) return;
+    const intervalMs = Math.max(15, intervalMinutes) * 60 * 1000;
+    this.autoTrackerHandle = setInterval(() => this.checkAllPricesLive(), intervalMs);
+    console.log(`[PriceTracker] Auto price tracking scheduler started (running every ${intervalMinutes} mins)`);
+  }
+
+  public stopAutoTracker() {
+    if (this.autoTrackerHandle) {
+      clearInterval(this.autoTrackerHandle);
+      this.autoTrackerHandle = null;
+    }
+  }
 
   public async trackProduct(
     productName: string,
     currentPrice: number,
     targetPrice?: number,
-    productUrl?: string
+    productUrl?: string,
+    store?: string
   ): Promise<{ success: boolean; item: TrackedProductItem; message: string }> {
     const name = (productName || "Product").trim();
     const curPrice = Math.abs(Number(currentPrice) || 0);
@@ -42,6 +75,14 @@ class PriceDropTrackerService {
       priceDropAmount: 0,
       lastChecked: nowStr,
       isAlertTriggered: false,
+      store: store || "MultiStore",
+      priceHistory: [
+        {
+          price: curPrice,
+          timestamp: nowStr,
+          store: store || "Initial"
+        }
+      ]
     };
 
     // Store in memory
@@ -53,7 +94,7 @@ class PriceDropTrackerService {
       console.warn("[PriceTracker] Firestore write note (cached locally):", e?.message || e);
     }
 
-    const message = `Boss, "${name}" price tracker me add ho gaya hai! (Current Price: ₹${curPrice}, Target Alert: ₹${tgtPrice}). Jaise hi price drop hoga, main alert de dungi!`;
+    const message = `Boss, "${name}" price tracker me add ho gaya hai! (Current Price: ₹${curPrice}, Target Alert: ₹${tgtPrice}). Jaise hi price drop hoga, main WhatsApp alert de dungi!`;
 
     return {
       success: true,
@@ -93,7 +134,8 @@ class PriceDropTrackerService {
 
   public async checkAndUpdatePrice(
     productId: string,
-    newPrice: number
+    newPrice: number,
+    storeName?: string
   ): Promise<{ success: boolean; dropped: boolean; priceDiff: number; message: string }> {
     const cleanId = (productId || "").trim();
     let item = this.inMemoryTrackers.get(cleanId);
@@ -119,6 +161,18 @@ class PriceDropTrackerService {
     item.currentPrice = price;
     item.priceDropAmount = item.initialPrice - price;
     item.lastChecked = nowStr;
+    if (storeName) item.store = storeName;
+
+    if (!item.priceHistory) item.priceHistory = [];
+    item.priceHistory.push({
+      price,
+      timestamp: nowStr,
+      store: storeName || item.store
+    });
+    // Keep max 50 price history logs
+    if (item.priceHistory.length > 50) {
+      item.priceHistory = item.priceHistory.slice(-50);
+    }
 
     let alertSent = false;
     let dropped = false;
@@ -128,7 +182,7 @@ class PriceDropTrackerService {
       dropped = true;
 
       // Dispatch real WhatsApp Alert
-      const alertMsg = `🏷️ *PRICE DROP ALERT — FRIDAY AI*\n\n🔥 *${item.productName}*\n💰 *New Price:* ₹${price}\n🎯 *Target:* ₹${item.targetPrice}\n📉 *Savings:* ₹${item.initialPrice - price}\n${item.productUrl ? `🔗 *Link:* ${item.productUrl}\n` : ""}\n_Boss, jaldi check karein deal live hai!_`;
+      const alertMsg = `🏷️ *PRICE DROP ALERT — FRIDAY AI*\n\n🔥 *${item.productName}*\n💰 *New Lowest Price:* ₹${price.toLocaleString("en-IN")}\n🎯 *Target:* ₹${item.targetPrice.toLocaleString("en-IN")}\n📉 *Total Savings:* ₹${(item.initialPrice - price).toLocaleString("en-IN")}\n🛒 *Store:* ${storeName || item.store || "Online Store"}\n${item.productUrl ? `🔗 *Link:* ${item.productUrl}\n` : ""}\n_Boss, deal live hai! Jaldi order karein._`;
 
       const targetPhone = process.env.OWNER_WHATSAPP_NUMBER || process.env.BOSS_WHATSAPP_NUMBER || "919999999999";
       try {
@@ -167,6 +221,45 @@ class PriceDropTrackerService {
     } catch {
       return true;
     }
+  }
+
+  /**
+   * Scrapes live prices for all tracked products using productPriceService and triggers alerts
+   */
+  public async checkAllPricesLive(): Promise<{ success: boolean; updatedCount: number; alertsTriggered: number }> {
+    if (this.isCheckingLive) return { success: false, updatedCount: 0, alertsTriggered: 0 };
+    this.isCheckingLive = true;
+
+    const { productPriceService } = await import("./productPriceService");
+    const { products } = await this.getTrackedProducts();
+    let updatedCount = 0;
+    let alertsTriggered = 0;
+
+    try {
+      for (const item of products) {
+        try {
+          const query = item.productName;
+          const res = await productPriceService.compareProductAcrossStores(query);
+          if (res.bestDeal && res.bestDeal.product.price > 0) {
+            const livePrice = res.bestDeal.product.price;
+            const storeName = res.bestDeal.store;
+            const updateRes = await this.checkAndUpdatePrice(item.id, livePrice, storeName);
+            updatedCount++;
+            if (updateRes.dropped) alertsTriggered++;
+          }
+        } catch (err) {
+          console.warn(`[PriceTracker] Live price check failed for ${item.productName}:`, err);
+        }
+      }
+    } finally {
+      this.isCheckingLive = false;
+    }
+
+    return {
+      success: true,
+      updatedCount,
+      alertsTriggered
+    };
   }
 }
 

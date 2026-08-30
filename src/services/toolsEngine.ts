@@ -535,6 +535,21 @@ class ToolsEngine {
     const { fridayMessengerService } = await import("./fridayMessengerService");
     return await fridayMessengerService.setContactRole(contactId, role);
   }
+
+  /**
+   * Multi-Store E-Commerce Price Comparison (Flipkart, Amazon, Meesho)
+   */
+  public async compareProductPrices(productName: string) {
+    const { productPriceService } = await import("./productPriceService");
+    return await productPriceService.compareProductAcrossStores(productName);
+  }
+
+  public async searchStoreProduct(query: string, store: "amazon" | "flipkart" | "meesho" = "amazon") {
+    const { productPriceService } = await import("./productPriceService");
+    if (store === "flipkart") return await productPriceService.searchFlipkart(query);
+    if (store === "meesho") return await productPriceService.searchMeesho(query);
+    return await productPriceService.searchAmazon(query);
+  }
 }
 
 export const toolsEngine = new ToolsEngine();

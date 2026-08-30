@@ -18,6 +18,8 @@ import { mobileNotificationService } from '@/utils/mobileNotificationService';
 import { MusicCapsule } from './MusicCapsule';
 import { MusicStudioModal } from './MusicStudioModal';
 import { SongPreviewModal, PreviewCandidate } from './SongPreviewModal';
+import { ProductDeckCarousel } from './ProductDeckCarousel';
+import { EcomProduct } from '@/services/productPriceService';
 import AppAccessSection from './AppAccessSection';
 
 interface LiveAIInterfaceProps {
@@ -669,6 +671,9 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const [previewQuery, setPreviewQuery] = useState('');
     const [previewCandidates, setPreviewCandidates] = useState<PreviewCandidate[]>([]);
     const [activePreviewIndex, setActivePreviewIndex] = useState(0);
+    const [ecommerceDeckProducts, setEcommerceDeckProducts] = useState<EcomProduct[]>([]);
+    const [ecommerceActiveIndex, setEcommerceActiveIndex] = useState<number>(0);
+    const [ecommerceQuery, setEcommerceQuery] = useState<string>('');
     const fileInputRef = useRef<HTMLInputElement>(null);
     const captionBoxRef = useRef<HTMLDivElement>(null);
     const userScrolledUpRef = useRef(false);
@@ -1931,6 +1936,16 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     } else if (setting === 'music') {
                         if (state === false) stopMusicPlayback();
                     }
+                } else if (msg.type === 'ecommerce_product_deck') {
+                    if (msg.products && Array.isArray(msg.products)) {
+                        setEcommerceDeckProducts(msg.products);
+                        setEcommerceActiveIndex(typeof msg.activeIndex === 'number' ? msg.activeIndex : 0);
+                        setEcommerceQuery(msg.query || '');
+                    }
+                } else if (msg.type === 'ecommerce_highlight_index') {
+                    setEcommerceActiveIndex(typeof msg.index === 'number' ? msg.index : 0);
+                } else if (msg.type === 'ecommerce_close_deck') {
+                    setEcommerceDeckProducts([]);
                 } else if (msg.type === 'session_reconnecting') {
                     isInitializedRef.current = false;
                     isAiSpeaking.current = false;
@@ -3197,6 +3212,17 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 onNextPreview={() => setActivePreviewIndex(prev => (previewCandidates.length > 0 ? (prev + 1) % previewCandidates.length : 0))}
                 onSelectCandidate={playConfirmedCandidate}
             />
+
+            {/* Interactive Horizontal E-Commerce Product Deck */}
+            {ecommerceDeckProducts.length > 0 && (
+                <ProductDeckCarousel
+                    products={ecommerceDeckProducts}
+                    activeIndex={ecommerceActiveIndex}
+                    query={ecommerceQuery}
+                    onClose={() => setEcommerceDeckProducts([])}
+                    onSelectProduct={(idx) => setEcommerceActiveIndex(idx)}
+                />
+            )}
 
             {/* Background YouTube Audio Player for 100% Reliable Background Streaming */}
             {nowPlayingMusic?.videoId && (

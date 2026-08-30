@@ -44,6 +44,8 @@ import { networkDeviceScannerService } from "./src/services/networkDeviceScanner
 import { jioSaavnService } from "./src/services/jioSaavnService";
 import { youtubeMusicService } from "./src/services/youtubeMusicService";
 import { calendarEventService } from "./src/services/calendarEventService";
+import { productPriceService } from "./src/services/productPriceService";
+import { priceDropTrackerService } from "./src/services/priceDropTrackerService";
 
 const PORT = Number(process.env.PORT) || 3000;
 const isProduction = process.env.NODE_ENV === "production";
@@ -200,6 +202,86 @@ async function startServer() {
       res.json({ ok: true });
     } catch (e) {
       res.status(500).json({ error: "failed_to_save_vault" });
+    }
+  });
+
+  // ── Multi-Store E-Commerce Price Comparison & Scraping Endpoints ───────────
+  app.get("/api/ecommerce/compare", async (req, res) => {
+    try {
+      const query = (req.query.q as string || req.query.query as string || "").trim();
+      if (!query) {
+        return res.status(400).json({ ok: false, error: "Search query 'q' is required" });
+      }
+      const result = await productPriceService.compareProductAcrossStores(query);
+      res.json({ ok: true, data: result });
+    } catch (e: any) {
+      console.error("[ECommerce] Compare price error:", e);
+      res.status(500).json({ ok: false, error: e?.message || "Failed to compare prices" });
+    }
+  });
+
+  app.get("/api/ecommerce/search", async (req, res) => {
+    try {
+      const query = (req.query.q as string || "").trim();
+      const store = (req.query.store as string || "all").toLowerCase();
+      if (!query) {
+        return res.status(400).json({ ok: false, error: "Search query 'q' is required" });
+      }
+      if (store === "amazon") {
+        const items = await productPriceService.searchAmazon(query);
+        return res.json({ ok: true, store: "amazon", items });
+      } else if (store === "flipkart") {
+        const items = await productPriceService.searchFlipkart(query);
+        return res.json({ ok: true, store: "flipkart", items });
+      } else if (store === "meesho") {
+        const items = await productPriceService.searchMeesho(query);
+        return res.json({ ok: true, store: "meesho", items });
+      }
+      const result = await productPriceService.compareProductAcrossStores(query);
+      res.json({ ok: true, data: result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "Failed to search products" });
+    }
+  });
+
+  app.post("/api/ecommerce/track", async (req, res) => {
+    try {
+      const { productName, currentPrice, targetPrice, productUrl, store } = req.body;
+      if (!productName || !currentPrice) {
+        return res.status(400).json({ ok: false, error: "productName and currentPrice are required" });
+      }
+      const result = await priceDropTrackerService.trackProduct(productName, currentPrice, targetPrice, productUrl, store);
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "Failed to track product" });
+    }
+  });
+
+  app.get("/api/ecommerce/tracked", async (_req, res) => {
+    try {
+      const result = await priceDropTrackerService.getTrackedProducts();
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "Failed to get tracked products" });
+    }
+  });
+
+  app.delete("/api/ecommerce/tracked/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const success = await priceDropTrackerService.deleteTrackedProduct(id);
+      res.json({ success, message: success ? "Product tracker deleted." : "Failed to delete" });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "Failed to delete tracker" });
+    }
+  });
+
+  app.post("/api/ecommerce/check-now", async (_req, res) => {
+    try {
+      const result = await priceDropTrackerService.checkAllPricesLive();
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "Failed to check live prices" });
     }
   });
 
@@ -3383,6 +3465,28 @@ STYLE:
           },
         },
         {
+          name: "compare_product_prices",
+          description: "Compare live product prices across Flipkart, Amazon India, and Meesho in real-time and display a horizontal interactive product card deck on the screen. Use when DK/user asks 'football ka price kya hai', 'laptop ka rate batao', 'iPhone 15 Flipkart vs Amazon', 'product compare karo', etc. When called, you MUST speak about product #1 first.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              query: { type: "STRING", description: "The product name to search and compare (e.g. 'football', 'iPhone 15', 'gaming laptop')" },
+            },
+            required: ["query"],
+          },
+        },
+        {
+          name: "highlight_ecommerce_product",
+          description: "Advance or highlight a specific product in the horizontal product deck on the dashboard. Use when DK/user says 'ye pasand nahi aaya, dusra dikhao', 'next product', 'agla dikhao', '2nd product ka batao', or asks about product 2, 3, etc. You must then speak about that highlighted product's price, discount, and store details.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              index: { type: "NUMBER", description: "0-based index of the product to highlight in the deck (e.g., 1 for 2nd product, 2 for 3rd product)" },
+            },
+            required: ["index"],
+          },
+        },
+        {
           name: "get_daily_work_digest",
           description: "Generate end-of-day daily work, coding, and productivity activity digest with overall grade. Use when DK says 'Aaj ka work report do', 'Daily productivity digest batao'.",
           parameters: {
@@ -4893,6 +4997,60 @@ STYLE:
                     result = await publicApisService.getGithubUserInfo(String(username || ""));
                   } catch (e: any) {
                     result = { success: false, message: `GitHub user fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "compare_product_prices") {
+                  const { query } = call.args || {};
+                  const searchQuery = String(query || "").trim();
+                  try {
+                    const compRes = await productPriceService.compareProductAcrossStores(searchQuery);
+                    const allProducts = [
+                      ...(compRes.stores.flipkart || []),
+                      ...(compRes.stores.amazon || []),
+                      ...(compRes.stores.meesho || [])
+                    ].filter(p => p.price > 0);
+
+                    // Sort so best deals are at the front
+                    allProducts.sort((a, b) => a.price - b.price);
+
+                    // Send interactive horizontal carousel deck to frontend UI
+                    if (allProducts.length > 0) {
+                      safeSend(JSON.stringify({
+                        type: "ecommerce_product_deck",
+                        products: allProducts,
+                        activeIndex: 0,
+                        query: searchQuery
+                      }));
+                    }
+
+                    result = {
+                      success: true,
+                      query: searchQuery,
+                      totalProducts: allProducts.length,
+                      bestDeal: compRes.bestDeal,
+                      topProduct: allProducts.length > 0 ? allProducts[0] : null,
+                      allProducts: allProducts.slice(0, 8),
+                      instructionForFriday: allProducts.length > 0
+                        ? `Product #1 ("${allProducts[0].title}" on ${allProducts[0].store} for ₹${allProducts[0].price}) is currently HIGHLIGHTED on the user's screen dashboard. Speak its price, store, and discount first. If user says 'pasand nahi aaya', 'dusra dikhao', or asks for next, call highlight_ecommerce_product with index 1.`
+                        : `No live products found for "${searchQuery}". Tell Boss politely.`
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `Price comparison fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "highlight_ecommerce_product") {
+                  const { index } = call.args || {};
+                  const targetIdx = Math.max(0, Number(index) || 0);
+                  try {
+                    safeSend(JSON.stringify({
+                      type: "ecommerce_highlight_index",
+                      index: targetIdx
+                    }));
+                    result = {
+                      success: true,
+                      highlightedIndex: targetIdx,
+                      instructionForFriday: `Product at position #${targetIdx + 1} is now HIGHLIGHTED on screen. Speak this product's title, price, and store details clearly to the user.`
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `Highlight product fail hua: ${e?.message || e}` };
                   }
                 } else if (call.name === "get_github_repo_info") {
                   const { owner, repo } = call.args || {};
@@ -7190,6 +7348,8 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
 
   httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    // Start automated background price tracking scheduler (every 60 mins)
+    priceDropTrackerService.startAutoTracker(60);
   });
 }
 
