@@ -1,6 +1,22 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, ExternalLink, Star, Sparkles, Volume2, ShoppingBag, Tag, ChevronRight, ChevronLeft } from 'lucide-react';
+import {
+  X,
+  ExternalLink,
+  Star,
+  Sparkles,
+  Volume2,
+  ShoppingBag,
+  Tag,
+  ChevronRight,
+  ChevronLeft,
+  Zap,
+  CreditCard,
+  Banknote,
+  CheckCircle2,
+  QrCode,
+  Smartphone
+} from 'lucide-react';
 import { EcomProduct } from '@/services/productPriceService';
 
 interface ProductDeckCarouselProps {
@@ -20,6 +36,11 @@ export const ProductDeckCarousel: React.FC<ProductDeckCarouselProps> = ({
 }) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const cardRefs = useRef<(HTMLDivElement | null)[]>([]);
+
+  // State for interactive order & payment modal
+  const [selectedOrderProduct, setSelectedOrderProduct] = useState<EcomProduct | null>(null);
+  const [orderSubmitting, setOrderSubmitting] = useState(false);
+  const [orderSuccessData, setOrderSuccessData] = useState<any | null>(null);
 
   // Automatically scroll the currently spoken/active product card into center view
   useEffect(() => {
@@ -79,6 +100,33 @@ export const ProductDeckCarousel: React.FC<ProductDeckCarouselProps> = ({
   const handleScrollRight = () => {
     if (scrollContainerRef.current) {
       scrollContainerRef.current.scrollBy({ left: 280, behavior: 'smooth' });
+    }
+  };
+
+  const handlePlaceOrder = async (method: 'COD' | 'ONLINE_UPI') => {
+    if (!selectedOrderProduct) return;
+    setOrderSubmitting(true);
+    try {
+      const res = await fetch('/api/ecommerce/order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          productName: selectedOrderProduct.title,
+          price: selectedOrderProduct.price,
+          paymentMethod: method,
+          store: selectedOrderProduct.store,
+          productUrl: selectedOrderProduct.productUrl,
+          imageUrl: selectedOrderProduct.imageUrl,
+        }),
+      });
+      const data = await res.json();
+      if (data.success && data.order) {
+        setOrderSuccessData(data.order);
+      }
+    } catch (err) {
+      console.error('Order creation failed:', err);
+    } finally {
+      setOrderSubmitting(false);
     }
   };
 
@@ -224,7 +272,7 @@ export const ProductDeckCarousel: React.FC<ProductDeckCarouselProps> = ({
                     </h4>
                   </div>
 
-                  {/* Bottom: Price and Buy Link Button */}
+                  {/* Bottom: Price and Action Buttons */}
                   <div className="pt-2 border-t border-white/10 mt-auto">
                     <div className="flex items-baseline gap-2 mb-2">
                       <span className="text-lg font-black text-cyan-300">
@@ -237,26 +285,183 @@ export const ProductDeckCarousel: React.FC<ProductDeckCarouselProps> = ({
                       )}
                     </div>
 
-                    {/* Direct Store Link Button */}
-                    <a
-                      href={item.productUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                      className={`w-full py-1.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all duration-200 cursor-pointer shadow-md ${
-                        isActive
-                          ? 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-extrabold shadow-[0_0_15px_rgba(6,182,212,0.4)]'
-                          : 'bg-slate-800 hover:bg-slate-700 text-white border border-white/10'
-                      }`}
-                    >
-                      <span>Buy on {item.store}</span>
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </a>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {/* Direct Store Link Button */}
+                      <a
+                        href={item.productUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="py-1.5 px-2 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 transition-all duration-200 cursor-pointer bg-slate-800 hover:bg-slate-700 text-white border border-white/10"
+                      >
+                        <span>View</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+
+                      {/* Autonomous Order Button */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedOrderProduct(item);
+                          setOrderSuccessData(null);
+                        }}
+                        className={`py-1.5 px-2 rounded-xl text-[11px] font-black flex items-center justify-center gap-1 transition-all duration-200 cursor-pointer shadow-md ${
+                          isActive
+                            ? 'bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 shadow-[0_0_12px_rgba(16,185,129,0.5)]'
+                            : 'bg-emerald-600/90 hover:bg-emerald-500 text-white border border-emerald-400/40'
+                        }`}
+                      >
+                        <Zap className="w-3 h-3 fill-current" />
+                        <span>Order Now</span>
+                      </button>
+                    </div>
                   </div>
                 </motion.div>
               );
             })}
           </div>
+
+          {/* ── INTERACTIVE ORDER & PAYMENT MODAL ─────────────────────────────────── */}
+          <AnimatePresence>
+            {selectedOrderProduct && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="absolute inset-0 bg-slate-950/95 backdrop-blur-xl z-30 flex flex-col justify-center items-center p-4 text-center"
+              >
+                <button
+                  onClick={() => {
+                    setSelectedOrderProduct(null);
+                    setOrderSuccessData(null);
+                  }}
+                  className="absolute top-3 right-3 p-1.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+
+                {!orderSuccessData ? (
+                  <div className="w-full max-w-sm">
+                    <div className="w-10 h-10 rounded-2xl bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 flex items-center justify-center mx-auto mb-2">
+                      <Zap className="w-5 h-5" />
+                    </div>
+
+                    <h3 className="text-base font-black text-white mb-1">
+                      Choose Payment Method
+                    </h3>
+                    <p className="text-xs text-slate-400 mb-1 line-clamp-1">
+                      {selectedOrderProduct.title}
+                    </p>
+                    <p className="text-xl font-black text-cyan-300 mb-4">
+                      Total: ₹{selectedOrderProduct.price.toLocaleString('en-IN')}
+                    </p>
+
+                    <div className="space-y-2.5">
+                      {/* Option 1: Cash on Delivery (COD) */}
+                      <button
+                        disabled={orderSubmitting}
+                        onClick={() => handlePlaceOrder('COD')}
+                        className="w-full p-3 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white font-bold text-xs flex items-center justify-between border border-emerald-400/40 shadow-lg cursor-pointer transition-all active:scale-98 disabled:opacity-50"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <Banknote className="w-5 h-5 text-emerald-300" />
+                          <div className="text-left">
+                            <div className="font-extrabold text-white">Cash on Delivery (COD)</div>
+                            <div className="text-[10px] text-emerald-200">Pay cash or UPI at delivery time</div>
+                          </div>
+                        </div>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950/60 border border-emerald-400/40 font-mono font-black">
+                          100% AUTO
+                        </span>
+                      </button>
+
+                      {/* Option 2: Online UPI Payment (PhonePe / GPay / Paytm) */}
+                      <button
+                        disabled={orderSubmitting}
+                        onClick={() => handlePlaceOrder('ONLINE_UPI')}
+                        className="w-full p-3 rounded-2xl bg-gradient-to-r from-cyan-600 to-blue-700 hover:from-cyan-500 hover:to-blue-600 text-white font-bold text-xs flex items-center justify-between border border-cyan-400/40 shadow-lg cursor-pointer transition-all active:scale-98 disabled:opacity-50"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <CreditCard className="w-5 h-5 text-cyan-300" />
+                          <div className="text-left">
+                            <div className="font-extrabold text-white">Online UPI (PhonePe / GPay)</div>
+                            <div className="text-[10px] text-cyan-200">Instant links to WhatsApp & Telegram</div>
+                          </div>
+                        </div>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-950/60 border border-cyan-400/40 font-mono font-black">
+                          FAST
+                        </span>
+                      </button>
+                    </div>
+
+                    <p className="text-[10px] text-slate-500 mt-3">
+                      ⚡ WhatsApp & Telegram alerts will be sent automatically to Boss.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="w-full max-w-sm">
+                    <div className="w-12 h-12 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center mx-auto mb-2 animate-bounce">
+                      <CheckCircle2 className="w-6 h-6" />
+                    </div>
+
+                    <h3 className="text-base font-black text-white mb-1">
+                      {orderSuccessData.paymentMethod === 'COD' ? 'Order Confirmed!' : 'Payment Links Dispatched!'}
+                    </h3>
+                    <p className="text-xs text-slate-300 mb-2">
+                      Order ID: <b className="text-cyan-300 font-mono">#{orderSuccessData.id}</b>
+                    </p>
+
+                    {orderSuccessData.paymentMethod === 'ONLINE_UPI' && orderSuccessData.paymentLinks ? (
+                      <div className="bg-slate-900 border border-cyan-500/30 rounded-xl p-2.5 mb-3 text-left space-y-1.5">
+                        <p className="text-[11px] font-bold text-cyan-300 flex items-center gap-1">
+                          <Smartphone className="w-3.5 h-3.5" /> 1-Tap UPI Links:
+                        </p>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <a
+                            href={orderSuccessData.paymentLinks.phonepe}
+                            className="py-1 px-2 rounded-lg bg-purple-900/80 hover:bg-purple-800 text-white text-[10px] font-bold text-center block"
+                          >
+                            🟣 PhonePe
+                          </a>
+                          <a
+                            href={orderSuccessData.paymentLinks.gpay}
+                            className="py-1 px-2 rounded-lg bg-blue-900/80 hover:bg-blue-800 text-white text-[10px] font-bold text-center block"
+                          >
+                            🔵 Google Pay
+                          </a>
+                        </div>
+                        <a
+                          href={orderSuccessData.paymentLinks.webPayUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="w-full py-1 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 text-[10px] font-bold text-center flex items-center justify-center gap-1"
+                        >
+                          <QrCode className="w-3 h-3" />
+                          <span>Open Web Pay & QR Portal</span>
+                        </a>
+                      </div>
+                    ) : (
+                      <div className="bg-slate-900 border border-emerald-500/30 rounded-xl p-2.5 mb-3 text-xs text-emerald-300">
+                        📦 Delivery Expected: <b>{orderSuccessData.expectedDeliveryDate}</b>
+                        <br />
+                        <span className="text-[10px] text-slate-400">Cash on Delivery receipt sent to WhatsApp & Telegram.</span>
+                      </div>
+                    )}
+
+                    <button
+                      onClick={() => {
+                        setSelectedOrderProduct(null);
+                        setOrderSuccessData(null);
+                      }}
+                      className="w-full py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold"
+                    >
+                      Done
+                    </button>
+                  </div>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </motion.div>
     </AnimatePresence>

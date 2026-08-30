@@ -46,6 +46,8 @@ import { youtubeMusicService } from "./src/services/youtubeMusicService";
 import { calendarEventService } from "./src/services/calendarEventService";
 import { productPriceService } from "./src/services/productPriceService";
 import { priceDropTrackerService } from "./src/services/priceDropTrackerService";
+import { ecommerceOrderService } from "./src/services/ecommerceOrderService";
+import { autonomousBuyerService } from "./src/services/autonomousBuyerService";
 
 const PORT = Number(process.env.PORT) || 3000;
 const isProduction = process.env.NODE_ENV === "production";
@@ -282,6 +284,192 @@ async function startServer() {
       res.json({ ok: true, ...result });
     } catch (e: any) {
       res.status(500).json({ ok: false, error: e?.message || "Failed to check live prices" });
+    }
+  });
+
+  // ── Autonomous E-Commerce Orders & Payment Endpoints ──────────────────────
+  app.post("/api/ecommerce/order", async (req, res) => {
+    try {
+      const { productName, price, paymentMethod, store, productUrl, imageUrl, customAddress } = req.body;
+      if (!productName || !price) {
+        return res.status(400).json({ ok: false, error: "productName and price are required" });
+      }
+      const result = await ecommerceOrderService.createOrder({
+        productName,
+        price,
+        paymentMethod: paymentMethod === "COD" ? "COD" : "ONLINE_UPI",
+        store,
+        productUrl,
+        imageUrl,
+        customAddress,
+      });
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "Failed to create order" });
+    }
+  });
+
+  app.get("/api/ecommerce/orders", async (_req, res) => {
+    try {
+      const orders = await ecommerceOrderService.getAllOrders();
+      res.json({ ok: true, orders });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "Failed to fetch orders" });
+    }
+  });
+
+  app.post("/api/ecommerce/orders/:id/paid", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { utr } = req.body;
+      const result = await ecommerceOrderService.markOrderPaid(id, utr);
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "Failed to update order" });
+    }
+  });
+
+  // ── Autonomous Auto-Buyer & Login Session Endpoints ────────────────────────
+  app.post("/api/ecommerce/browser-login", async (req, res) => {
+    try {
+      const { store } = req.body;
+      const targetStore = store === "amazon" ? "amazon" : store === "meesho" ? "meesho" : "flipkart";
+      const result = await autonomousBuyerService.openInteractiveLogin(targetStore);
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "Failed to open login helper" });
+    }
+  });
+
+  app.post("/api/ecommerce/browser-logout", async (req, res) => {
+    try {
+      const { store } = req.body;
+      const targetStore = store === "amazon" ? "amazon" : store === "meesho" ? "meesho" : "flipkart";
+      const result = await autonomousBuyerService.logoutStore(targetStore);
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "Failed to logout store" });
+    }
+  });
+
+  app.get("/api/ecommerce/session-status", async (_req, res) => {
+    try {
+      const [fk, amz, meesho] = await Promise.all([
+        autonomousBuyerService.checkLoginStatus("flipkart"),
+        autonomousBuyerService.checkLoginStatus("amazon"),
+        autonomousBuyerService.checkLoginStatus("meesho"),
+      ]);
+      res.json({ ok: true, sessions: { flipkart: fk, amazon: amz, meesho } });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "Failed to check session status" });
+    }
+  });
+
+  app.post("/api/ecommerce/auto-order-cod", async (req, res) => {
+    try {
+      const { productUrl, productName, price, store, addressKeyword } = req.body;
+      if (!productUrl || !productName) {
+        return res.status(400).json({ ok: false, error: "productUrl and productName are required" });
+      }
+      const targetStore = store === "amazon" ? "amazon" : store === "meesho" ? "meesho" : "flipkart";
+      const result = await autonomousBuyerService.autoOrderCod({
+        productUrl,
+        productName,
+        price: Number(price) || 0,
+        store: targetStore,
+        addressKeyword,
+      });
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "Autonomous COD order failed" });
+    }
+  });
+
+  // ── Public Web UPI 1-Click Pay & QR Portal ─────────────────────────────────
+  app.get("/pay/:orderId", async (req, res) => {
+    try {
+      const { orderId } = req.params;
+      const order = await ecommerceOrderService.getOrderById(orderId);
+      if (!order) {
+        return res.status(404).send(`
+          <!DOCTYPE html>
+          <html>
+          <head><title>Order Not Found</title><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+          <body style="background:#0a0f24;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;">
+            <div style="text-align:center;padding:20px;">
+              <h2>❌ Order #${orderId} Not Found</h2>
+              <p style="color:#94a3b8;">Yeh order link expire ho chuki hai ya galat hai.</p>
+            </div>
+          </body>
+          </html>
+        `);
+      }
+
+      const links = order.paymentLinks || ecommerceOrderService.generatePaymentLinks(order.id, order.price, order.productName);
+      const qrData = encodeURIComponent(links.universalUpi);
+      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${qrData}`;
+
+      res.setHeader("Content-Type", "text/html");
+      res.send(`
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>FRIDAY Pay — Order #${order.id}</title>
+          <style>
+            * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+            body { background: #060918; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 16px; }
+            .card { background: #0f172a; border: 1px solid rgba(6, 182, 212, 0.3); box-shadow: 0 10px 40px rgba(0,0,0,0.8), 0 0 30px rgba(6, 182, 212, 0.15); border-radius: 24px; width: 100%; max-width: 440px; padding: 24px; text-align: center; }
+            .badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 999px; background: rgba(6, 182, 212, 0.15); border: 1px solid rgba(6, 182, 212, 0.4); color: #22d3ee; font-size: 11px; font-weight: 700; text-transform: uppercase; margin-bottom: 16px; }
+            .price { font-size: 36px; font-weight: 900; color: #38bdf8; margin: 8px 0; }
+            .title { font-size: 15px; font-weight: 600; color: #e2e8f0; margin-bottom: 16px; line-height: 1.4; }
+            .details { background: #1e293b; border-radius: 16px; padding: 12px 16px; font-size: 12px; color: #94a3b8; text-align: left; margin-bottom: 20px; }
+            .details div { display: flex; justify-content: space-between; margin-bottom: 6px; }
+            .details div:last-child { margin-bottom: 0; }
+            .btn { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 12px 16px; border-radius: 14px; text-decoration: none; font-weight: 700; font-size: 14px; margin-bottom: 10px; transition: transform 0.15s, opacity 0.15s; }
+            .btn:active { transform: scale(0.98); }
+            .btn-phonepe { background: linear-gradient(135deg, #5f259f, #7c3aed); color: #fff; }
+            .btn-gpay { background: linear-gradient(135deg, #1a73e8, #2563eb); color: #fff; }
+            .btn-paytm { background: linear-gradient(135deg, #00b9f5, #0284c7); color: #fff; }
+            .btn-any { background: #334155; color: #f8fafc; border: 1px solid rgba(255,255,255,0.1); }
+            .qr-box { margin-top: 20px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.1); }
+            .qr-img { width: 180px; height: 180px; border-radius: 12px; border: 4px solid #fff; margin: 8px auto; display: block; }
+            .footer { font-size: 11px; color: #64748b; margin-top: 16px; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <div class="badge">⚡ FRIDAY Instant UPI Pay</div>
+            <div class="price">₹${order.price.toLocaleString("en-IN")}</div>
+            <div class="title">${order.productName}</div>
+
+            <div class="details">
+              <div><span>Order ID:</span> <b style="color:#f1f5f9;">#${order.id}</b></div>
+              <div><span>Store:</span> <b style="color:#f1f5f9;">${order.store}</b></div>
+              <div><span>Delivery:</span> <b style="color:#22d3ee;">${order.expectedDeliveryDate}</b></div>
+            </div>
+
+            <!-- 1-Tap UPI App Action Buttons -->
+            <a href="${links.phonepe}" class="btn btn-phonepe">🟣 Pay with PhonePe</a>
+            <a href="${links.gpay}" class="btn btn-gpay">🔵 Pay with Google Pay</a>
+            <a href="${links.paytm}" class="btn btn-paytm">🔷 Pay with Paytm</a>
+            <a href="${links.universalUpi}" class="btn btn-any">📲 Pay with Any UPI App / BHIM</a>
+
+            <!-- Scan to Pay QR Code -->
+            <div class="qr-box">
+              <p style="font-size:12px; color:#94a3b8; font-weight:600;">Scan QR Code from any UPI App:</p>
+              <img src="${qrUrl}" alt="UPI QR Code" class="qr-img" />
+              <p style="font-size:11px; color:#64748b;">UPI ID: <b>${order.paymentLinks ? order.paymentLinks.universalUpi.split('pa=')[1].split('&')[0] : 'divakarkumar@upi'}</b></p>
+            </div>
+
+            <div class="footer">🔒 100% Secure & Encrypted by FRIDAY AI</div>
+          </div>
+        </body>
+        </html>
+      `);
+    } catch (err: any) {
+      res.status(500).send("Payment portal error: " + err?.message);
     }
   });
 
@@ -3441,6 +3629,55 @@ STYLE:
           },
         },
         {
+          name: "compare_product_prices",
+          description: "Compare live prices of any product across Flipkart, Amazon India, and Meesho. Generates interactive horizontal cards deck on the dashboard. Use when DK/user asks 'football ka price kya hai', 'laptop price batao', 'compare prices', etc.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              query: { type: "STRING", description: "The product name to search and compare (e.g. 'football', 'iPhone 15', 'gaming laptop')" },
+            },
+            required: ["query"],
+          },
+        },
+        {
+          name: "highlight_ecommerce_product",
+          description: "Advance or highlight a specific product in the horizontal product deck on the dashboard. Use when DK/user says 'ye pasand nahi aaya, dusra dikhao', 'next product', 'agla dikhao', '2nd product ka batao', or asks about product 2, 3, etc. You must then speak about that highlighted product's price, discount, and store details.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              index: { type: "NUMBER", description: "0-based index of the product to highlight in the deck (e.g., 1 for 2nd product, 2 for 3rd product)" },
+            },
+            required: ["index"],
+          },
+        },
+        {
+          name: "place_ecommerce_order",
+          description: "Place an e-commerce order for any product. If user chooses Cash on Delivery ('COD'), the order is immediately confirmed and placed autonomously. If user chooses Online Payment ('ONLINE_UPI'), dynamic PhonePe, Google Pay (GPay), and Paytm UPI payment links and QR code are instantly generated and sent to Boss's WhatsApp and Telegram. Use when user says 'order kar do', 'ye buy kar do', 'COD se order karo', 'online payment se order karo', etc.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              productName: { type: "STRING", description: "The title of the product to order" },
+              price: { type: "NUMBER", description: "The price in INR" },
+              paymentMethod: { type: "STRING", description: "Payment method chosen: 'COD' (Cash on Delivery) or 'ONLINE_UPI' (PhonePe / GPay / Paytm)" },
+              store: { type: "STRING", description: "The store name ('Amazon', 'Flipkart', 'Meesho')" },
+              productUrl: { type: "STRING", description: "Optional direct product URL" },
+              deliveryAddress: { type: "STRING", description: "Optional custom delivery address" },
+            },
+            required: ["productName", "price", "paymentMethod"],
+          },
+        },
+        {
+          name: "open_store_login_helper",
+          description: "Opens an interactive visible browser window for Flipkart or Amazon so Boss can log in once with mobile number/OTP. Once logged in, session cookies are saved permanently in local storage for 100% autonomous 1-click ordering. Use when user says 'Flipkart me login karwa do', 'Amazon login helper kholo', 'account connect karo', etc.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              store: { type: "STRING", description: "The store to log into: 'flipkart' or 'amazon'" },
+            },
+            required: ["store"],
+          },
+        },
+        {
           name: "analyze_document",
           description: "Analyze a PDF, resume, contract, research paper, or technical specification. Use when DK asks to analyze, review, or summarize a document.",
           parameters: {
@@ -3484,6 +3721,17 @@ STYLE:
               index: { type: "NUMBER", description: "0-based index of the product to highlight in the deck (e.g., 1 for 2nd product, 2 for 3rd product)" },
             },
             required: ["index"],
+          },
+        },
+        {
+          name: "open_store_login_helper",
+          description: "Opens an interactive visible browser window for Flipkart or Amazon so Boss can log in once with mobile number/OTP. Once logged in, session cookies are saved permanently in local storage for 100% autonomous 1-click ordering. Use when user says 'Flipkart me login karwa do', 'Amazon login helper kholo', 'account connect karo', etc.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              store: { type: "STRING", description: "The store to log into: 'flipkart' or 'amazon'" },
+            },
+            required: ["store"],
           },
         },
         {
@@ -5051,6 +5299,52 @@ STYLE:
                     };
                   } catch (e: any) {
                     result = { success: false, message: `Highlight product fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "place_ecommerce_order") {
+                  const { productName, price, paymentMethod, store, productUrl, deliveryAddress } = call.args || {};
+                  try {
+                    const isCod = String(paymentMethod || "").toUpperCase().includes("COD") ||
+                                  String(paymentMethod || "").toLowerCase().includes("cash");
+                    const method = isCod ? "COD" : "ONLINE_UPI";
+
+                    const orderRes = await ecommerceOrderService.createOrder({
+                      productName: String(productName || "Product"),
+                      price: Number(price) || 0,
+                      paymentMethod: method,
+                      store: store ? String(store) : undefined,
+                      productUrl: productUrl ? String(productUrl) : undefined,
+                      customAddress: deliveryAddress ? String(deliveryAddress) : undefined,
+                    });
+
+                    safeSend(JSON.stringify({
+                      type: "ecommerce_order_placed",
+                      order: orderRes.order,
+                    }));
+
+                    result = {
+                      success: true,
+                      orderId: orderRes.order.id,
+                      paymentMethod: orderRes.order.paymentMethod,
+                      speechMessage: orderRes.speechMessage,
+                      paymentLinks: orderRes.order.paymentLinks,
+                      instructionForFriday: orderRes.speechMessage,
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `Order placement fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "open_store_login_helper") {
+                  const { store } = call.args || {};
+                  const targetStore = String(store || "").toLowerCase().includes("amazon") ? "amazon" : "flipkart";
+                  try {
+                    const loginRes = await autonomousBuyerService.openInteractiveLogin(targetStore);
+                    result = {
+                      success: true,
+                      store: targetStore,
+                      message: loginRes.message,
+                      instructionForFriday: loginRes.message,
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `Login window open karne me error: ${e?.message || e}` };
                   }
                 } else if (call.name === "get_github_repo_info") {
                   const { owner, repo } = call.args || {};

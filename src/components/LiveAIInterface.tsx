@@ -21,6 +21,8 @@ import { SongPreviewModal, PreviewCandidate } from './SongPreviewModal';
 import { ProductDeckCarousel } from './ProductDeckCarousel';
 import { EcomProduct } from '@/services/productPriceService';
 import AppAccessSection from './AppAccessSection';
+import EcommerceAccountsSection from './EcommerceAccountsSection';
+import { ShoppingBag } from 'lucide-react';
 
 interface LiveAIInterfaceProps {
     onClose: () => void;
@@ -3066,6 +3068,38 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
 
                                             {/* Friday Cyber Security & OSINT Suite Card */}
                                             <CyberSecurityCard />
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
+                            </div>
+
+                            {/* ── 6. 🛒 E-Commerce & Auto-Buyer Accounts (Flipkart, Amazon, Meesho) ── */}
+                            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 overflow-hidden transition-all">
+                                <button
+                                    onClick={() => toggleSettingsSection('ecommerce_accounts')}
+                                    className="w-full flex items-center justify-between p-4 text-left hover:bg-slate-800/40 transition-colors select-none"
+                                >
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400">
+                                            <ShoppingBag className="w-4 h-4" />
+                                        </div>
+                                        <div>
+                                            <h4 className="text-sm font-semibold text-white">E-Commerce & Auto-Buyer Login</h4>
+                                            <p className="text-[11px] text-slate-400">Flipkart, Amazon & Meesho persistent login sessions</p>
+                                        </div>
+                                    </div>
+                                    <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${openSettingsSection === 'ecommerce_accounts' ? 'rotate-180 text-amber-400' : 'text-slate-400'}`} />
+                                </button>
+
+                                <AnimatePresence>
+                                    {openSettingsSection === 'ecommerce_accounts' && (
+                                        <motion.div
+                                            initial={{ height: 0, opacity: 0 }}
+                                            animate={{ height: 'auto', opacity: 1 }}
+                                            exit={{ height: 0, opacity: 0 }}
+                                            className="px-4 pb-4 pt-1 space-y-4 border-t border-slate-800/60"
+                                        >
+                                            <EcommerceAccountsSection />
                                         </motion.div>
                                     )}
                                 </AnimatePresence>
