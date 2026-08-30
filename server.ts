@@ -237,11 +237,14 @@ async function startServer() {
   // ---------------------------------------------------------------------------
   // WebSocket Live AI Connection Handler (Gemini Live Session)
   // ---------------------------------------------------------------------------
-  wss.on("connection", (clientWs, req) => {
+  wss.on("connection", (clientWs, req: any) => {
     console.log("[Server] Client connected to live session");
     connectedClients.add(clientWs);
 
-    let isAuthorized = false;
+    const urlParams = new URLSearchParams((req.url || "").split("?")[1] || "");
+    const initialToken = urlParams.get("token");
+    let isAuthorized = initialToken ? appSecurityService.verifySessionToken(initialToken) : false;
+
     const authTimeout = setTimeout(() => {
       if (!isAuthorized) {
         console.warn("[Server] 🚫 Closing unauthorized WebSocket (Auth Timeout 10s)");
@@ -593,6 +596,22 @@ async function startServer() {
           }
         } else if (parsedData.image) {
           await processImageInput(parsedData);
+        } else if (parsedData.type === "text_input" && parsedData.text) {
+          saveMessage("user", parsedData.text).catch((e) => console.error("[Server] Failed to save text_input message:", e));
+          memoryEngine.recordMessage(sessionId, "user", parsedData.text);
+          currentSession.sendClientContent({
+            turns: [{ role: "user", parts: [{ text: parsedData.text }] }],
+            turnComplete: true,
+          });
+        } else if (parsedData.type === "trigger_reply") {
+          try {
+            currentSession.sendClientContent({
+              turns: [{ role: "user", parts: [{ text: "Jawab do, please reply now to what I just said." }] }],
+              turnComplete: true,
+            });
+          } catch (e) {
+            console.error("Failed to trigger reply:", e);
+          }
         }
       } catch (err) {
         console.error("Error processing client input:", err);
