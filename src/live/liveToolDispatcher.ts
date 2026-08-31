@@ -2662,6 +2662,177 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                       const pnrRes = await railRadarService.getPnrStatus(query);
                       result = pnrRes;
                       if (pnrRes.success) {
+                  }
+                } else if (call.name === "get_utility_and_bill_services") {
+                  const { serviceType, providerOrState } = call.args || {};
+                  try {
+                    result = await publicApisService.getUtilityAndBillServices(
+                      String(serviceType || "all"),
+                      providerOrState ? String(providerOrState) : undefined
+                    );
+                  } catch (e: any) {
+                    result = { success: false, message: `Utility services lookup fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_govt_scheme_info") {
+                  const { schemeName } = call.args || {};
+                  try {
+                    result = await publicApisService.getGovtSchemeInfo(String(schemeName || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Govt scheme lookup fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "track_expense_entry") {
+                  const { amount, category, note } = call.args || {};
+                  try {
+                    result = await publicApisService.trackExpenseEntry(
+                      Number(amount),
+                      String(category || "General"),
+                      note ? String(note) : undefined
+                    );
+                  } catch (e: any) {
+                    result = { success: false, message: `Expense logging fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_daily_expense_summary") {
+                  try {
+                    result = await publicApisService.getExpenseSummary();
+                  } catch (e: any) {
+                    result = { success: false, message: `Expense summary fetch fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_bus_travel_info") {
+                  const { fromCity, toCity } = call.args || {};
+                  try {
+                    result = await publicApisService.getBusTravelInfo(String(fromCity || ""), String(toCity || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Bus info lookup fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "scan_wifi_networks") {
+                  try {
+                    result = await publicApisService.scanWifiNetworks();
+                  } catch (e: any) {
+                    result = { success: false, message: `WiFi scan fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_wifi_status") {
+                  try {
+                    result = await publicApisService.getCurrentWifiStatus();
+                  } catch (e: any) {
+                    result = { success: false, message: `WiFi status check fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "connect_to_wifi") {
+                  const { ssid, password } = call.args || {};
+                  try {
+                    result = await publicApisService.connectToWifi(String(ssid || ""), password ? String(password) : undefined);
+                  } catch (e: any) {
+                    result = { success: false, message: `WiFi connect fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "disconnect_wifi") {
+                  try {
+                    result = await publicApisService.disconnectWifi();
+                  } catch (e: any) {
+                    result = { success: false, message: `WiFi disconnect fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "verify_voice_authorization_pin") {
+                  const { pin } = call.args || {};
+                  try {
+                    result = await voiceBiometricsService.verifyVoicePin(String(pin || ""));
+                  } catch (e: any) {
+                    result = { valid: false, message: `PIN check fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "setup_boss_voice_recognition") {
+                  const { pin, name, relationWithDivakar, spokenPhrase } = call.args || {};
+                  try {
+                    result = await voiceBiometricsService.enrollVoice(
+                      String(pin || ""),
+                      String(name || "Boss (Divakar)"),
+                      String(relationWithDivakar || "Boss (DK)"),
+                      undefined,
+                      spokenPhrase ? String(spokenPhrase) : undefined
+                    );
+                  } catch (e: any) {
+                    result = { success: false, message: `Voice calibration fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "delete_boss_voice_recognition") {
+                  const { pin, profileId } = call.args || {};
+                  try {
+                    result = await voiceBiometricsService.deleteVoiceProfile(
+                      String(pin || ""),
+                      profileId ? String(profileId) : undefined
+                    );
+                  } catch (e: any) {
+                    result = { success: false, message: `Voice deletion fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_coding_agent_status") {
+                  try {
+                    result = await codeAgentService.getLiveStatusSummary();
+                  } catch (e: any) {
+                    result = { success: false, message: `Coding Agent status check fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "approve_coding_agent_plan") {
+                  const { requestId } = call.args || {};
+                  try {
+                    result = await codeAgentService.approve(requestId ? String(requestId) : undefined);
+                  } catch (e: any) {
+                    result = { success: false, message: `Coding Agent approval fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "approve_and_commit_to_master") {
+                  const { requestId } = call.args || {};
+                  try {
+                    result = await codeAgentService.approveAndPushDirectlyToMain(requestId ? String(requestId) : undefined);
+                  } catch (e: any) {
+                    result = { success: false, message: `Master commit command fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "reject_coding_agent_plan") {
+                  const { requestId } = call.args || {};
+                  try {
+                    result = await codeAgentService.deny(requestId ? String(requestId) : undefined);
+                  } catch (e: any) {
+                    result = { success: false, message: `Reject command fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "send_command_to_coding_agent") {
+                  const { instruction, problemTitle } = call.args || {};
+                  try {
+                    const req = await codeAgentService.createRequest(
+                      String(problemTitle || "Boss Voice Command Task"),
+                      String(instruction || ""),
+                      "feature",
+                      "DK (Voice)"
+                    );
+                    result = {
+                      success: true,
+                      requestId: req.id,
+                      message: `Boss, Coding Agent ko naya task de diya gaya hai! Task ID: ${req.id}. Agent codebase analyze karke plan bana raha hai.`,
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `Coding Agent command fail hui: ${e?.message || e}` };
+                  }
+                } else if (call.name === "execute_service" || call.name === "get_live_train_status" || call.name === "get_pnr_status" || call.name === "get_live_station_board" || call.name === "get_train_fares" || call.name === "get_coach_position") {
+                  const action = String(call.args?.action || call.name);
+                  const query = String(call.args?.query || call.args?.trainQuery || call.args?.pnr || call.args?.station || "");
+                  const targetStation = String(call.args?.targetStation || call.args?.station || "");
+                  const fromStation = String(call.args?.fromStation || call.args?.from || "");
+                  const toStation = String(call.args?.toStation || call.args?.to || "");
+                  
+                  try {
+                    if (action.includes("schedule") || action.includes("timetable")) {
+                      result = await railRadarService.getTrainSchedule(query);
+                    } else if (action.includes("refund") || action.includes("cancel")) {
+                      result = railRadarService.calculateCancellationRefund("3A", "CNF", 48);
+                    } else if (action.includes("seat") || action.includes("availab") || action.includes("tatkal") || action.includes("quota")) {
+                      result = await railRadarService.getSeatAvailability(query, fromStation, toStation);
+                    } else if (action.includes("coach") || action.includes("layout") || action.includes("general") || action.includes("composition")) {
+                      result = await railRadarService.getCoachPosition(query);
+                    } else if (action.includes("stop") || action.includes("halt") || action.includes("route_check")) {
+                      result = await railRadarService.checkTrainStoppage(query, targetStation || "PNBE");
+                    } else if (action.includes("between") || action.includes("search_trains") || action.includes("journey")) {
+                      result = await railRadarService.searchTrainsBetweenStations(fromStation || query, toStation || "PNBE");
+                    } else if (action.includes("fare") || action.includes("price") || action.includes("ticket") || action.includes("kiraya")) {
+                      const fareRes = await railRadarService.getTrainFares(query, fromStation, toStation);
+                      result = fareRes;
+                      if (fareRes.success) {
+                        safeSend(JSON.stringify({ type: "train_fare_info", fare: fareRes }));
+                      }
+                    } else if (action.includes("pnr") || /^\d{10}$/.test(query)) {
+                      const pnrRes = await railRadarService.getPnrStatus(query);
+                      result = pnrRes;
+                      if (pnrRes.success) {
                         safeSend(JSON.stringify({ type: "pnr_live_status", pnr: pnrRes }));
                       }
                     } else if (action.includes("station") || action.includes("board")) {
@@ -2681,7 +2852,43 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                   } catch (e: any) {
                     result = { success: false, message: `RailRadar service execution fail hui: ${e?.message || e}` };
                   }
+                } else if (call.name === "change_voice") {
+                  try {
+                    const MALE_VOICES = ["Puck","Charon","Fenrir","Orus","Umbriel","Achird","Enceladus","Algieba","Algenib","Gacrux","Zubenelgenubi","Sadaltager","Iapetus","Rasalgethi","Alnilam"];
+                    const FEMALE_VOICES = ["Aoede","Kore","Zephyr","Autonoe","Erinome","Laomedeia","Schedar","Achernar","Leda","Callirrhoe","Despina","Vindemiatrix","Sulafat","Pulcherrima","Sadachbia"];
+                    const { gender, voiceName, style } = call.args || {};
+
+                    let picked = voiceName as string | undefined;
+
+                    if (!picked) {
+                      const pool = gender === "male" ? MALE_VOICES : gender === "female" ? FEMALE_VOICES : [...MALE_VOICES, ...FEMALE_VOICES];
+                      picked = pool[Math.floor(Math.random() * pool.length)];
+                    }
+
+                    const pickedGender = MALE_VOICES.includes(picked || "") ? "male" : "female";
+
+                    // ✅ Firebase mein save karo — device independent!
+                    const { voicePersonaService } = await import("../services/voicePersonaService");
+                    await voicePersonaService.setVoice(picked!);
+
+                    // Send signal to frontend to switch voice
+                    safeSend(JSON.stringify({
+                      type: "voice_change",
+                      voiceName: picked,
+                      gender: pickedGender,
+                    }));
+
+                    result = {
+                      success: true,
+                      voiceName: picked,
+                      gender: pickedGender,
+                      message: `Voice "${picked}" Firebase mein save ho gayi! Ab kisi bhi device pe same awaaz rahegi. 🎙️`,
+                    };
+                  } catch (e: any) {
+                    result = { success: false, error: e?.message };
+                  }
                 }
+
 
   } catch (err: any) {
     console.error(`[Friday Tool Dispatcher] Error executing ${call.name}:`, err);

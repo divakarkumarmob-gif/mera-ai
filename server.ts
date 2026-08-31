@@ -290,7 +290,9 @@ async function startServer() {
         accurateMode,
         answerLength,
         googleSearchMode,
+        voiceName: voice || "Aoede",
       });
+
 
       let inputTranscriptBuffer = "";
       let outputTranscriptBuffer = "";

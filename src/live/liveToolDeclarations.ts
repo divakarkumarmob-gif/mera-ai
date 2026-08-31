@@ -3578,5 +3578,27 @@ export const fridayFunctionDeclarations: any[] = [
         "query"
       ]
     }
+  },
+  {
+    "name": "change_voice",
+    "description": "Change Friday's voice. Call when DK says 'male voice lagao', 'female voice lagao', 'ladke ki awaaz mein baat karo', 'Charon voice use karo', 'awaaz badlo', 'teri awaaz change kar', 'mujhe male/female voice chahiye'. This sends a signal to the frontend to switch the voice and restart the session with the new voice.",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {
+        "gender": {
+          "type": "STRING",
+          "description": "Gender category: 'male' or 'female'. Use when DK says 'male voice', 'female voice', 'ladke ki awaaz', 'ladki ki awaaz'."
+        },
+        "voiceName": {
+          "type": "STRING",
+          "description": "Specific voice name (e.g. 'Charon', 'Puck', 'Sulafat', 'Aoede'). Use when DK mentions a specific voice name."
+        },
+        "style": {
+          "type": "STRING",
+          "description": "Voice style preference: 'warm', 'calm', 'upbeat', 'deep', 'soft', 'energetic', 'mature', 'youthful', 'smooth', 'firm'."
+        }
+      },
+      "required": []
+    }
   }
 ];

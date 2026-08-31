@@ -678,6 +678,20 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const [selectedVoice, setSelectedVoice] = useState(() => localStorage.getItem('selectedVoice') || 'Aoede');
     const [showVoiceDropdown, setShowVoiceDropdown] = useState(false);
     const [voiceTab, setVoiceTab] = useState<'female' | 'male'>('female');
+
+    // ── Load saved voice from Firebase on startup ──────────────────────────
+    useEffect(() => {
+        fetch('/api/voices/saved-preference')
+            .then(r => r.json())
+            .then(data => {
+                if (data?.ok && data?.voiceName) {
+                    setSelectedVoice(data.voiceName);
+                    localStorage.setItem('selectedVoice', data.voiceName);
+                }
+            })
+            .catch(() => {}); // Non-critical — localStorage fallback
+    }, []);
+
     const [thinkingLevel, setThinkingLevel] = useState('low');
     const [accurateMode, setAccurateMode] = useState(false);
     const [answerLength, setAnswerLength] = useState(() => localStorage.getItem('answerLength') || 'short');
@@ -1992,6 +2006,17 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                     setEcommerceActiveIndex(typeof msg.index === 'number' ? msg.index : 0);
                 } else if (msg.type === 'ecommerce_close_deck') {
                     setEcommerceDeckProducts([]);
+                } else if (msg.type === 'voice_change') {
+                    // Friday ne voice change tool call kiya
+                    if (msg.voiceName) {
+                        setSelectedVoice(msg.voiceName);
+                        localStorage.setItem('selectedVoice', msg.voiceName);
+                        // Thodi der baad session reinitialize ho (new voice ke saath)
+                        setTimeout(() => {
+                            isInitializedRef.current = false;
+                        }, 300);
+                    }
+
                 } else if (msg.type === 'session_reconnecting') {
                     isInitializedRef.current = false;
                     isAiSpeaking.current = false;

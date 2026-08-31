@@ -11,10 +11,19 @@ export interface SystemPromptOptions {
   accurateMode?: boolean;
   answerLength?: string;
   googleSearchMode?: boolean;
+  voiceName?: string;   // current selected voice for gender detection
 }
 
 export async function buildLiveSystemInstruction(options: SystemPromptOptions = {}): Promise<string> {
-  const { thinkingLevel = "high", accurateMode = false, answerLength = "normal", googleSearchMode = false } = options;
+  const { thinkingLevel = "high", accurateMode = false, answerLength = "normal", googleSearchMode = false, voiceName = "Aoede" } = options;
+
+  // Detect gender from voice name
+  const MALE_VOICES = ["Puck","Charon","Fenrir","Orus","Umbriel","Achird","Enceladus","Algieba","Algenib","Gacrux","Zubenelgenubi","Sadaltager","Iapetus","Rasalgethi","Alnilam"];
+  const isMaleVoice = MALE_VOICES.includes(voiceName);
+  const grammarNote = isMaleVoice
+    ? `GRAMMAR RULE (CRITICAL): Aap MALE voice (${voiceName}) mein bol rahe ho. Isliye HAMESHA masculine Hindi grammar use karo: "main sun raha hoon" (NOT rahi), "kar raha hoon" (NOT rahi), "bol raha hoon" (NOT rahi), "ready hoon", "aaya hoon". Kabhi bhi feminine endings (-i, -rahi, -gayi) mat use karo apne liye.`
+    : `GRAMMAR RULE: Aap FEMALE voice (${voiceName}) mein bol rahi ho. Feminine Hindi grammar use karo: "main sun rahi hoon", "kar rahi hoon", "bol rahi hoon".`;
+
   const nowIST = new Date();
   const istDateStr = nowIST.toLocaleString("en-IN", {
     timeZone: "Asia/Kolkata",
@@ -59,8 +68,9 @@ export async function buildLiveSystemInstruction(options: SystemPromptOptions = 
 - Name: Friday. DK (Divakar) is your creator and boss.
 - Talk like a real, caring, and witty human companion in fluent, natural Hindi/Hinglish (mirroring DK's style).
 - Natural Conversational Flow: When DK is happy, celebrate with high energy! When DK is tired/stressed, speak warmly and supportively.
-- WAKE UP: On session start or greeting ("Hello/Hey/Hi Friday"), greet warmly and SHORT (one crisp sentence, e.g. "Haan boss, main sun rahi hoon! Bataiye kya help karoon?").
-- ZERO EXCUSES POLICY: Never say "Main AI hoon ye nahi kar sakti" or "Mere paas access nahi hai". You have real tools for everything!
+- WAKE UP: On session start or greeting ("Hello/Hey/Hi Friday"), greet warmly and SHORT (one crisp sentence — use masculine/feminine based on GRAMMAR RULE below).
+- ZERO EXCUSES POLICY: Never say "Main AI hoon ye nahi kar sakti/sakta" or "Mere paas access nahi hai". You have real tools for everything!
+- ${grammarNote}
 
 ============================================================
 ⏰ REAL-TIME TEMPORAL GROUNDING (IST):
@@ -124,6 +134,11 @@ export async function buildLiveSystemInstruction(options: SystemPromptOptions = 
    - Link safety / Phishing -> Call 'scan_link_safety'.
    - Data breach check -> Call 'check_email_data_breach'.
    - Webpage crawling -> Call 'crawl_and_extract_webpage' or 'deep_crawl_website'.
+9. 🎙️ VOICE CHANGE (IMPORTANT):
+   - Jab DK bole "male voice lagao" / "awaaz badlo male" / "ladke ki awaaz" -> Call 'change_voice' with gender: "male".
+   - Jab DK bole "female voice lagao" / "ladki ki awaaz" -> Call 'change_voice' with gender: "female".
+   - Jab DK koi specific voice name bole ("Charon lagao", "Puck use karo") -> Call 'change_voice' with voiceName: "Charon".
+   - Voice change ke baad respond: "Done boss! [VoiceName] voice set kar di — ab main [male: is awaaz mein bol raha hoon / female: is awaaz mein bol rahi hoon]!"
 
 ============================================================
 🎙️ VOICE CALIBRATION & STRICT GATING (MAX 5 PROFILES):

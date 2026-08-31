@@ -46,6 +46,8 @@ import { sqlMapService } from "../services/sqlMapService";
 import { niktoService } from "../services/niktoService";
 import { socialEngineerToolkitService } from "../services/socialEngineerToolkitService";
 import { johnTheRipperService } from "../services/johnTheRipperService";
+import { voicePersonaService } from "../services/voicePersonaService";
+
 
 export interface ApiRoutesContext {
   getBaileysEnabled: () => boolean;
@@ -2385,6 +2387,16 @@ export function createApiRouter(context: ApiRoutesContext): Router {
       { name: "Alnilam", style: "Firm" },
     ],
   };
+
+  /** GET /api/voices/saved-preference — Firebase se saved voice load karo */
+  app.get("/api/voices/saved-preference", async (_req, res) => {
+    try {
+      const prefs = await voicePersonaService.getSavedPreferences();
+      res.json({ ok: true, ...prefs });
+    } catch (e: any) {
+      res.json({ ok: false, voiceName: "Aoede" });
+    }
+  });
 
   /** GET /api/voices — Sabhi voices list with categories */
   app.get("/api/voices", (_req, res) => {

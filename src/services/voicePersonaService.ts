@@ -1,3 +1,5 @@
+import { db } from "./firebaseAdmin";
+
 export interface VoicePersona {
   id: string;
   name: string;
@@ -49,8 +51,71 @@ export const PERSONAS: Record<string, VoicePersona> = {
   },
 };
 
+// Firestore document path for voice preferences
+const VOICE_PREFS_DOC = "friday_settings/voice_preferences";
+
 class VoicePersonaService {
   private activePersonaId = "friday_classic";
+  private activeVoiceName = "Aoede";  // Gemini voice name — persisted in Firebase
+
+  // ── Firebase: Save voice name persistently ─────────────────────────────
+  async saveVoiceName(voiceName: string): Promise<void> {
+    this.activeVoiceName = voiceName;
+    try {
+      if (!db) return;
+      await db.doc(VOICE_PREFS_DOC).set(
+        { voiceName, updatedAt: new Date().toISOString() },
+        { merge: true }
+      );
+      console.log(`[VoicePersona] ✅ Voice "${voiceName}" saved to Firebase`);
+    } catch (e) {
+      console.warn("[VoicePersona] Firebase save failed (non-critical):", e);
+    }
+  }
+
+  // ── Firebase: Load saved voice name on server start ────────────────────
+  async loadSavedVoiceName(): Promise<string> {
+    try {
+      if (!db) return this.activeVoiceName;
+      const snap = await db.doc(VOICE_PREFS_DOC).get();
+      if (snap.exists) {
+        const data = snap.data();
+        if (data?.voiceName) {
+          this.activeVoiceName = data.voiceName;
+          console.log(`[VoicePersona] ✅ Loaded saved voice: "${this.activeVoiceName}"`);
+          return this.activeVoiceName;
+        }
+      }
+    } catch (e) {
+      console.warn("[VoicePersona] Firebase load failed (non-critical):", e);
+    }
+    return this.activeVoiceName;
+  }
+
+  // ── Get current active voice name ─────────────────────────────────────
+  getActiveVoiceName(): string {
+    return this.activeVoiceName;
+  }
+
+  // ── REST: Update voice (called from dispatcher) ────────────────────────
+  async setVoice(voiceName: string): Promise<{ success: boolean; voiceName: string; message: string }> {
+    await this.saveVoiceName(voiceName);
+    return {
+      success: true,
+      voiceName,
+      message: `Voice "${voiceName}" save ho gayi Firebase mein! Device change karo — same awaaz rahegi.`,
+    };
+  }
+
+  // ── REST: Get saved preferences (for API endpoint) ─────────────────────
+  async getSavedPreferences(): Promise<{ voiceName: string; updatedAt?: string }> {
+    try {
+      if (!db) return { voiceName: this.activeVoiceName };
+      const snap = await db.doc(VOICE_PREFS_DOC).get();
+      if (snap.exists) return snap.data() as any;
+    } catch {}
+    return { voiceName: this.activeVoiceName };
+  }
 
   public getActivePersona(): VoicePersona {
     return PERSONAS[this.activePersonaId] || PERSONAS.friday_classic;
