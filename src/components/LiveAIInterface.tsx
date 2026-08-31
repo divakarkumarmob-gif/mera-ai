@@ -1753,13 +1753,13 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         lowpass.frequency.value = 6000;
         lowpass.Q.value = 0.707;
 
-        // 4. Studio Dynamics Compressor (Boosts soft whispers, evens out dynamics, prevents loud clipping)
+        // 4. Studio Dynamics Compressor (Calibrated to prevent boosting distant room chatter)
         const compressor = inputAudioCtx.current.createDynamicsCompressor();
-        compressor.threshold.value = -36; // Catches soft whispers down to -36 dB
+        compressor.threshold.value = -24; // Calibrated: catches direct speech without boosting background chatter
         compressor.knee.value = 12;
-        compressor.ratio.value = 4.0;
+        compressor.ratio.value = 3.0;
         compressor.attack.value = 0.003; // 3ms fast response
-        compressor.release.value = 0.25;
+        compressor.release.value = 0.20;
 
         // 5. Connect DSP Chain: source -> highpass -> lowpass -> compressor -> processor
         source.connect(highpass);
@@ -1769,6 +1769,10 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         processor.current = inputAudioCtx.current.createScriptProcessor(4096, 1, 1);
         compressor.connect(processor.current);
         processor.current.connect(inputAudioCtx.current.destination);
+
+        let lastSpeechTime = 0;
+        let wasSpeaking = false;
+        let lastEndStreamSent = 0;
 
         processor.current.onaudioprocess = (e) => {
             const isAudioStillPlaying = !!(outputAudioCtx.current && outputAudioCtx.current.currentTime < (nextStartTime.current - 0.05));
@@ -1785,17 +1789,71 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 sumSquares += pcm[i] * pcm[i];
             }
             const rms = Math.sqrt(sumSquares / pcm.length) * 1000;
-            const isHumanSpeaking = rms >= 8; // Sensitive threshold supported by AGC & Compressor
-            if (isHumanSpeaking) {
-                lastActivityTimeRef.current = Date.now();
+            const now = Date.now();
+
+            // 1. Acoustic Pitch / Formant Periodicity Estimation (Fast autocorrelation for human voice detection)
+            let isHarmonicVoice = false;
+            let pitchHz = 0;
+            if (rms >= 6.0) {
+                const frameSize = Math.min(800, pcm.length);
+                let zeroLag = 0;
+                for (let i = 0; i < frameSize; i++) zeroLag += pcm[i] * pcm[i];
+                if (zeroLag > 1e-5) {
+                    let maxCorr = -1;
+                    let bestLag = -1;
+                    const minLag = 45; // ~355 Hz upper human speech bound
+                    const maxLag = 213; // ~75 Hz lower human speech bound
+                    for (let lag = minLag; lag <= maxLag; lag += 2) {
+                        let corr = 0;
+                        for (let i = 0; i < frameSize - lag; i += 2) {
+                            corr += pcm[i] * pcm[i + lag];
+                        }
+                        if (corr > maxCorr) {
+                            maxCorr = corr;
+                            bestLag = lag;
+                        }
+                    }
+                    const normCorr = (maxCorr * 2) / (zeroLag + 1e-6);
+                    if (normCorr >= 0.28 && bestLag > 0) {
+                        pitchHz = 16000 / bestLag;
+                        isHarmonicVoice = (pitchHz >= 75 && pitchHz <= 350);
+                    }
+                }
+            }
+
+            // 2. Intelligent Dynamic Proximity & Noise Gate
+            // Direct near-field speech has high RMS + valid pitch. Background chatter is suppressed below threshold.
+            const isSpeechDetected = (rms >= 12.0 && isHarmonicVoice) || (rms >= 20.0);
+
+            if (isSpeechDetected) {
+                lastSpeechTime = now;
+                wasSpeaking = true;
+                lastActivityTimeRef.current = now;
                 if (isWarningSpokenRef.current) {
                     isWarningSpokenRef.current = false;
                     setInactivityCountdown(null);
                 }
             }
 
-            ws.current?.send(JSON.stringify({ audio: pcmToBase64(pcm) }));
-            setVolume(Math.min(100, rms * 2.5));
+            // 3. Hangover Window (450ms hold time so natural sentence pauses aren't clipped)
+            const isGateOpen = isSpeechDetected || ((now - lastSpeechTime) < 450);
+
+            if (isGateOpen) {
+                ws.current?.send(JSON.stringify({ audio: pcmToBase64(pcm) }));
+                setVolume(Math.min(100, rms * 2.5));
+            } else {
+                // 4. Intelligent Turn-End Silence Window (VAD Flush)
+                // When primary user finishes speaking and gate closes, inform server to cleanly flush the turn
+                // so trailing room voices/murmurs don't trigger AI responses.
+                if (wasSpeaking && (now - lastSpeechTime) >= 450 && (now - lastEndStreamSent) > 1500) {
+                    wasSpeaking = false;
+                    lastEndStreamSent = now;
+                    try {
+                        ws.current?.send(JSON.stringify({ type: "audio_stream_end" }));
+                    } catch {}
+                }
+                setVolume(0);
+            }
         };
     };
 
