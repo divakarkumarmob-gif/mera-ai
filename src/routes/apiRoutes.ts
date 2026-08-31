@@ -47,6 +47,7 @@ import { niktoService } from "../services/niktoService";
 import { socialEngineerToolkitService } from "../services/socialEngineerToolkitService";
 import { johnTheRipperService } from "../services/johnTheRipperService";
 import { voicePersonaService } from "../services/voicePersonaService";
+import { azureSpeakerRecognitionService } from "../services/azureSpeakerRecognitionService";
 
 
 export interface ApiRoutesContext {
@@ -1813,8 +1814,6 @@ export function createApiRouter(context: ApiRoutesContext): Router {
       }
       const result = await sherlockService.searchUsername(username.trim(), {
         timeout: timeout ? Number(timeout) : 30,
-        nsfw: Boolean(nsfw),
-        onlyFound: Boolean(onlyFound),
       });
       res.json({ ok: true, result });
     } catch (e: any) {
@@ -1827,7 +1826,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
    */
   app.post("/api/osint/sherlock/search-multi", async (req, res) => {
     try {
-      const { usernames, timeout, nsfw } = req.body || {};
+      const { usernames, timeout } = req.body || {};
       if (!Array.isArray(usernames) || usernames.length === 0) {
         return res.status(400).json({ ok: false, error: "usernames array is required" });
       }
@@ -1836,7 +1835,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
       }
       const results = await sherlockService.searchMultipleUsernames(
         usernames.map((u: any) => String(u).trim()),
-        { timeout: timeout ? Number(timeout) : 30, nsfw: Boolean(nsfw) }
+        { timeout: timeout ? Number(timeout) : 30 }
       );
       res.json({ ok: true, results });
     } catch (e: any) {
@@ -2455,6 +2454,100 @@ export function createApiRouter(context: ApiRoutesContext): Router {
       });
     } catch (e: any) {
       res.status(500).json({ ok: false, error: e?.message });
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // 🎙️ Azure Cognitive Services Speaker Recognition / Biometrics API
+  // ---------------------------------------------------------------------------
+
+  /** GET /api/azure-speaker/status — Service status & configuration */
+  app.get("/api/azure-speaker/status", (_req, res) => {
+    res.json({ ok: true, status: azureSpeakerRecognitionService.getStatus() });
+  });
+
+  /** GET /api/azure-speaker/profiles — List all registered profiles */
+  app.get("/api/azure-speaker/profiles", async (_req, res) => {
+    try {
+      const profiles = await azureSpeakerRecognitionService.getAllProfiles();
+      res.json({ ok: true, profiles });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || e });
+    }
+  });
+
+  /** POST /api/azure-speaker/create-profile — Create a new profile on Azure
+   *  Body: { name: string, role?: string, relationWithDivakar?: string, locale?: string }
+   */
+  app.post("/api/azure-speaker/create-profile", async (req, res) => {
+    try {
+      const { name, role, relationWithDivakar, locale } = req.body || {};
+      if (!name) {
+        return res.status(400).json({ ok: false, error: "name is required" });
+      }
+      const result = await azureSpeakerRecognitionService.createProfile(name, role, relationWithDivakar, locale);
+      res.json({ ok: result.success, ...result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || e });
+    }
+  });
+
+  /** POST /api/azure-speaker/enroll — Enroll voice sample
+   *  Body: { profileId: string, audioBase64: string }
+   */
+  app.post("/api/azure-speaker/enroll", async (req, res) => {
+    try {
+      const { profileId, audioBase64 } = req.body || {};
+      if (!profileId || !audioBase64) {
+        return res.status(400).json({ ok: false, error: "profileId and audioBase64 are required" });
+      }
+      const result = await azureSpeakerRecognitionService.enrollAudio(profileId, audioBase64);
+      res.json({ ok: result.success, ...result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || e });
+    }
+  });
+
+  /** POST /api/azure-speaker/verify — 1:1 Verification against profile
+   *  Body: { profileId: string, audioBase64: string }
+   */
+  app.post("/api/azure-speaker/verify", async (req, res) => {
+    try {
+      const { profileId, audioBase64 } = req.body || {};
+      if (!profileId || !audioBase64) {
+        return res.status(400).json({ ok: false, error: "profileId and audioBase64 are required" });
+      }
+      const result = await azureSpeakerRecognitionService.verifySpeaker(profileId, audioBase64);
+      res.json({ ok: true, result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || e });
+    }
+  });
+
+  /** POST /api/azure-speaker/identify — 1:N Identification (Who is speaking?)
+   *  Body: { audioBase64: string }
+   */
+  app.post("/api/azure-speaker/identify", async (req, res) => {
+    try {
+      const { audioBase64 } = req.body || {};
+      if (!audioBase64) {
+        return res.status(400).json({ ok: false, error: "audioBase64 is required" });
+      }
+      const result = await azureSpeakerRecognitionService.identifyWhoIsSpeaking(audioBase64);
+      res.json({ ok: true, result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || e });
+    }
+  });
+
+  /** DELETE /api/azure-speaker/profile/:profileId — Delete profile */
+  app.delete("/api/azure-speaker/profile/:profileId", async (req, res) => {
+    try {
+      const { profileId } = req.params;
+      const result = await azureSpeakerRecognitionService.deleteProfile(profileId);
+      res.json({ ok: result.success, ...result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || e });
     }
   });
 

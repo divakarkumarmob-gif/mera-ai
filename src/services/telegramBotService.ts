@@ -2073,10 +2073,10 @@ INSTRUCTIONS FOR WHEN SENDER IS SOMEONE ELSE (NOT DK):
       }
     }
 
-    // 3. Handle Voice PIN updates (e.g. "voice pin - 123456", "voice pin: 994411")
-    const pinRes = await voiceBiometricsService.handleWhatsAppVoicePinMessage(text, senderName);
+    // 3. Handle Voice PIN updates & queries (e.g. "voice code 1234", "voice pin: 994411", "voice code kya hai")
+    const pinRes = await voiceBiometricsService.handleWhatsAppVoicePinMessage(text, senderName, "telegram");
     if (pinRes.handled && pinRes.replyText) {
-      await this.sendMessage(chatId, `🔐 *Voice PIN Update:*\n\n${pinRes.replyText}`);
+      await this.sendMessage(chatId, pinRes.replyText);
       return;
     }
 

@@ -1,4 +1,5 @@
 import { appSecurityService } from "./appSecurityService";
+import { voiceBiometricsService } from "./voiceBiometricsService";
 
 // ---------------------------------------------------------------------------
 // FRIDAY DEDICATED SECURITY SENTINEL TELEGRAM BOT
@@ -402,16 +403,41 @@ class TelegramSecurityBotService {
       return;
     }
 
-    // 6. Security Status & Health
+    // 6. Voice Code / PIN Inspection & Change
+    if (lower === "/voicecode" || lower === "/voicepin" || lower === "🎙️ voice code" || lower === "voice code" || lower === "voice pin") {
+      const activePin = await voiceBiometricsService.getActivePin();
+      await this.sendMessage(
+        chatId,
+        `🎙️ *FRIDAY LIVE VOICE AUTH CODE* 🔐\n\n` +
+        `• 🔑 *Active Voice Code / PIN:* \`${activePin || "1234"}\`\n` +
+        `• 💾 *Storage:* Cloud Firestore (\`systemSecurity/voicePin\`)\n` +
+        `• 👑 *Status:* Active & Synchronized with Friday Voice AI\n\n` +
+        `Friday se voice mode me bolte waqt \`Boss Code ${activePin || "1234"}\` bol kar aap 100% Root Access unlock kar sakte hain.\n\n` +
+        `✏️ *Naya Voice Code set karne ke liye type karein:*\n` +
+        `👉 \`voice code <naya_pin>\` (e.g. \`voice code 4589\`)`,
+        this.getMainKeyboard()
+      );
+      return;
+    }
+
+    const voiceCodeRes = await voiceBiometricsService.handleWhatsAppVoicePinMessage(text, senderName, "telegram_security");
+    if (voiceCodeRes.handled && voiceCodeRes.replyText) {
+      await this.sendMessage(chatId, voiceCodeRes.replyText, this.getMainKeyboard());
+      return;
+    }
+
+    // 7. Security Status & Health
     if (lower === "/status" || lower === "📊 system health" || lower === "status") {
       const blockedList = await appSecurityService.listBlockedIps();
       const liveWsCount = this.getActiveConnectionsCount();
+      const activePin = await voiceBiometricsService.getActivePin();
 
       await this.sendMessage(
         chatId,
         `🛡️ *FRIDAY SECURITY SENTINEL STATUS REPORT*\n\n` +
         `• 🔒 *AES-256-GCM Firestore Encryption:* Active ✅\n` +
         `• 🛡️ *Double-Lock Protection:* Active ✅\n` +
+        `• 🎙️ *Voice Auth PIN (Firestore):* \`${activePin || "1234"}\` ✅\n` +
         `• ⚡ *Anti-Brute Force Rate Limiter:* Active (2 attempts/min) ✅\n` +
         `• 🛑 *Currently Blocked Attackers:* \`${blockedList.length}\`\n` +
         `• 👥 *Live Connected Users:* \`${liveWsCount}\`\n` +
@@ -430,11 +456,13 @@ class TelegramSecurityBotService {
     return {
       keyboard: [
         [{ text: "👥 Active Users" }, { text: "🛑 Blocked Clients" }],
-        [{ text: "🔑 App Key" }, { text: "📊 System Health" }],
-        [{ text: "🔓 Unblock IP" }, { text: "🚪 Logout" }],
+        [{ text: "🔑 App Key" }, { text: "🎙️ Voice Code" }],
+        [{ text: "📊 System Health" }, { text: "🔓 Unblock IP" }],
+        [{ text: "🚪 Logout" }],
       ],
       resize_keyboard: true,
       persistent: true,
+      one_time_keyboard: false,
     };
   }
 

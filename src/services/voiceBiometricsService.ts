@@ -105,63 +105,96 @@ class VoiceBiometricsService {
 
   /**
    * Fetches active PIN from Firestore (doc: systemSecurity/voicePin) with in-memory fallback.
+   * Ensures Friday ALWAYS verifies against the latest Firestore document.
    */
   public async getActivePin(): Promise<string | null> {
     try {
-      const doc = await db.collection("systemSecurity").doc("voicePin").get();
-      if (doc.exists && doc.data()?.pin) {
-        const pin = String(doc.data()?.pin).trim();
-        this.cachedPin = pin;
-        return pin;
+      if (db) {
+        const doc = await db.collection("systemSecurity").doc("voicePin").get();
+        if (doc.exists && doc.data()?.pin) {
+          const pin = String(doc.data()?.pin).trim();
+          this.cachedPin = pin;
+          return pin;
+        }
       }
-    } catch {
-      // In-memory fallback
+    } catch (e) {
+      console.warn("[VoiceBiometrics] Firestore getActivePin read error, using cache:", e);
     }
 
     return this.cachedPin || process.env.VOICE_AUTH_PIN || "1234";
   }
 
   /**
-   * Updates the single active PIN in Firestore with in-memory fallback.
+   * Updates the single active PIN in Firestore, overwriting any previous PIN.
    */
   public async updateVoicePin(
     newPin: string,
-    senderName: string = "Boss (DK)"
+    senderName: string = "Boss (DK)",
+    channel: string = "system"
   ): Promise<{ success: boolean; pin: string; message: string }> {
     const cleanPin = String(newPin || "").trim().replace(/\D/g, "");
     if (!cleanPin || cleanPin.length < 4) {
       return {
         success: false,
         pin: "",
-        message: "PIN kam se kam 4-6 digits ka hona chahiye.",
+        message: "⚠️ Voice PIN kam se kam 4 se 8 digits ka hona chahiye (e.g. `voice code 4589`).",
       };
     }
 
     this.cachedPin = cleanPin;
 
     try {
-      await db.collection("systemSecurity").doc("voicePin").set({
-        pin: cleanPin,
-        updatedAt: Date.now(),
-        updatedBy: senderName,
-      });
-      console.log(`[VoiceBiometrics] Updated active voice PIN to [${cleanPin}] by ${senderName}`);
-    } catch {
-      // Offline / In-memory fallback
+      if (db) {
+        await db.collection("systemSecurity").doc("voicePin").set({
+          pin: cleanPin,
+          updatedAt: Date.now(),
+          updatedAtISO: new Date().toISOString(),
+          updatedBy: senderName,
+          channel,
+        });
+        console.log(`[VoiceBiometrics] ✅ Firestore Voice PIN updated to [${cleanPin}] by ${senderName} via ${channel}`);
+      }
+    } catch (e) {
+      console.warn("[VoiceBiometrics] Firestore write error (using memory cache):", e);
     }
 
     return {
       success: true,
       pin: cleanPin,
-      message: `Boss, aapka naya Voice PIN [${cleanPin}] save ho gaya hai! Purana PIN replace ho gaya. Ab aap is naye PIN se voice enroll ya delete kar sakte hain. ✅`,
+      message: `🔐 *VOICE CODE UPDATED SUCCESSFULLY!* ✅\n\n` +
+        `• 🔑 *New Active Voice Code / PIN:* \`${cleanPin}\`\n` +
+        `• 👤 *Set By:* ${senderName}\n` +
+        `• 💾 *Storage:* Firestore (\`systemSecurity/voicePin\`)\n\n` +
+        `Purana PIN replace ho gaya hai! Ab Friday voice mode me aapse baat karte waqt isi naye code (\`${cleanPin}\`) se verify karegi. 👑`,
     };
   }
 
   /**
    * Verifies the provided PIN against Firestore or cache.
+   * Supports raw digits, English words ("one two three four"), and Hindi words ("ek do teen char").
    */
   public async verifyPin(pin: string): Promise<boolean> {
-    const normalizedInput = String(pin || "").trim().replace(/\D/g, "");
+    let raw = String(pin || "").toLowerCase().trim();
+    
+    // Map spoken number words in Hindi and English to digits
+    const wordToDigit: Record<string, string> = {
+      zero: "0", shunya: "0", sifar: "0",
+      one: "1", ek: "1",
+      two: "2", do: "2",
+      three: "3", teen: "3",
+      four: "4", chaar: "4", char: "4",
+      five: "5", paanch: "5", panch: "5",
+      six: "6", chhah: "6", che: "6",
+      seven: "7", saat: "7", sat: "7",
+      eight: "8", aath: "8", ath: "8",
+      nine: "9", nau: "9", no: "9",
+    };
+
+    for (const [word, digit] of Object.entries(wordToDigit)) {
+      raw = raw.replace(new RegExp(`\\b${word}\\b`, "gi"), digit);
+    }
+
+    const normalizedInput = raw.replace(/\D/g, "");
     if (!normalizedInput) return false;
 
     const active = await this.getActivePin();
@@ -487,6 +520,31 @@ Return JSON:
       }
     }
 
+    // ── Tier 1: Microsoft Azure Speaker Recognition (High Precision 98%+) ──────
+    try {
+      const { azureSpeakerRecognitionService } = await import("./azureSpeakerRecognitionService");
+      if (azureSpeakerRecognitionService.isConfigured) {
+        const azureRes = await azureSpeakerRecognitionService.identifyWhoIsSpeaking(audioBase64);
+        if (azureRes.identified) {
+          const result: SpeakerVerificationResult = {
+            isBoss: azureRes.speakerRole === "boss",
+            speakerRole: azureRes.speakerRole,
+            speakerName: azureRes.speakerName,
+            confidence: azureRes.score,
+            isRootAdmin: azureRes.isRootAdmin,
+            reason: `Azure Biometric Match: ${azureRes.reason}`,
+            matchedProfileId: azureRes.profileId,
+          };
+          if (sessionId) {
+            this.activeSessionSpeakerCache.set(sessionId, { result, timestamp: Date.now() });
+          }
+          return result;
+        }
+      }
+    } catch (azErr) {
+      console.warn("[VoiceBiometrics] Azure Speaker Recognition check fallback:", azErr);
+    }
+
     const ai = this.getGenAI();
     if (!ai) {
       return {
@@ -671,18 +729,43 @@ Return JSON:
     };
   }
 
-  public async handleWhatsAppVoicePinMessage(text: string, senderName: string): Promise<{ handled: boolean; replyText?: string }> {
-    const pattern = /(?:voice\s*pin|voice\s*password|security\s*pin|auth\s*pin|new\s*pin)[\s\:\-\=]+([0-9]{4,8})/i;
-    const match = text.match(pattern);
+  public async handleWhatsAppVoicePinMessage(
+    text: string,
+    senderName: string,
+    channel: string = "whatsapp"
+  ): Promise<{ handled: boolean; replyText?: string }> {
+    const raw = String(text || "").trim();
 
-    if (match && match[1]) {
-      const pin = match[1];
-      const result = await this.updateVoicePin(pin, senderName);
+    // 1. Check Voice Code Query (e.g. "voice code kya hai", "/voicecode", "check voice pin")
+    const queryPattern = /^\/?(?:voice\s*code|voice\s*pin|boss\s*code|voice\s*password|check\s*voice\s*pin)(?:\s*(?:kya\s*hai|check|status|batao|\?))?$/i;
+    if (queryPattern.test(raw)) {
+      const active = await this.getActivePin();
+      return {
+        handled: true,
+        replyText:
+          `🔐 *ACTIVE FRIDAY VOICE AUTH CODE* 🎙️\n\n` +
+          `• 🔑 *Active Voice Code / PIN:* \`${active || "1234"}\`\n` +
+          `• 💾 *Storage:* Cloud Firestore (\`systemSecurity/voicePin\`)\n\n` +
+          `Friday se voice mode me bolte waqt \`Boss Code ${active || "1234"}\` bol kar aap 100% Root Access verify kar sakte hain.\n\n` +
+          `✏️ *Badalne ke liye type karein:*\n` +
+          `👉 \`voice code <naya_pin>\` (e.g. \`voice code 4589\`)`,
+      };
+    }
+
+    // 2. Set / Update Voice Code (e.g. "voice code 4589", "/voicecode 4589", "boss code 9876", "set voice code 1234")
+    const updatePattern = /(?:^\/?(?:voice\s*code|voice\s*pin|boss\s*code|voice\s*password|security\s*pin|auth\s*pin|set\s*voice\s*code|update\s*voice\s*pin|new\s*pin|mera\s*voice\s*code)[\s\:\-\=]+([0-9]{4,8}))|(?:(?:voice\s*code|voice\s*pin|boss\s*code)[\s\:\-\=]+([0-9]{4,8}))/i;
+    const match = raw.match(updatePattern);
+
+    const pinCandidate = match ? (match[1] || match[2]) : null;
+
+    if (pinCandidate) {
+      const result = await this.updateVoicePin(pinCandidate, senderName, channel);
       return {
         handled: true,
         replyText: result.message,
       };
     }
+
     return { handled: false };
   }
 }

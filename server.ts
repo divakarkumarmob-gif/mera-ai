@@ -199,7 +199,7 @@ async function startServer() {
     const ownerPhone = (process.env.OWNER_WHATSAPP_NUMBER || "").replace(/\D/g, "");
     const senderDigits = (msg.from || "").replace(/\D/g, "");
     if (ownerPhone && senderDigits === ownerPhone) {
-      voiceBiometricsService.handleWhatsAppVoicePinMessage(msg.text, msg.name)
+      voiceBiometricsService.handleWhatsAppVoicePinMessage(msg.text, msg.name, "whatsapp_cloud")
         .then(async (pinRes) => {
           if (pinRes.handled && pinRes.replyText) {
             await whatsappCloudService.sendMessage(msg.from, pinRes.replyText);
