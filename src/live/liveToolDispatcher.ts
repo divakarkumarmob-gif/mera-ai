@@ -2565,13 +2565,6 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                   } catch (e: any) {
                     result = { success: false, message: `WiFi disconnect fail hua: ${e?.message || e}` };
                   }
-                } else if (call.name === "verify_voice_authorization_pin") {
-                  const { pin } = call.args || {};
-                  try {
-                    result = await voiceBiometricsService.verifyVoicePin(String(pin || ""));
-                  } catch (e: any) {
-                    result = { valid: false, message: `PIN check fail hua: ${e?.message || e}` };
-                  }
                 } else if (call.name === "setup_boss_voice_recognition") {
                   const { pin, name, relationWithDivakar, spokenPhrase } = call.args || {};
                   try {

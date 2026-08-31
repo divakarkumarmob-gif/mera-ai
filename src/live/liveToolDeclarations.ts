@@ -3,7 +3,7 @@
  * Declarations defining parameters and capabilities for real-time voice streaming.
  */
 
-export const fridayFunctionDeclarations: any[] = [
+const rawFunctionDeclarations: any[] = [
   {
     "name": "start_background_task",
     "description": "Start a background task (e.g. weather update, live cricket score check, product deal search, security scan, codebase audit, or custom background operation). Friday immediately acknowledges in conversation that the task has started in background, and when it finishes, it will be reported at the end of a turn or when DK asks.",
@@ -2481,13 +2481,13 @@ export const fridayFunctionDeclarations: any[] = [
   },
   {
     "name": "update_voice_pin",
-    "description": "Update Boss's master Voice Authentication PIN.",
+    "description": "Update/Change the active Voice PIN in Firestore. Call when Boss says 'Mera Voice PIN badlo to 5678', 'Naya PIN set karo 9876', 'Update voice code 4589'.",
     "parameters": {
       "type": "OBJECT",
       "properties": {
         "newPin": {
           "type": "STRING",
-          "description": "New 4-6 digit numeric PIN"
+          "description": "The new 4-8 digit voice PIN to save in Firestore."
         }
       },
       "required": [
@@ -2939,13 +2939,13 @@ export const fridayFunctionDeclarations: any[] = [
   },
   {
     "name": "verify_voice_authorization_pin",
-    "description": "MANDATORY STEP 1: Verify if the user's spoken voice authorization password/PIN matches the secret PIN in Firestore. MUST ALWAYS BE CALLED IMMEDIATELY whenever a user speaks or provides a PIN before asking for phrase or name.",
+    "description": "Verify Boss Divakar's Voice PIN / Secret Auth Code. Call IMMEDIATELY whenever user speaks a PIN or secret code (e.g., 'Boss Code 4589', 'Authenticate 1234', 'PIN 5678', 'Mera voice PIN 4589 hai'). Unlocks 100% root access upon successful verification.",
     "parameters": {
       "type": "OBJECT",
       "properties": {
         "pin": {
           "type": "STRING",
-          "description": "The exact 4-8 digit numeric PIN spoken by the user"
+          "description": "The 4-8 digit voice PIN or secret code spoken by the user (e.g. '4589', '1234', 'char paanch aath nau')."
         }
       },
       "required": [
@@ -3600,38 +3600,20 @@ export const fridayFunctionDeclarations: any[] = [
       },
       "required": []
     }
-  },
-  {
-    "name": "verify_voice_authorization_pin",
-    "description": "Verify Boss Divakar's Voice PIN / Secret Auth Code. Call IMMEDIATELY whenever user speaks a PIN or secret code (e.g., 'Boss Code 4589', 'Authenticate 1234', 'PIN 5678', 'Mera voice PIN 4589 hai'). Unlocks 100% root access upon successful verification.",
-    "parameters": {
-      "type": "OBJECT",
-      "properties": {
-        "pin": {
-          "type": "STRING",
-          "description": "The 4-8 digit voice PIN or secret code spoken by the user (e.g. '4589', '1234', 'char paanch aath nau')."
-        }
-      },
-      "required": [
-        "pin"
-      ]
-    }
-  },
-  {
-    "name": "update_voice_pin",
-    "description": "Update/Change the active Voice PIN in Firestore. Call when Boss says 'Mera Voice PIN badlo to 5678', 'Naya PIN set karo 9876', 'Update voice code 4589'.",
-    "parameters": {
-      "type": "OBJECT",
-      "properties": {
-        "newPin": {
-          "type": "STRING",
-          "description": "The new 4-8 digit voice PIN to save in Firestore."
-        }
-      },
-      "required": [
-        "newPin"
-      ]
-    }
   }
 ];
+
+// Ensure 100% uniqueness of function declarations to prevent Gemini Live 1007 WebSocket disconnect errors
+const _seenDeclarationNames = new Set<string>();
+export const fridayFunctionDeclarations: any[] = rawFunctionDeclarations.filter((decl) => {
+  if (!decl?.name || _seenDeclarationNames.has(decl.name)) {
+    if (decl?.name) {
+      console.warn(`[Gemini Live] Stripped duplicate tool declaration: "${decl.name}"`);
+    }
+    return false;
+  }
+  _seenDeclarationNames.add(decl.name);
+  return true;
+});
+
 
