@@ -110,15 +110,20 @@ class VoiceBiometricsService {
   public async getActivePin(): Promise<string | null> {
     try {
       if (db) {
-        const doc = await db.collection("systemSecurity").doc("voicePin").get();
-        if (doc.exists && doc.data()?.pin) {
+        const timeoutPromise = new Promise<null>((_, reject) =>
+          setTimeout(() => reject(new Error("Firestore timeout")), 1200)
+        );
+        const docPromise = db.collection("systemSecurity").doc("voicePin").get();
+        const doc = (await Promise.race([docPromise, timeoutPromise])) as any;
+
+        if (doc && doc.exists && doc.data()?.pin) {
           const pin = String(doc.data()?.pin).trim();
           this.cachedPin = pin;
           return pin;
         }
       }
     } catch (e) {
-      console.warn("[VoiceBiometrics] Firestore getActivePin read error, using cache:", e);
+      console.warn("[VoiceBiometrics] Firestore getActivePin read error / timeout, using cache:", e);
     }
 
     return this.cachedPin || process.env.VOICE_AUTH_PIN || "1234";
@@ -145,13 +150,17 @@ class VoiceBiometricsService {
 
     try {
       if (db) {
-        await db.collection("systemSecurity").doc("voicePin").set({
+        const timeoutPromise = new Promise<null>((_, reject) =>
+          setTimeout(() => reject(new Error("Firestore timeout")), 1500)
+        );
+        const setPromise = db.collection("systemSecurity").doc("voicePin").set({
           pin: cleanPin,
           updatedAt: Date.now(),
           updatedAtISO: new Date().toISOString(),
           updatedBy: senderName,
           channel,
         });
+        await Promise.race([setPromise, timeoutPromise]);
         console.log(`[VoiceBiometrics] ✅ Firestore Voice PIN updated to [${cleanPin}] by ${senderName} via ${channel}`);
       }
     } catch (e) {
@@ -518,31 +527,6 @@ Return JSON:
       if (Date.now() - cached.timestamp < this.SESSION_CACHE_TTL_MS) {
         return cached.result;
       }
-    }
-
-    // ── Tier 1: Microsoft Azure Speaker Recognition (High Precision 98%+) ──────
-    try {
-      const { azureSpeakerRecognitionService } = await import("./azureSpeakerRecognitionService");
-      if (azureSpeakerRecognitionService.isConfigured) {
-        const azureRes = await azureSpeakerRecognitionService.identifyWhoIsSpeaking(audioBase64);
-        if (azureRes.identified) {
-          const result: SpeakerVerificationResult = {
-            isBoss: azureRes.speakerRole === "boss",
-            speakerRole: azureRes.speakerRole,
-            speakerName: azureRes.speakerName,
-            confidence: azureRes.score,
-            isRootAdmin: azureRes.isRootAdmin,
-            reason: `Azure Biometric Match: ${azureRes.reason}`,
-            matchedProfileId: azureRes.profileId,
-          };
-          if (sessionId) {
-            this.activeSessionSpeakerCache.set(sessionId, { result, timestamp: Date.now() });
-          }
-          return result;
-        }
-      }
-    } catch (azErr) {
-      console.warn("[VoiceBiometrics] Azure Speaker Recognition check fallback:", azErr);
     }
 
     const ai = this.getGenAI();
