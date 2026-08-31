@@ -68,7 +68,7 @@ async function startServer() {
       return res.status(403).json({
         ok: false,
         error: "ACCESS_BLOCKED",
-        message: "🚨 Access Blocked: 3 failed attempts ke baad aapka device/IP block kar diya gaya hai. Boss ko unblock karne ke liye kahein.",
+        message: "Access Blocked: 3 failed attempts ke baad aapka device/IP block kar diya gaya hai. Boss ko unblock karne ke liye kahein.",
       });
     }
 
@@ -105,7 +105,7 @@ async function startServer() {
         return res.status(403).json({
           ok: false,
           error: "ACCESS_BLOCKED_IMMEDIATE",
-          message: "🚨 Critical Intrusion: Direct unauthorized probe on protected endpoint. Your IP & Device have been permanently blocked.",
+          message: "Critical Intrusion: Direct unauthorized probe on protected endpoint. Your IP & Device have been permanently blocked.",
         });
       }
 
@@ -248,7 +248,7 @@ async function startServer() {
     let isAuthorized = false;
     const authTimeout = setTimeout(() => {
       if (!isAuthorized) {
-        console.warn("[Server] 🚫 Closing unauthorized WebSocket (Auth Timeout 10s)");
+        console.warn("[Server] Closing unauthorized WebSocket (Auth Timeout 10s)");
         try {
           clientWs.send(JSON.stringify({ error: "ACCESS_LOCKED", message: "Authentication timeout. App Access Key required." }));
           clientWs.close(4001, "UNAUTHORIZED_TIMEOUT");
@@ -306,17 +306,17 @@ async function startServer() {
         model: "gemini-3.1-flash-live-preview",
         callbacks: {
           onopen: () => {
-            console.log(`[Server] 🟢 Gemini Live session opened (session=${sessionId})`);
+            console.log(`[Server] Gemini Live session opened (session=${sessionId})`);
           },
           onerror: (err: any) => {
-            console.error(`[Server] ❌ Gemini Live session ERROR (session=${sessionId}):`, err?.message || err);
+            console.error(`[Server] Gemini Live session ERROR (session=${sessionId}):`, err?.message || err);
             if (currentSession === thisSessionRef) {
               currentSession = undefined;
               autoReconnect();
             }
           },
           onclose: (evt: any) => {
-            console.warn(`[Server] 🔌 Gemini Live session CLOSED (session=${sessionId}) code=${evt?.code} reason=${evt?.reason || "n/a"}`);
+            console.warn(`[Server] Gemini Live session CLOSED (session=${sessionId}) code=${evt?.code} reason=${evt?.reason || "n/a"}`);
             if (currentSession === thisSessionRef) {
               currentSession = undefined;
               autoReconnect();
@@ -461,7 +461,7 @@ async function startServer() {
         isReconnecting = false;
         reconnectAttempts = 0;
         safeSend(JSON.stringify({ type: "session_reconnected" }));
-        console.log(`[Server] ✅ Auto-reconnect successful for session=${sessionId}.`);
+        console.log(`[Server] Auto-reconnect successful for session=${sessionId}.`);
       } catch (err: any) {
         console.error(`[Server] Auto-reconnect attempt ${reconnectAttempts} failed:`, err?.message || err);
         isReconnecting = false;
@@ -490,7 +490,7 @@ async function startServer() {
           safeSend(JSON.stringify({ type: "auth_ack", ok: true }));
           return;
         } else {
-          console.warn("[Server] 🚫 WebSocket auth failed: Invalid App Key Token");
+          console.warn("[Server] WebSocket auth failed: Invalid App Key Token");
           safeSend(JSON.stringify({ error: "ACCESS_LOCKED", message: "Invalid App Key Token." }));
           try { clientWs.close(4001, "UNAUTHORIZED_APP_KEY"); } catch {}
           return;
@@ -498,18 +498,18 @@ async function startServer() {
       }
 
       if (!isAuthorized) {
-        console.warn("[Server] 🚫 WebSocket command blocked: Session is not authorized");
+        console.warn("[Server] WebSocket command blocked: Session is not authorized");
         safeSend(JSON.stringify({ error: "ACCESS_LOCKED", message: "App Key authentication required." }));
         return;
       }
 
       if (parsedData.type === "init") {
         if (isInitializingSession) {
-          console.log(`[Server] ⏳ Session initialization already in progress (session=${sessionId}), ignoring duplicate init.`);
+          console.log(`[Server] Session initialization already in progress (session=${sessionId}), ignoring duplicate init.`);
           return;
         }
         isInitializingSession = true;
-        console.log(`[Server] 🎙️ init received (session=${sessionId}), (re)creating Gemini Live session...`);
+        console.log(`[Server] init received (session=${sessionId}), (re)creating Gemini Live session...`);
         lastVoice = parsedData.voice || "Aoede";
         lastThinkingLevel = parsedData.thinkingLevel || "high";
         lastAccurateMode = !!parsedData.accurateMode;
@@ -575,7 +575,7 @@ async function startServer() {
             audio: { data: parsedData.audio, mimeType: "audio/pcm;rate=16000" },
           });
         } else if (parsedData.type === "audio_stream_end") {
-          console.log(`[Server] 🔕 audio_stream_end received from client (session=${sessionId}) — flushing turn to Gemini.`);
+          console.log(`[Server] audio_stream_end received from client (session=${sessionId}) — flushing turn to Gemini.`);
           try {
             currentSession.sendRealtimeInput({ audioStreamEnd: true });
           } catch (e) {
@@ -601,7 +601,7 @@ async function startServer() {
   });
 
   httpServer.listen(PORT, "0.0.0.0", () => {
-    console.log(`[Server] 🚀 Friday Clean Architecture Server running on http://0.0.0.0:${PORT}`);
+    console.log(`[Server] Friday Clean Architecture Server running on http://0.0.0.0:${PORT}`);
   });
 }
 
