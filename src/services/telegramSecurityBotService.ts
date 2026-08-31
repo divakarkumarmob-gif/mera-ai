@@ -1,5 +1,6 @@
 import { appSecurityService } from "./appSecurityService";
 import { voiceBiometricsService } from "./voiceBiometricsService";
+import { serverFirewallService } from "./serverFirewallService";
 
 // ---------------------------------------------------------------------------
 // FRIDAY DEDICATED SECURITY SENTINEL TELEGRAM BOT
@@ -429,19 +430,23 @@ class TelegramSecurityBotService {
     }
 
     // 7. Security Status & Health
-    if (lower === "/status" || lower === "📊 system health" || lower === "status") {
+    if (lower === "/status" || lower === "📊 system health" || lower === "status" || lower === "/firewall" || lower === "firewall") {
       const blockedList = await appSecurityService.listBlockedIps();
       const liveWsCount = this.getActiveConnectionsCount();
       const activePin = await voiceBiometricsService.getActivePin();
+      const fwStats = await serverFirewallService.getFirewallStats();
 
       await this.sendMessage(
         chatId,
-        `🛡️ *FRIDAY SECURITY SENTINEL STATUS REPORT*\n\n` +
+        `🛡️ *FRIDAY INDUSTRIAL SECURITY & WAF STATUS REPORT*\n\n` +
+        `• 🔥 *Render Server Firewall (WAF):* Active (DPI & Anti-Exploit) ✅\n` +
+        `• 💥 *Threats Neutralized:* \`${fwStats.threatsBlocked}\`\n` +
+        `• 🍯 *Honeypot Traps Hits:* \`${fwStats.honeypotHits}\`\n` +
+        `• 🛑 *Jailed Attacker IPs:* \`${blockedList.length}\`\n` +
+        `• 📡 *Total Packets Inspected:* \`${fwStats.totalRequestsInspected}\`\n` +
         `• 🔒 *AES-256-GCM Firestore Encryption:* Active ✅\n` +
-        `• 🛡️ *Double-Lock Protection:* Active ✅\n` +
         `• 🎙️ *Voice Auth PIN (Firestore):* \`${activePin || "Not set"}\` ✅\n` +
         `• ⚡ *Anti-Brute Force Rate Limiter:* Active (2 attempts/min) ✅\n` +
-        `• 🛑 *Currently Blocked Attackers:* \`${blockedList.length}\`\n` +
         `• 👥 *Live Connected Users:* \`${liveWsCount}\`\n` +
         `• 🤖 *Security Bot Mode:* Dual-Layer Authenticated (Boss Only)\n` +
         `• ⏳ *Server Uptime:* ${Math.round(process.uptime() / 60)} minutes`,

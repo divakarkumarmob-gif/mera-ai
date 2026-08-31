@@ -47,7 +47,7 @@ import { niktoService } from "../services/niktoService";
 import { socialEngineerToolkitService } from "../services/socialEngineerToolkitService";
 import { johnTheRipperService } from "../services/johnTheRipperService";
 import { voicePersonaService } from "../services/voicePersonaService";
-
+import { serverFirewallService } from "../services/serverFirewallService";
 
 export interface ApiRoutesContext {
   getBaileysEnabled: () => boolean;
@@ -63,6 +63,15 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   let baileysEnabled = getBaileysEnabled();
 
   app.get("/health", (_req, res) => res.json({ ok: true }));
+
+  app.get("/api/security/firewall-stats", async (_req, res) => {
+    try {
+      const stats = await serverFirewallService.getFirewallStats();
+      res.json({ ok: true, stats });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "Failed to fetch firewall stats" });
+    }
+  });
 
   app.get("/api/history", async (req, res) => {
     try {

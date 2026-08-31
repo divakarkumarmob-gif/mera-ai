@@ -22,6 +22,7 @@ import { telegramBotService } from "./src/services/telegramBotService";
 import { backgroundTasksService } from "./src/services/backgroundTasksService";
 import { appSecurityService } from "./src/services/appSecurityService";
 import { telegramSecurityBotService } from "./src/services/telegramSecurityBotService";
+import { serverFirewallService } from "./src/services/serverFirewallService";
 
 // Clean modular live AI & route subsystems
 import { fridayFunctionDeclarations } from "./src/live/liveToolDeclarations";
@@ -49,6 +50,9 @@ async function startServer() {
   app.set("trust proxy", 1);
   app.use(express.json({ limit: "10mb" }));
   app.use(cors());
+
+  // ── Industrial-Grade Server Firewall & Attack Sentinel (DPI + Anti-Exploit) ──
+  app.use(serverFirewallService.createMiddleware());
 
   const limiter = rateLimit({ windowMs: 60 * 1000, max: 120 });
   app.use("/api/", limiter);
