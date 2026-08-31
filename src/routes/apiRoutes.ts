@@ -40,6 +40,12 @@ import { productPriceService } from "../services/productPriceService";
 import { priceDropTrackerService } from "../services/priceDropTrackerService";
 import { ecommerceOrderService } from "../services/ecommerceOrderService";
 import { autonomousBuyerService } from "../services/autonomousBuyerService";
+import { sherlockService } from "../services/sherlockService";
+import { theHarvesterService } from "../services/theHarvesterService";
+import { sqlMapService } from "../services/sqlMapService";
+import { niktoService } from "../services/niktoService";
+import { socialEngineerToolkitService } from "../services/socialEngineerToolkitService";
+import { johnTheRipperService } from "../services/johnTheRipperService";
 
 export interface ApiRoutesContext {
   getBaileysEnabled: () => boolean;
@@ -1774,6 +1780,669 @@ export function createApiRouter(context: ApiRoutesContext): Router {
       res.json({ ok: true, data: extracted });
     } catch (e: any) {
       res.status(500).json({ error: e?.message || "failed_to_extract_json" });
+    }
+  });
+
+
+  // ---------------------------------------------------------------------------
+  // 🔍 OSINT Tool #1: Sherlock — Username Intelligence (300+ Platforms)
+  // Source: https://github.com/sherlock-project/sherlock
+  // Install: pip install sherlock-project
+  // ---------------------------------------------------------------------------
+
+  /** GET /api/osint/sherlock/status — Check if Sherlock is installed */
+  app.get("/api/osint/sherlock/status", async (_req, res) => {
+    try {
+      const status = await sherlockService.getStatus();
+      res.json({ ok: true, ...status });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "sherlock_status_failed" });
+    }
+  });
+
+  /** POST /api/osint/sherlock/search — Search username across 300+ platforms
+   *  Body: { username: string, timeout?: number, nsfw?: boolean, onlyFound?: boolean }
+   */
+  app.post("/api/osint/sherlock/search", async (req, res) => {
+    try {
+      const { username, timeout, nsfw, onlyFound } = req.body || {};
+      if (!username || typeof username !== "string") {
+        return res.status(400).json({ ok: false, error: "username is required" });
+      }
+      const result = await sherlockService.searchUsername(username.trim(), {
+        timeout: timeout ? Number(timeout) : 30,
+        nsfw: Boolean(nsfw),
+        onlyFound: Boolean(onlyFound),
+      });
+      res.json({ ok: true, result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "sherlock_search_failed" });
+    }
+  });
+
+  /** POST /api/osint/sherlock/search-multi — Search multiple usernames at once
+   *  Body: { usernames: string[], timeout?: number, nsfw?: boolean }
+   */
+  app.post("/api/osint/sherlock/search-multi", async (req, res) => {
+    try {
+      const { usernames, timeout, nsfw } = req.body || {};
+      if (!Array.isArray(usernames) || usernames.length === 0) {
+        return res.status(400).json({ ok: false, error: "usernames array is required" });
+      }
+      if (usernames.length > 5) {
+        return res.status(400).json({ ok: false, error: "Max 5 usernames per request" });
+      }
+      const results = await sherlockService.searchMultipleUsernames(
+        usernames.map((u: any) => String(u).trim()),
+        { timeout: timeout ? Number(timeout) : 30, nsfw: Boolean(nsfw) }
+      );
+      res.json({ ok: true, results });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "sherlock_multi_search_failed" });
+    }
+  });
+
+  /** GET /api/osint/sherlock/sites — List all supported social media platforms */
+  app.get("/api/osint/sherlock/sites", async (_req, res) => {
+    try {
+      const sites = await sherlockService.getSupportedSites();
+      res.json({ ok: true, totalSites: sites.length, sites });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "sherlock_sites_failed" });
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // 🌱 OSINT Tool #2: TheHarvester — Email, Subdomain & Host Intelligence
+  // Source: https://github.com/laramies/theHarvester
+  // Sources: crt.sh, HackerTarget, AlienVault OTX, Shodan, DNS (Pure JS)
+  // Optional: VIRUSTOTAL_API_KEY, HUNTER_API_KEY in .env
+  // ---------------------------------------------------------------------------
+
+  /** GET /api/osint/harvester/status — Service status and sources */
+  app.get("/api/osint/harvester/status", (_req, res) => {
+    res.json({ ok: true, ...theHarvesterService.getStatus() });
+  });
+
+  /** POST /api/osint/harvester/harvest — Full OSINT harvest for a domain
+   *  Body: { domain: string, resolveIps?: boolean, shodanScan?: boolean }
+   */
+  app.post("/api/osint/harvester/harvest", async (req, res) => {
+    try {
+      const { domain, resolveIps, shodanScan, virusTotalKey, hunterKey } = req.body || {};
+      if (!domain || typeof domain !== "string") {
+        return res.status(400).json({ ok: false, error: "domain is required" });
+      }
+      const report = await theHarvesterService.harvest(domain.trim(), {
+        resolveIps: resolveIps !== false,
+        shodanScan: shodanScan !== false,
+        virusTotalKey,
+        hunterKey,
+      });
+      res.json({ ok: true, report });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "harvester_failed" });
+    }
+  });
+
+  /** POST /api/osint/harvester/subdomains — Quick subdomain enumeration only
+   *  Body: { domain: string }
+   */
+  app.post("/api/osint/harvester/subdomains", async (req, res) => {
+    try {
+      const { domain } = req.body || {};
+      if (!domain || typeof domain !== "string") {
+        return res.status(400).json({ ok: false, error: "domain is required" });
+      }
+      const result = await theHarvesterService.findSubdomains(domain.trim());
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "subdomain_scan_failed" });
+    }
+  });
+
+  /** POST /api/osint/harvester/dns — DNS records for a domain
+   *  Body: { domain: string }
+   */
+  app.post("/api/osint/harvester/dns", async (req, res) => {
+    try {
+      const { domain } = req.body || {};
+      if (!domain || typeof domain !== "string") {
+        return res.status(400).json({ ok: false, error: "domain is required" });
+      }
+      const result = await theHarvesterService.getDnsRecords(domain.trim());
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "dns_lookup_failed" });
+    }
+  });
+
+  /** POST /api/osint/harvester/ip-scan — Shodan InternetDB scan for an IP
+   *  Body: { ip: string }
+   */
+  app.post("/api/osint/harvester/ip-scan", async (req, res) => {
+    try {
+      const { ip } = req.body || {};
+      if (!ip || typeof ip !== "string") {
+        return res.status(400).json({ ok: false, error: "ip is required" });
+      }
+      const result = await theHarvesterService.scanIp(ip.trim());
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "ip_scan_failed" });
+    }
+  });
+
+
+  // ---------------------------------------------------------------------------
+  // 💉 OSINT Tool #3: SQLMap — SQL Injection Scanner
+  // Source: https://github.com/sqlmapproject/sqlmap
+  // Techniques: Error-Based, Boolean-Blind, Time-Blind, Union-Based (Pure JS)
+  // ⚠️  Use only on systems you own or have permission to test!
+  // ---------------------------------------------------------------------------
+
+  /** GET /api/osint/sqlmap/status — Service status and payload count */
+  app.get("/api/osint/sqlmap/status", (_req, res) => {
+    res.json({ ok: true, ...sqlMapService.getStatus() });
+  });
+
+  /** POST /api/osint/sqlmap/scan — Full SQL injection scan
+   *  Body: {
+   *    url: string,
+   *    method?: "GET"|"POST",
+   *    postData?: string,        // e.g. "user=admin&pass=test"
+   *    params?: string[],        // specific params to test
+   *    cookies?: string,
+   *    techniques?: string[],    // ["error","boolean","time","union"]
+   *    timeThreshold?: number    // ms delay for time-based (default 2800)
+   *  }
+   */
+  app.post("/api/osint/sqlmap/scan", async (req, res) => {
+    try {
+      const { url, method, postData, params, cookies, techniques, timeThreshold } = req.body || {};
+      if (!url || typeof url !== "string") {
+        return res.status(400).json({ ok: false, error: "url is required" });
+      }
+      const report = await sqlMapService.scan(url.trim(), {
+        method: method || "GET",
+        postData,
+        params: Array.isArray(params) ? params : undefined,
+        cookies,
+        techniques: Array.isArray(techniques) ? techniques : undefined,
+        timeThreshold: timeThreshold ? Number(timeThreshold) : undefined,
+      });
+      res.json({ ok: true, report });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "sqlmap_scan_failed" });
+    }
+  });
+
+  /** POST /api/osint/sqlmap/quick-test — Test single param with one payload
+   *  Body: { url: string, param: string, payload: string }
+   */
+  app.post("/api/osint/sqlmap/quick-test", async (req, res) => {
+    try {
+      const { url, param, payload } = req.body || {};
+      if (!url || !param || !payload) {
+        return res.status(400).json({ ok: false, error: "url, param, and payload are required" });
+      }
+      const result = await sqlMapService.quickTest(String(url), String(param), String(payload));
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "quick_test_failed" });
+    }
+  });
+
+  /** POST /api/osint/sqlmap/analyze-url — Analyze URL for injectable parameters
+   *  Body: { url: string }
+   */
+  app.post("/api/osint/sqlmap/analyze-url", async (req, res) => {
+    try {
+      const { url } = req.body || {};
+      if (!url || typeof url !== "string") {
+        return res.status(400).json({ ok: false, error: "url is required" });
+      }
+      const analysis = sqlMapService.analyzeUrl(url.trim());
+      res.json({ ok: true, ...analysis });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "analyze_url_failed" });
+    }
+  });
+
+  /** GET /api/osint/sqlmap/payloads — Get all SQL injection payloads (educational) */
+  app.get("/api/osint/sqlmap/payloads", (_req, res) => {
+    try {
+      const payloads = sqlMapService.getPayloads();
+      res.json({ ok: true, ...payloads });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "payloads_fetch_failed" });
+    }
+  });
+
+
+  // ---------------------------------------------------------------------------
+  // 🕵️ OSINT Tool #4: Nikto — Web Server Vulnerability Scanner
+  // Source: https://github.com/sullo/nikto
+  // Checks: Headers, Dangerous Paths, HTTP Methods, CMS, Cookies (Pure JS)
+  // ⚠️  Use only on systems you own or have permission to test!
+  // ---------------------------------------------------------------------------
+
+  /** GET /api/osint/nikto/status — Service info and total checks */
+  app.get("/api/osint/nikto/status", (_req, res) => {
+    res.json({ ok: true, ...niktoService.getStatus() });
+  });
+
+  /** POST /api/osint/nikto/scan — Full web server vulnerability scan
+   *  Body: {
+   *    url: string,
+   *    checkPaths?: boolean,     // scan dangerous paths (default: true)
+   *    checkHeaders?: boolean,   // check security headers (default: true)
+   *    checkMethods?: boolean,   // check HTTP methods (default: true)
+   *    maxPaths?: number,        // limit path checks for speed
+   *    concurrency?: number      // parallel requests (default: 15)
+   *  }
+   */
+  app.post("/api/osint/nikto/scan", async (req, res) => {
+    try {
+      const { url, checkPaths, checkHeaders, checkMethods, maxPaths, concurrency } = req.body || {};
+      if (!url || typeof url !== "string") {
+        return res.status(400).json({ ok: false, error: "url is required" });
+      }
+      const report = await niktoService.scan(url.trim(), {
+        checkPaths: checkPaths !== false,
+        checkHeaders: checkHeaders !== false,
+        checkMethods: checkMethods !== false,
+        maxPaths: maxPaths ? Number(maxPaths) : undefined,
+        concurrency: concurrency ? Number(concurrency) : 15,
+      });
+      res.json({ ok: true, report });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "nikto_scan_failed" });
+    }
+  });
+
+  /** POST /api/osint/nikto/headers-only — Check only security headers (fast)
+   *  Body: { url: string }
+   */
+  app.post("/api/osint/nikto/headers-only", async (req, res) => {
+    try {
+      const { url } = req.body || {};
+      if (!url || typeof url !== "string") {
+        return res.status(400).json({ ok: false, error: "url is required" });
+      }
+      const report = await niktoService.scan(url.trim(), {
+        checkPaths: false,
+        checkHeaders: true,
+        checkMethods: true,
+        maxPaths: 0,
+      });
+      res.json({ ok: true, report });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "header_check_failed" });
+    }
+  });
+
+
+  // ---------------------------------------------------------------------------
+  // 🎭 OSINT Tool #5 & #6: Social Engineer Toolkit (SET)
+  // Source: https://github.com/trustedsec/social-engineer-toolkit
+  // Features: Phishing templates, Pretexting, Smishing, Vishing, URL analyzer
+  // ⚠️  FOR AUTHORIZED PENTEST & SECURITY AWARENESS TRAINING ONLY!
+  // ---------------------------------------------------------------------------
+
+  /** GET /api/osint/set/status */
+  app.get("/api/osint/set/status", (_req, res) => {
+    res.json({ ok: true, ...socialEngineerToolkitService.getStatus() });
+  });
+
+  /** GET /api/osint/set/phishing-templates — Get all phishing email templates
+   *  Query: ?category=corporate|banking|tech|hr|urgent|delivery|healthcare
+   */
+  app.get("/api/osint/set/phishing-templates", (req, res) => {
+    try {
+      const category = req.query.category as any;
+      const templates = socialEngineerToolkitService.getPhishingTemplates(category);
+      res.json({ ok: true, count: templates.length, templates });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
+    }
+  });
+
+  /** POST /api/osint/set/generate-phishing — Generate customized phishing email
+   *  Body: { templateId: string, targetName?: string, phishingLink?: string, companyName?: string }
+   */
+  app.post("/api/osint/set/generate-phishing", (req, res) => {
+    try {
+      const { templateId, targetName, targetEmail, phishingLink, companyName, senderName } = req.body || {};
+      if (!templateId) return res.status(400).json({ ok: false, error: "templateId is required" });
+      const result = socialEngineerToolkitService.generatePhishingEmail(String(templateId), {
+        targetName, targetEmail, phishingLink, companyName, senderName,
+      });
+      if (!result.template) return res.status(404).json({ ok: false, error: "Template not found" });
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
+    }
+  });
+
+  /** GET /api/osint/set/pretexting — Get pretexting scripts
+   *  Query: ?scenario=it-helpdesk
+   */
+  app.get("/api/osint/set/pretexting", (req, res) => {
+    try {
+      const scenario = req.query.scenario as string | undefined;
+      const scripts = socialEngineerToolkitService.getPretextingScripts(scenario);
+      res.json({ ok: true, count: scripts.length, scripts });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
+    }
+  });
+
+  /** GET /api/osint/set/smishing — Get SMS phishing templates
+   *  Query: ?category=Banking|Delivery|Government
+   */
+  app.get("/api/osint/set/smishing", (req, res) => {
+    try {
+      const category = req.query.category as string | undefined;
+      const templates = socialEngineerToolkitService.getSmishingTemplates(category);
+      res.json({ ok: true, count: templates.length, templates });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
+    }
+  });
+
+  /** GET /api/osint/set/vishing — Get voice phishing scripts */
+  app.get("/api/osint/set/vishing", (_req, res) => {
+    try {
+      const scripts = socialEngineerToolkitService.getVishingScripts();
+      res.json({ ok: true, count: scripts.length, scripts });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
+    }
+  });
+
+  /** POST /api/osint/set/analyze-url — Phishing URL analyzer
+   *  Body: { url: string }
+   */
+  app.post("/api/osint/set/analyze-url", (req, res) => {
+    try {
+      const { url } = req.body || {};
+      if (!url) return res.status(400).json({ ok: false, error: "url is required" });
+      const analysis = socialEngineerToolkitService.analyzePhishingUrl(String(url));
+      res.json({ ok: true, analysis });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
+    }
+  });
+
+  /** POST /api/osint/set/build-campaign — Build a social engineering campaign
+   *  Body: { name: string, type: "phishing"|"smishing"|"vishing", targetDescription: string }
+   */
+  app.post("/api/osint/set/build-campaign", (req, res) => {
+    try {
+      const { name, type, targetDescription, duration } = req.body || {};
+      if (!name || !type || !targetDescription) {
+        return res.status(400).json({ ok: false, error: "name, type, and targetDescription are required" });
+      }
+      const campaign = socialEngineerToolkitService.buildCampaign({ name, type, targetDescription, duration });
+      res.json({ ok: true, campaign });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
+    }
+  });
+
+  /** GET /api/osint/set/awareness-quiz — Social engineering awareness quiz */
+  app.get("/api/osint/set/awareness-quiz", (_req, res) => {
+    try {
+      const quiz = socialEngineerToolkitService.getAwarenessQuiz();
+      res.json({ ok: true, count: quiz.length, quiz });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
+    }
+  });
+
+  /** GET /api/osint/set/harvester-templates — Fake login page examples (educational) */
+  app.get("/api/osint/set/harvester-templates", (_req, res) => {
+    try {
+      const templates = socialEngineerToolkitService.getHarvesterTemplates();
+      res.json({ ok: true, count: templates.length, templates });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
+    }
+  });
+
+
+  // ---------------------------------------------------------------------------
+  // 🔑 OSINT Tool #7: John the Ripper — Password Hash Cracker
+  // Source: https://github.com/openwall/john
+  // Features: Hash ID, Wordlist crack, Online lookup, Strength analyzer (Pure JS)
+  // ⚠️  USE ONLY FOR AUTHORIZED SECURITY TESTING!
+  // ---------------------------------------------------------------------------
+
+  /** GET /api/osint/john/status */
+  app.get("/api/osint/john/status", (_req, res) => {
+    res.json({ ok: true, ...johnTheRipperService.getStatus() });
+  });
+
+  /** POST /api/osint/john/identify — Identify hash type
+   *  Body: { hash: string }
+   */
+  app.post("/api/osint/john/identify", (req, res) => {
+    try {
+      const { hash } = req.body || {};
+      if (!hash) return res.status(400).json({ ok: false, error: "hash is required" });
+      const result = johnTheRipperService.identifyHash(String(hash));
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
+    }
+  });
+
+  /** POST /api/osint/john/crack — Crack a single hash
+   *  Body: { hash: string, hashType?: string, useOnlineLookup?: boolean, customWordlist?: string[] }
+   */
+  app.post("/api/osint/john/crack", async (req, res) => {
+    try {
+      const { hash, hashType, useOnlineLookup, customWordlist } = req.body || {};
+      if (!hash) return res.status(400).json({ ok: false, error: "hash is required" });
+      const result = await johnTheRipperService.crackHash(String(hash), {
+        hashType,
+        useOnlineLookup: useOnlineLookup !== false,
+        customWordlist: Array.isArray(customWordlist) ? customWordlist : undefined,
+      });
+      res.json({ ok: true, result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
+    }
+  });
+
+  /** POST /api/osint/john/crack-multiple — Crack multiple hashes
+   *  Body: { hashes: string[], hashType?: string, useOnlineLookup?: boolean }
+   */
+  app.post("/api/osint/john/crack-multiple", async (req, res) => {
+    try {
+      const { hashes, hashType, useOnlineLookup } = req.body || {};
+      if (!Array.isArray(hashes) || hashes.length === 0) {
+        return res.status(400).json({ ok: false, error: "hashes array is required" });
+      }
+      if (hashes.length > 20) {
+        return res.status(400).json({ ok: false, error: "Max 20 hashes per request" });
+      }
+      const results = await johnTheRipperService.crackMultiple(
+        hashes.map(String),
+        { hashType, useOnlineLookup: useOnlineLookup !== false }
+      );
+      res.json({ ok: true, results, crackedCount: results.filter(r => r.cracked).length });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
+    }
+  });
+
+  /** POST /api/osint/john/analyze-password — Password strength analysis + hashes
+   *  Body: { password: string }
+   */
+  app.post("/api/osint/john/analyze-password", (req, res) => {
+    try {
+      const { password } = req.body || {};
+      if (!password) return res.status(400).json({ ok: false, error: "password is required" });
+      const result = johnTheRipperService.analyzePassword(String(password));
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
+    }
+  });
+
+  /** POST /api/osint/john/generate-hashes — Generate all hash types for plaintext
+   *  Body: { plaintext: string }
+   */
+  app.post("/api/osint/john/generate-hashes", (req, res) => {
+    try {
+      const { plaintext } = req.body || {};
+      if (!plaintext) return res.status(400).json({ ok: false, error: "plaintext is required" });
+      const hashes = johnTheRipperService.generateHashes(String(plaintext));
+      res.json({ ok: true, ...hashes });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
+    }
+  });
+
+  /** POST /api/osint/john/brute-force-estimate — Estimate brute force time
+   *  Body: { passwordLength: number, charset?: "numeric"|"alpha"|"alphanumeric"|"full" }
+   */
+  app.post("/api/osint/john/brute-force-estimate", (req, res) => {
+    try {
+      const { passwordLength, charset } = req.body || {};
+      if (!passwordLength) return res.status(400).json({ ok: false, error: "passwordLength is required" });
+      if (Number(passwordLength) > 20) return res.status(400).json({ ok: false, error: "Max length: 20" });
+      const estimate = johnTheRipperService.estimateBruteForce({
+        passwordLength: Number(passwordLength),
+        charset: charset || "full",
+      });
+      res.json({ ok: true, ...estimate });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
+    }
+  });
+
+  /** POST /api/osint/john/check-common — Check if password is in common list
+   *  Body: { password: string }
+   */
+  app.post("/api/osint/john/check-common", (req, res) => {
+    try {
+      const { password } = req.body || {};
+      if (!password) return res.status(400).json({ ok: false, error: "password is required" });
+      const result = johnTheRipperService.checkCommonPassword(String(password));
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
+    }
+  });
+
+  /** POST /api/osint/john/check-policy — Check password against security policy
+   *  Body: { password: string, policy?: { minLength, requireUppercase, ... } }
+   */
+  app.post("/api/osint/john/check-policy", (req, res) => {
+    try {
+      const { password, policy } = req.body || {};
+      if (!password) return res.status(400).json({ ok: false, error: "password is required" });
+      const result = johnTheRipperService.checkPasswordPolicy(String(password), policy);
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
+    }
+  });
+
+  /** GET /api/osint/john/wordlist-stats — Wordlist statistics */
+  app.get("/api/osint/john/wordlist-stats", (_req, res) => {
+    res.json({ ok: true, ...johnTheRipperService.getWordlistStats() });
+  });
+
+
+  // ---------------------------------------------------------------------------
+  // 🎙️ Voice Control — Friday apni awaaz badal sake
+  // Friday ko bolo: "male voice lagao" / "female voice lagao" / "Charon lagao"
+  // ---------------------------------------------------------------------------
+
+  const VOICE_CATEGORIES_API = {
+    female: [
+      { name: "Aoede", style: "Breezy" }, { name: "Kore", style: "Firm" },
+      { name: "Zephyr", style: "Bright" }, { name: "Autonoe", style: "Bright" },
+      { name: "Erinome", style: "Clear" }, { name: "Laomedeia", style: "Upbeat" },
+      { name: "Schedar", style: "Even" }, { name: "Achernar", style: "Soft" },
+      { name: "Leda", style: "Youthful" }, { name: "Callirrhoe", style: "Easy-going" },
+      { name: "Despina", style: "Smooth" }, { name: "Vindemiatrix", style: "Gentle" },
+      { name: "Sulafat", style: "Warm" }, { name: "Pulcherrima", style: "Forward" },
+      { name: "Sadachbia", style: "Lively" },
+    ],
+    male: [
+      { name: "Puck", style: "Upbeat" }, { name: "Charon", style: "Informative" },
+      { name: "Fenrir", style: "Excitable" }, { name: "Orus", style: "Firm" },
+      { name: "Umbriel", style: "Easy-going" }, { name: "Achird", style: "Friendly" },
+      { name: "Enceladus", style: "Breathy" }, { name: "Algieba", style: "Smooth" },
+      { name: "Algenib", style: "Gravelly" }, { name: "Gacrux", style: "Mature" },
+      { name: "Zubenelgenubi", style: "Casual" }, { name: "Sadaltager", style: "Knowledgeable" },
+      { name: "Iapetus", style: "Clear" }, { name: "Rasalgethi", style: "Informative" },
+      { name: "Alnilam", style: "Firm" },
+    ],
+  };
+
+  /** GET /api/voices — Sabhi voices list with categories */
+  app.get("/api/voices", (_req, res) => {
+    res.json({
+      ok: true,
+      total: 30,
+      categories: VOICE_CATEGORIES_API,
+      all: [...VOICE_CATEGORIES_API.female, ...VOICE_CATEGORIES_API.male],
+    });
+  });
+
+  /** POST /api/voices/suggest — Friday ke liye voice suggest karo
+   *  Body: { gender?: "male"|"female", style?: string, voiceName?: string }
+   *  Friday isko call karta hai jab user bole "male voice lagao"
+   */
+  app.post("/api/voices/suggest", (req, res) => {
+    try {
+      const { gender, style, voiceName } = req.body || {};
+
+      // Specific voice name diya
+      if (voiceName) {
+        const allVoices = [...VOICE_CATEGORIES_API.female, ...VOICE_CATEGORIES_API.male];
+        const found = allVoices.find(v => v.name.toLowerCase() === String(voiceName).toLowerCase());
+        if (found) {
+          const gender = VOICE_CATEGORIES_API.female.find(v => v.name === found.name) ? "female" : "male";
+          return res.json({ ok: true, suggested: found.name, style: found.style, gender, message: `${found.name} voice (${found.style}) suggest ki gayi hai` });
+        }
+        return res.status(404).json({ ok: false, error: "Voice not found" });
+      }
+
+      // Gender filter
+      const pool = gender === "male"
+        ? VOICE_CATEGORIES_API.male
+        : gender === "female"
+        ? VOICE_CATEGORIES_API.female
+        : [...VOICE_CATEGORIES_API.female, ...VOICE_CATEGORIES_API.male];
+
+      // Style filter (optional)
+      const stylePool = style
+        ? pool.filter(v => v.style.toLowerCase().includes(String(style).toLowerCase()))
+        : pool;
+
+      const pick = stylePool.length > 0
+        ? stylePool[Math.floor(Math.random() * stylePool.length)]
+        : pool[Math.floor(Math.random() * pool.length)];
+
+      const pickedGender = VOICE_CATEGORIES_API.female.find(v => v.name === pick.name) ? "female" : "male";
+
+      res.json({
+        ok: true,
+        suggested: pick.name,
+        style: pick.style,
+        gender: pickedGender,
+        message: `${pick.name} voice suggest ki — ${pickedGender === "female" ? "♀ Female" : "♂ Male"}, style: ${pick.style}`,
+        instruction: `Frontend pe selectedVoice ko "${pick.name}" set karo aur session reinitialize karo`,
+      });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
     }
   });
 

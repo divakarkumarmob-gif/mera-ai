@@ -28,7 +28,45 @@ interface LiveAIInterfaceProps {
     onClose: () => void;
 }
 
-const VOICES = ['Aoede', 'Charon', 'Fenrir', 'Kore', 'Puck'];
+// All 30 Google Gemini Live voices — categorized by gender
+export const VOICE_CATEGORIES = {
+  female: [
+    { name: 'Aoede',         style: 'Breezy' },
+    { name: 'Kore',          style: 'Firm' },
+    { name: 'Zephyr',        style: 'Bright' },
+    { name: 'Autonoe',       style: 'Bright' },
+    { name: 'Erinome',       style: 'Clear' },
+    { name: 'Laomedeia',     style: 'Upbeat' },
+    { name: 'Schedar',       style: 'Even' },
+    { name: 'Achernar',      style: 'Soft' },
+    { name: 'Leda',          style: 'Youthful' },
+    { name: 'Callirrhoe',    style: 'Easy-going' },
+    { name: 'Despina',       style: 'Smooth' },
+    { name: 'Vindemiatrix',  style: 'Gentle' },
+    { name: 'Sulafat',       style: 'Warm' },
+    { name: 'Pulcherrima',   style: 'Forward' },
+    { name: 'Sadachbia',     style: 'Lively' },
+  ],
+  male: [
+    { name: 'Puck',          style: 'Upbeat' },
+    { name: 'Charon',        style: 'Informative' },
+    { name: 'Fenrir',        style: 'Excitable' },
+    { name: 'Orus',          style: 'Firm' },
+    { name: 'Umbriel',       style: 'Easy-going' },
+    { name: 'Achird',        style: 'Friendly' },
+    { name: 'Enceladus',     style: 'Breathy' },
+    { name: 'Algieba',       style: 'Smooth' },
+    { name: 'Algenib',       style: 'Gravelly' },
+    { name: 'Gacrux',        style: 'Mature' },
+    { name: 'Zubenelgenubi', style: 'Casual' },
+    { name: 'Sadaltager',    style: 'Knowledgeable' },
+    { name: 'Iapetus',       style: 'Clear' },
+    { name: 'Rasalgethi',    style: 'Informative' },
+    { name: 'Alnilam',       style: 'Firm' },
+  ],
+};
+const ALL_VOICES = [...VOICE_CATEGORIES.female, ...VOICE_CATEGORIES.male];
+const VOICES = ALL_VOICES.map(v => v.name);
 const THINKING_LEVELS = ['low', 'medium', 'high'];
 
 // ── Reusable Toggle Switch with Clear "ON" / "OFF" Visual Badge ───────────────
@@ -639,6 +677,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
 
     const [selectedVoice, setSelectedVoice] = useState(() => localStorage.getItem('selectedVoice') || 'Aoede');
     const [showVoiceDropdown, setShowVoiceDropdown] = useState(false);
+    const [voiceTab, setVoiceTab] = useState<'female' | 'male'>('female');
     const [thinkingLevel, setThinkingLevel] = useState('low');
     const [accurateMode, setAccurateMode] = useState(false);
     const [answerLength, setAnswerLength] = useState(() => localStorage.getItem('answerLength') || 'short');
@@ -2800,29 +2839,64 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                                             exit={{ height: 0, opacity: 0 }}
                                             className="px-4 pb-4 pt-1 space-y-4 border-t border-slate-800/60"
                                         >
-                                            {/* Voice Selector */}
+                                            {/* Voice Selector — Male / Female Categories */}
                                             <div>
                                                 <label className="text-slate-400 text-xs uppercase tracking-wide font-medium">Voice Model</label>
-                                                <div className="relative mt-1">
+
+                                                {/* Current selected voice badge */}
+                                                <div className="flex items-center gap-2 mt-2 mb-2">
+                                                    <span className="text-xs px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 font-mono">{selectedVoice}</span>
+                                                    <span className="text-xs text-slate-500">
+                                                        {VOICE_CATEGORIES.female.find(v => v.name === selectedVoice)
+                                                            ? `♀ Female — ${VOICE_CATEGORIES.female.find(v => v.name === selectedVoice)?.style}`
+                                                            : VOICE_CATEGORIES.male.find(v => v.name === selectedVoice)
+                                                            ? `♂ Male — ${VOICE_CATEGORIES.male.find(v => v.name === selectedVoice)?.style}`
+                                                            : ''}
+                                                    </span>
+                                                </div>
+
+                                                {/* Male / Female Tabs */}
+                                                <div className="flex gap-1 mb-2">
                                                     <button
-                                                        onClick={() => setShowVoiceDropdown(!showVoiceDropdown)}
-                                                        className="w-full flex items-center justify-between bg-slate-800/80 border border-slate-700 rounded-xl px-4 py-2.5 text-white text-sm"
+                                                        onClick={() => setVoiceTab('female')}
+                                                        className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                                                            voiceTab === 'female'
+                                                                ? 'bg-pink-500/30 border border-pink-500/50 text-pink-300'
+                                                                : 'bg-slate-800 border border-slate-700 text-slate-400 hover:bg-slate-700'
+                                                        }`}
                                                     >
-                                                        <span>{selectedVoice}</span> <ChevronDown className="w-4 h-4" />
+                                                        ♀ Female (15)
                                                     </button>
-                                                    {showVoiceDropdown && (
-                                                        <div className="absolute top-full mt-1 w-full bg-slate-800 border border-slate-600 rounded-xl overflow-hidden z-20 shadow-2xl">
-                                                            {VOICES.map(v => (
-                                                                <button
-                                                                    key={v}
-                                                                    onClick={() => { setSelectedVoice(v); setShowVoiceDropdown(false); }}
-                                                                    className={`w-full text-left px-4 py-2 text-sm hover:bg-slate-700 ${v === selectedVoice ? 'text-purple-400 font-bold bg-purple-500/10' : 'text-white'}`}
-                                                                >
-                                                                    {v}
-                                                                </button>
-                                                            ))}
-                                                        </div>
-                                                    )}
+                                                    <button
+                                                        onClick={() => setVoiceTab('male')}
+                                                        className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                                                            voiceTab === 'male'
+                                                                ? 'bg-blue-500/30 border border-blue-500/50 text-blue-300'
+                                                                : 'bg-slate-800 border border-slate-700 text-slate-400 hover:bg-slate-700'
+                                                        }`}
+                                                    >
+                                                        ♂ Male (15)
+                                                    </button>
+                                                </div>
+
+                                                {/* Voice Grid */}
+                                                <div className="grid grid-cols-2 gap-1 max-h-48 overflow-y-auto pr-1 custom-scrollbar">
+                                                    {VOICE_CATEGORIES[voiceTab].map(v => (
+                                                        <button
+                                                            key={v.name}
+                                                            onClick={() => setSelectedVoice(v.name)}
+                                                            className={`flex flex-col items-start px-3 py-2 rounded-xl text-xs transition-all border ${
+                                                                v.name === selectedVoice
+                                                                    ? voiceTab === 'female'
+                                                                        ? 'bg-pink-500/20 border-pink-500/50 text-pink-300'
+                                                                        : 'bg-blue-500/20 border-blue-500/50 text-blue-300'
+                                                                    : 'bg-slate-800/60 border-slate-700 text-white hover:bg-slate-700'
+                                                            }`}
+                                                        >
+                                                            <span className="font-semibold">{v.name}</span>
+                                                            <span className="text-[10px] opacity-60 mt-0.5">{v.style}</span>
+                                                        </button>
+                                                    ))}
                                                 </div>
                                             </div>
 
