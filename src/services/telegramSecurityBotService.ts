@@ -409,10 +409,12 @@ class TelegramSecurityBotService {
       await this.sendMessage(
         chatId,
         `🎙️ *FRIDAY LIVE VOICE AUTH CODE* 🔐\n\n` +
-        `• 🔑 *Active Voice Code / PIN:* \`${activePin || "1234"}\`\n` +
+        `• 🔑 *Active Voice Code / PIN:* \`${activePin || "Not configured yet"}\`\n` +
         `• 💾 *Storage:* Cloud Firestore (\`systemSecurity/voicePin\`)\n` +
         `• 👑 *Status:* Active & Synchronized with Friday Voice AI\n\n` +
-        `Friday se voice mode me bolte waqt \`Boss Code ${activePin || "1234"}\` bol kar aap 100% Root Access unlock kar sakte hain.\n\n` +
+        (activePin
+          ? `Friday se voice mode me bolte waqt \`Boss Code ${activePin}\` bol kar aap 100% Root Access unlock kar sakte hain.\n\n`
+          : `Abhi koi Voice Code set nahi hai.\n\n`) +
         `✏️ *Naya Voice Code set karne ke liye type karein:*\n` +
         `👉 \`voice code <naya_pin>\` (e.g. \`voice code 4589\`)`,
         this.getMainKeyboard()
@@ -437,7 +439,7 @@ class TelegramSecurityBotService {
         `🛡️ *FRIDAY SECURITY SENTINEL STATUS REPORT*\n\n` +
         `• 🔒 *AES-256-GCM Firestore Encryption:* Active ✅\n` +
         `• 🛡️ *Double-Lock Protection:* Active ✅\n` +
-        `• 🎙️ *Voice Auth PIN (Firestore):* \`${activePin || "1234"}\` ✅\n` +
+        `• 🎙️ *Voice Auth PIN (Firestore):* \`${activePin || "Not set"}\` ✅\n` +
         `• ⚡ *Anti-Brute Force Rate Limiter:* Active (2 attempts/min) ✅\n` +
         `• 🛑 *Currently Blocked Attackers:* \`${blockedList.length}\`\n` +
         `• 👥 *Live Connected Users:* \`${liveWsCount}\`\n` +

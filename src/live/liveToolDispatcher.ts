@@ -1781,6 +1781,13 @@ export async function dispatchLiveToolCall(call: any, context: ToolDispatchConte
                   } catch (e: any) {
                     result = { success: false, message: `Voice PIN update fail hua: ${e?.message || e}` };
                   }
+                } else if (call.name === "verify_voice_authorization_pin") {
+                  const { pin } = call.args || {};
+                  try {
+                    result = await voiceBiometricsService.verifyVoicePin(String(pin || ""));
+                  } catch (e: any) {
+                    result = { valid: false, message: `Voice PIN verification fail hui: ${e?.message || e}` };
+                  }
                 } else if (call.name === "send_music_on_whatsapp") {
                   const { songName, targetPhone } = call.args || {};
                   try {

@@ -3600,5 +3600,38 @@ export const fridayFunctionDeclarations: any[] = [
       },
       "required": []
     }
+  },
+  {
+    "name": "verify_voice_authorization_pin",
+    "description": "Verify Boss Divakar's Voice PIN / Secret Auth Code. Call IMMEDIATELY whenever user speaks a PIN or secret code (e.g., 'Boss Code 4589', 'Authenticate 1234', 'PIN 5678', 'Mera voice PIN 4589 hai'). Unlocks 100% root access upon successful verification.",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {
+        "pin": {
+          "type": "STRING",
+          "description": "The 4-8 digit voice PIN or secret code spoken by the user (e.g. '4589', '1234', 'char paanch aath nau')."
+        }
+      },
+      "required": [
+        "pin"
+      ]
+    }
+  },
+  {
+    "name": "update_voice_pin",
+    "description": "Update/Change the active Voice PIN in Firestore. Call when Boss says 'Mera Voice PIN badlo to 5678', 'Naya PIN set karo 9876', 'Update voice code 4589'.",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {
+        "newPin": {
+          "type": "STRING",
+          "description": "The new 4-8 digit voice PIN to save in Firestore."
+        }
+      },
+      "required": [
+        "newPin"
+      ]
+    }
   }
 ];
+

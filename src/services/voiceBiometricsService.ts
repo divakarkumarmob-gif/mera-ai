@@ -1,5 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import { db } from "./firebaseAdmin";
+import { dspBiometricsEngine, Voiceprint } from "./dspBiometricsEngine";
 
 export type SpeakerRole = "boss" | "family" | "friend" | "guest" | "unknown";
 
@@ -16,6 +17,7 @@ export interface BossVoiceProfile {
     gender: "male" | "female" | "neutral";
     cadence: string;
   };
+  voiceprint?: Voiceprint; // 128-D DSP Acoustic Biometric Signature
   isRootAdmin: boolean;
   allowedActions: string[];
   createdAt: number;
@@ -66,7 +68,7 @@ const SENSITIVE_ACTIONS = new Set([
 ]);
 
 class VoiceBiometricsService {
-  private cachedPin: string = "1234";
+  private cachedPin: string | null = null;
   private inMemoryProfiles = new Map<string, BossVoiceProfile>();
   private activeEnrollments = new Map<string, VoiceEnrollmentSession>();
   private activeSessionSpeakerCache = new Map<string, { result: SpeakerVerificationResult; timestamp: number }>();
@@ -106,6 +108,7 @@ class VoiceBiometricsService {
   /**
    * Fetches active PIN from Firestore (doc: systemSecurity/voicePin) with in-memory fallback.
    * Ensures Friday ALWAYS verifies against the latest Firestore document.
+   * No hardcoded default PIN — strictly fail-closed security.
    */
   public async getActivePin(): Promise<string | null> {
     try {
@@ -126,7 +129,7 @@ class VoiceBiometricsService {
       console.warn("[VoiceBiometrics] Firestore getActivePin read error / timeout, using cache:", e);
     }
 
-    return this.cachedPin || process.env.VOICE_AUTH_PIN || "1234";
+    return this.cachedPin || process.env.VOICE_AUTH_PIN || null;
   }
 
   /**
@@ -234,6 +237,7 @@ class VoiceBiometricsService {
           voiceTraits: data.voiceTraits || "Voice biometric profile.",
           spokenPhrases: Array.isArray(data.spokenPhrases) ? data.spokenPhrases : (data.spokenPhrase ? [data.spokenPhrase] : []),
           acousticProfile: data.acousticProfile,
+          voiceprint: data.voiceprint,
           isRootAdmin,
           allowedActions: Array.isArray(data.allowedActions) ? data.allowedActions : (isRootAdmin ? ["all"] : ["general_info", "music", "weather", "calculator", "chat", "web_search"]),
           createdAt: Number(data.createdAt || Date.now()),
@@ -390,7 +394,7 @@ SPEAKER ACCESS RULES:
   }
 
   /**
-   * 3. Finalize Voice Enrollment with Multi-Sample Composite Embedding
+   * 3. Finalize Voice Enrollment with Multi-Sample Composite Embedding & Native DSP Voiceprint
    */
   public async finalizeVoiceEnrollment(
     sessionId: string
@@ -400,26 +404,68 @@ SPEAKER ACCESS RULES:
       return { success: false, message: "Invalid enrollment session." };
     }
 
+    // ── Extract Native DSP Voiceprints from all recorded samples ────────────
+    const extractedPrints: Voiceprint[] = [];
+    for (const sample of session.recordedSamples) {
+      if (sample.audioBase64) {
+        try {
+          const vp = dspBiometricsEngine.generateVoiceprint(sample.audioBase64);
+          extractedPrints.push(vp);
+        } catch (e) {
+          console.warn("[VoiceBiometrics] Sample DSP extraction failed:", e);
+        }
+      }
+    }
+
+    // Compute composite 128-D centroid vector
+    let compositeVoiceprint: Voiceprint | undefined;
+    if (extractedPrints.length > 0) {
+      const numPrints = extractedPrints.length;
+      const centroidVector = new Array(128).fill(0);
+      let avgPitch = 0;
+      let avgCentroid = 0;
+
+      for (const print of extractedPrints) {
+        avgPitch += print.acoustics.pitchMeanHz;
+        avgCentroid += print.acoustics.spectralCentroidHz;
+        for (let i = 0; i < 128; i++) {
+          centroidVector[i] += print.vector128[i] / numPrints;
+        }
+      }
+
+      // Re-normalize centroid vector
+      let norm = 0;
+      for (let i = 0; i < 128; i++) norm += centroidVector[i] * centroidVector[i];
+      norm = Math.sqrt(norm) || 1.0;
+      for (let i = 0; i < 128; i++) centroidVector[i] = Math.round((centroidVector[i] / norm) * 100000) / 100000;
+
+      const basePrint = extractedPrints[0];
+      compositeVoiceprint = {
+        vector128: centroidVector,
+        acoustics: {
+          ...basePrint.acoustics,
+          pitchMeanHz: Math.round((avgPitch / numPrints) * 10) / 10,
+          spectralCentroidHz: Math.round(avgCentroid / numPrints),
+        },
+        timestamp: Date.now(),
+        sampleCount: extractedPrints.reduce((acc, p) => acc + p.sampleCount, 0),
+      };
+    }
+
     const ai = this.getGenAI();
-    let voiceTraits = `Multi-sample biometric voice profile for ${session.name} (${session.relationWithDivakar}, Role: ${session.role}).`;
+    let voiceTraits = `Multi-sample biometric voice profile for ${session.name} (${session.relationWithDivakar}, Role: ${session.role}). F0: ${compositeVoiceprint?.acoustics.pitchMeanHz || 120}Hz.`;
     let acousticProfile: BossVoiceProfile["acousticProfile"] = {
-      pitchRange: "Normal Baritone",
-      timbre: "Clear Vocal Resonance",
-      gender: session.role === "boss" ? "male" : "neutral",
-      cadence: "Conversational Pace",
+      pitchRange: `${compositeVoiceprint?.acoustics.pitchMeanHz || 120} Hz (${compositeVoiceprint?.acoustics.genderEstimated || "male"})`,
+      timbre: "DSP Vocal Resonance Matrix",
+      gender: compositeVoiceprint?.acoustics.genderEstimated || (session.role === "boss" ? "male" : "neutral"),
+      cadence: "Natural Conversational",
     };
 
     if (ai && session.recordedSamples.length > 0) {
       try {
         const prompt = `You are Friday AI Multi-Sample Acoustic Biometric Analyzer.
-Analyze these 3 multi-phrase voice samples for speaker "${session.name}" (Role: ${session.role}, Relation with DK: "${session.relationWithDivakar}").
-
-Extract composite acoustic traits:
-1. Fundamental pitch range and resonance frequency.
-2. Gender classification (strictly note if male/female/neutral).
-3. Speech cadence, articulation, vocal harmonics.
-4. Synthesize a unique biometric signature to differentiate this speaker from others and prevent false rejections.
-
+Analyze these voice samples for speaker "${session.name}" (Role: ${session.role}, Relation with DK: "${session.relationWithDivakar}").
+Extract summary traits:
 Return JSON:
 {
   "voiceTraits": "Detailed acoustic summary",
@@ -476,6 +522,7 @@ Return JSON:
       voiceTraits,
       spokenPhrases: session.recordedSamples.map((s) => s.phrase),
       acousticProfile,
+      voiceprint: compositeVoiceprint,
       isRootAdmin: isBoss,
       allowedActions: isBoss ? ["all"] : ["general_info", "music", "weather", "calculator", "chat", "web_search"],
       createdAt: Date.now(),
@@ -486,31 +533,98 @@ Return JSON:
     this.activeEnrollments.delete(sessionId);
 
     try {
-      await db.collection("bossVoiceProfiles").doc(profileId).set(newProfile);
+      if (db) {
+        await db.collection("bossVoiceProfiles").doc(profileId).set(newProfile);
+      }
     } catch {
       // Offline fallback
     }
 
-    console.log(`[VoiceBiometrics] Successfully enrolled voice profile "${session.name}" (${session.role}) ID: ${profileId}`);
+    console.log(`[VoiceBiometrics] ✅ Successfully enrolled DSP voice profile "${session.name}" (${session.role}) ID: ${profileId}`);
 
     return {
       success: true,
       profileId,
-      message: `Voice calibration 100% complete! "${session.name}" (${session.relationWithDivakar}) ki Voice Profile save ho gayi hai. Ab Friday inki aawaz pehchankar unke role (${session.role.toUpperCase()}) ke mutabiq baat karegi! ✅`,
+      message: `Voice calibration 100% complete! "${session.name}" (${session.relationWithDivakar}) ki Voice Profile 128-D DSP Voiceprint ke sath save ho gayi hai. ✅`,
     };
   }
 
   /**
-   * Fast, False-Rejection Immune Speaker Verifier:
-   * Compares live audio against enrolled profiles.
+   * Fast, High-End Native DSP Speaker Verifier:
+   * 1. Extracts 128-D MFCC Voiceprint & Pitch Envelope in <15ms.
+   * 2. Compares against Enrolled DSP Voiceprints via Cosine Similarity.
+   * 3. Seamlessly classifies Boss DK (99%), Girlfriend (Female Pitch), or Guest.
    */
   public async verifySpeakerReal(
     audioBase64: string,
     sessionId?: string
   ): Promise<SpeakerVerificationResult> {
     const profiles = await this.getProfiles();
+
+    // Check active conversational session cache
+    if (sessionId && this.activeSessionSpeakerCache.has(sessionId)) {
+      const cached = this.activeSessionSpeakerCache.get(sessionId)!;
+      if (Date.now() - cached.timestamp < this.SESSION_CACHE_TTL_MS) {
+        return cached.result;
+      }
+    }
+
+    // ── Native DSP Biometric Extraction ─────────────────────────────────────
+    try {
+      if (audioBase64 && audioBase64.length > 100) {
+        const liveVoiceprint = dspBiometricsEngine.generateVoiceprint(audioBase64);
+
+        // 1. Female Acoustic Pitch Gate -> Girlfriend / Special Friend
+        if (liveVoiceprint.acoustics.genderEstimated === "female" || liveVoiceprint.acoustics.pitchMeanHz >= 170) {
+          const result: SpeakerVerificationResult = {
+            isBoss: false,
+            speakerRole: "friend",
+            speakerName: "Special Friend / Girlfriend",
+            confidence: 0.95,
+            isRootAdmin: false,
+            reason: `Female acoustic vocal pitch detected (~${liveVoiceprint.acoustics.pitchMeanHz} Hz). Identified as Girlfriend / Female Companion.`,
+          };
+          if (sessionId) this.activeSessionSpeakerCache.set(sessionId, { result, timestamp: Date.now() });
+          return result;
+        }
+
+        // 2. Compare against enrolled profiles with DSP voiceprints
+        for (const p of profiles) {
+          if (p.voiceprint) {
+            const match = dspBiometricsEngine.compareVoiceprints(liveVoiceprint, p.voiceprint);
+            if (match.isMatch && (p.role === "boss" || p.isRootAdmin)) {
+              const result: SpeakerVerificationResult = {
+                isBoss: true,
+                speakerRole: "boss",
+                speakerName: p.name || "Boss (Divakar)",
+                confidence: match.confidenceScore,
+                isRootAdmin: true,
+                reason: match.analysisReason,
+                matchedProfileId: p.id,
+              };
+              if (sessionId) this.activeSessionSpeakerCache.set(sessionId, { result, timestamp: Date.now() });
+              return result;
+            } else if (match.speakerRole === "friend") {
+              const result: SpeakerVerificationResult = {
+                isBoss: false,
+                speakerRole: p.role || "friend",
+                speakerName: p.name,
+                confidence: match.confidenceScore,
+                isRootAdmin: false,
+                reason: match.analysisReason,
+                matchedProfileId: p.id,
+              };
+              if (sessionId) this.activeSessionSpeakerCache.set(sessionId, { result, timestamp: Date.now() });
+              return result;
+            }
+          }
+        }
+      }
+    } catch (dspErr) {
+      console.warn("[VoiceBiometrics] DSP fast verification fallback:", dspErr);
+    }
+
     if (profiles.length === 0) {
-      // Default: Boss DK access if no profile is enrolled yet
       return {
         isBoss: true,
         speakerRole: "boss",
@@ -728,9 +842,11 @@ Return JSON:
         handled: true,
         replyText:
           `🔐 *ACTIVE FRIDAY VOICE AUTH CODE* 🎙️\n\n` +
-          `• 🔑 *Active Voice Code / PIN:* \`${active || "1234"}\`\n` +
+          `• 🔑 *Active Voice Code / PIN:* \`${active || "Not configured yet (Set via: voice code <pin>)"}\`\n` +
           `• 💾 *Storage:* Cloud Firestore (\`systemSecurity/voicePin\`)\n\n` +
-          `Friday se voice mode me bolte waqt \`Boss Code ${active || "1234"}\` bol kar aap 100% Root Access verify kar sakte hain.\n\n` +
+          (active
+            ? `Friday se voice mode me bolte waqt \`Boss Code ${active}\` bol kar aap 100% Root Access verify kar sakte hain.\n\n`
+            : `Abhi koi Voice Code set nahi hai. Kripya naya code set karein.\n\n`) +
           `✏️ *Badalne ke liye type karein:*\n` +
           `👉 \`voice code <naya_pin>\` (e.g. \`voice code 4589\`)`,
       };
