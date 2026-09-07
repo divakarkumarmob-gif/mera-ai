@@ -3,6 +3,7 @@ import { motion } from 'motion/react';
 import LiveAIInterface from './components/LiveAIInterface';
 import AgentFace from './components/AgentFace';
 import AppKeyLockModal from './components/AppKeyLockModal';
+import IncomingCallScreen from './components/IncomingCallScreen';
 import { getStoredAppSession, saveAppSession } from '@/utils/appSecurityClient';
 import { wakeWordManager } from '@/utils/wakeWord';
 import { screenWakeLock } from '@/utils/screenWakeLock';
@@ -23,6 +24,8 @@ export default function App() {
             caller: params.get('caller'),
         };
     });
+
+    const [isCallAnswered, setIsCallAnswered] = useState(false);
 
     const [callValidation, setCallValidation] = useState<{
         checked: boolean;
@@ -119,6 +122,20 @@ export default function App() {
                     </div>
                 </motion.div>
             </div>
+        );
+    }
+
+    // 📞 Realistic Incoming Ringing Call Screen (Green Swipe to Answer / Red Decline)
+    if (callParams.isCall && !isCallAnswered && isOpen) {
+        return (
+            <IncomingCallScreen
+                callerName={callParams.caller || 'FRIDAY AI'}
+                onAccept={() => setIsCallAnswered(true)}
+                onDecline={() => {
+                    setIsCallAnswered(false);
+                    setIsOpen(false);
+                }}
+            />
         );
     }
 
