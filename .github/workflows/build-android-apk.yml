@@ -67,27 +67,30 @@ jobs:
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           if [ -f "$MANIFEST" ]; then
-            # 1. Add All Required Android Permissions for Background Mic, Media, WakeLock, and Notification
-            PERMS='    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />\n    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />\n    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />'
+            # 1. Add All Required Android Permissions for Voice Call, Background Mic, Media, WakeLock, and Notifications
+            PERMS='    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />\n    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />\n    <uses-permission android:name="android.permission.VIBRATE" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />\n    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />\n    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />'
             
-            # Remove any duplicate internet permission before re-injecting
+            # Remove any duplicate internet/record audio permission before re-injecting
             sed -i '/android.permission.INTERNET/d' "$MANIFEST"
             sed -i '/android.permission.RECORD_AUDIO/d' "$MANIFEST"
             sed -i '/<application/i '"$PERMS"'' "$MANIFEST"
 
-            # 2. Register FridayForegroundService with Android 14+ Foreground Service Types
-            SERVICE_TAG='        <service\n            android:name=".FridayForegroundService"\n            android:foregroundServiceType="microphone|mediaPlayback|dataSync"\n            android:exported="false" />'
+            # 2. Add showWhenLocked, turnScreenOn, and showOnLockScreen attributes to MainActivity
+            sed -i 's/<activity/<activity android:showWhenLocked="true" android:turnScreenOn="true" android:showOnLockScreen="true"/g' "$MANIFEST"
+
+            # 3. Register FridayForegroundService with Android 14+ Foreground Service Types (Call, Mic, Media, DataSync)
+            SERVICE_TAG='        <service\n            android:name=".FridayForegroundService"\n            android:foregroundServiceType="microphone|mediaPlayback|phoneCall|dataSync"\n            android:exported="false" />'
             if ! grep -q "FridayForegroundService" "$MANIFEST"; then
               sed -i '/<\/application>/i '"$SERVICE_TAG"'' "$MANIFEST"
             fi
           fi
 
-      - name: 🛡️ Inject Native FridayForegroundService & Background WebView in MainActivity
+      - name: 🛡️ Inject Native FridayForegroundService & Background Calling in MainActivity
         run: |
           PACKAGE_DIR="android/app/src/main/java/com/friday/ai"
           mkdir -p "$PACKAGE_DIR"
 
-          # 1. Create FridayForegroundService.java
+          # 1. Create FridayForegroundService.java (Unified for Voice Calls & Background AI Dashboard)
           cat << 'EOF' > "$PACKAGE_DIR/FridayForegroundService.java"
           package com.friday.ai;
 
@@ -135,7 +138,7 @@ jobs:
                       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                           serviceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE | ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK;
                           if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                              serviceType |= ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC;
+                              serviceType |= ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC | ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL;
                           }
                       }
                       startForeground(NOTIFICATION_ID, notification, serviceType);
@@ -150,7 +153,7 @@ jobs:
                   try {
                       PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
                       if (powerManager != null && (wakeLock == null || !wakeLock.isHeld())) {
-                          wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "FridayAI:BackgroundWakeLock");
+                          wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP, "FridayAI:BackgroundWakeLock");
                           wakeLock.acquire();
                       }
                       WifiManager wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
@@ -182,10 +185,10 @@ jobs:
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                       NotificationChannel channel = new NotificationChannel(
                           CHANNEL_ID,
-                          "FRIDAY AI Background Service",
-                          NotificationManager.IMPORTANCE_LOW
+                          "FRIDAY AI Background & Call Service",
+                          NotificationManager.IMPORTANCE_HIGH
                       );
-                      channel.setDescription("Keeps Friday AI active for wake word detection, music playback, and voice commands when screen is off.");
+                      channel.setDescription("Keeps Friday AI active for wake word detection, live voice calls, music playback, and background AI tasks.");
                       NotificationManager manager = getSystemService(NotificationManager.class);
                       if (manager != null) {
                           manager.createNotificationChannel(channel);
@@ -194,7 +197,10 @@ jobs:
               }
 
               private Notification buildForegroundNotification() {
-                  Intent launchIntent = new Intent(this, MainActivity.class);
+                  Intent launchIntent = getPackageManager().getLaunchIntentForPackage(getPackageName());
+                  if (launchIntent == null) {
+                      launchIntent = new Intent(this, MainActivity.class);
+                  }
                   launchIntent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
                   PendingIntent pendingIntent = PendingIntent.getActivity(
                       this,
@@ -205,12 +211,12 @@ jobs:
 
                   return new NotificationCompat.Builder(this, CHANNEL_ID)
                       .setContentTitle("FRIDAY AI Active")
-                      .setContentText("Listening for 'Hello Friday' • Background Music Active 🎙️🎵")
+                      .setContentText("🎙️ Live Voice Calling & AI Intelligence Ready • 'Hello Friday'")
                       .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                       .setContentIntent(pendingIntent)
                       .setOngoing(true)
-                      .setPriority(NotificationCompat.PRIORITY_LOW)
-                      .setCategory(NotificationCompat.CATEGORY_SERVICE)
+                      .setPriority(NotificationCompat.PRIORITY_HIGH)
+                      .setCategory(NotificationCompat.CATEGORY_CALL)
                       .build();
               }
 
@@ -231,12 +237,15 @@ jobs:
           cat << 'EOF' > "$PACKAGE_DIR/MainActivity.java"
           package com.friday.ai;
 
+          import android.app.KeyguardManager;
+          import android.content.Context;
           import android.content.Intent;
           import android.net.Uri;
           import android.os.Build;
           import android.os.Bundle;
           import android.os.PowerManager;
           import android.provider.Settings;
+          import android.view.WindowManager;
           import android.webkit.WebSettings;
           import android.webkit.WebView;
           import androidx.core.app.ActivityCompat;
@@ -246,23 +255,57 @@ jobs:
               @Override
               public void onCreate(Bundle savedInstanceState) {
                   super.onCreate(savedInstanceState);
+
+                  // 1. Wake screen & show over lockscreen when call or wake-up occurs
+                  try {
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                          setShowWhenLocked(true);
+                          setTurnScreenOn(true);
+                          KeyguardManager km = (KeyguardManager) getSystemService(KEYGUARD_SERVICE);
+                          if (km != null) {
+                              km.requestDismissKeyguard(this, null);
+                          }
+                      } else {
+                          getWindow().addFlags(
+                              WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED |
+                              WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD |
+                              WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON |
+                              WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+                          );
+                      }
+                  } catch (Exception e) {
+                      e.printStackTrace();
+                  }
                   
-                  // 1. Request Battery Exemption so Android Doze doesn't sleep the CPU
+                  // 2. Request Battery Exemption so Android Doze doesn't sleep the CPU
                   requestBatteryExemption();
 
-                  // 2. Request Notification Permission for Android 13+ (Tiramisu)
+                  // 3. Request Notification & Microphone Permissions
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                       ActivityCompat.requestPermissions(
                           this,
-                          new String[]{android.Manifest.permission.POST_NOTIFICATIONS, android.Manifest.permission.RECORD_AUDIO},
+                          new String[]{
+                              android.Manifest.permission.POST_NOTIFICATIONS,
+                              android.Manifest.permission.RECORD_AUDIO,
+                              android.Manifest.permission.MODIFY_AUDIO_SETTINGS
+                          },
+                          101
+                      );
+                  } else {
+                      ActivityCompat.requestPermissions(
+                          this,
+                          new String[]{
+                              android.Manifest.permission.RECORD_AUDIO,
+                              android.Manifest.permission.MODIFY_AUDIO_SETTINGS
+                          },
                           101
                       );
                   }
 
-                  // 3. Start Friday Native Foreground Service
+                  // 4. Start Friday Native Foreground Service
                   startFridayBackgroundService();
 
-                  // 4. Configure WebView to allow background media & audio without user gesture
+                  // 5. Configure WebView to allow background media, live voice & audio without user gesture
                   try {
                       WebView webView = this.getBridge().getWebView();
                       if (webView != null) {
