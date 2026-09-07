@@ -132,6 +132,11 @@ export default function App() {
                 callerName={callParams.caller || 'FRIDAY AI'}
                 onAccept={() => setIsCallAnswered(true)}
                 onDecline={() => {
+                    fetch('/api/call/decline', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ callId: callParams.callId, callerName: callParams.caller }),
+                    }).catch(() => {});
                     setIsCallAnswered(false);
                     setIsOpen(false);
                 }}

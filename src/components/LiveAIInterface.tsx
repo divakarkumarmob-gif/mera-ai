@@ -23,6 +23,7 @@ import { EcomProduct } from '@/services/productPriceService';
 import AppAccessSection from './AppAccessSection';
 import EcommerceAccountsSection from './EcommerceAccountsSection';
 import IncomingCallScreen from './IncomingCallScreen';
+import InCallActiveScreen from './InCallActiveScreen';
 import { ShoppingBag } from 'lucide-react';
 
 interface LiveAIInterfaceProps {
@@ -822,6 +823,41 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
         }
         return null;
     });
+
+    const [isMicMuted, setIsMicMuted] = useState(false);
+    const isMicMutedRef = useRef(false);
+    const callGreetingSentRef = useRef(false);
+    const [activeInCallModal, setActiveInCallModal] = useState<boolean>(!!isCallMode);
+
+    const toggleMicMute = useCallback(() => {
+        setIsMicMuted((prev) => {
+            const next = !prev;
+            isMicMutedRef.current = next;
+            return next;
+        });
+    }, []);
+
+    const handleEndCall = useCallback(async (durationSecs: number) => {
+        stopRecording();
+        setActiveInCallModal(false);
+        try {
+            await fetch('/api/call/end-summary', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    callId: callSession?.callId || 'live-call',
+                    callerName: callSession?.callerName || remoteIncomingCall?.callerName || 'Boss DK',
+                    durationSecs,
+                    transcript: captionText || '',
+                }),
+            });
+        } catch (e) {
+            console.warn('[LiveAIInterface] Error posting call end summary:', e);
+        }
+        if (isCallMode && onClose) {
+            onClose();
+        }
+    }, [callSession, remoteIncomingCall, captionText, isCallMode, onClose]);
 
     useEffect(() => {
         if (callRemainingSecs === null || callRemainingSecs <= 0) return;
@@ -2002,7 +2038,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
         processor.current.onaudioprocess = (e) => {
             const isAudioStillPlaying = !!(outputAudioCtx.current && outputAudioCtx.current.currentTime < (nextStartTime.current - 0.05));
             const isAiBusy = aiTurnActiveRef.current || isAiSpeaking.current || isAiThinkingRef.current || statusRef.current === "Thinking..." || statusRef.current === "Speaking..." || isAudioStillPlaying;
-            if (isAiBusy || Date.now() < speakingCooldownUntilRef.current || !isInitializedRef.current) {
+            if (isAiBusy || Date.now() < speakingCooldownUntilRef.current || !isInitializedRef.current || isMicMutedRef.current) {
                 setVolume(0);
                 return;
             }
@@ -2247,6 +2283,17 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                     speakingCooldownUntilRef.current = 0;
                     if (initAckTimeoutRef.current) { clearTimeout(initAckTimeoutRef.current); initAckTimeoutRef.current = null; }
                     setStatus("Listening...");
+                    
+                    // 📞 Auto First Greeting when Voice Call connects
+                    if ((isCallMode || activeInCallModal) && !callGreetingSentRef.current) {
+                        callGreetingSentRef.current = true;
+                        try {
+                            ws.current?.send(JSON.stringify({
+                                text: "Haan Boss, aapne call karne ko bola tha. Batayein main kya help kar sakti hoon?"
+                            }));
+                        } catch {}
+                    }
+
                     if (pendingImagePayloadsRef.current.length > 0) {
                         const queued = [...pendingImagePayloadsRef.current];
                         pendingImagePayloadsRef.current = [];
@@ -3678,17 +3725,38 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                 />
             )}
 
-            {/* 📞 Remote Triggered Real Incoming Call Modal */}
+            {/* 📞 Remote Triggered Real Incoming Call Ringing Modal */}
             {remoteIncomingCall && (
                 <IncomingCallScreen
                     callerName={remoteIncomingCall.callerName}
                     onAccept={() => {
                         setRemoteIncomingCall(null);
+                        setActiveInCallModal(true);
                         ensureConnection(true).catch(() => {});
                     }}
                     onDecline={() => {
+                        const callId = remoteIncomingCall.callId;
+                        const caller = remoteIncomingCall.callerName;
                         setRemoteIncomingCall(null);
+                        fetch('/api/call/decline', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ callId, callerName: caller }),
+                        }).catch(() => {});
                     }}
+                />
+            )}
+
+            {/* 📞 Active Call Screen (Full-Screen In-Call UI with Timer, DTMF Keypad, Mute, Disconnect Tone) */}
+            {activeInCallModal && (
+                <InCallActiveScreen
+                    callerName={callSession?.callerName || remoteIncomingCall?.callerName || 'FRIDAY AI'}
+                    onEndCall={handleEndCall}
+                    isMicMuted={isMicMuted}
+                    onToggleMute={toggleMicMute}
+                    volume={volume}
+                    statusText={status}
+                    aiTranscript={captionText}
                 />
             )}
         </div>

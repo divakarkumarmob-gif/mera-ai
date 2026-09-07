@@ -77,6 +77,33 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
+  // ── Call Declined Busy Message Endpoint ────────────────────────────────────
+  app.post("/api/call/decline", async (req, res) => {
+    try {
+      const { callId, callerName } = req.body || {};
+      const success = await whatsappFeatureEngine.handleCallDeclined(callId, callerName);
+      res.json({ ok: success });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
+    }
+  });
+
+  // ── Post-Call Summary WhatsApp Delivery Endpoint ───────────────────────────
+  app.post("/api/call/end-summary", async (req, res) => {
+    try {
+      const { callId, callerName, durationSecs, transcript } = req.body || {};
+      const success = await whatsappFeatureEngine.handleCallEndedSummary(
+        callId || "direct-call",
+        callerName || "Boss DK",
+        Number(durationSecs) || 0,
+        transcript
+      );
+      res.json({ ok: success });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
+    }
+  });
+
   app.get("/api/security/firewall-stats", async (_req, res) => {
     try {
       const stats = await serverFirewallService.getFirewallStats();

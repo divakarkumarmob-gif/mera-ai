@@ -844,6 +844,76 @@ State politely that this specific detail is not recorded yet in the vault.`;
 
     return { valid: true, session };
   }
+
+  /**
+   * Handles user declining a call and sends a polite busy note on WhatsApp.
+   */
+  public async handleCallDeclined(callId?: string, callerName?: string): Promise<boolean> {
+    try {
+      const { sendWhatsAppUnified } = await import("./whatsappService");
+      const ownerPhone = process.env.WHATSAPP_OWNER_PHONE || process.env.OWNER_PHONE || "919999999999";
+      const message = `📞 *FRIDAY Call Update*\n\nBoss, lagta hai aap abhi busy hain ya meeting me hain. 🤝\nJab bhi aap free hon, bas WhatsApp par *"call me"* ya *"@call"* likh dena, main turant connect ho jaungi! ⚡`;
+      await sendWhatsAppUnified(ownerPhone, message);
+      return true;
+    } catch (e) {
+      console.warn("[WhatsAppFeatureEngine] Failed to send decline note:", e);
+      return false;
+    }
+  }
+
+  /**
+   * Generates and sends a WhatsApp post-call summary with duration, key points, and action items.
+   */
+  public async handleCallEndedSummary(
+    callId: string,
+    callerName: string,
+    durationSecs: number,
+    transcript?: string
+  ): Promise<boolean> {
+    try {
+      if (durationSecs < 5) {
+        return false; // Skip very short / immediate hang-ups
+      }
+
+      const { sendWhatsAppUnified } = await import("./whatsappService");
+      const ownerPhone = process.env.WHATSAPP_OWNER_PHONE || process.env.OWNER_PHONE || "919999999999";
+
+      const mins = Math.floor(durationSecs / 60);
+      const secs = durationSecs % 60;
+      const durationStr = mins > 0 ? `${mins} min ${secs} sec` : `${secs} seconds`;
+
+      let summaryContent = "Live Voice conversation completed successfully.";
+
+      if (transcript && transcript.trim().length > 15) {
+        const prompt = `You are Friday, an ultra-intelligent executive AI assistant.
+A live voice phone call just ended with Boss.
+Summarize the call conversation concisely for WhatsApp.
+
+CALL TRANSCRIPT / NOTES:
+${transcript.slice(0, 1500)}
+
+OUTPUT FORMAT (Natural Hinglish):
+• 📌 *Main Discussion:* (1-2 crisp lines)
+• 💡 *Key Decisions / Insights:* (1-2 points)
+• ⚡ *Action Items / Tasks:* (if any action was discussed)
+
+Keep it short, professional, and formatted for WhatsApp with bold headers.`;
+
+        const aiSummary = await this.callGeminiWithFallback(prompt);
+        if (aiSummary) {
+          summaryContent = aiSummary;
+        }
+      }
+
+      const message = `📋 *FRIDAY CALL SUMMARY REPORT* 🎙️\n\n👤 *Caller:* ${callerName || "Boss DK"}\n⏱️ *Call Duration:* ${durationStr}\n🔒 *Status:* Completed & Encrypted\n\n${summaryContent}\n\n_Next Call: WhatsApp par 'call me' likh kar kabhi bhi call start karein!_`;
+
+      await sendWhatsAppUnified(ownerPhone, message);
+      return true;
+    } catch (e) {
+      console.warn("[WhatsAppFeatureEngine] Failed to send call summary:", e);
+      return false;
+    }
+  }
 }
 
 export const whatsappFeatureEngine = new WhatsAppFeatureEngine();
