@@ -1621,7 +1621,7 @@ COMMUNICATION STYLE:
 (CRITICAL REASONING: Read and understand the previous quoted message first, and then directly answer/execute Boss's reply in that precise context!)`;
     }
 
-    for (const model of ["gemini-2.5-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.6-flash"]) {
+    for (const model of ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash-lite"]) {
       try {
         const chat = ai.chats.create({
           model,
@@ -2120,12 +2120,10 @@ RULES FOR GROUP REPLIES:
    * Handles: identity ("who made you / who are you"), privacy guard for DK's data, normal chat.
    */
   private static readonly AUTO_REPLY_MODEL_CHAIN = [
-    "gemini-3.5-flash-lite",
-    "gemini-3.1-flash-lite",
     "gemini-3.6-flash",
     "gemini-3.5-flash",
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-3.5-flash-lite",
   ];
 
   private async generateSmartAutoReply(
@@ -2398,14 +2396,29 @@ YOUR RULES FOR GENERATING THE WHATSAPP REPLY:
     // Record message dispatch with firewall
     humanBotFirewallService.recordDispatchedMessage("whatsapp", recipientKey);
 
-    // Quote the original message if messageKey is provided
+    // Safely construct quoted message context for Baileys
     const sendOptions: any = {};
     if (messageKey) {
-      sendOptions.quoted = (messageKey as any).key ? messageKey : { key: messageKey };
+      if (messageKey.message) {
+        sendOptions.quoted = messageKey;
+      } else {
+        const cleanKey = messageKey.key || messageKey;
+        sendOptions.quoted = {
+          key: cleanKey,
+          message: { conversation: incomingText || "..." },
+        };
+      }
     }
 
-    // Send the message
-    const result = await this.sock.sendMessage(jid, { text: trimmed }, sendOptions);
+    // Send the message with automatic fallback if quoted formatting fails
+    let result: any = null;
+    try {
+      result = await this.sock.sendMessage(jid, { text: trimmed }, sendOptions);
+    } catch (quotedErr) {
+      console.warn("[WhatsAppBot] Quoted send failed, retrying without quoted context:", (quotedErr as any)?.message || quotedErr);
+      result = await this.sock.sendMessage(jid, { text: trimmed });
+    }
+
     if (result?.key?.id) {
       this.botSentMessageIds.add(result.key.id);
       if (this.botSentMessageIds.size > 500) {
