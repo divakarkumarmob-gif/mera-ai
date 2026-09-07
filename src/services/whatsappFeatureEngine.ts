@@ -755,6 +755,16 @@ State politely that this specific detail is not recorded yet in the vault.`;
       return `⚠️ Memory recall error: ${e?.message || e}`;
     }
   }
+
+  /**
+   * Generates a 1-click 100% Free Live Voice Call room card for WhatsApp users.
+   */
+  public generateLiveVoiceCallCard(callerName: string, isOwner = false): string {
+    const baseUrl = (process.env.APP_BASE_URL || process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || "http://localhost:3000").replace(/\/$/, "");
+    const callUrl = `${baseUrl}/?call=true&caller=${encodeURIComponent(callerName)}&mode=live`;
+
+    return `📞 *FRIDAY 1-CLICK LIVE VOICE CALL (Jarvis Duplex Mode)* 🎙️⚡\n\n${isOwner ? "Boss DK" : callerName}, aapki *100% Free Real-Time Live Voice Call* ready hai!\n\nNeeche diye link par tap karein aur phone ka mic allow karke aamne-saamne baat karein:\n🔗 *Tap to Join Call:* ${callUrl}\n\n✨ *Live Voice Call Highlights:*\n• ⚡ *0-Latency Duplex Audio:* Aamne-saamne real continuous conversation\n• 🗣️ *Hands-Free Speaking:* Mic button dabane ki zaroorat nahi\n• 🎧 *Neural AI Voice:* Natural Hindi/Hinglish speaking agent\n• 🔒 *Encrypted Room:* Private 1-on-1 session\n• 🆓 *100% Free:* Zero telephony / zero recharge cost!`;
+  }
 }
 
 export const whatsappFeatureEngine = new WhatsAppFeatureEngine();

@@ -1220,6 +1220,17 @@ class WhatsAppBotService {
       console.warn("[WhatsAppBot] Direct recent media Q&A notice:", recentMediaErr);
     }
 
+    // 0.08 1-Click Live Voice Call Room ("call me", "friday call me", "call karo", "mujhe call karo", "@call", "/call", "live call", "voice call")
+    if (
+      /^(?:@call|\/call|call\s*me|call\s*karo|mujhe\s*call\s*karo|friday\s*call\s*me|voice\s*call|live\s*call|call\s*lagao|baat\s*karni\s*hai\s*call\s*par)/i.test(rawText) ||
+      rawText.toLowerCase() === "call"
+    ) {
+      const { whatsappFeatureEngine } = await import("./whatsappFeatureEngine");
+      const callCard = whatsappFeatureEngine.generateLiveVoiceCallCard("Boss DK", true);
+      await this.sendHumanLikeMessage(replyJid, callCard, rawText, messageKey);
+      return;
+    }
+
     // 0.1 AI Image Generation ("@image <prompt>", "/image <prompt>", "image: <prompt>", "photo banao <prompt>")
     const imageGenMatch =
       rawText.match(/^(?:@image|\/image|image:|photo\s*banao|image\s*banao|tasveer\s*banao|generate\s*image|draw\s*image|draw)\s*[:=-]?\s*(.+)/i) ||
@@ -2502,7 +2513,14 @@ COMMUNICATION STYLE:
       console.warn("[WhatsAppBot] Group direct media Q&A notice:", grpMediaErr);
     }
 
-    // 1. Group Anti-Spam & Phishing Link Guard ("@safety", or suspicious url detection)
+    // 1. Group Live Voice Call Room ("@call", "call me", "call karo", "mujhe call karo", "voice call", "live call")
+    if (/^(?:@call|\/call|call\s*me|call\s*karo|mujhe\s*call\s*karo|voice\s*call|live\s*call)/i.test(text) || text.toLowerCase() === "call") {
+      const callCard = whatsappFeatureEngine.generateLiveVoiceCallCard(senderName, false);
+      await this.sendHumanLikeMessage(groupJid, callCard, text, messageKey);
+      return;
+    }
+
+    // 1.1 Group Anti-Spam & Phishing Link Guard ("@safety", or suspicious url detection)
     if (/^(?:@safety|\/safety|safety)/i.test(text) || (text.includes("http") && /free|win|prize|hack|mod\s*apk|lottery/i.test(text))) {
       const safetyCard = await whatsappFeatureEngine.checkLinkSafety(text);
       await this.sendHumanLikeMessage(groupJid, safetyCard, text, messageKey);

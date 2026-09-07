@@ -3,7 +3,7 @@ import { motion } from 'motion/react';
 import LiveAIInterface from './components/LiveAIInterface';
 import AgentFace from './components/AgentFace';
 import AppKeyLockModal from './components/AppKeyLockModal';
-import { getStoredAppSession } from '@/utils/appSecurityClient';
+import { getStoredAppSession, saveAppSession } from '@/utils/appSecurityClient';
 import { wakeWordManager } from '@/utils/wakeWord';
 import { screenWakeLock } from '@/utils/screenWakeLock';
 
@@ -13,8 +13,28 @@ export default function App() {
         screenWakeLock.requestLock().catch(() => {});
     }, []);
 
-    // Application Access Key Protection (Backed by Cryptographic Token)
-    const [isUnlocked, setIsUnlocked] = useState<boolean>(() => !!getStoredAppSession());
+    // Check URL parameters for direct call or token
+    const [isCallMode] = useState<boolean>(() => {
+        if (typeof window === 'undefined') return false;
+        const params = new URLSearchParams(window.location.search);
+        return params.get('call') === 'true' || params.get('mode') === 'live';
+    });
+
+    // Application Access Key Protection (Backed by Cryptographic Token or 1-Click Call URL)
+    const [isUnlocked, setIsUnlocked] = useState<boolean>(() => {
+        if (typeof window !== 'undefined') {
+            const params = new URLSearchParams(window.location.search);
+            const token = params.get('token') || params.get('auth');
+            if (token) {
+                saveAppSession(token);
+                return true;
+            }
+            if (params.get('call') === 'true') {
+                return true;
+            }
+        }
+        return !!getStoredAppSession();
+    });
 
     // Listen for anti-tamper security lock events
     useEffect(() => {
@@ -44,7 +64,7 @@ export default function App() {
     }
 
     if (isOpen) {
-        return <LiveAIInterface onClose={() => setIsOpen(false)} />;
+        return <LiveAIInterface onClose={() => setIsOpen(false)} isCallMode={isCallMode} />;
     }
 
     return (

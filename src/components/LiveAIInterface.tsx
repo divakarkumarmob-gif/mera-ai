@@ -26,6 +26,7 @@ import { ShoppingBag } from 'lucide-react';
 
 interface LiveAIInterfaceProps {
     onClose: () => void;
+    isCallMode?: boolean;
 }
 
 // All 30 Google Gemini Live voices — categorized by gender
@@ -802,7 +803,7 @@ async function playAudioChunk(
     }
 }
 
-export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
+export default function LiveAIInterface({ onClose, isCallMode }: LiveAIInterfaceProps) {
     const [isRecording, setIsRecording] = useState(false);
     const [status, setStatus] = useState("Idle");
     const statusRef = useRef("Idle");
@@ -1858,6 +1859,20 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isRecording, wakeWordActive]);
+
+    // ── WhatsApp 1-Click Live Voice Call Auto-Connect ────────────────────────
+    useEffect(() => {
+        if (isCallMode) {
+            console.log("[LiveAIInterface] 📞 1-Click WhatsApp Live Voice Call detected -> Auto-starting audio stream!");
+            const timer = setTimeout(() => {
+                ensureConnection(true).catch(err => {
+                    console.warn("[LiveAIInterface] Auto-call initial connect notice:", err);
+                });
+            }, 600);
+            return () => clearTimeout(timer);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isCallMode]);
 
     // 75-second Inactivity Detection -> 15s warning -> Auto Shutdown (Paused during Thinking & Speaking)
     useEffect(() => {

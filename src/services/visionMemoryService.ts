@@ -135,10 +135,10 @@ ${caption ? `User caption: "${caption}"` : ""}`;
         const normalizedMime = isDoc
           ? (lowerMime.includes("pdf") ? "application/pdf" : "application/pdf")
           : isVideo
-          ? "video/mp4"
-          : isAudio
-          ? (lowerMime.includes("ogg") ? "audio/ogg" : "audio/mp3")
-          : (lowerMime.includes("png") ? "image/png" : lowerMime.includes("webp") ? "image/webp" : "image/jpeg");
+            ? "video/mp4"
+            : isAudio
+              ? (lowerMime.includes("ogg") ? "audio/ogg" : "audio/mp3")
+              : (lowerMime.includes("png") ? "image/png" : lowerMime.includes("webp") ? "image/webp" : "image/jpeg");
 
         const VISION_FALLBACK_MODELS = [
           "gemini-3.6-flash",
@@ -213,7 +213,7 @@ ${caption ? `User caption: "${caption}"` : ""}`;
     try {
       const mediaId = `media_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
       const thumbBase64 = buffer.length < 500000 ? buffer.toString("base64") : buffer.subarray(0, 400000).toString("base64");
-      
+
       await db.collection("whatsappMediaArchive").doc(mediaId).set({
         id: mediaId,
         sender,
@@ -304,10 +304,10 @@ ${caption ? `User caption: "${caption}"` : ""}`;
     const normalizedMime = isDoc
       ? "application/pdf"
       : isVideo
-      ? "video/mp4"
-      : isAudio
-      ? "audio/ogg"
-      : (lowerMime.includes("png") ? "image/png" : lowerMime.includes("webp") ? "image/webp" : "image/jpeg");
+        ? "video/mp4"
+        : isAudio
+          ? "audio/ogg"
+          : (lowerMime.includes("png") ? "image/png" : lowerMime.includes("webp") ? "image/webp" : "image/jpeg");
 
     const base64Data = buffer.toString("base64");
 
@@ -417,10 +417,10 @@ Use WhatsApp markdown (*bold*, _italic_, bullet points). Keep it clean, accurate
     const normalizedMime = isDoc
       ? "application/pdf"
       : isVideo
-      ? "video/mp4"
-      : isAudio
-      ? "audio/ogg"
-      : (lowerMime.includes("png") ? "image/png" : lowerMime.includes("webp") ? "image/webp" : "image/jpeg");
+        ? "video/mp4"
+        : isAudio
+          ? "audio/ogg"
+          : (lowerMime.includes("png") ? "image/png" : lowerMime.includes("webp") ? "image/webp" : "image/jpeg");
 
     const VISION_FALLBACK_MODELS = [
       "gemini-3.6-flash",
