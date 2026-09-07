@@ -1047,6 +1047,36 @@ class WhatsAppBotService {
     // Combined context text for link/train detection
     const fullSearchContext = quotedMessage?.text ? `${quotedMessage.text}\n${rawText}` : rawText;
 
+    // 0. AI Image Generation ("@image <prompt>", "/image <prompt>", "image: <prompt>", "photo banao <prompt>")
+    const imageGenMatch =
+      rawText.match(/^(?:@image|\/image|image:|photo\s*banao|image\s*banao|tasveer\s*banao|generate\s*image|draw\s*image|draw)\s*[:=-]?\s*(.+)/i) ||
+      (rawText.includes("@image") ? rawText.match(/@image\s+(.+)/i) : null);
+    if (imageGenMatch && imageGenMatch[1]?.trim()) {
+      const prompt = imageGenMatch[1].trim();
+      try {
+        await this.sendHumanLikeMessage(replyJid, `🎨 *Image generate ho rahi hai Boss...* ⚡\n\n📌 *Prompt:* _"${prompt}"_`, rawText, messageKey);
+        const { imageGenerationService } = await import("./imageGenerationService");
+        const genRes = await imageGenerationService.generateImage(prompt);
+        if (genRes.success && (genRes.buffer || genRes.imageUrl)) {
+          const imageSrc = genRes.buffer || genRes.imageUrl!;
+          await this.sendPhotoMessage(
+            replyJid,
+            imageSrc,
+            `✨ *AI Generated Image*\n📌 *Prompt:* _"${prompt}"_\n🤖 *Engine:* _${genRes.model}_`,
+            messageKey
+          );
+          return;
+        } else {
+          await this.sendHumanLikeMessage(replyJid, `⚠️ Boss, image generate karne me issue aaya: ${genRes.error || "Unknown error"}`, rawText, messageKey);
+          return;
+        }
+      } catch (imgErr: any) {
+        console.error("[WhatsAppBot] Image generation error:", imgErr);
+        await this.sendHumanLikeMessage(replyJid, `⚠️ Image generate nahi ho payi: ${imgErr?.message || imgErr}`, rawText, messageKey);
+        return;
+      }
+    }
+
     // 1. YouTube Video Intelligence ("https://youtube.com/..." / "https://youtu.be/...")
     try {
       const { youtubeService } = await import("./youtubeService");
@@ -1461,6 +1491,18 @@ class WhatsAppBotService {
           required: [],
         },
       },
+      {
+        name: "generate_ai_image",
+        description: "Generate a realistic AI image or photo from a text description (using Google Imagen 3 / Pollinations Flux) and send it directly to Boss on WhatsApp.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            prompt: { type: "STRING", description: "Detailed visual description of the image to generate" },
+            aspectRatio: { type: "STRING", description: "Aspect ratio: '1:1', '16:9', '9:16', '4:3', '3:4' (default: '1:1')" },
+          },
+          required: ["prompt"],
+        },
+      },
     ];
 
     const systemInstruction = `YOU ARE FRIDAY: DK's (Divakar Kumar) ultra-intelligent, loyal, warm, witty, and deeply caring AI companion and chief executive assistant.
@@ -1602,6 +1644,21 @@ COMMUNICATION STYLE:
           const { telegramBotService } = await import("./telegramBotService");
           const updates = await telegramBotService.getRecentTelegramMessages(args.limit || 10);
           return { count: updates.length, updates };
+        }
+        if (toolName === "generate_ai_image") {
+          const { imageGenerationService } = await import("./imageGenerationService");
+          const genRes = await imageGenerationService.generateImage(args.prompt, { aspectRatio: args.aspectRatio });
+          if (genRes.success && (genRes.buffer || genRes.imageUrl)) {
+            const imageSrc = genRes.buffer || genRes.imageUrl!;
+            await this.sendPhotoMessage(
+              replyJid,
+              imageSrc,
+              `✨ *AI Generated Image*\n📌 *Prompt:* _"${args.prompt}"_\n🤖 *Engine:* _${genRes.model}_`,
+              messageKey
+            );
+            return { success: true, message: `Image generated using ${genRes.model} and delivered to Boss on WhatsApp!` };
+          }
+          return { success: false, message: `Image generation failed: ${genRes.error || "Unknown error"}` };
         }
       } catch (err: any) {
         return { error: err?.message || String(err) };
@@ -1814,6 +1871,12 @@ COMMUNICATION STYLE:
       "fryday",
       "fraiday",
       "frieday",
+      "@image",
+      "/image",
+      "image:",
+      "photo banao",
+      "image banao",
+      "tasveer banao",
     ];
     if (nameTriggers.some((t) => cleanText.includes(t))) {
       return true;
@@ -1892,6 +1955,31 @@ COMMUNICATION STYLE:
     const quotedSnippet = quotedMessage && quotedMessage.isReply
       ? `\n- PREVIOUS QUOTED MESSAGE IN GROUP (From: ${quotedMessage.sender}, Type: ${quotedMessage.mediaType}): "${quotedMessage.text}"`
       : "";
+
+    // 1. Group AI Image Generation ("@image <prompt>", "image: <prompt>", "photo banao <prompt>")
+    const groupImgMatch =
+      text.match(/^(?:@image|\/image|image:|photo\s*banao|image\s*banao|tasveer\s*banao|generate\s*image|draw\s*image|draw)\s*[:=-]?\s*(.+)/i) ||
+      (text.includes("@image") ? text.match(/@image\s+(.+)/i) : null);
+    if (groupImgMatch && groupImgMatch[1]?.trim()) {
+      const prompt = groupImgMatch[1].trim();
+      try {
+        await this.sendHumanLikeMessage(groupJid, `🎨 *AI Image generate ho rahi hai ${senderName}...* ⚡\n\n📌 *Prompt:* _"${prompt}"_`, text, messageKey);
+        const { imageGenerationService } = await import("./imageGenerationService");
+        const genRes = await imageGenerationService.generateImage(prompt);
+        if (genRes.success && (genRes.buffer || genRes.imageUrl)) {
+          const imageSrc = genRes.buffer || genRes.imageUrl!;
+          await this.sendPhotoMessage(
+            groupJid,
+            imageSrc,
+            `✨ *AI Generated Image for ${senderName}*\n📌 *Prompt:* _"${prompt}"_\n🤖 *Engine:* _${genRes.model}_`,
+            messageKey
+          );
+          return;
+        }
+      } catch (imgErr) {
+        console.error("[WhatsAppBot] Group image generation error:", imgErr);
+      }
+    }
 
     const prompt = `You are Friday, the ultra-smart, witty and polite AI assistant of DK (Divakar Kumar).
 You have been tagged or mentioned in a WhatsApp Group named "${groupName}".
@@ -2497,29 +2585,72 @@ YOUR RULES FOR GENERATING THE WHATSAPP REPLY:
   /**
    * Sends a Photo/Image with realistic 0.5s human attachment selection and typing presence.
    */
-  public async sendPhotoMessage(toPhone: string, imageSource: string | Buffer, caption?: string): Promise<{ success: boolean; message: string }> {
-    let cleanPhone = toPhone.replace(/[\s\-\(\)\+]/g, "").trim();
-    if (cleanPhone.length === 10) cleanPhone = `91${cleanPhone}`;
-
+  /**
+   * Sends a Photo/Image with realistic 0.5s human attachment selection and typing presence.
+   * Supports sending to phone numbers, group JIDs, and LID contacts.
+   */
+  public async sendPhotoMessage(
+    target: string,
+    imageSource: string | Buffer,
+    caption?: string,
+    messageKey?: any
+  ): Promise<{ success: boolean; message: string }> {
     if (!this.isConnected || !this.sock) {
       return { success: false, message: "WhatsApp bot is not connected." };
     }
 
     try {
-      const jid = `${cleanPhone}@s.whatsapp.net`;
+      let jid = target;
+      if (!jid.includes("@")) {
+        let cleanPhone = target.replace(/[\s\-\(\)\+]/g, "").trim();
+        if (cleanPhone.length === 10) cleanPhone = `91${cleanPhone}`;
+        jid = `${cleanPhone}@s.whatsapp.net`;
+      }
       
-      // Simulate Human Attachment + Gallery pick + Caption typing (0.5s gaps)
+      // Simulate Human Attachment + Gallery pick + Caption typing
       await humanBotFirewallService.simulateWhatsAppPhotoDelays(this.sock, jid, caption);
 
-      const imagePayload = typeof imageSource === "string" ? { url: imageSource } : imageSource;
-      await this.sock.sendMessage(jid, {
-        image: imagePayload,
-        caption: caption ? caption.trim() : undefined,
-      });
+      const sendOptions: any = {};
+      if (messageKey) {
+        if (messageKey.message) {
+          sendOptions.quoted = messageKey;
+        } else {
+          const cleanKey = messageKey.key || messageKey;
+          sendOptions.quoted = {
+            key: cleanKey,
+            message: { conversation: caption || "[Photo]" },
+          };
+        }
+      }
 
-      humanBotFirewallService.recordDispatchedMessage("whatsapp", cleanPhone);
-      return { success: true, message: `Photo successfully delivered to +${cleanPhone}!` };
+      const imagePayload = typeof imageSource === "string" ? { url: imageSource } : imageSource;
+      let sendRes: any = null;
+      try {
+        sendRes = await this.sock.sendMessage(
+          jid,
+          {
+            image: imagePayload,
+            caption: caption ? caption.trim() : undefined,
+          },
+          sendOptions
+        );
+      } catch (quotedErr) {
+        console.warn("[WhatsAppBot] Quoted photo send failed, retrying without quoted context:", (quotedErr as any)?.message || quotedErr);
+        sendRes = await this.sock.sendMessage(jid, {
+          image: imagePayload,
+          caption: caption ? caption.trim() : undefined,
+        });
+      }
+
+      if (sendRes?.key?.id) {
+        this.botSentMessageIds.add(sendRes.key.id);
+      }
+
+      const recipientKey = jid.replace(/@.*$/, "");
+      humanBotFirewallService.recordDispatchedMessage("whatsapp", recipientKey);
+      return { success: true, message: `Photo successfully delivered to ${jid}!` };
     } catch (e: any) {
+      console.error("[WhatsAppBot] Failed to send photo:", e);
       return { success: false, message: `Failed to send photo: ${e?.message || e}` };
     }
   }
