@@ -27,6 +27,7 @@ import { ShoppingBag } from 'lucide-react';
 interface LiveAIInterfaceProps {
     onClose: () => void;
     isCallMode?: boolean;
+    callSession?: any;
 }
 
 // All 30 Google Gemini Live voices — categorized by gender
@@ -803,7 +804,7 @@ async function playAudioChunk(
     }
 }
 
-export default function LiveAIInterface({ onClose, isCallMode }: LiveAIInterfaceProps) {
+export default function LiveAIInterface({ onClose, isCallMode, callSession }: LiveAIInterfaceProps) {
     const [isRecording, setIsRecording] = useState(false);
     const [status, setStatus] = useState("Idle");
     const statusRef = useRef("Idle");
@@ -812,6 +813,28 @@ export default function LiveAIInterface({ onClose, isCallMode }: LiveAIInterface
     const [selectedImages, setSelectedImages] = useState<{ id: string; file: File; status: 'uploading' | 'uploaded' }[]>([]);
     const [showSettings, setShowSettings] = useState(false);
     const [openSettingsSection, setOpenSettingsSection] = useState<string | null>(null);
+
+    // ── Live Voice Call Expiry Countdown Timer (20m / 30m) ───────────────────
+    const [callRemainingSecs, setCallRemainingSecs] = useState<number | null>(() => {
+        if (callSession?.expiresAt) {
+            return Math.max(0, Math.floor((callSession.expiresAt - Date.now()) / 1000));
+        }
+        return null;
+    });
+
+    useEffect(() => {
+        if (callRemainingSecs === null || callRemainingSecs <= 0) return;
+        const timer = setInterval(() => {
+            setCallRemainingSecs(prev => {
+                if (prev === null || prev <= 1) {
+                    clearInterval(timer);
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
+        return () => clearInterval(timer);
+    }, [callRemainingSecs]);
     const [musicYtEnabled, setMusicYtEnabled] = useState<boolean>(() => {
         if (typeof window !== "undefined") {
             const saved = localStorage.getItem('music_yt_enabled');
@@ -2519,6 +2542,17 @@ export default function LiveAIInterface({ onClose, isCallMode }: LiveAIInterface
                             <span>🤖</span>
                             <span>FRIDAY</span>
                             <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 font-mono font-medium border border-blue-500/40">Live Agent</span>
+                            {isCallMode && (
+                                <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-mono border border-cyan-500/40 flex items-center gap-1.5 shadow-[0_0_12px_rgba(6,182,212,0.3)] animate-pulse">
+                                    <span>📞</span>
+                                    <span>{callSession?.isOwner ? 'Boss Call' : 'Live Call'}</span>
+                                    {callRemainingSecs !== null && (
+                                        <span className="text-amber-300 font-bold ml-1">
+                                            {Math.floor(callRemainingSecs / 60)}:{String(callRemainingSecs % 60).padStart(2, '0')}
+                                        </span>
+                                    )}
+                                </span>
+                            )}
                         </h1>
                         <span className="text-[11px] text-slate-400 font-mono flex items-center gap-1.5 bg-slate-900/60 px-2.5 py-1 rounded-full border border-white/5">
                             <span className={`w-2 h-2 rounded-full ${isRecording ? 'bg-red-500 animate-ping' : 'bg-emerald-400'}`} />

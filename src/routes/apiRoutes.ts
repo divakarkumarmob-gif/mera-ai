@@ -49,6 +49,7 @@ import { socialEngineerToolkitService } from "../services/socialEngineerToolkitS
 import { johnTheRipperService } from "../services/johnTheRipperService";
 import { voicePersonaService } from "../services/voicePersonaService";
 import { serverFirewallService } from "../services/serverFirewallService";
+import { whatsappFeatureEngine } from "../services/whatsappFeatureEngine";
 
 export interface ApiRoutesContext {
   getBaileysEnabled: () => boolean;
@@ -64,6 +65,17 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   let baileysEnabled = getBaileysEnabled();
 
   app.get("/health", (_req, res) => res.json({ ok: true }));
+
+  // ── 1-Click Live Voice Call Session Validation ─────────────────────────────
+  app.get("/api/call/validate-session", async (req, res) => {
+    try {
+      const callId = String(req.query.callId || "").trim();
+      const validation = await whatsappFeatureEngine.validateCallSession(callId);
+      res.json({ ok: validation.valid, ...validation });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, valid: false, message: e?.message || "Validation error" });
+    }
+  });
 
   app.get("/api/security/firewall-stats", async (_req, res) => {
     try {

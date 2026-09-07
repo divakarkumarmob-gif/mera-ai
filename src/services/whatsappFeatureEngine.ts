@@ -30,7 +30,19 @@ export interface ScheduledMessageDoc {
 
 const scheduledCol = () => db.collection("whatsapp_scheduled_messages");
 
+export interface LiveCallSession {
+  callId: string;
+  callerName: string;
+  isOwner: boolean;
+  createdAt: number;
+  expiresAt: number;
+  durationMinutes: number;
+  used: boolean;
+}
+
 class WhatsAppFeatureEngine {
+  private activeCallSessions = new Map<string, LiveCallSession>();
+
   private static readonly MODEL_CHAIN = [
     "gemini-3.6-flash",
     "gemini-3.5-flash",
@@ -757,13 +769,80 @@ State politely that this specific detail is not recorded yet in the vault.`;
   }
 
   /**
-   * Generates a 1-click 100% Free Live Voice Call room card for WhatsApp users.
+   * Generates a fresh, unique time-limited single-use Call link.
+   * - 1v1 & Groups: 20 minutes expiry per new call
+   * - Owner (DK): 30 minutes expiry per new call
    */
   public generateLiveVoiceCallCard(callerName: string, isOwner = false): string {
-    const baseUrl = (process.env.APP_BASE_URL || process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || "http://localhost:3000").replace(/\/$/, "");
-    const callUrl = `${baseUrl}/?call=true&caller=${encodeURIComponent(callerName)}&mode=live`;
+    const durationMinutes = isOwner ? 30 : 20;
+    const now = Date.now();
+    const expiresAt = now + durationMinutes * 60 * 1000;
+    const callId = `call_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-    return `📞 *FRIDAY 1-CLICK LIVE VOICE CALL (Jarvis Duplex Mode)* 🎙️⚡\n\n${isOwner ? "Boss DK" : callerName}, aapki *100% Free Real-Time Live Voice Call* ready hai!\n\nNeeche diye link par tap karein aur phone ka mic allow karke aamne-saamne baat karein:\n🔗 *Tap to Join Call:* ${callUrl}\n\n✨ *Live Voice Call Highlights:*\n• ⚡ *0-Latency Duplex Audio:* Aamne-saamne real continuous conversation\n• 🗣️ *Hands-Free Speaking:* Mic button dabane ki zaroorat nahi\n• 🎧 *Neural AI Voice:* Natural Hindi/Hinglish speaking agent\n• 🔒 *Encrypted Room:* Private 1-on-1 session\n• 🆓 *100% Free:* Zero telephony / zero recharge cost!`;
+    const session: LiveCallSession = {
+      callId,
+      callerName,
+      isOwner,
+      createdAt: now,
+      expiresAt,
+      durationMinutes,
+      used: false,
+    };
+
+    this.activeCallSessions.set(callId, session);
+
+    // Persist session in Firestore
+    try {
+      db.collection("live_call_sessions").doc(callId).set(session).catch(() => {});
+    } catch {}
+
+    const baseUrl = (process.env.APP_BASE_URL || process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || "http://localhost:3000").replace(/\/$/, "");
+    const callUrl = `${baseUrl}/?call=true&callId=${callId}&caller=${encodeURIComponent(callerName)}&mode=live`;
+
+    const expiryTimeStr = new Date(expiresAt).toLocaleTimeString("en-IN", {
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: "Asia/Kolkata",
+    });
+
+    return `📞 *FRIDAY 1-CLICK LIVE VOICE CALL (Jarvis Duplex Mode)* 🎙️⚡\n\n${isOwner ? "👑 *Boss DK*" : `👤 *${callerName}*`}, aapka *Live Voice Call Room* generate ho gaya hai!\n\nNeeche diye fresh link par tap karein aur call join karein:\n🔗 *Tap to Join Call:* ${callUrl}\n\n⏳ *Link Expiry:* *${durationMinutes} Minutes* (Valid till: _${expiryTimeStr}_)\n🔒 *Fresh Session:* Har naye call par naya unique link banta hai\n\n✨ *Live Voice Call Highlights:*\n• ⚡ *0-Latency Duplex Audio:* Real-time continuous conversation\n• 🗣️ *Hands-Free Speaking:* Mic hold karne ki zaroorat nahi\n• 🎧 *Neural AI Voice:* Natural Hindi/Hinglish speaking assistant\n• 🆓 *100% Free:* Zero telephony charges!`;
+  }
+
+  /**
+   * Validates if a call session is active and not expired.
+   */
+  public async validateCallSession(callId: string): Promise<{ valid: boolean; session?: LiveCallSession; message?: string }> {
+    if (!callId) {
+      return { valid: false, message: "⚠️ Call ID missing. Kripya WhatsApp par '@call' ya 'call me' likh kar fresh link generate karein." };
+    }
+
+    let session = this.activeCallSessions.get(callId);
+
+    // Fallback: check Firestore
+    if (!session) {
+      try {
+        const doc = await db.collection("live_call_sessions").doc(callId).get();
+        if (doc.exists) {
+          session = doc.data() as LiveCallSession;
+          this.activeCallSessions.set(callId, session);
+        }
+      } catch {}
+    }
+
+    if (!session) {
+      return { valid: false, message: "⚠️ Ye Call Link invalid hai ya expire ho chuka hai. WhatsApp par 'call me' ya '@call' likh kar naya link lein!" };
+    }
+
+    const now = Date.now();
+    if (now > session.expiresAt) {
+      this.activeCallSessions.delete(callId);
+      return {
+        valid: false,
+        message: `⏳ Ye Call Link ${session.durationMinutes} minute ki time-limit poori hone ke baad expire ho gaya hai! WhatsApp par naya link mangwayein.`,
+      };
+    }
+
+    return { valid: true, session };
   }
 }
 
