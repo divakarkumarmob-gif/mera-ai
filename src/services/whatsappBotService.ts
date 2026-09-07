@@ -860,7 +860,7 @@ class WhatsAppBotService {
                             const idRes = await visionMemoryService.identifyPersonInPhoto(buffer);
                             await this.sendHumanLikeMessage(replyJid, idRes.explanation, "", msg.key);
                           } else {
-                            const summaryRes = await visionMemoryService.generateMediaSummary(buffer, "image/jpeg", cap);
+                            const summaryRes = await visionMemoryService.generateMediaSummary(buffer, "image/jpeg", cap, undefined, replyJid);
                             await this.sendHumanLikeMessage(replyJid, summaryRes, "", msg.key);
                           }
                           return;
@@ -933,7 +933,7 @@ class WhatsAppBotService {
                         const isDocSummaryReq = isFromOwner || /\b(summary|summarize|summarise|friday\s*summary|analysis|analyze|padho|check|batao|kya\s*hai|explain)\b/i.test(cap) || cap.startsWith("@friday");
                         if (isDocSummaryReq) {
                           await this.sendHumanLikeMessage(replyJid, `📄 *Document / PDF (${fileName || "file"}) analyze & summarize ho raha hai...* ⚡`, "", msg.key);
-                          const summaryRes = await visionMemoryService.generateMediaSummary(buffer, mimeType, cap, fileName);
+                          const summaryRes = await visionMemoryService.generateMediaSummary(buffer, mimeType, cap, fileName, replyJid);
                           await this.sendHumanLikeMessage(replyJid, summaryRes, "", msg.key);
                           return;
                         }
@@ -946,7 +946,7 @@ class WhatsAppBotService {
                     if (isVideo && isFromOwner) {
                       try {
                         await this.sendHumanLikeMessage(replyJid, "🎬 *Video analyze & summarize ho rahi hai...* ⚡", "", msg.key);
-                        const summaryRes = await visionMemoryService.generateMediaSummary(buffer, "video/mp4", caption, fileName);
+                        const summaryRes = await visionMemoryService.generateMediaSummary(buffer, "video/mp4", caption, fileName, replyJid);
                         await this.sendHumanLikeMessage(replyJid, summaryRes, "", msg.key);
                         return;
                       } catch (videoErr) {
@@ -960,7 +960,8 @@ class WhatsAppBotService {
                       mimeType,
                       senderName,
                       caption,
-                      fileName
+                      fileName,
+                      replyJid
                     );
                     if (analyzed.shortSummary) {
                       incoming.text = `${incoming.text} | AI Summary: ${analyzed.shortSummary}`;
@@ -1063,8 +1064,8 @@ class WhatsAppBotService {
   }
 
   /**
-   * Handles swipe-to-reply (Quote) on any photo, PDF, document, video, or link
-   * when the user asks for a summary ("friday summary", "summary", "summarize", "analyze", etc.).
+   * Handles swipe-to-reply (Quote) on any photo, PDF, document, video, summary card, or text
+   * when the user asks for a summary OR asks a specific follow-up question (e.g. "meeting kab hai?", "total bill amount kitna h?").
    */
   public async handleQuotedMediaSummary(
     replyJid: string,
@@ -1079,8 +1080,6 @@ class WhatsAppBotService {
       cleanText.startsWith("/summary") ||
       cleanText.startsWith("summary");
 
-    if (!isSummaryIntent) return false;
-
     const { visionMemoryService } = await import("./visionMemoryService");
     const { whatsappFeatureEngine } = await import("./whatsappFeatureEngine");
 
@@ -1089,12 +1088,11 @@ class WhatsAppBotService {
       const downloadFn = baileys.downloadMediaMessage || baileys.default?.downloadMediaMessage;
       if (downloadFn) {
         try {
-          await this.sendHumanLikeMessage(
-            replyJid,
-            `📑 *Quoted ${quotedMessage.mediaType.toUpperCase()} analyze & summarize ho raha hai...* ⚡`,
-            rawText,
-            messageKey
-          );
+          const actionText = (isSummaryIntent && !visionMemoryService.isMediaQuestionIntent(rawText))
+            ? `📑 *Quoted ${quotedMessage.mediaType.toUpperCase()} analyze & summarize ho raha hai...* ⚡`
+            : `🔍 *Quoted ${quotedMessage.mediaType.toUpperCase()} me se dhoondh kar jawab de rahi hoon...* ⚡`;
+
+          await this.sendHumanLikeMessage(replyJid, actionText, rawText, messageKey);
 
           const qMsgWrapper = { message: quotedMessage.rawQuotedMessage };
           const buffer: Buffer = await downloadFn(qMsgWrapper, "buffer", {}, { reuploadRequest: this.sock?.updateMediaMessage });
@@ -1109,34 +1107,65 @@ class WhatsAppBotService {
               (quotedMessage.mediaType === "photo" ? "image/jpeg" : quotedMessage.mediaType === "document" ? "application/pdf" : "video/mp4");
             const fileName = rawQ.documentMessage?.fileName || quotedMessage.fileName;
 
-            const summaryRes = await visionMemoryService.generateMediaSummary(buffer, mimeType, rawText, fileName);
-            await this.sendHumanLikeMessage(replyJid, summaryRes, rawText, messageKey);
+            if (isSummaryIntent && !visionMemoryService.isMediaQuestionIntent(rawText)) {
+              const summaryRes = await visionMemoryService.generateMediaSummary(buffer, mimeType, rawText, fileName, replyJid);
+              await this.sendHumanLikeMessage(replyJid, summaryRes, rawText, messageKey);
+            } else {
+              // Direct contextual Q&A on the quoted photo/document/PDF (e.g. "meeting kab hai", "amount kitna hai")
+              const answerRes = await visionMemoryService.answerQuestionOnMedia({
+                buffer,
+                mimeType,
+                question: rawText,
+                fileName,
+                chatId: replyJid,
+              });
+              await this.sendHumanLikeMessage(replyJid, answerRes, rawText, messageKey);
+            }
             return true;
           }
         } catch (mediaErr) {
-          console.warn("[WhatsAppBot] Quoted media download/summary error:", mediaErr);
+          console.warn("[WhatsAppBot] Quoted media download/QnA error:", mediaErr);
         }
       }
     }
 
     // Case 2: Quoted message contains a URL / Link
     const urlMatch = quotedMessage.text.match(/(https?:\/\/[^\s]+)/i);
-    if (urlMatch) {
+    if (urlMatch && isSummaryIntent) {
       await this.sendHumanLikeMessage(replyJid, `🌐 *Quoted URL analyze ho raha hai...* ⚡\n🔗 _${urlMatch[1]}_`, rawText, messageKey);
       const webSummary = await whatsappFeatureEngine.summarizeWebUrl(urlMatch[1], rawText);
       await this.sendHumanLikeMessage(replyJid, webSummary, rawText, messageKey);
       return true;
     }
 
-    // Case 3: Quoted message is a long text/message
-    if (quotedMessage.text && quotedMessage.text.length > 20) {
-      await this.sendHumanLikeMessage(replyJid, "📝 *Quoted message ki summary ban rahi hai...* ⚡", rawText, messageKey);
-      const textSummary = await whatsappFeatureEngine.translateText(
-        `Summarize this message clearly in 3-5 concise bullet points in Hinglish:\n"${quotedMessage.text}"`,
-        "Hinglish"
-      );
-      await this.sendHumanLikeMessage(replyJid, `📑 *Quoted Message Summary:*\n\n${textSummary}`, rawText, messageKey);
-      return true;
+    // Case 3: Quoted message is a Summary Card or text message
+    if (quotedMessage.text && quotedMessage.text.length > 15) {
+      const isSummaryCard =
+        quotedMessage.text.includes("📌") ||
+        quotedMessage.text.includes("📝 *Key Summary") ||
+        quotedMessage.text.includes("💡 *Executive") ||
+        quotedMessage.text.includes("Executive Summary") ||
+        quotedMessage.text.toLowerCase().includes("summary");
+
+      if (isSummaryCard || (!isSummaryIntent && quotedMessage.text.length > 25)) {
+        // Direct question on Friday's summary card or quoted message (e.g. "meeting kab hai", "total kitna hai")
+        await this.sendHumanLikeMessage(replyJid, "🔍 *Summary me se dhoondh kar jawab de rahi hoon...* ⚡", rawText, messageKey);
+        const answer = await visionMemoryService.answerQuestionOnMedia({
+          question: rawText,
+          textContext: quotedMessage.text,
+          chatId: replyJid,
+        });
+        await this.sendHumanLikeMessage(replyJid, answer, rawText, messageKey);
+        return true;
+      } else if (isSummaryIntent) {
+        await this.sendHumanLikeMessage(replyJid, "📝 *Quoted message ki summary ban rahi hai...* ⚡", rawText, messageKey);
+        const textSummary = await whatsappFeatureEngine.translateText(
+          `Summarize this message clearly in 3-5 concise bullet points in Hinglish:\n"${quotedMessage.text}"`,
+          "Hinglish"
+        );
+        await this.sendHumanLikeMessage(replyJid, `📑 *Quoted Message Summary:*\n\n${textSummary}`, rawText, messageKey);
+        return true;
+      }
     }
 
     return false;
@@ -1170,6 +1199,25 @@ class WhatsAppBotService {
     if (quotedMessage && quotedMessage.isReply) {
       const handledQuoted = await this.handleQuotedMediaSummary(replyJid, rawText, quotedMessage, messageKey);
       if (handledQuoted) return;
+    }
+
+    // 0.05 Recent Media Follow-Up Q&A (User asking question about recent photo/PDF/file without quote)
+    try {
+      const { visionMemoryService } = await import("./visionMemoryService");
+      const recentChatMedia = visionMemoryService.getChatMediaContext(replyJid);
+      if (recentChatMedia && visionMemoryService.isMediaQuestionIntent(rawText)) {
+        await this.sendHumanLikeMessage(replyJid, "🔍 *Recent file/photo me se dhoondh rahi hoon...* ⚡", rawText, messageKey);
+        const ans = await visionMemoryService.answerQuestionOnMedia({
+          question: rawText,
+          chatId: replyJid,
+        });
+        if (ans && !ans.startsWith("⚠️")) {
+          await this.sendHumanLikeMessage(replyJid, ans, rawText, messageKey);
+          return;
+        }
+      }
+    } catch (recentMediaErr) {
+      console.warn("[WhatsAppBot] Direct recent media Q&A notice:", recentMediaErr);
     }
 
     // 0.1 AI Image Generation ("@image <prompt>", "/image <prompt>", "image: <prompt>", "photo banao <prompt>")
@@ -2433,6 +2481,25 @@ COMMUNICATION STYLE:
     if (quotedMessage && quotedMessage.isReply) {
       const handledQuoted = await this.handleQuotedMediaSummary(groupJid, text, quotedMessage, messageKey);
       if (handledQuoted) return;
+    }
+
+    // 0.05 Recent Group Media Follow-Up Q&A (e.g. "meeting kab hai?", "amount kitna hai?")
+    try {
+      const { visionMemoryService } = await import("./visionMemoryService");
+      const recentGroupMedia = visionMemoryService.getChatMediaContext(groupJid);
+      if (recentGroupMedia && visionMemoryService.isMediaQuestionIntent(text)) {
+        await this.sendHumanLikeMessage(groupJid, `🔍 *Recent file/photo me se dhoondh rahi hoon ${senderName}...* ⚡`, text, messageKey);
+        const ans = await visionMemoryService.answerQuestionOnMedia({
+          question: text,
+          chatId: groupJid,
+        });
+        if (ans && !ans.startsWith("⚠️")) {
+          await this.sendHumanLikeMessage(groupJid, ans, text, messageKey);
+          return;
+        }
+      }
+    } catch (grpMediaErr) {
+      console.warn("[WhatsAppBot] Group direct media Q&A notice:", grpMediaErr);
     }
 
     // 1. Group Anti-Spam & Phishing Link Guard ("@safety", or suspicious url detection)

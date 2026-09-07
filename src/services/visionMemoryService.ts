@@ -24,22 +24,55 @@ export interface StoredMediaItem {
   photoBase64?: string;
 }
 
+export interface CachedMediaContext {
+  buffer: Buffer;
+  mimeType: string;
+  sender: string;
+  caption?: string;
+  fileName?: string;
+  analysis: string;
+  ocrText?: string;
+  timestamp: number;
+  shortSummary?: string;
+}
+
 class VisionMemoryService {
-  private latestMedia: {
-    buffer: Buffer;
-    mimeType: string;
-    sender: string;
-    caption?: string;
-    analysis: string;
-    ocrText?: string;
-    timestamp: number;
-  } | null = null;
+  private latestMedia: CachedMediaContext | null = null;
+  private latestMediaPerChat = new Map<string, CachedMediaContext>();
   private inMemoryPersonMemories = new Map<string, StoredPersonMemory>();
 
   private getGenAI(): GoogleGenAI | null {
     const key = process.env.GEMINI_API_KEY;
     if (!key) return null;
     return new GoogleGenAI({ apiKey: key });
+  }
+
+  /**
+   * Retrieves the recent cached media for a given chat or globally (within 1 hour).
+   */
+  public getChatMediaContext(chatId?: string): CachedMediaContext | null {
+    const oneHour = 60 * 60 * 1000;
+    if (chatId && this.latestMediaPerChat.has(chatId)) {
+      const item = this.latestMediaPerChat.get(chatId)!;
+      if (Date.now() - item.timestamp < oneHour) {
+        return item;
+      }
+    }
+    if (this.latestMedia && Date.now() - this.latestMedia.timestamp < oneHour) {
+      return this.latestMedia;
+    }
+    return null;
+  }
+
+  /**
+   * Checks if user text is inquiring about a recent photo, PDF, file, or summary.
+   */
+  public isMediaQuestionIntent(text: string): boolean {
+    const t = text.toLowerCase().trim();
+    return (
+      /\b(photo|image|picture|pic|pdf|doc|document|file|summary|invoice|bill|receipt|poster|notice|screenshot|chart|slide)\b/i.test(t) ||
+      /\b(meeting|timing|time|kab\s*h|kab\s*hai|kahan\s*h|kahan\s*hai|kya\s*date|kya\s*time|kis\s*din|kis\s*time|kitna\s*amount|total\s*kitna|kisko\s*bhejna|account\s*no|ifsc|venue|location|kya\s*likha\s*hai|padh\s*ke\s*batao|isme\s*kya\s*hai)\b/i.test(t)
+    );
   }
 
   /**
@@ -50,7 +83,8 @@ class VisionMemoryService {
     mimeType: string,
     sender: string,
     caption?: string,
-    fileName?: string
+    fileName?: string,
+    chatId?: string
   ): Promise<{ analysis: string; ocrText?: string; mediaCategory: "image" | "video" | "document" | "audio"; shortSummary: string }> {
     const ai = this.getGenAI();
     let analysis = "Media received.";
@@ -158,16 +192,22 @@ ${caption ? `User caption: "${caption}"` : ""}`;
       shortSummary = `${mediaCategory} received from ${sender}`;
     }
 
-    // Cache latest media in memory
-    this.latestMedia = {
+    // Cache latest media in memory and per-chat
+    const cachedItem: CachedMediaContext = {
       buffer,
       mimeType,
       sender,
       caption: caption || fileName,
+      fileName,
       analysis,
       ocrText,
       timestamp: Date.now(),
+      shortSummary,
     };
+    this.latestMedia = cachedItem;
+    if (chatId) {
+      this.latestMediaPerChat.set(chatId, cachedItem);
+    }
 
     // Store in Firestore archive
     try {
@@ -248,7 +288,8 @@ ${caption ? `User caption: "${caption}"` : ""}`;
     buffer: Buffer,
     mimeType: string,
     userInstruction?: string,
-    fileName?: string
+    fileName?: string,
+    chatId?: string
   ): Promise<string> {
     const ai = this.getGenAI();
     if (!ai) {
@@ -312,13 +353,172 @@ Use WhatsApp markdown (*bold*, _italic_, bullet points). Keep it clean, accurate
         });
 
         const reply = response.text?.trim();
-        if (reply) return reply;
+        if (reply) {
+          // Cache this summary in the chat context
+          const cachedItem: CachedMediaContext = {
+            buffer,
+            mimeType,
+            sender: "User",
+            caption: userInstruction || fileName,
+            fileName,
+            analysis: reply,
+            timestamp: Date.now(),
+            shortSummary: reply.slice(0, 180),
+          };
+          this.latestMedia = cachedItem;
+          if (chatId) {
+            this.latestMediaPerChat.set(chatId, cachedItem);
+          }
+          return reply;
+        }
       } catch (err: any) {
         console.warn(`[VisionMemoryService] Summary generation model ${model} failed: ${err?.message || err}`);
       }
     }
 
     return "⚠️ Is file/photo ka summary analyze karne me dikkat aayi. Kripya dobara bhejein!";
+  }
+
+  /**
+   * Answers specific follow-up questions regarding a photo, PDF, document, video, or summary card.
+   * e.g. "meeting kab hai", "total bill amount kitna hai", "is document me date kya hai", etc.
+   */
+  public async answerQuestionOnMedia(options: {
+    buffer?: Buffer | null;
+    mimeType?: string;
+    question: string;
+    textContext?: string;
+    fileName?: string;
+    chatId?: string;
+  }): Promise<string> {
+    const ai = this.getGenAI();
+    if (!ai) {
+      return "⚠️ AI service configured nahi hai. Kripya GEMINI_API_KEY check karein.";
+    }
+
+    const { question, textContext, fileName, chatId } = options;
+    let buffer = options.buffer;
+    let mimeType = options.mimeType || "image/jpeg";
+
+    // If buffer wasn't passed directly, check chat / global media cache
+    if (!buffer) {
+      const cached = this.getChatMediaContext(chatId);
+      if (cached) {
+        buffer = cached.buffer;
+        mimeType = cached.mimeType || mimeType;
+      }
+    }
+
+    const lowerMime = (mimeType || "").toLowerCase();
+    const isDoc = lowerMime.includes("pdf") || lowerMime.includes("document") || lowerMime.includes("text") || lowerMime.includes("sheet") || lowerMime.includes("msword");
+    const isVideo = lowerMime.includes("video");
+    const isAudio = lowerMime.includes("audio") || lowerMime.includes("ogg");
+
+    const normalizedMime = isDoc
+      ? "application/pdf"
+      : isVideo
+      ? "video/mp4"
+      : isAudio
+      ? "audio/ogg"
+      : (lowerMime.includes("png") ? "image/png" : lowerMime.includes("webp") ? "image/webp" : "image/jpeg");
+
+    const VISION_FALLBACK_MODELS = [
+      "gemini-3.6-flash",
+      "gemini-3.5-flash",
+      "gemini-3.1-flash-lite",
+      "gemini-2.0-flash",
+      "gemini-1.5-pro",
+      "gemini-1.5-flash",
+    ];
+
+    // Case 1: We have media buffer -> multimodal vision query
+    if (buffer && buffer.length > 0) {
+      const base64Data = buffer.toString("base64");
+      const prompt = `You are Friday, DK's (Divakar Kumar) ultra-intelligent AI assistant.
+The user is asking a specific question about this attached ${isDoc ? `document/PDF (${fileName || "file"})` : isVideo ? "video" : isAudio ? "audio" : "photo/image"}.
+
+USER QUESTION: "${question}"
+${fileName ? `FILE NAME: "${fileName}"` : ""}
+${textContext ? `PREVIOUS SUMMARY / CONTEXT:\n${textContext}` : ""}
+
+INSTRUCTIONS:
+1. Thoroughly read/scan all visible content, text (OCR), tables, dates, timings, names, amounts, headers, and bullet points.
+2. Directly answer the user's question clearly, accurately, and politely in natural Hindi/Hinglish.
+3. If they asked about a meeting (e.g. "meeting kab hai", "meeting timing", "kab milna hai"), extract the EXACT date, day, time (IST/AM/PM), meeting platform/link/location, and agenda if present in the media.
+4. If they asked about money/bills/invoice (e.g. "kitna amount hai", "kisko bhejna hai"), clearly highlight the exact numbers, bank details, due date, etc.
+5. Format with WhatsApp markdown (*bold*, bullet points, emojis).
+6. If the requested information is not mentioned in this media, clearly state what information IS visible instead of making things up.`;
+
+      for (const model of VISION_FALLBACK_MODELS) {
+        try {
+          const response = await ai.models.generateContent({
+            model,
+            contents: [
+              {
+                role: "user",
+                parts: [
+                  { text: prompt },
+                  {
+                    inlineData: {
+                      mimeType: normalizedMime,
+                      data: base64Data,
+                    },
+                  },
+                ],
+              },
+            ],
+          });
+
+          const reply = response.text?.trim();
+          if (reply) return reply;
+        } catch (err: any) {
+          console.warn(`[VisionMemoryService] Media Q&A model ${model} failed: ${err?.message || err}`);
+        }
+      }
+    }
+
+    // Case 2: We have textContext (e.g. quoted summary card, or OCR text)
+    const contextToSearch = textContext || this.getChatMediaContext(chatId)?.analysis || this.getChatMediaContext(chatId)?.ocrText;
+    if (contextToSearch && contextToSearch.trim().length > 0) {
+      const prompt = `You are Friday, DK's ultra-intelligent AI assistant.
+The user is asking a specific question regarding the following document/photo summary or OCR content:
+
+CONTENT / SUMMARY / OCR:
+"""
+${contextToSearch}
+"""
+
+USER QUESTION: "${question}"
+
+INSTRUCTIONS:
+1. Extract the exact answer to the user's question from the provided summary/content.
+2. Provide a direct, helpful, and concise response in friendly Hindi/Hinglish using WhatsApp formatting (*bold*, bullet points).
+3. If the user asked "meeting kab hai", find and specify the meeting date, time, link/location.
+4. If not found in the summary, state clearly what the summary contains.`;
+
+      const TEXT_MODELS = [
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3.1-flash-lite",
+        "gemini-2.0-flash",
+        "gemini-1.5-pro",
+      ];
+
+      for (const model of TEXT_MODELS) {
+        try {
+          const response = await ai.models.generateContent({
+            model,
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
+          });
+          const reply = response.text?.trim();
+          if (reply) return reply;
+        } catch (err: any) {
+          console.warn(`[VisionMemoryService] Text Q&A model ${model} failed: ${err?.message || err}`);
+        }
+      }
+    }
+
+    return "⚠️ Is photo ya summary me aapke sawal ka jawab dhoondhne me dikkat aayi. Kripya dubara photo bhej kar ya quote karke poochhein!";
   }
 
   /**
