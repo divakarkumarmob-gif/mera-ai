@@ -1190,6 +1190,16 @@ YOUR RULES FOR GENERATING THE WHATSAPP REPLY:
     }
   }
 
+  private baileysEnabled: boolean = true;
+
+  public isBaileysEnabled(): boolean {
+    return this.baileysEnabled;
+  }
+
+  public setBaileysEnabled(enabled: boolean) {
+    this.baileysEnabled = enabled;
+  }
+
   public setAutoReply(enabled: boolean) {
     this.autoReplyEnabled = enabled;
   }
@@ -1201,6 +1211,7 @@ YOUR RULES FOR GENERATING THE WHATSAPP REPLY:
       pairingCode: this.pairingCode,
       qrCodeDataUrl: this.qrCodeDataUrl,
       autoReplyEnabled: this.autoReplyEnabled,
+      baileysEnabled: this.baileysEnabled,
     };
   }
 }

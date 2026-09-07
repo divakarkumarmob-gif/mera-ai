@@ -129,9 +129,9 @@ export default function WhatsAppPairModal({ isOpen, onClose }: WhatsAppPairModal
                             </div>
                             <div>
                                 <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
-                                    WhatsApp Manager
+                                    WhatsApp Manager (1 & 2)
                                 </h2>
-                                <p className="text-xs text-slate-400">Meta Cloud API & Baileys Assistant</p>
+                                <p className="text-xs text-slate-400">WhatsApp 1 (Official Cloud API) & WhatsApp 2 (Baileys)</p>
                             </div>
                         </div>
                         <div className="flex items-center gap-1">
@@ -139,7 +139,7 @@ export default function WhatsAppPairModal({ isOpen, onClose }: WhatsAppPairModal
                                 onClick={handleReset}
                                 disabled={isResetting}
                                 className="p-2 rounded-full hover:bg-slate-800 text-slate-400 hover:text-emerald-400 transition-colors"
-                                title="Reset & Refresh Baileys Session"
+                                title="Reset & Refresh WhatsApp 2 (Baileys) Session"
                             >
                                 <RefreshCw className={`w-4 h-4 ${isResetting ? 'animate-spin' : ''}`} />
                             </button>
@@ -154,22 +154,22 @@ export default function WhatsAppPairModal({ isOpen, onClose }: WhatsAppPairModal
 
                     {/* Dual Channel Status Badges */}
                     <div className="grid grid-cols-2 gap-2 text-[11px]">
-                        {/* Cloud API Pill */}
+                        {/* WhatsApp 1 (Cloud API) */}
                         <div className={`p-2.5 rounded-xl border flex flex-col gap-0.5 ${isCloudConfigured ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300' : 'bg-slate-950/60 border-slate-800 text-slate-400'}`}>
                             <div className="flex items-center gap-1.5 font-semibold">
                                 <Cloud className="w-3.5 h-3.5 text-emerald-400" />
-                                <span>Meta Cloud API</span>
+                                <span>WhatsApp 1 (Official)</span>
                             </div>
                             <span className="text-[10px] text-slate-400 truncate">
                                 {isCloudConfigured ? `Active (${cloudPhone ? `+${cloudPhone}` : 'Configured'})` : 'Not configured'}
                             </span>
                         </div>
 
-                        {/* Baileys Pill */}
+                        {/* WhatsApp 2 (Baileys) */}
                         <div className={`p-2.5 rounded-xl border flex flex-col gap-0.5 ${isBaileysConnected ? 'bg-cyan-950/40 border-cyan-500/30 text-cyan-300' : 'bg-amber-950/40 border-amber-500/30 text-amber-300'}`}>
                             <div className="flex items-center gap-1.5 font-semibold">
                                 <Zap className="w-3.5 h-3.5 text-cyan-400" />
-                                <span>Baileys Bridge</span>
+                                <span>WhatsApp 2 (Baileys)</span>
                             </div>
                             <span className="text-[10px] truncate">
                                 {isBaileysConnected ? `Linked (+${baileysPhone})` : 'Not Linked (Pair below)'}
@@ -184,13 +184,13 @@ export default function WhatsAppPairModal({ isOpen, onClose }: WhatsAppPairModal
                                 <ShieldCheck className="w-7 h-7" />
                             </div>
                             <div>
-                                <span className="font-bold text-cyan-300 text-base block">Baileys Web Successfully Linked! 🎉</span>
+                                <span className="font-bold text-cyan-300 text-base block">WhatsApp 2 (Baileys) Linked! 🎉</span>
                                 <span className="text-xs text-slate-300 mt-1 block">
                                     Number: <b className="text-white font-mono">{baileysPhone ? `+${baileysPhone}` : 'Linked'}</b>
                                 </span>
                             </div>
                             <p className="text-[11px] text-slate-400">
-                                24-hr limit fallback aur direct WhatsApp conversation dono active hain.
+                                WhatsApp 1 failover aur direct dual-channel messaging active hai.
                             </p>
                             
                             <div className="flex gap-2 w-full mt-2">
@@ -214,8 +214,8 @@ export default function WhatsAppPairModal({ isOpen, onClose }: WhatsAppPairModal
                         <>
                             {/* Explanatory banner for linking Baileys */}
                             <div className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 text-[11px] text-slate-300">
-                                <span className="text-emerald-400 font-semibold">⚡ Link Baileys WhatsApp: </span>
-                                QR scan ya 8-digit code se apna personal/spare WhatsApp link karein taaki Meta 24h window bypass aur auto-replies seamlessly chalein.
+                                <span className="text-emerald-400 font-semibold">⚡ Link WhatsApp 2 (Baileys): </span>
+                                QR scan ya 8-digit code se apna personal/spare WhatsApp link karein taaki WhatsApp 1 fail hone par seamless auto-switch ho sake.
                             </div>
 
                             {/* Tab Switcher */}

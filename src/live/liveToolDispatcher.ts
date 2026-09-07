@@ -143,20 +143,31 @@ export async function dispatchLiveToolCall(call: any, context: ToolDispatchConte
                     : { success: false, message: `No matching contact found for "${contactNameOrPhone}" — nothing was deleted.` };
                   clientWs.send(JSON.stringify({ type: "contact_deleted", ...result }));
                 } else if (call.name === "send_whatsapp_to_contact") {
-                  const { contactNameOrPhone, messageText } = call.args || {};
+                  const { contactNameOrPhone, messageText, channel } = call.args || {};
                   const contact = await contactsService.findContact(contactNameOrPhone);
-                  const targetPhone = contact ? contact.phone : contactNameOrPhone.replace(/[\s\-\(\)\+]/g, "");
+                  const targetPhone = contact ? contact.phone : String(contactNameOrPhone || "").replace(/[\s\-\(\)\+]/g, "");
 
-                  // Primary: WhatsApp Cloud API (official, ban-safe).
-                  // Fallback: Dedicated Baileys bot if linked.
-                  const sendRes = await sendWhatsAppUnified(targetPhone, messageText);
+                  const selectedChannel: "auto" | "whatsapp1" | "whatsapp2" =
+                    channel === "whatsapp1" || channel === "1" ? "whatsapp1"
+                    : channel === "whatsapp2" || channel === "2" ? "whatsapp2"
+                    : "auto";
+
+                  const isBaileysActive = getBaileysEnabled?.() ?? whatsappBotService.isBaileysEnabled();
+
+                  const sendRes = await sendWhatsAppUnified(targetPhone, messageText, {
+                    channel: selectedChannel,
+                    baileysEnabled: isBaileysActive,
+                  });
 
                   result = {
                     success: sendRes.success,
                     via: sendRes.via,
-                    message: sendRes.success
-                      ? `Message successfully delivered to ${contact?.name || targetPhone}: "${messageText}"`
-                      : `Delivery failed: ${sendRes.message}`,
+                    channelUsed: sendRes.channelUsed,
+                    suggestBaileysFallback: sendRes.suggestBaileysFallback,
+                    canFallbackToWhatsApp2: sendRes.canFallbackToWhatsApp2,
+                    targetPhone,
+                    messageText,
+                    message: sendRes.message,
                   };
                   clientWs.send(JSON.stringify({ type: "whatsapp_contact_sent", ...result }));
                 } else if (call.name === "pair_dedicated_whatsapp_number") {
@@ -2185,10 +2196,11 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                     const norm = String(settingName || "").toLowerCase().trim();
                     let finalState: boolean | undefined = typeof state === "boolean" ? state : undefined;
 
-                    if (norm.includes("baileys") || norm === "baileys_whatsapp") {
+                    if (norm.includes("baileys") || norm.includes("whatsapp2") || norm.includes("whatsapp 2") || norm.includes("whatsapp_2") || norm === "baileys_whatsapp") {
                       if (finalState === undefined) setBaileysEnabled(!getBaileysEnabled());
                       else setBaileysEnabled(finalState);
                       finalState = getBaileysEnabled();
+                      whatsappBotService.setBaileysEnabled(finalState);
                     }
 
                     const normalizedSetting = norm.includes("caption") || norm.includes("subtitle")

@@ -183,7 +183,7 @@ const rawFunctionDeclarations: any[] = [
   },
   {
     "name": "send_whatsapp_to_contact",
-    "description": "Send a WhatsApp message directly to any contact (e.g. Rahul, Aman, Mummy) in the background using Friday's dedicated assistant session.",
+    "description": "Send a WhatsApp message directly to any contact (e.g. Rahul, Aman, Mummy) in the background. Supports choosing between WhatsApp 1 (Official Meta Cloud API) and WhatsApp 2 (Baileys Multi-Device Bot) or auto-failover.",
     "parameters": {
       "type": "OBJECT",
       "properties": {
@@ -194,6 +194,10 @@ const rawFunctionDeclarations: any[] = [
         "messageText": {
           "type": "STRING",
           "description": "The exact message to send to the contact"
+        },
+        "channel": {
+          "type": "STRING",
+          "description": "Optional WhatsApp channel to use: 'whatsapp1' for WhatsApp 1 (Official Meta Cloud API), 'whatsapp2' for WhatsApp 2 (Baileys Multi-Device Bot), or 'auto' (default: try WhatsApp 1 first, failover/prompt to WhatsApp 2)."
         }
       },
       "required": [

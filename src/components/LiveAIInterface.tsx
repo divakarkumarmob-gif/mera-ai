@@ -122,7 +122,7 @@ function ToggleSwitch({ label, description, active, onToggle, activeColor = 'bg-
     );
 }
 
-// ── Baileys Backup WhatsApp Toggle (inline mini-component) ────────────────────
+// ── WhatsApp 2 (Baileys Multi-Device Bot) Toggle ─────────────────────────────
 function BaileysToggle({ onOpenPairModal }: { onOpenPairModal?: () => void }) {
     const [enabled, setEnabled] = useState(false);
     const [loading, setLoading] = useState(false);
@@ -163,19 +163,19 @@ function BaileysToggle({ onOpenPairModal }: { onOpenPairModal?: () => void }) {
     return (
         <div className="flex flex-col gap-2.5 p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800">
             <ToggleSwitch
-                label="Baileys Backup WhatsApp"
-                description={enabled ? '⚡ Fallback Active (24h window bypass)' : '🛡️ Meta Cloud API Only'}
+                label="WhatsApp 2 (Baileys Multi-Device Bot)"
+                description={enabled ? '⚡ ON: Auto-failover active (agar WhatsApp 1 fail ho toh WhatsApp 2 se jayega)' : '🛡️ OFF: Only WhatsApp 1 (Friday failure par aapse WhatsApp 2 confirmation mangegi)'}
                 active={enabled}
                 onToggle={toggle}
-                activeColor="bg-amber-500"
+                activeColor="bg-cyan-500"
                 disabled={loading}
             />
             <div className="flex items-center justify-between pt-2 border-t border-slate-800/60 text-xs">
                 <span className="text-[11px] text-slate-400">
                     Status: {baileysLinked ? (
-                        <span className="text-cyan-400 font-semibold ml-1">🟢 Linked {linkedPhone ? `(+${linkedPhone})` : ''}</span>
+                        <span className="text-cyan-400 font-semibold ml-1">🟢 WhatsApp 2 Linked {linkedPhone ? `(+${linkedPhone})` : ''}</span>
                     ) : (
-                        <span className="text-amber-400 font-semibold ml-1">🟡 Not Linked</span>
+                        <span className="text-amber-400 font-semibold ml-1">🟡 WhatsApp 2 Not Linked</span>
                     )}
                 </span>
                 {onOpenPairModal && (
