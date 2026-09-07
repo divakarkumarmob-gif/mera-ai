@@ -829,36 +829,6 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
     const callGreetingSentRef = useRef(false);
     const [activeInCallModal, setActiveInCallModal] = useState<boolean>(!!isCallMode);
 
-    const toggleMicMute = useCallback(() => {
-        setIsMicMuted((prev) => {
-            const next = !prev;
-            isMicMutedRef.current = next;
-            return next;
-        });
-    }, []);
-
-    const handleEndCall = useCallback(async (durationSecs: number) => {
-        stopRecording();
-        setActiveInCallModal(false);
-        try {
-            await fetch('/api/call/end-summary', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    callId: callSession?.callId || 'live-call',
-                    callerName: callSession?.callerName || remoteIncomingCall?.callerName || 'Boss DK',
-                    durationSecs,
-                    transcript: captionText || '',
-                }),
-            });
-        } catch (e) {
-            console.warn('[LiveAIInterface] Error posting call end summary:', e);
-        }
-        if (isCallMode && onClose) {
-            onClose();
-        }
-    }, [callSession, remoteIncomingCall, captionText, isCallMode, onClose]);
-
     useEffect(() => {
         if (callRemainingSecs === null || callRemainingSecs <= 0) return;
         const timer = setInterval(() => {
@@ -1871,6 +1841,36 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
         setStatus("Idle");
     };
 
+    const toggleMicMute = useCallback(() => {
+        setIsMicMuted((prev) => {
+            const next = !prev;
+            isMicMutedRef.current = next;
+            return next;
+        });
+    }, []);
+
+    const handleEndCall = useCallback(async (durationSecs: number) => {
+        stopRecording();
+        setActiveInCallModal(false);
+        try {
+            await fetch(getApiUrl('/api/call/end-summary'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    callId: callSession?.callId || remoteIncomingCall?.callId || 'live-call',
+                    callerName: callSession?.callerName || remoteIncomingCall?.callerName || 'Boss DK',
+                    durationSecs,
+                    transcript: captionText || '',
+                }),
+            });
+        } catch (e) {
+            console.warn('[LiveAIInterface] Error posting call end summary:', e);
+        }
+        if (isCallMode && onClose) {
+            onClose();
+        }
+    }, [callSession, remoteIncomingCall, captionText, isCallMode, onClose]);
+
     const handleInterrupt = () => {
         ws.current?.send(JSON.stringify({ interrupt: true }));
         stopAudio();
@@ -1920,6 +1920,14 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isRecording, wakeWordActive]);
+
+    // ── Auto-connect Background WebSocket on Mount for Real-time WhatsApp/Call Triggers ──
+    useEffect(() => {
+        ensureConnection(false).catch((err) => {
+            console.warn("[LiveAIInterface] Background WS connect notice:", err);
+        });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     // ── WhatsApp 1-Click Live Voice Call Auto-Connect ────────────────────────
     useEffect(() => {
@@ -3738,7 +3746,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                         const callId = remoteIncomingCall.callId;
                         const caller = remoteIncomingCall.callerName;
                         setRemoteIncomingCall(null);
-                        fetch('/api/call/decline', {
+                        fetch(getApiUrl('/api/call/decline'), {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ callId, callerName: caller }),

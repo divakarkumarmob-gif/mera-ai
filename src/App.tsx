@@ -5,6 +5,7 @@ import AgentFace from './components/AgentFace';
 import AppKeyLockModal from './components/AppKeyLockModal';
 import IncomingCallScreen from './components/IncomingCallScreen';
 import { getStoredAppSession, saveAppSession } from '@/utils/appSecurityClient';
+import { getApiUrl } from '@/utils/api';
 import { wakeWordManager } from '@/utils/wakeWord';
 import { screenWakeLock } from '@/utils/screenWakeLock';
 
@@ -37,7 +38,7 @@ export default function App() {
     // Validate Call Token from server
     useEffect(() => {
         if (callParams.isCall && callParams.callId) {
-            fetch(`/api/call/validate-session?callId=${encodeURIComponent(callParams.callId)}`)
+            fetch(getApiUrl(`/api/call/validate-session?callId=${encodeURIComponent(callParams.callId)}`))
                 .then((r) => r.json())
                 .then((data) => {
                     if (data?.valid) {
@@ -132,7 +133,7 @@ export default function App() {
                 callerName={callParams.caller || 'FRIDAY AI'}
                 onAccept={() => setIsCallAnswered(true)}
                 onDecline={() => {
-                    fetch('/api/call/decline', {
+                    fetch(getApiUrl('/api/call/decline'), {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ callId: callParams.callId, callerName: callParams.caller }),
