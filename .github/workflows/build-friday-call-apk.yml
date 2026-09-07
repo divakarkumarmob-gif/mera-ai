@@ -73,17 +73,21 @@ jobs:
             sed -i '/android.permission.RECORD_AUDIO/d' "$MANIFEST"
             sed -i '/<application/i '"$PERMS"'' "$MANIFEST"
 
+            # Add showWhenLocked & turnScreenOn attributes to MainActivity
+            sed -i 's/<activity/<activity android:showWhenLocked="true" android:turnScreenOn="true" android:showOnLockScreen="true"/g' "$MANIFEST"
+
             SERVICE_TAG='        <service\n            android:name=".FridayCallForegroundService"\n            android:foregroundServiceType="microphone|mediaPlayback|phoneCall"\n            android:exported="false" />'
             if ! grep -q "FridayCallForegroundService" "$MANIFEST"; then
               sed -i '/<\/application>/i '"$SERVICE_TAG"'' "$MANIFEST"
             fi
           fi
 
-      - name: 🛡️ Inject FridayCallForegroundService in Android App
+      - name: 🛡️ Inject FridayCallForegroundService & Screen WakeLock in MainActivity
         run: |
           PACKAGE_DIR="android/app/src/main/java/com/friday/ai"
           mkdir -p "$PACKAGE_DIR"
 
+          # 1. Create FridayCallForegroundService.java
           cat << 'EOF' > "$PACKAGE_DIR/FridayCallForegroundService.java"
           package com.friday.ai;
 
@@ -141,7 +145,7 @@ jobs:
                   try {
                       PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
                       if (pm != null) {
-                          wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "FridayCall::WakeLock");
+                          wakeLock = pm.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP | PowerManager.ON_AFTER_RELEASE, "FridayCall::ScreenWakeLock");
                           wakeLock.acquire(12 * 60 * 60 * 1000L);
                       }
                   } catch (Exception e) {
@@ -209,6 +213,56 @@ jobs:
           }
           EOF
 
+          # 2. Inject Screen Wake & LockScreen Overlay in MainActivity.java
+          cat << 'EOF' > "$PACKAGE_DIR/MainActivity.java"
+          package com.friday.ai;
+
+          import android.app.KeyguardManager;
+          import android.content.Intent;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.os.PowerManager;
+          import android.view.WindowManager;
+          import com.getcapacitor.BridgeActivity;
+
+          public class MainActivity extends BridgeActivity {
+              @Override
+              public void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+
+                  // Turn ON Screen and show over Lock Screen when call rings
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                      setShowWhenLocked(true);
+                      setTurnScreenOn(true);
+                      KeyguardManager km = (KeyguardManager) getSystemService(KEYGUARD_SERVICE);
+                      if (km != null) {
+                          km.requestDismissKeyguard(this, null);
+                      }
+                  } else {
+                      getWindow().addFlags(
+                          WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED |
+                          WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD |
+                          WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON |
+                          WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+                      );
+                  }
+
+                  // Start Foreground Call Service
+                  try {
+                      Intent serviceIntent = new Intent(this, FridayCallForegroundService.class);
+                      serviceIntent.setAction(FridayCallForegroundService.ACTION_START);
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                          startForegroundService(serviceIntent);
+                      } else {
+                          startService(serviceIntent);
+                      }
+                  } catch (Exception e) {
+                      e.printStackTrace();
+                  }
+              }
+          }
+          EOF
+
       - name: 🔨 Build Debug Call APK via Gradle
         run: |
           cd android
@@ -240,3 +294,4 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
