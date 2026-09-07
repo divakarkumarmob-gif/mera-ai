@@ -168,6 +168,31 @@ class WhatsAppBotService {
     }
   }
 
+  private scheduledMessageTimer: any = null;
+
+  private startScheduledMessagesTicker() {
+    this.stopScheduledMessagesTicker();
+    this.scheduledMessageTimer = setInterval(async () => {
+      if (!this.isConnected || !this.sock) return;
+      try {
+        const { whatsappFeatureEngine } = await import("./whatsappFeatureEngine");
+        await whatsappFeatureEngine.processPendingScheduledMessages((phone, text) =>
+          this.sendMessage(phone, text)
+        );
+      } catch (err) {
+        console.warn("[WhatsAppBot] Scheduled message ticker error:", err);
+      }
+    }, 30 * 1000);
+    console.log("[WhatsAppBot] Scheduled messages background ticker active (30s interval).");
+  }
+
+  private stopScheduledMessagesTicker() {
+    if (this.scheduledMessageTimer) {
+      clearInterval(this.scheduledMessageTimer);
+      this.scheduledMessageTimer = null;
+    }
+  }
+
   private scheduleReconnect(delayMs: number) {
     if (this.reconnectTimer) return;
     this.reconnectTimer = setTimeout(async () => {
@@ -1303,9 +1328,106 @@ class WhatsAppBotService {
       return;
     }
 
-    // 10. AUTONOMOUS MASTER FRIDAY AI WITH TOOL CALLING FOR BOSS
+    // 10. ADVANCED FEATURE SUITE SHORTCUTS FOR BOSS:
+    const { whatsappFeatureEngine } = await import("./whatsappFeatureEngine");
+
+    // A. Personal Catch-Up Digest ("@digest", "kiska msg aaya", "who messaged me")
+    if (/^(?:@digest|\/digest|digest|kiska\s*msg\s*aaya|kiska\s*kiska\s*msg\s*aaya|who\s*messaged|messages\s*digest)/i.test(rawText)) {
+      const recent = await this.getMessages({ limit: 40 });
+      const digestRes = await whatsappFeatureEngine.generatePersonalDigest(recent);
+      await this.sendHumanLikeMessage(replyJid, digestRes, rawText, messageKey);
+      return;
+    }
+
+    // B. Group / Chat Catch-Up Summary ("@summary", "@catchup", "summary")
+    if (/^(?:@summary|\/summary|summary|@catchup|catchup|chat\s*summary)/i.test(rawText)) {
+      const isGroup = replyJid.endsWith("@g.us");
+      const groupName = isGroup ? await this.getGroupName(replyJid) : "Chat";
+      const recent = await this.getMessages({ groupName: isGroup ? groupName : undefined, limit: 35 });
+      const summaryRes = await whatsappFeatureEngine.generateGroupSummary(groupName, recent);
+      await this.sendHumanLikeMessage(replyJid, summaryRes, rawText, messageKey);
+      return;
+    }
+
+    // C. Multi-Language Translation ("@translate to english", "@translate hindi <text>")
+    const translateMatch = rawText.match(/^(?:@translate|\/translate|translate)\s+(?:to\s+)?([a-zA-Z\s]+?)(?:\s*[:=-]\s*|\s+)(.*)/i) ||
+      (quotedMessage?.text && rawText.match(/^(?:@translate|\/translate|translate)\s+(?:to\s+)?([a-zA-Z]+)/i));
+    if (translateMatch) {
+      const targetLang = translateMatch[1]?.trim() || "english";
+      const textToTranslate = translateMatch[2]?.trim() || quotedMessage?.text || "";
+      if (textToTranslate) {
+        await this.sendHumanLikeMessage(replyJid, `🌐 *Translating to ${targetLang}...* ⚡`, rawText, messageKey);
+        const transRes = await whatsappFeatureEngine.translateText(textToTranslate, targetLang);
+        await this.sendHumanLikeMessage(replyJid, transRes, rawText, messageKey);
+        return;
+      }
+    }
+
+    // D. Web Scraper & URL Reader ("@web https://...", "@read https://...")
+    const webMatch = rawText.match(/^(?:@web|\/web|@read|\/read|web|read)\s+(https?:\/\/\S+)(?:\s+(.*))?/i) ||
+      rawText.match(/(https?:\/\/[^\s]+)\s*(?:ka\s*summary|padho|explain|kya\s*hai)/i);
+    if (webMatch) {
+      const targetUrl = webMatch[1].trim();
+      const userQ = webMatch[2]?.trim() || "";
+      await this.sendHumanLikeMessage(replyJid, `🌐 *Fetching & analyzing webpage...* ⚡\n🔗 _${targetUrl}_`, rawText, messageKey);
+      const webSummary = await whatsappFeatureEngine.summarizeWebUrl(targetUrl, userQ);
+      await this.sendHumanLikeMessage(replyJid, webSummary, rawText, messageKey);
+      return;
+    }
+
+    // E. Scheduled Message Sender ("@schedule Rahul in 10 mins: text", "schedule msg to ...")
+    const scheduleMatch = rawText.match(/^(?:@schedule|\/schedule|schedule\s*msg|schedule\s*message)\s+(?:to\s+)?([^:\n]+?)\s+(?:in|after|at)\s+([^:\n]+)[:=-]\s*(.+)/i);
+    if (scheduleMatch) {
+      const targetContact = scheduleMatch[1].trim();
+      const timeInst = scheduleMatch[2].trim();
+      const msgBody = scheduleMatch[3].trim();
+      const schedRes = await whatsappFeatureEngine.scheduleMessage(targetContact, msgBody, timeInst);
+      await this.sendHumanLikeMessage(replyJid, schedRes.message, rawText, messageKey);
+      return;
+    }
+
+    // F. Interactive AI Poll Creator ("@poll <question>")
+    const pollMatch = rawText.match(/^(?:@poll|\/poll|poll|vote)\s*[:=-]?\s*(.+)/i);
+    if (pollMatch) {
+      const pollQuery = pollMatch[1].trim();
+      const pollCard = await whatsappFeatureEngine.generatePoll(pollQuery);
+      await this.sendHumanLikeMessage(replyJid, pollCard, rawText, messageKey);
+      return;
+    }
+
+    // G. Group Trivia & Quiz Master ("@quiz tech", "@quiz cricket")
+    const quizMatch = rawText.match(/^(?:@quiz|\/quiz|quiz|trivia)\s*(.*)/i);
+    if (quizMatch) {
+      const topic = quizMatch[1]?.trim() || "tech & general knowledge";
+      const quizCard = await whatsappFeatureEngine.generateQuiz(topic);
+      await this.sendHumanLikeMessage(replyJid, quizCard, rawText, messageKey);
+      return;
+    }
+
+    // H. Live Code Explainer & Debugger ("@code <code>", "@debug <code>")
+    const codeMatch = rawText.match(/^(?:@code|\/code|@debug|\/debug|debug|code)\s*[:=-]?\s*([\s\S]+)/i);
+    if (codeMatch) {
+      const codeSnippet = codeMatch[1].trim();
+      if (codeSnippet) {
+        await this.sendHumanLikeMessage(replyJid, "💻 *Code analyze ho raha hai...* ⚡", rawText, messageKey);
+        const codeRes = await whatsappFeatureEngine.analyzeCode(codeSnippet);
+        await this.sendHumanLikeMessage(replyJid, codeRes, rawText, messageKey);
+        return;
+      }
+    }
+
+    // I. Music with Lyrics Finder ("@music <song name>")
+    const musicMatch = rawText.match(/^(?:@music|\/music|music|song)\s*[:=-]?\s*(.+)/i);
+    if (musicMatch) {
+      const songQuery = musicMatch[1].trim();
+      const musicCard = await whatsappFeatureEngine.searchMusicWithLyrics(songQuery);
+      await this.sendHumanLikeMessage(replyJid, musicCard, rawText, messageKey);
+      return;
+    }
+
+    // 11. AUTONOMOUS MASTER FRIDAY AI WITH TOOL CALLING FOR BOSS
     try {
-      const reply = await this.executeBossChatAI(senderName, rawText, quotedMessage);
+      const reply = await this.executeBossChatAI(senderName, rawText, quotedMessage, replyJid, messageKey);
       await this.sendHumanLikeMessage(replyJid, reply, rawText, messageKey);
     } catch (aiErr: any) {
       console.error("[WhatsAppBot] Error in executeBossChatAI:", aiErr);
@@ -1320,7 +1442,9 @@ class WhatsAppBotService {
   private async executeBossChatAI(
     senderName: string,
     messageText: string,
-    quotedMessage?: QuotedMessageContext | null
+    quotedMessage?: QuotedMessageContext | null,
+    replyJid = "",
+    messageKey?: any
   ): Promise<string> {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
@@ -1328,6 +1452,7 @@ class WhatsAppBotService {
     }
 
     const { memoryEngine } = await import("./memoryEngine");
+    const { whatsappFeatureEngine } = await import("./whatsappFeatureEngine");
     const memoryContext = await memoryEngine.compileLeanMemoryPrompt();
 
     const ai = new GoogleGenAI({ apiKey });
@@ -1335,7 +1460,7 @@ class WhatsAppBotService {
     const functionDeclarations: any[] = [
       {
         name: "send_whatsapp_message",
-        description: "Send a WhatsApp message to any contact or phone number from DK's contacts book.",
+        description: "Send a WhatsApp message immediately to any contact or phone number from DK's contacts book.",
         parameters: {
           type: "OBJECT",
           properties: {
@@ -1344,6 +1469,89 @@ class WhatsAppBotService {
             channel: { type: "STRING", description: "Optional channel: 'whatsapp1', 'whatsapp2', or 'auto'" },
           },
           required: ["contactNameOrPhone", "messageText"],
+        },
+      },
+      {
+        name: "schedule_whatsapp_message",
+        description: "Schedule a WhatsApp message to be sent automatically at a future time or relative duration (e.g., 'in 15 mins', 'at 8 PM', 'tomorrow at 10 AM').",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            recipientContactOrPhone: { type: "STRING", description: "Recipient name or phone number" },
+            messageText: { type: "STRING", description: "Message body to send" },
+            timeInstruction: { type: "STRING", description: "When to deliver the message (e.g. 'in 10 minutes', 'tomorrow 9am', 'at 5:30 PM')" },
+          },
+          required: ["recipientContactOrPhone", "messageText", "timeInstruction"],
+        },
+      },
+      {
+        name: "get_messages_digest",
+        description: "Get a comprehensive catch-up summary of all recent WhatsApp messages across all contacts or for a specific group/chat.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            groupName: { type: "STRING", description: "Optional group name to summarize specifically" },
+            limit: { type: "NUMBER", description: "Number of recent messages to analyze (default: 30)" },
+          },
+          required: [],
+        },
+      },
+      {
+        name: "translate_text",
+        description: "Translate any text or message accurately into any target language (e.g. English, Hindi, Spanish, French, German, Japanese).",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            text: { type: "STRING", description: "Text to translate" },
+            targetLanguage: { type: "STRING", description: "Target language name (e.g. 'English', 'Hindi', 'Spanish')" },
+          },
+          required: ["text", "targetLanguage"],
+        },
+      },
+      {
+        name: "summarize_web_url",
+        description: "Fetch live content from any website or URL and provide an executive summary or answer specific questions about it.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            url: { type: "STRING", description: "Complete URL of the webpage to scrape and analyze" },
+            query: { type: "STRING", description: "Optional specific question or focus area for analysis" },
+          },
+          required: ["url"],
+        },
+      },
+      {
+        name: "generate_poll",
+        description: "Create an interactive multi-choice poll with emoji voting keys for groups or personal decision-making.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            topicOrQuestion: { type: "STRING", description: "The poll topic or question" },
+          },
+          required: ["topicOrQuestion"],
+        },
+      },
+      {
+        name: "generate_quiz",
+        description: "Generate an engaging trivia/quiz question with 4 options and hint for WhatsApp group or personal learning.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            topic: { type: "STRING", description: "Quiz topic (e.g. 'Space', 'Cricket', 'JavaScript', 'World History')" },
+          },
+          required: ["topic"],
+        },
+      },
+      {
+        name: "analyze_code_snippet",
+        description: "Analyze, debug, explain, or optimize a programming code snippet.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            codeSnippet: { type: "STRING", description: "The code to inspect" },
+            instruction: { type: "STRING", description: "Optional instruction (e.g. 'find bug', 'optimize', 'explain')" },
+          },
+          required: ["codeSnippet"],
         },
       },
       {
@@ -1510,7 +1718,7 @@ Boss (DK) is chatting with you directly on WhatsApp. He is using WhatsApp chat t
 You have FULL AUTONOMOUS ACCESS to execute all tools:
 1. Search all historical & recent WhatsApp messages (even 30+ days ago) using 'search_whatsapp_history'.
 2. Cross-platform bridging: Forward any text/photo/video/file between WhatsApp and Telegram using 'forward_to_telegram' and 'forward_from_telegram_to_whatsapp'.
-3. Send WhatsApp messages, lookup contacts, set reminders, take notes, track expenses, fetch weather, news, search web, and answer any technical, coding, personal, or life questions Boss asks.
+3. Send and schedule WhatsApp messages, translate text, summarize web pages, generate polls & quizzes, inspect code, lookup contacts, set reminders, take notes, track expenses, fetch weather, news, search web, and answer any technical, coding, personal, or life questions Boss asks.
 
 SWIPE-TO-REPLY / QUOTED MESSAGE REASONING (CRITICAL):
 When Boss replies to a previous message by swiping left on WhatsApp:
@@ -1526,7 +1734,7 @@ COMMUNICATION STYLE:
 - Address DK warmly and respectfully as 'Boss' or 'DK Boss'.
 - Speak in natural, affectionate, crisp Hinglish (blend of Hindi and English) with high intellect.
 - Format responses cleanly using WhatsApp markdown (*bold*, _italic_, bullet points).
-- If Boss asks you to perform an action (send a message, save a note, check weather, search history, forward to telegram, etc.), call the appropriate tool immediately!`;
+- If Boss asks you to perform an action (send a message, schedule a message, summarize, translate, generate an image, poll, quiz, check weather, search history, forward to telegram, etc.), call the appropriate tool immediately!`;
 
     const executeTool = async (toolName: string, args: any): Promise<any> => {
       try {
@@ -1537,6 +1745,43 @@ COMMUNICATION STYLE:
           const phone = contact ? contact.phone : String(args.contactNameOrPhone || "").replace(/\D/g, "");
           const res = await sendWhatsAppUnified(phone, args.messageText, { channel: args.channel });
           return res;
+        }
+        if (toolName === "schedule_whatsapp_message") {
+          const schedRes = await whatsappFeatureEngine.scheduleMessage(
+            args.recipientContactOrPhone,
+            args.messageText,
+            args.timeInstruction
+          );
+          return schedRes;
+        }
+        if (toolName === "get_messages_digest") {
+          const recent = await this.getMessages({ groupName: args.groupName, limit: args.limit || 30 });
+          if (args.groupName) {
+            const sum = await whatsappFeatureEngine.generateGroupSummary(args.groupName, recent);
+            return { summary: sum };
+          }
+          const digest = await whatsappFeatureEngine.generatePersonalDigest(recent);
+          return { digest };
+        }
+        if (toolName === "translate_text") {
+          const trans = await whatsappFeatureEngine.translateText(args.text, args.targetLanguage);
+          return { translation: trans };
+        }
+        if (toolName === "summarize_web_url") {
+          const webSum = await whatsappFeatureEngine.summarizeWebUrl(args.url, args.query);
+          return { summary: webSum };
+        }
+        if (toolName === "generate_poll") {
+          const poll = await whatsappFeatureEngine.generatePoll(args.topicOrQuestion);
+          return { pollCard: poll };
+        }
+        if (toolName === "generate_quiz") {
+          const quiz = await whatsappFeatureEngine.generateQuiz(args.topic);
+          return { quizCard: quiz };
+        }
+        if (toolName === "analyze_code_snippet") {
+          const codeAnalysis = await whatsappFeatureEngine.analyzeCode(args.codeSnippet, args.instruction);
+          return { analysis: codeAnalysis };
         }
         if (toolName === "get_contact_info") {
           const { contactsService } = await import("./contactsService");
@@ -1650,12 +1895,14 @@ COMMUNICATION STYLE:
           const genRes = await imageGenerationService.generateImage(args.prompt, { aspectRatio: args.aspectRatio });
           if (genRes.success && (genRes.buffer || genRes.imageUrl)) {
             const imageSrc = genRes.buffer || genRes.imageUrl!;
-            await this.sendPhotoMessage(
-              replyJid,
-              imageSrc,
-              `✨ *AI Generated Image*\n📌 *Prompt:* _"${args.prompt}"_\n🤖 *Engine:* _${genRes.model}_`,
-              messageKey
-            );
+            if (replyJid) {
+              await this.sendPhotoMessage(
+                replyJid,
+                imageSrc,
+                `✨ *AI Generated Image*\n📌 *Prompt:* _"${args.prompt}"_\n🤖 *Engine:* _${genRes.model}_`,
+                messageKey
+              );
+            }
             return { success: true, message: `Image generated using ${genRes.model} and delivered to Boss on WhatsApp!` };
           }
           return { success: false, message: `Image generation failed: ${genRes.error || "Unknown error"}` };
@@ -1877,6 +2124,29 @@ COMMUNICATION STYLE:
       "photo banao",
       "image banao",
       "tasveer banao",
+      "@summary",
+      "/summary",
+      "@catchup",
+      "/catchup",
+      "@poll",
+      "/poll",
+      "@quiz",
+      "/quiz",
+      "@trivia",
+      "@translate",
+      "/translate",
+      "@web",
+      "/web",
+      "@read",
+      "/read",
+      "@code",
+      "/code",
+      "@debug",
+      "/debug",
+      "@music",
+      "/music",
+      "@safety",
+      "/safety",
     ];
     if (nameTriggers.some((t) => cleanText.includes(t))) {
       return true;
@@ -1945,18 +2215,16 @@ COMMUNICATION STYLE:
       return `Main sun rahi hoon ${senderName}! Main Friday hoon — DK Boss ki AI assistant. DK abhi thode busy hain, agar koi important kaam hai to batayein main unhe note karwa dungi! 👍`;
     };
 
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      await this.sendHumanLikeMessage(groupJid, fallbackText(), text, messageKey);
+    const { whatsappFeatureEngine } = await import("./whatsappFeatureEngine");
+
+    // 1. Group Anti-Spam & Phishing Link Guard ("@safety", or suspicious url detection)
+    if (/^(?:@safety|\/safety|safety)/i.test(text) || (text.includes("http") && /free|win|prize|hack|mod\s*apk|lottery/i.test(text))) {
+      const safetyCard = await whatsappFeatureEngine.checkLinkSafety(text);
+      await this.sendHumanLikeMessage(groupJid, safetyCard, text, messageKey);
       return;
     }
 
-    const ai = new GoogleGenAI({ apiKey });
-    const quotedSnippet = quotedMessage && quotedMessage.isReply
-      ? `\n- PREVIOUS QUOTED MESSAGE IN GROUP (From: ${quotedMessage.sender}, Type: ${quotedMessage.mediaType}): "${quotedMessage.text}"`
-      : "";
-
-    // 1. Group AI Image Generation ("@image <prompt>", "image: <prompt>", "photo banao <prompt>")
+    // 2. Group AI Image Generation ("@image <prompt>", "image: <prompt>", "photo banao <prompt>")
     const groupImgMatch =
       text.match(/^(?:@image|\/image|image:|photo\s*banao|image\s*banao|tasveer\s*banao|generate\s*image|draw\s*image|draw)\s*[:=-]?\s*(.+)/i) ||
       (text.includes("@image") ? text.match(/@image\s+(.+)/i) : null);
@@ -1980,6 +2248,90 @@ COMMUNICATION STYLE:
         console.error("[WhatsAppBot] Group image generation error:", imgErr);
       }
     }
+
+    // 3. Group Catch-Up Summary ("@summary", "@catchup", "/summary")
+    if (/^(?:@summary|\/summary|@catchup|\/catchup)/i.test(text) || /(?:chat|group)\s*(?:summary|digest)/i.test(text)) {
+      await this.sendHumanLikeMessage(groupJid, `📊 *"${groupName}" ki summary generate ho rahi hai...* ⚡`, text, messageKey);
+      const recent = await this.getMessages({ groupName, limit: 35 });
+      const summaryCard = await whatsappFeatureEngine.generateGroupSummary(groupName, recent);
+      await this.sendHumanLikeMessage(groupJid, summaryCard, text, messageKey);
+      return;
+    }
+
+    // 4. Group Interactive Poll & Voting ("@poll <question>")
+    const pollMatch = text.match(/^(?:@poll|\/poll|poll|vote)\s*[:=-]?\s*(.+)/i) ||
+      (text.includes("@poll") ? text.match(/@poll\s+(.+)/i) : null);
+    if (pollMatch && pollMatch[1]?.trim()) {
+      const pollQuery = pollMatch[1].trim();
+      const pollCard = await whatsappFeatureEngine.generatePoll(pollQuery);
+      await this.sendHumanLikeMessage(groupJid, pollCard, text, messageKey);
+      return;
+    }
+
+    // 5. Group Trivia & Quiz Master ("@quiz <topic>", "@trivia <topic>")
+    const quizMatch = text.match(/^(?:@quiz|\/quiz|@trivia|\/trivia|quiz|trivia)\s*(.*)/i);
+    if (quizMatch) {
+      const topic = quizMatch[1]?.trim() || "tech & general knowledge";
+      const quizCard = await whatsappFeatureEngine.generateQuiz(topic);
+      await this.sendHumanLikeMessage(groupJid, quizCard, text, messageKey);
+      return;
+    }
+
+    // 6. Multi-Language Translator ("@translate english <text>", or translate quoted msg)
+    const translateMatch = text.match(/^(?:@translate|\/translate|translate)\s+(?:to\s+)?([a-zA-Z\s]+?)(?:\s*[:=-]\s*|\s+)(.*)/i) ||
+      (quotedMessage?.text && text.match(/^(?:@translate|\/translate|translate)\s+(?:to\s+)?([a-zA-Z]+)/i));
+    if (translateMatch) {
+      const targetLang = translateMatch[1]?.trim() || "english";
+      const textToTranslate = translateMatch[2]?.trim() || quotedMessage?.text || "";
+      if (textToTranslate) {
+        await this.sendHumanLikeMessage(groupJid, `🌐 *Translating to ${targetLang}...* ⚡`, text, messageKey);
+        const transRes = await whatsappFeatureEngine.translateText(textToTranslate, targetLang);
+        await this.sendHumanLikeMessage(groupJid, transRes, text, messageKey);
+        return;
+      }
+    }
+
+    // 7. Live Code Explainer & Debugger ("@code <code>", "@debug <code>")
+    const codeMatch = text.match(/^(?:@code|\/code|@debug|\/debug)\s*[:=-]?\s*([\s\S]+)/i);
+    if (codeMatch && codeMatch[1]?.trim()) {
+      const codeSnippet = codeMatch[1].trim();
+      await this.sendHumanLikeMessage(groupJid, `💻 *Code inspect ho raha hai ${senderName}...* ⚡`, text, messageKey);
+      const codeRes = await whatsappFeatureEngine.analyzeCode(codeSnippet);
+      await this.sendHumanLikeMessage(groupJid, codeRes, text, messageKey);
+      return;
+    }
+
+    // 8. Music & Lyrics Finder ("@music <song>", "/music <song>")
+    const musicMatch = text.match(/^(?:@music|\/music)\s*[:=-]?\s*(.+)/i) ||
+      (text.includes("@music") ? text.match(/@music\s+(.+)/i) : null);
+    if (musicMatch && musicMatch[1]?.trim()) {
+      const songQuery = musicMatch[1].trim();
+      const musicCard = await whatsappFeatureEngine.searchMusicWithLyrics(songQuery);
+      await this.sendHumanLikeMessage(groupJid, musicCard, text, messageKey);
+      return;
+    }
+
+    // 9. Web Scraper & URL Reader ("@web <url>", "@read <url>")
+    const webMatch = text.match(/^(?:@web|\/web|@read|\/read)\s+(https?:\/\/\S+)(?:\s+(.*))?/i);
+    if (webMatch) {
+      const targetUrl = webMatch[1].trim();
+      const userQ = webMatch[2]?.trim() || "";
+      await this.sendHumanLikeMessage(groupJid, `🌐 *Webpage analyze ho rahi hai...* ⚡\n🔗 _${targetUrl}_`, text, messageKey);
+      const webSummary = await whatsappFeatureEngine.summarizeWebUrl(targetUrl, userQ);
+      await this.sendHumanLikeMessage(groupJid, webSummary, text, messageKey);
+      return;
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      await this.sendHumanLikeMessage(groupJid, fallbackText(), text, messageKey);
+      return;
+    }
+
+    const ai = new GoogleGenAI({ apiKey });
+    const quotedSnippet = quotedMessage && quotedMessage.isReply
+      ? `\n- PREVIOUS QUOTED MESSAGE IN GROUP (From: ${quotedMessage.sender}, Type: ${quotedMessage.mediaType}): "${quotedMessage.text}"`
+      : "";
 
     const prompt = `You are Friday, the ultra-smart, witty and polite AI assistant of DK (Divakar Kumar).
 You have been tagged or mentioned in a WhatsApp Group named "${groupName}".
@@ -2353,6 +2705,7 @@ YOUR RULES FOR GENERATING THE WHATSAPP REPLY:
 
         if (connection === "close") {
           this.stopKeepAlive();
+          this.stopScheduledMessagesTicker();
           const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
           const isLoggedOut = statusCode === DisconnectReason?.loggedOut || statusCode === 401;
           const shouldReconnect = !isLoggedOut;
@@ -2378,9 +2731,10 @@ YOUR RULES FOR GENERATING THE WHATSAPP REPLY:
           if (this.dedicatedPhone) this.savePhoneToFirestore(this.dedicatedPhone).catch(() => {});
           // FIX 4: Start app-level keep-alive ping every 4 min (Offline background mode)
           this.startKeepAlive();
+          this.startScheduledMessagesTicker();
           // By default, stay OFFLINE until someone sends a message
           this.sock.sendPresenceUpdate("unavailable").catch(() => {});
-          console.log("[WhatsAppBot] Connected! Natural Offline mode active.");
+          console.log("[WhatsAppBot] Connected! Natural Offline mode & Scheduled Ticker active.");
         }
       });
     } catch (err) {
