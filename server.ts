@@ -359,6 +359,8 @@ async function startServer() {
                 memoryEngine.recordMessage(sessionId, "ai", outputTranscriptBuffer);
                 backgroundTasksService.markTaskNotified("all");
               }
+              // Extract important facts dynamically during conversation
+              memoryEngine.maybeAutoExtract(sessionId, ai, 4).catch((e) => console.warn("[Server] Periodic memory extraction failed:", e));
               inputTranscriptBuffer = "";
               outputTranscriptBuffer = "";
             }
@@ -597,6 +599,10 @@ async function startServer() {
         try { currentSession.close(); } catch {}
         currentSession = undefined;
       }
+      // Persist session to Firestore and extract memory in background
+      memoryEngine.finalizeSession(sessionId, ai).catch((e) => {
+        console.error(`[Server] Error finalizing session ${sessionId} on disconnect:`, e);
+      });
     });
   });
 

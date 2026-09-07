@@ -524,8 +524,11 @@ function InstagramBotCard() {
 
     const [usernameInput, setUsernameInput] = useState('');
     const [passwordInput, setPasswordInput] = useState('');
+    const [sessionIdInput, setSessionIdInput] = useState('');
+    const [loginMode, setLoginMode] = useState<'password' | 'session'>('password');
     const [twoFactorCode, setTwoFactorCode] = useState('');
     const [showLoginForm, setShowLoginForm] = useState(false);
+    const [showSessionHelp, setShowSessionHelp] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [message, setMessage] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -551,14 +554,18 @@ function InstagramBotCard() {
         setMessage(null);
 
         try {
-            const res = await fetch('/api/instagram/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
+            const payload = loginMode === 'session'
+                ? { sessionId: sessionIdInput }
+                : {
                     username: usernameInput,
                     password: passwordInput,
                     verificationCode: twoFactorCode || undefined,
-                }),
+                };
+
+            const res = await fetch('/api/instagram/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
             });
             const data = await res.json();
 
@@ -566,6 +573,7 @@ function InstagramBotCard() {
                 setMessage(data.message || 'Login successful!');
                 setShowLoginForm(false);
                 setPasswordInput('');
+                setSessionIdInput('');
                 setTwoFactorCode('');
                 fetchStatus();
             } else if (data.requiresTwoFactor) {
@@ -674,19 +682,19 @@ function InstagramBotCard() {
                     {!showLoginForm ? (
                         <div className="flex flex-col gap-2 text-center py-1">
                             <p className="text-[11px] text-slate-400">
-                                Instagram ID aur Password se direct login karein taaki Friday aapke DMs read aur auto-reply kar sake.
+                                Instagram credentials ya Session ID se login karein taaki Friday aapke DMs read aur auto-reply kar sake.
                             </p>
                             <button
                                 onClick={() => setShowLoginForm(true)}
                                 className="w-full py-2 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white font-bold text-xs shadow-[0_0_15px_rgba(236,72,153,0.3)] transition-all cursor-pointer"
                             >
-                                🔐 Login with Instagram ID & Password
+                                🔐 Connect Instagram Bot
                             </button>
                         </div>
                     ) : (
-                        <form onSubmit={handleLogin} className="flex flex-col gap-2">
+                        <form onSubmit={handleLogin} className="flex flex-col gap-2.5">
                             <div className="flex items-center justify-between pb-1 border-b border-white/10">
-                                <span className="font-semibold text-white text-[11px]">Instagram Credentials:</span>
+                                <span className="font-semibold text-white text-[11px]">Instagram Login Method:</span>
                                 <button
                                     type="button"
                                     onClick={() => setShowLoginForm(false)}
@@ -696,40 +704,88 @@ function InstagramBotCard() {
                                 </button>
                             </div>
 
-                            <input
-                                type="text"
-                                required
-                                placeholder="Instagram Username / Handle (e.g. divakar_01)"
-                                value={usernameInput}
-                                onChange={(e) => setUsernameInput(e.target.value)}
-                                className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 text-xs focus:border-pink-500 outline-none"
-                            />
+                            {/* Mode Tabs */}
+                            <div className="grid grid-cols-2 gap-1 p-0.5 bg-slate-900 rounded-lg border border-white/5 text-[11px]">
+                                <button
+                                    type="button"
+                                    onClick={() => { setLoginMode('password'); setError(null); }}
+                                    className={`py-1 rounded-md font-medium transition-all ${loginMode === 'password' ? 'bg-pink-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+                                >
+                                    🔑 ID / Email / Phone
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => { setLoginMode('session'); setError(null); }}
+                                    className={`py-1 rounded-md font-medium transition-all ${loginMode === 'session' ? 'bg-purple-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+                                >
+                                    ⚡ Session ID (100% Fix)
+                                </button>
+                            </div>
 
-                            <input
-                                type="password"
-                                required
-                                placeholder="Instagram Password"
-                                value={passwordInput}
-                                onChange={(e) => setPasswordInput(e.target.value)}
-                                className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 text-xs focus:border-pink-500 outline-none"
-                            />
-
-                            {/* 2FA input if required */}
-                            {status?.requiresTwoFactor && (
-                                <div className="flex flex-col gap-1 p-2 rounded-xl bg-amber-950/40 border border-amber-500/40">
-                                    <span className="text-[10px] text-amber-300 font-semibold">2FA Security OTP (SMS / App Code):</span>
+                            {loginMode === 'password' ? (
+                                <>
                                     <input
                                         type="text"
-                                        placeholder="6-digit 2FA code"
-                                        value={twoFactorCode}
-                                        onChange={(e) => setTwoFactorCode(e.target.value)}
-                                        className="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-amber-500/50 text-amber-200 text-xs font-mono tracking-widest outline-none"
+                                        required
+                                        placeholder="Username, Email ya Phone (e.g. your_email@gmail.com)"
+                                        value={usernameInput}
+                                        onChange={(e) => setUsernameInput(e.target.value)}
+                                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 text-xs focus:border-pink-500 outline-none"
                                     />
+
+                                    <input
+                                        type="password"
+                                        required
+                                        placeholder="Instagram Password"
+                                        value={passwordInput}
+                                        onChange={(e) => setPasswordInput(e.target.value)}
+                                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 text-xs focus:border-pink-500 outline-none"
+                                    />
+
+                                    {/* 2FA input if required */}
+                                    {status?.requiresTwoFactor && (
+                                        <div className="flex flex-col gap-1 p-2 rounded-xl bg-amber-950/40 border border-amber-500/40">
+                                            <span className="text-[10px] text-amber-300 font-semibold">2FA Security OTP (SMS / App Code):</span>
+                                            <input
+                                                type="text"
+                                                placeholder="6-digit 2FA code"
+                                                value={twoFactorCode}
+                                                onChange={(e) => setTwoFactorCode(e.target.value)}
+                                                className="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-amber-500/50 text-amber-200 text-xs font-mono tracking-widest outline-none"
+                                            />
+                                        </div>
+                                    )}
+                                </>
+                            ) : (
+                                <div className="flex flex-col gap-1.5">
+                                    <input
+                                        type="text"
+                                        required
+                                        placeholder="Paste Instagram 'sessionid' cookie here..."
+                                        value={sessionIdInput}
+                                        onChange={(e) => setSessionIdInput(e.target.value)}
+                                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-purple-500/60 text-slate-100 font-mono text-xs focus:border-purple-400 outline-none"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowSessionHelp(!showSessionHelp)}
+                                        className="text-[10px] text-purple-400 hover:underline text-left self-start"
+                                    >
+                                        ℹ️ Session ID kaise milegi? (Click here)
+                                    </button>
+                                    {showSessionHelp && (
+                                        <div className="p-2 rounded-lg bg-slate-900/90 border border-purple-500/30 text-[10px] text-slate-300 space-y-1">
+                                            <p>1. Chrome/Edge me <b>instagram.com</b> open karke login karein.</p>
+                                            <p>2. <b>F12</b> dabayein ya Right-click &rarr; <b>Inspect</b> karein.</p>
+                                            <p>3. <b>Application</b> tab &rarr; <b>Cookies</b> &rarr; <b>https://www.instagram.com</b> par jaayein.</p>
+                                            <p>4. <b>sessionid</b> cookie ki Value copy karke yahan paste kar dein!</p>
+                                        </div>
+                                    )}
                                 </div>
                             )}
 
                             {error && (
-                                <div className="p-2 rounded-lg bg-red-950/60 border border-red-500/40 text-red-300 text-[11px]">
+                                <div className="p-2 rounded-lg bg-red-950/60 border border-red-500/40 text-red-300 text-[11px] leading-relaxed">
                                     {error}
                                 </div>
                             )}
@@ -751,7 +807,7 @@ function InstagramBotCard() {
                                         <span>Logging in...</span>
                                     </>
                                 ) : (
-                                    <span>Connect Instagram</span>
+                                    <span>{loginMode === 'session' ? '⚡ Connect via Session ID' : 'Connect Instagram'}</span>
                                 )}
                             </button>
                         </form>

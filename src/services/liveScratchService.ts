@@ -111,14 +111,25 @@ class LiveScratchService {
   }
 
   /**
-   * Returns all active scratch turns within the last 24 hours.
+   * Returns all active scratch turns within the last specified hours (default 48h).
    */
-  public async getRecentScratchTurns(hours: number = 24): Promise<LiveScratchTurn[]> {
+  public async getRecentScratchTurns(hours: number = 48): Promise<LiveScratchTurn[]> {
     await this.initPromise;
     const cutoff = Date.now() - hours * 60 * 60 * 1000;
     return Array.from(this.inMemoryScratch.values())
       .filter((t) => t.timestamp >= cutoff)
       .sort((a, b) => a.timestamp - b.timestamp);
+  }
+
+  /**
+   * Returns recent scratch summaries from the last specified days (default 7 days).
+   */
+  public async getRecentSummaries(days: number = 7): Promise<ScratchSummaryEntry[]> {
+    await this.initPromise;
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    return Array.from(this.inMemorySummaries.values())
+      .filter((s) => s.timestamp >= cutoff)
+      .sort((a, b) => b.timestamp - a.timestamp);
   }
 
   /**

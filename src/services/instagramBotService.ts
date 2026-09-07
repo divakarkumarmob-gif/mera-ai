@@ -163,14 +163,18 @@ class InstagramBotService {
    * Direct Login with Instagram Username & Password (and optional 2FA / Verification code)
    */
   public async login(username: string, password?: string, verificationCode?: string): Promise<{ success: boolean; requiresTwoFactor?: boolean; message: string }> {
-    const cleanUser = username.trim().replace(/^@/, "").toLowerCase();
+    let cleanUser = username.trim().replace(/^@/, "");
+    // If it's not an email, strip extra spaces
+    if (!cleanUser.includes("@")) {
+      cleanUser = cleanUser.replace(/\s+/g, "");
+    }
 
     try {
       // If resolving 2FA challenge
       if (verificationCode && this.pendingTwoFactor && this.ig) {
         console.log(`[InstagramBot] Submitting 2FA code for @${cleanUser}...`);
         const twoFactorRes = await this.ig.account.twoFactorLogin({
-          username: cleanUser,
+          username: cleanUser.toLowerCase(),
           verificationCode: verificationCode.trim(),
           twoFactorIdentifier: this.pendingTwoFactor.twoFactorIdentifier,
           verificationMethod: "1", // SMS or Authenticator App
@@ -184,7 +188,7 @@ class InstagramBotService {
         this.pendingTwoFactor = null;
 
         const sessionState = await this.ig.state.serialize();
-        await this.saveSessionToStorage(cleanUser, sessionState);
+        await this.saveSessionToStorage(this.currentUsername, sessionState);
         this.startInboxPolling();
 
         return {
@@ -197,9 +201,16 @@ class InstagramBotService {
         return { success: false, message: "Password is required for Instagram login." };
       }
 
-      console.log(`[InstagramBot] Logging in to Instagram as @${cleanUser}...`);
+      console.log(`[InstagramBot] Logging in to Instagram as ${cleanUser}...`);
       const ig = new IgApiClient();
       this.configureIndianDevice(ig, cleanUser);
+
+      // Perform pre-login flow simulation so Instagram registers mobile device handshake
+      try {
+        await ig.simulate.preLoginFlow();
+      } catch (flowErr) {
+        console.warn("[InstagramBot] Pre-login simulation notice:", flowErr);
+      }
 
       try {
         const user = await ig.account.login(cleanUser, password);
@@ -209,8 +220,15 @@ class InstagramBotService {
         this.currentFullName = user.full_name || user.username;
         this.currentProfilePicUrl = user.profile_pic_url || null;
 
+        // Post-login flow in background
+        process.nextTick(async () => {
+          try {
+            await ig.simulate.postLoginFlow();
+          } catch {}
+        });
+
         const sessionState = await ig.state.serialize();
-        await this.saveSessionToStorage(cleanUser, sessionState);
+        await this.saveSessionToStorage(user.username, sessionState);
         this.startInboxPolling();
 
         console.log(`[InstagramBot] Logged in successfully as @${user.username}!`);
@@ -238,7 +256,16 @@ class InstagramBotService {
         if (loginError.name === "IgCheckpointError") {
           return {
             success: false,
-            message: "Instagram security checkpoint triggered. Please open Instagram on your phone once to tap 'This Was Me', then login again.",
+            message: "Instagram security checkpoint triggered. Please open Instagram on your phone once to tap 'This Was Me', then login again or use Session ID login.",
+          };
+        }
+
+        // Account not found or bad request
+        const rawMsg = loginError?.response?.body?.message || loginError?.message || "";
+        if (rawMsg.toLowerCase().includes("can't find an account") || rawMsg.includes("400")) {
+          return {
+            success: false,
+            message: `Instagram ko account nahi mila. Agar username/number se nahi ho raha, toh apna registered Email ID daalein ya neeche 'Session ID Login' use karein.`,
           };
         }
 
@@ -248,7 +275,105 @@ class InstagramBotService {
       console.error("[InstagramBot] Login error:", e?.message || e);
       return {
         success: false,
-        message: e?.message || "Instagram login failed. Please verify credentials.",
+        message: e?.response?.body?.message || e?.message || "Instagram login failed. Please verify credentials.",
+      };
+    }
+  }
+
+  /**
+   * Login using Instagram Web sessionid cookie (Bypasses Meta account lookup, checkpoints & password challenges)
+   */
+  public async loginWithSessionId(sessionId: string): Promise<{ success: boolean; message: string }> {
+    try {
+      let cleanSession = (sessionId || "").trim();
+      if (cleanSession.startsWith("sessionid=")) {
+        cleanSession = cleanSession.substring("sessionid=".length).trim();
+      }
+      cleanSession = cleanSession.replace(/^["']|["']$/g, "");
+
+      if (!cleanSession) {
+        return { success: false, message: "Valid Instagram sessionid is required." };
+      }
+
+      console.log("[InstagramBot] Logging in via Session ID cookie...");
+      const ig = new IgApiClient();
+
+      let dsUserId = "0";
+      const parts = cleanSession.split(/%3A|:/);
+      if (parts.length > 0 && /^\d+$/.test(parts[0])) {
+        dsUserId = parts[0];
+      }
+
+      this.configureIndianDevice(ig, dsUserId !== "0" ? dsUserId : "user_session");
+
+      const jarSerialized = {
+        version: "tough-cookie@4.1.4",
+        storeType: "MemoryCookieStore",
+        rejectPublicSuffixes: true,
+        cookies: [
+          {
+            key: "sessionid",
+            value: cleanSession,
+            domain: "i.instagram.com",
+            path: "/",
+            hostOnly: false,
+            creation: new Date().toISOString(),
+            lastAccessed: new Date().toISOString(),
+            httpOnly: true,
+            secure: true,
+          },
+          {
+            key: "sessionid",
+            value: cleanSession,
+            domain: "instagram.com",
+            path: "/",
+            hostOnly: false,
+            creation: new Date().toISOString(),
+            lastAccessed: new Date().toISOString(),
+            httpOnly: true,
+            secure: true,
+          },
+          {
+            key: "ds_user_id",
+            value: dsUserId,
+            domain: "i.instagram.com",
+            path: "/",
+            hostOnly: false,
+            creation: new Date().toISOString(),
+            lastAccessed: new Date().toISOString(),
+            httpOnly: false,
+            secure: true,
+          },
+        ],
+      };
+
+      await ig.state.deserializeCookieJar(jarSerialized as any);
+
+      const currentUser = await ig.account.currentUser();
+      if (!currentUser || !currentUser.pk) {
+        return { success: false, message: "Invalid or expired Instagram Session ID. Please re-copy from browser." };
+      }
+
+      this.ig = ig;
+      this.isLoggedIn = true;
+      this.currentUsername = currentUser.username;
+      this.currentFullName = currentUser.full_name || currentUser.username;
+      this.currentProfilePicUrl = currentUser.profile_pic_url || null;
+
+      const sessionState = await ig.state.serialize();
+      await this.saveSessionToStorage(currentUser.username, sessionState);
+      this.startInboxPolling();
+
+      console.log(`[InstagramBot] Session login successful for @${currentUser.username}!`);
+      return {
+        success: true,
+        message: `Instagram session login successful for @${currentUser.username}! 🎉`,
+      };
+    } catch (e: any) {
+      console.error("[InstagramBot] Session login error:", e?.message || e);
+      return {
+        success: false,
+        message: e?.message || "Session login failed. Please verify your sessionid cookie.",
       };
     }
   }

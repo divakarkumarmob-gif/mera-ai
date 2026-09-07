@@ -1170,8 +1170,12 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   });
 
   app.post("/api/instagram/login", async (req, res) => {
-    const { username, password, verificationCode } = req.body || {};
-    if (!username) return res.status(400).json({ ok: false, error: "username_required" });
+    const { username, password, verificationCode, sessionId } = req.body || {};
+    if (sessionId) {
+      const result = await instagramBotService.loginWithSessionId(sessionId);
+      return res.json({ ok: result.success, ...result });
+    }
+    if (!username) return res.status(400).json({ ok: false, message: "Username, Email, or Session ID required." });
     const result = await instagramBotService.login(username, password, verificationCode);
     res.json({ ok: result.success, ...result });
   });

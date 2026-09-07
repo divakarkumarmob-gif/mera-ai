@@ -328,21 +328,24 @@ ${transcript}`;
     // Add to exact Personal Vault (NEVER SUMMARIZED) — dedup by exact text
     if (Array.isArray(parsed.exactPersonalFacts) && parsed.exactPersonalFacts.length > 0) {
       const existingVault = await vaultCol().get();
-      const existingFacts = new Set(existingVault.docs.map((d) => (d.data().exactFact || "").toLowerCase()));
+      const existingFacts = new Set(
+        existingVault.docs.map((d) => (decryptData(d.data().exactFact || "")).toLowerCase().trim())
+      );
 
       for (const item of parsed.exactPersonalFacts) {
-        if (item?.exactFact && !existingFacts.has(item.exactFact.toLowerCase())) {
+        const cleanFact = (item?.exactFact || "").trim();
+        if (cleanFact && !existingFacts.has(cleanFact.toLowerCase())) {
           const id = Math.random().toString(36).substring(2, 9);
           await vaultCol()
             .doc(id)
             .set({
               id,
               category: item.category || "general_personal_info",
-              exactFact: item.exactFact.trim(),
+              exactFact: encryptData(cleanFact),
               date: dateStr,
               timestamp,
             });
-          existingFacts.add(item.exactFact.toLowerCase());
+          existingFacts.add(cleanFact.toLowerCase());
         }
       }
     }
@@ -350,18 +353,21 @@ ${transcript}`;
     // Add to global pinned memories — dedup by exact text
     if (Array.isArray(parsed.pinnedMemories) && parsed.pinnedMemories.length > 0) {
       const existingPinned = await pinnedCol().get();
-      const existingPinnedFacts = new Set(existingPinned.docs.map((d) => (d.data().fact || "").toLowerCase()));
+      const existingPinnedFacts = new Set(
+        existingPinned.docs.map((d) => (decryptData(d.data().fact || "")).toLowerCase().trim())
+      );
 
       for (const fact of parsed.pinnedMemories) {
-        if (fact && !existingPinnedFacts.has(fact.toLowerCase())) {
+        const cleanFact = (fact || "").trim();
+        if (cleanFact && !existingPinnedFacts.has(cleanFact.toLowerCase())) {
           const id = Math.random().toString(36).substring(2, 9);
           await pinnedCol().doc(id).set({
             id,
-            fact,
+            fact: encryptData(cleanFact),
             date: dateStr,
             timestamp,
           });
-          existingPinnedFacts.add(fact.toLowerCase());
+          existingPinnedFacts.add(cleanFact.toLowerCase());
         }
       }
     }
@@ -562,12 +568,13 @@ ${transcript}`;
     const sections: string[] = [];
 
     try {
-      const [vaultSnap, pinnedSnap, profileSnap, recentSessionsSnap, recentTurns] = await Promise.all([
-        vaultCol().limit(15).get(),
-        pinnedCol().orderBy("timestamp", "desc").limit(8).get(),
+      const [vaultSnap, pinnedSnap, profileSnap, recentSessionsSnap, recentTurns, recentSummaries] = await Promise.all([
+        vaultCol().limit(25).get(),
+        pinnedCol().orderBy("timestamp", "desc").limit(15).get(),
         profileDoc().get(),
-        sessionsCol().orderBy("startTime", "desc").limit(2).get().catch(() => ({ docs: [], empty: true } as any)),
-        liveScratchService.getRecentScratchTurns(12).catch(() => []),
+        sessionsCol().orderBy("startTime", "desc").limit(5).get().catch(() => ({ docs: [], empty: true } as any)),
+        liveScratchService.getRecentScratchTurns(48).catch(() => []),
+        liveScratchService.getRecentSummaries(7).catch(() => []),
       ]);
 
       const personalVault = vaultSnap.docs.map((d) => {
@@ -598,27 +605,66 @@ ${transcript}`;
 
       // 3. DK Profile & Learning Context
       const profileFacts: string[] = profileData.profileFacts || [];
-      if (profileFacts.length > 0) {
-        sections.push(`### 🎯 DK PROFILE HIGHLIGHTS:\n- ${profileFacts.slice(-6).join("\n- ")}`);
+      const knownMistakes: string[] = profileData.knownMistakes || [];
+      if (profileFacts.length > 0 || knownMistakes.length > 0) {
+        let profileText = "";
+        if (profileFacts.length > 0) {
+          profileText += `General Facts & Preferences about DK:\n- ${profileFacts.slice(-8).join("\n- ")}\n`;
+        }
+        if (knownMistakes.length > 0) {
+          profileText += `Things to keep in mind / Past corrections:\n- ${knownMistakes.slice(-5).join("\n- ")}`;
+        }
+        sections.push(`### 🎯 DK PROFILE & LEARNING CONTEXT:\n${profileText.trim()}`);
       }
 
-      // 4. IMMEDIATE PRIOR CONVERSATIONS (REALTIME MEMORY CONTINUITY FOR CONSECUTIVE SESSIONS)
-      if (recentTurns && recentTurns.length > 0) {
-        const recentDialogue = recentTurns.slice(-14).map((t) => {
-          return `[${t.spokenTimeIST}] ${t.sender === "user" ? "Boss DK" : "Friday"}: "${t.text}"`;
-        }).join("\n");
-        sections.push(`### 🗣️ IMMEDIATE PRIOR CONVERSATIONS (LAST 12H - REALTIME CONTINUITY):\n${recentDialogue}`);
-      } else if (!recentSessionsSnap.empty) {
-        const recentSessionDocs = recentSessionsSnap.docs.reverse().map((d: any) => {
+      // 4. MULTI-DAY PAST CONVERSATIONS DIGEST (1 to 7 Days Ago - Never Forgotten Across 24h/48h/72h+)
+      const pastDigests: string[] = [];
+
+      // 4a. Scratch Summaries (from 24h-7d archives)
+      if (recentSummaries && recentSummaries.length > 0) {
+        for (const s of recentSummaries.slice(0, 4)) {
+          if (s.summary && s.summary.trim()) {
+            pastDigests.push(`• [${s.dateStr}]: ${s.summary.trim()}`);
+          }
+        }
+      }
+
+      // 4b. Past Sessions Summaries (from sessions collection)
+      if (!recentSessionsSnap.empty) {
+        for (const d of recentSessionsSnap.docs) {
           const s = d.data() as ConversationSession;
           const decryptedSummary = s.summary ? decryptData(s.summary) : "";
+          if (decryptedSummary && decryptedSummary.trim()) {
+            const line = `• [Session on ${s.dateStr}]: ${decryptedSummary.trim()}`;
+            if (!pastDigests.includes(line)) {
+              pastDigests.push(line);
+            }
+          }
+        }
+      }
+
+      if (pastDigests.length > 0) {
+        sections.push(`### 📚 MULTI-DAY PAST CONVERSATIONS DIGEST (PAST 1 TO 7 DAYS):\n${pastDigests.slice(0, 5).join("\n")}`);
+      }
+
+      // 5. IMMEDIATE RECENT CONVERSATIONS (LAST 24-48H REALTIME CONTINUITY)
+      if (recentTurns && recentTurns.length > 0) {
+        const recentDialogue = recentTurns.slice(-16).map((t) => {
+          return `[${t.spokenTimeIST}] ${t.sender === "user" ? "Boss DK" : "Friday"}: "${t.text}"`;
+        }).join("\n");
+        sections.push(`### 🗣️ IMMEDIATE PRIOR CONVERSATIONS (REALTIME CONTINUITY):\n${recentDialogue}`);
+      } else if (!recentSessionsSnap.empty) {
+        const recentSessionDocs = recentSessionsSnap.docs.slice(0, 2).map((d: any) => {
+          const s = d.data() as ConversationSession;
           const messages = (s.messages || []).slice(-8).map((m) => {
             const timeFormatted = m.timeStr || new Date(m.timestamp).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", timeStyle: "short" });
             return `[${timeFormatted}] ${m.sender === "user" ? "Boss DK" : "Friday"}: "${decryptData(m.text)}"`;
           }).join("\n");
-          return `Session (${s.dateStr}):\n${decryptedSummary ? `Summary: ${decryptedSummary}\n` : ""}Recent lines:\n${messages}`;
+          return `Recent Session (${s.dateStr}):\n${messages}`;
         }).join("\n\n");
-        sections.push(`### 🗣️ RECENT PREVIOUS SESSIONS:\n${recentSessionDocs}`);
+        if (recentSessionDocs.trim()) {
+          sections.push(`### 🗣️ RECENT PREVIOUS SESSIONS:\n${recentSessionDocs}`);
+        }
       }
     } catch (e) {
       console.error("[MemoryEngine] Failed to compile lean memory prompt:", e);
