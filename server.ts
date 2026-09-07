@@ -258,6 +258,14 @@ async function startServer() {
     connectedClients.add(clientWs);
 
     let isAuthorized = false;
+    try {
+      const parsedUrl = new URL(req.url || "", `http://${req.headers.host || "localhost"}`);
+      const queryToken = parsedUrl.searchParams.get("token");
+      if (queryToken && appSecurityService.verifySessionToken(queryToken)) {
+        isAuthorized = true;
+      }
+    } catch {}
+
     const authTimeout = setTimeout(() => {
       if (!isAuthorized) {
         console.warn("[Server] Closing unauthorized WebSocket (Auth Timeout 10s)");
