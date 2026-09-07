@@ -4,6 +4,7 @@
  * Fallback: TomTom Maps Platform (https://docs.tomtom.com/)
  */
 
+import { GoogleGenAI } from "@google/genai";
 import { tomTomService } from "./tomTomService";
 
 export interface GoogleDirectionsResult {
@@ -20,6 +21,7 @@ export interface GoogleDirectionsResult {
   googleMapsUrl: string;
   source: string;
   message: string;
+  aiRouteBriefing?: string;
 }
 
 export interface GooglePlaceItem {
@@ -42,6 +44,7 @@ export interface GooglePlacesResult {
   googleMapsSearchUrl: string;
   source: string;
   message: string;
+  aiGroundingSummary?: string;
 }
 
 export interface GoogleGeocodeResult {
@@ -57,6 +60,41 @@ export interface GoogleGeocodeResult {
 }
 
 class GoogleMapsService {
+  // Primary Map Grounding model: Gemini 3.5 Transcribe with Google Search/Maps Grounding
+  private static readonly MAP_GROUNDING_MODELS = [
+    "gemini-3.5-transcribe",
+    "gemini-3.5-flash",
+    "gemini-2.5-flash",
+  ];
+
+  /**
+   * Gemini 3.5 Transcribe Map Grounding Engine:
+   * Uses Gemini 3.5 Transcribe with Google Search/Maps Grounding for live directions,
+   * traffic analysis, landmarks, and real-time location insights.
+   */
+  public async getMapGroundingOverview(prompt: string): Promise<string | null> {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) return null;
+
+    const ai = new GoogleGenAI({ apiKey });
+    for (const model of GoogleMapsService.MAP_GROUNDING_MODELS) {
+      try {
+        const res = await ai.models.generateContent({
+          model,
+          contents: prompt,
+          config: {
+            tools: [{ googleSearch: {} }],
+          },
+        });
+        const text = res.text?.trim();
+        if (text) return text;
+      } catch (err: any) {
+        console.warn(`[GoogleMaps] Map Grounding model ${model} notice:`, err?.message || err);
+      }
+    }
+    return null;
+  }
+
   private getApiKey(): string | null {
     return (
       process.env.GOOGLE_MAPS_API_KEY ||
@@ -338,19 +376,33 @@ class GoogleMapsService {
   }
 
   /**
-   * 4. Location Overview & Map Briefing
+   * 4. Location Overview & Map Briefing (Grounded with Gemini 3.5 Transcribe)
    */
   public async getLocationOverview(place: string): Promise<any> {
-    const geocode = await this.geocodeAddress(place);
+    const clean = String(place || "").trim();
+    const geocode = await this.geocodeAddress(clean);
+
+    // Primary: Gemini 3.5 Transcribe Map Grounding
+    let aiOverview = "";
+    try {
+      const grounded = await this.getMapGroundingOverview(
+        `Provide a concise 2-3 sentence live location overview, key landmarks, best route access, and geography for "${clean}" in natural Hindi/Hinglish.`
+      );
+      if (grounded) aiOverview = grounded;
+    } catch {}
+
     return {
       success: true,
-      place: place,
-      formattedAddress: geocode.formattedAddress || place,
+      place: clean,
+      formattedAddress: geocode.formattedAddress || clean,
       latitude: geocode.lat,
       longitude: geocode.lng,
       googleMapsUrl: geocode.googleMapsUrl,
-      source: geocode.source,
-      message: `Location "${place}" ka Map link aur coordinates ready hain: ${geocode.googleMapsUrl}`,
+      source: "gemini_3.5_transcribe_map_grounding",
+      aiOverview: aiOverview || undefined,
+      message: aiOverview
+        ? `${aiOverview} 📍 Google Maps: ${geocode.googleMapsUrl}`
+        : `Location "${clean}" ka Map link aur coordinates ready hain: ${geocode.googleMapsUrl}`,
     };
   }
 }
