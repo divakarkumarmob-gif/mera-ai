@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Phone, Copy, Check, Loader2, Smartphone, ShieldCheck, QrCode, KeyRound, RefreshCw } from 'lucide-react';
+import { X, Phone, Copy, Check, Loader2, Smartphone, ShieldCheck, QrCode, KeyRound, RefreshCw, Cloud, Zap } from 'lucide-react';
 import { getApiUrl } from '@/utils/api';
 
 interface WhatsAppPairModalProps {
@@ -17,17 +17,26 @@ export default function WhatsAppPairModal({ isOpen, onClose }: WhatsAppPairModal
     const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [copied, setCopied] = useState(false);
-    const [isConnected, setIsConnected] = useState(false);
-    const [activePhone, setActivePhone] = useState<string | null>(null);
+    
+    // Distinct states
+    const [isBaileysConnected, setIsBaileysConnected] = useState(false);
+    const [baileysPhone, setBaileysPhone] = useState<string | null>(null);
+    const [isCloudConfigured, setIsCloudConfigured] = useState(false);
+    const [cloudPhone, setCloudPhone] = useState<string | null>(null);
 
     const fetchStatus = async () => {
         try {
             const res = await fetch(getApiUrl('/api/whatsapp/status'));
             const data = await res.json();
-            const connected = !!(data.isConnected || data.baileys?.isConnected || data.cloud?.configured);
-            setIsConnected(connected);
-            const phone = data.dedicatedPhone || data.baileys?.dedicatedPhone || (data.cloud?.configured ? data.cloud?.fromNumber : null);
-            if (phone) setActivePhone(phone);
+            
+            const bConnected = !!(data.isBaileysConnected ?? data.baileys?.isConnected);
+            setIsBaileysConnected(bConnected);
+            setBaileysPhone(data.dedicatedPhone || data.baileys?.dedicatedPhone || null);
+
+            const cConfigured = !!(data.isCloudConfigured ?? data.cloud?.configured);
+            setIsCloudConfigured(cConfigured);
+            setCloudPhone(data.cloudPhone || data.cloud?.fromNumber || null);
+
             const qr = data.qrCodeDataUrl || data.baileys?.qrCodeDataUrl;
             if (qr) setQrCodeDataUrl(qr);
             const code = data.pairingCode || data.baileys?.pairingCode;
@@ -48,6 +57,7 @@ export default function WhatsAppPairModal({ isOpen, onClose }: WhatsAppPairModal
         setError(null);
         setPairingCode(null);
         setQrCodeDataUrl(null);
+        setIsBaileysConnected(false);
         try {
             await fetch(getApiUrl('/api/whatsapp/reset'), { method: 'POST' });
             await fetchStatus();
@@ -79,7 +89,7 @@ export default function WhatsAppPairModal({ isOpen, onClose }: WhatsAppPairModal
 
             if (data.ok && data.pairingCode) {
                 if (data.pairingCode === "ALREADY_CONNECTED") {
-                    setIsConnected(true);
+                    setIsBaileysConnected(true);
                 } else {
                     setPairingCode(data.pairingCode);
                 }
@@ -119,14 +129,9 @@ export default function WhatsAppPairModal({ isOpen, onClose }: WhatsAppPairModal
                             </div>
                             <div>
                                 <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
-                                    WhatsApp Link Assistant
-                                    {isConnected && (
-                                        <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 px-2 py-0.5 rounded-full font-medium">
-                                            Connected
-                                        </span>
-                                    )}
+                                    WhatsApp Manager
                                 </h2>
-                                <p className="text-xs text-slate-400">QR Code ya 8-Digit Code se link karein</p>
+                                <p className="text-xs text-slate-400">Meta Cloud API & Baileys Assistant</p>
                             </div>
                         </div>
                         <div className="flex items-center gap-1">
@@ -134,7 +139,7 @@ export default function WhatsAppPairModal({ isOpen, onClose }: WhatsAppPairModal
                                 onClick={handleReset}
                                 disabled={isResetting}
                                 className="p-2 rounded-full hover:bg-slate-800 text-slate-400 hover:text-emerald-400 transition-colors"
-                                title="Reset & Refresh Session"
+                                title="Reset & Refresh Baileys Session"
                             >
                                 <RefreshCw className={`w-4 h-4 ${isResetting ? 'animate-spin' : ''}`} />
                             </button>
@@ -147,25 +152,72 @@ export default function WhatsAppPairModal({ isOpen, onClose }: WhatsAppPairModal
                         </div>
                     </div>
 
-                    {/* Connected State Banner */}
-                    {isConnected ? (
-                        <div className="p-5 rounded-2xl bg-emerald-950/60 border border-emerald-500/40 flex flex-col items-center gap-3 text-center">
-                            <div className="w-12 h-12 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                    {/* Dual Channel Status Badges */}
+                    <div className="grid grid-cols-2 gap-2 text-[11px]">
+                        {/* Cloud API Pill */}
+                        <div className={`p-2.5 rounded-xl border flex flex-col gap-0.5 ${isCloudConfigured ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300' : 'bg-slate-950/60 border-slate-800 text-slate-400'}`}>
+                            <div className="flex items-center gap-1.5 font-semibold">
+                                <Cloud className="w-3.5 h-3.5 text-emerald-400" />
+                                <span>Meta Cloud API</span>
+                            </div>
+                            <span className="text-[10px] text-slate-400 truncate">
+                                {isCloudConfigured ? `Active (${cloudPhone ? `+${cloudPhone}` : 'Configured'})` : 'Not configured'}
+                            </span>
+                        </div>
+
+                        {/* Baileys Pill */}
+                        <div className={`p-2.5 rounded-xl border flex flex-col gap-0.5 ${isBaileysConnected ? 'bg-cyan-950/40 border-cyan-500/30 text-cyan-300' : 'bg-amber-950/40 border-amber-500/30 text-amber-300'}`}>
+                            <div className="flex items-center gap-1.5 font-semibold">
+                                <Zap className="w-3.5 h-3.5 text-cyan-400" />
+                                <span>Baileys Bridge</span>
+                            </div>
+                            <span className="text-[10px] truncate">
+                                {isBaileysConnected ? `Linked (+${baileysPhone})` : 'Not Linked (Pair below)'}
+                            </span>
+                        </div>
+                    </div>
+
+                    {/* Baileys Connected State Banner */}
+                    {isBaileysConnected ? (
+                        <div className="p-5 rounded-2xl bg-gradient-to-b from-cyan-950/60 to-slate-900/80 border border-cyan-500/40 flex flex-col items-center gap-3 text-center">
+                            <div className="w-12 h-12 rounded-full bg-cyan-500/20 text-cyan-400 flex items-center justify-center shadow-[0_0_15px_rgba(6,182,212,0.3)]">
                                 <ShieldCheck className="w-7 h-7" />
                             </div>
-                            <span className="font-bold text-emerald-300 text-base">WhatsApp Successfully Connected! 🎉</span>
-                            <span className="text-xs text-slate-300">
-                                Friday ab aapke number {activePhone ? `(+${activePhone})` : ''} se background mein seedha WhatsApp messages bhej sakti hai!
-                            </span>
-                            <button
-                                onClick={onClose}
-                                className="w-full mt-2 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-colors"
-                            >
-                                Done & Close
-                            </button>
+                            <div>
+                                <span className="font-bold text-cyan-300 text-base block">Baileys Web Successfully Linked! 🎉</span>
+                                <span className="text-xs text-slate-300 mt-1 block">
+                                    Number: <b className="text-white font-mono">{baileysPhone ? `+${baileysPhone}` : 'Linked'}</b>
+                                </span>
+                            </div>
+                            <p className="text-[11px] text-slate-400">
+                                24-hr limit fallback aur direct WhatsApp conversation dono active hain.
+                            </p>
+                            
+                            <div className="flex gap-2 w-full mt-2">
+                                <button
+                                    onClick={handleReset}
+                                    disabled={isResetting}
+                                    className="flex-1 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors flex items-center justify-center gap-1.5"
+                                >
+                                    <RefreshCw className={`w-3.5 h-3.5 ${isResetting ? 'animate-spin' : ''}`} />
+                                    <span>Re-link / Switch</span>
+                                </button>
+                                <button
+                                    onClick={onClose}
+                                    className="flex-1 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-semibold text-xs transition-colors"
+                                >
+                                    Done & Close
+                                </button>
+                            </div>
                         </div>
                     ) : (
                         <>
+                            {/* Explanatory banner for linking Baileys */}
+                            <div className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 text-[11px] text-slate-300">
+                                <span className="text-emerald-400 font-semibold">⚡ Link Baileys WhatsApp: </span>
+                                QR scan ya 8-digit code se apna personal/spare WhatsApp link karein taaki Meta 24h window bypass aur auto-replies seamlessly chalein.
+                            </div>
+
                             {/* Tab Switcher */}
                             <div className="flex rounded-2xl bg-slate-950/90 p-1 border border-slate-800">
                                 <button
@@ -216,7 +268,7 @@ export default function WhatsAppPairModal({ isOpen, onClose }: WhatsAppPairModal
                                         <form onSubmit={handleGenerateCode} className="flex flex-col gap-3">
                                             <div className="flex flex-col gap-1.5">
                                                 <label className="text-xs font-medium text-slate-300">
-                                                    Spare Phone Number (10 Digits):
+                                                    WhatsApp Phone Number (10 Digits):
                                                 </label>
                                                 <div className="relative flex items-center">
                                                     <div className="absolute left-3.5 flex items-center gap-1.5 text-slate-400 font-mono text-sm pointer-events-none">

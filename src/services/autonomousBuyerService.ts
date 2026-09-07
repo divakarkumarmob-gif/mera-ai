@@ -16,6 +16,7 @@ import { createCursor } from "ghost-cursor";
 import { Browser, Page } from "puppeteer-core";
 import { sendWhatsAppUnified } from "./whatsappService";
 import { telegramBotService } from "./telegramBotService";
+import { humanBotFirewallService } from "./humanBotFirewallService";
 
 // Register the stealth plugin to patch all bot signatures
 puppeteerExtra.use(StealthPlugin());
@@ -65,18 +66,11 @@ class AutonomousBuyerService {
   }
 
   /**
-   * Simulates human Gaussian typing with realistic inter-keystroke intervals (IKIs)
+   * Simulates human typing with zero copy-pasting:
+   * Real keystrokes, inter-word pauses, and typo/backspace corrections.
    */
   public async gaussianType(page: Page, text: string): Promise<void> {
-    for (let i = 0; i < text.length; i++) {
-      const char = text[i];
-      if (char === " " || char === "," || char === ".") {
-        await new Promise((r) => setTimeout(r, this.gaussianRandom(220, 60)));
-      } else {
-        await new Promise((r) => setTimeout(r, this.gaussianRandom(115, 35)));
-      }
-      await page.keyboard.type(char, { delay: 0 });
-    }
+    await humanBotFirewallService.typeHumanlyIntoPage(page, text);
   }
 
   /**
@@ -88,14 +82,10 @@ class AutonomousBuyerService {
   }
 
   /**
-   * Simulates natural human mouse scrolling
+   * Simulates natural human mouse scrolling with inverted micro-scrolls and re-reading pauses
    */
   private async humanScroll(page: Page, direction: "down" | "up" = "down"): Promise<void> {
-    const scrollAmount = Math.floor(Math.random() * 350 + 200) * (direction === "down" ? 1 : -1);
-    await page.evaluate((y) => {
-      window.scrollBy({ top: y, behavior: "smooth" });
-    }, scrollAmount);
-    await this.humanSleep(800, 1600);
+    await humanBotFirewallService.simulateHumanReadingScroll(page, 400);
   }
 
   /**

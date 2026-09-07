@@ -123,15 +123,27 @@ function ToggleSwitch({ label, description, active, onToggle, activeColor = 'bg-
 }
 
 // ── Baileys Backup WhatsApp Toggle (inline mini-component) ────────────────────
-function BaileysToggle() {
+function BaileysToggle({ onOpenPairModal }: { onOpenPairModal?: () => void }) {
     const [enabled, setEnabled] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [baileysLinked, setBaileysLinked] = useState(false);
+    const [linkedPhone, setLinkedPhone] = useState<string | null>(null);
+
+    const checkStatus = () => {
+        fetch('/api/whatsapp/status')
+            .then(r => r.json())
+            .then(d => {
+                setEnabled(!!d.baileysEnabled);
+                setBaileysLinked(!!(d.isBaileysConnected ?? d.baileys?.isConnected));
+                setLinkedPhone(d.dedicatedPhone || d.baileys?.dedicatedPhone || null);
+            })
+            .catch(() => {});
+    };
 
     useEffect(() => {
-        fetch('/api/whatsapp/baileys/status')
-            .then(r => r.json())
-            .then(d => setEnabled(!!d.baileysEnabled))
-            .catch(() => {});
+        checkStatus();
+        const interval = setInterval(checkStatus, 5000);
+        return () => clearInterval(interval);
     }, []);
 
     const toggle = async () => {
@@ -149,14 +161,34 @@ function BaileysToggle() {
     };
 
     return (
-        <ToggleSwitch
-            label="Baileys Backup WhatsApp"
-            description={enabled ? '⚡ Backup Active — Baileys fallback ON' : '🛡️ Cloud API Only (Safe)'}
-            active={enabled}
-            onToggle={toggle}
-            activeColor="bg-amber-500"
-            disabled={loading}
-        />
+        <div className="flex flex-col gap-2.5 p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800">
+            <ToggleSwitch
+                label="Baileys Backup WhatsApp"
+                description={enabled ? '⚡ Fallback Active (24h window bypass)' : '🛡️ Meta Cloud API Only'}
+                active={enabled}
+                onToggle={toggle}
+                activeColor="bg-amber-500"
+                disabled={loading}
+            />
+            <div className="flex items-center justify-between pt-2 border-t border-slate-800/60 text-xs">
+                <span className="text-[11px] text-slate-400">
+                    Status: {baileysLinked ? (
+                        <span className="text-cyan-400 font-semibold ml-1">🟢 Linked {linkedPhone ? `(+${linkedPhone})` : ''}</span>
+                    ) : (
+                        <span className="text-amber-400 font-semibold ml-1">🟡 Not Linked</span>
+                    )}
+                </span>
+                {onOpenPairModal && (
+                    <button
+                        onClick={onOpenPairModal}
+                        className="px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 font-semibold text-[11px] transition-colors flex items-center gap-1 cursor-pointer"
+                    >
+                        <span>📲</span>
+                        <span>{baileysLinked ? 'Manage / Re-link' : 'Link QR / Code'}</span>
+                    </button>
+                )}
+            </div>
+        </div>
     );
 }
 
@@ -478,48 +510,252 @@ function TelegramBotCard() {
     );
 }
 
-// ── Instagram Direct Bot Card (Meta Graph API) ────────────────────────────────
+// ── Instagram Direct Bot Card (Direct ID & Password Automation) ───────────────
 function InstagramBotCard() {
-    const [status, setStatus] = useState<{ isConfigured: boolean; accountId: string | null } | null>(null);
+    const [status, setStatus] = useState<{
+        isLoggedIn: boolean;
+        username: string | null;
+        fullName: string | null;
+        profilePicUrl?: string | null;
+        totalMessagesProcessed: number;
+        autoReplyEnabled: boolean;
+        requiresTwoFactor?: boolean;
+    } | null>(null);
+
+    const [usernameInput, setUsernameInput] = useState('');
+    const [passwordInput, setPasswordInput] = useState('');
+    const [twoFactorCode, setTwoFactorCode] = useState('');
+    const [showLoginForm, setShowLoginForm] = useState(false);
+    const [isLoading, setIsLoading] = useState(false);
+    const [message, setMessage] = useState<string | null>(null);
+    const [error, setError] = useState<string | null>(null);
+
+    const fetchStatus = async () => {
+        try {
+            const r = await fetch('/api/instagram/status');
+            const d = await r.json();
+            setStatus(d);
+        } catch {}
+    };
 
     useEffect(() => {
-        fetch('/api/instagram/status')
-            .then((r) => r.json())
-            .then((d) => setStatus(d))
-            .catch(() => {});
+        fetchStatus();
+        const interval = setInterval(fetchStatus, 8000);
+        return () => clearInterval(interval);
     }, []);
 
+    const handleLogin = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setIsLoading(true);
+        setError(null);
+        setMessage(null);
+
+        try {
+            const res = await fetch('/api/instagram/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    username: usernameInput,
+                    password: passwordInput,
+                    verificationCode: twoFactorCode || undefined,
+                }),
+            });
+            const data = await res.json();
+
+            if (data.ok) {
+                setMessage(data.message || 'Login successful!');
+                setShowLoginForm(false);
+                setPasswordInput('');
+                setTwoFactorCode('');
+                fetchStatus();
+            } else if (data.requiresTwoFactor) {
+                setMessage(data.message);
+            } else {
+                setError(data.message || 'Login failed. Please check credentials.');
+            }
+        } catch (err: any) {
+            setError(err?.message || 'Server error during Instagram login.');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleLogout = async () => {
+        if (!confirm('Instagram se logout karna chahte hain?')) return;
+        setIsLoading(true);
+        try {
+            await fetch('/api/instagram/logout', { method: 'POST' });
+            fetchStatus();
+        } catch {}
+        finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleToggleAutoReply = async () => {
+        if (!status) return;
+        try {
+            const next = !status.autoReplyEnabled;
+            const res = await fetch('/api/instagram/toggle-auto-reply', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled: next }),
+            });
+            const data = await res.json();
+            setStatus((prev) => (prev ? { ...prev, autoReplyEnabled: !!data.autoReplyEnabled } : null));
+        } catch {}
+    };
+
     return (
-        <div className="pt-3 border-t border-white/10">
-            <div className="flex items-center justify-between mb-2">
+        <div className="pt-3 border-t border-white/10 flex flex-col gap-2.5">
+            <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                    <Instagram className="w-4 h-4 text-pink-400" />
-                    <span className="text-white font-bold text-sm">Instagram Direct Bot</span>
+                    <div className="w-6 h-6 rounded-lg bg-gradient-to-tr from-yellow-500 via-pink-500 to-purple-600 flex items-center justify-center shadow-[0_0_10px_rgba(236,72,153,0.3)]">
+                        <Instagram className="w-3.5 h-3.5 text-white" />
+                    </div>
+                    <div>
+                        <span className="text-white font-bold text-sm block">Instagram Direct Bot</span>
+                        <span className="text-[10px] text-slate-400">Direct ID & Password Automation</span>
+                    </div>
                 </div>
                 <span
-                    className={`text-[10px] font-black tracking-wider px-2 py-0.5 rounded-full uppercase ${
-                        status?.isConfigured
+                    className={`text-[10px] font-bold tracking-wider px-2.5 py-0.5 rounded-full uppercase flex items-center gap-1 ${
+                        status?.isLoggedIn
                             ? 'bg-pink-500/20 text-pink-300 border border-pink-500/40 shadow-[0_0_8px_rgba(244,114,182,0.3)]'
                             : 'bg-slate-800 text-slate-400 border border-slate-700'
                     }`}
                 >
-                    {status?.isConfigured ? 'Meta Active' : 'Offline'}
+                    <span className={`w-1.5 h-1.5 rounded-full ${status?.isLoggedIn ? 'bg-pink-400 animate-pulse' : 'bg-slate-500'}`} />
+                    {status?.isLoggedIn ? 'Active' : 'Offline'}
                 </span>
             </div>
-            <p className="text-xs text-slate-400 mb-2">
-                AI DM Reader & Auto-Reply. 🛡️ <i>Sensitive actions strictly blocked from IG.</i>
-            </p>
 
-            {status?.isConfigured ? (
-                <div className="p-2.5 rounded-xl bg-pink-950/40 border border-pink-500/30 text-xs text-pink-200 flex items-center justify-between">
-                    <span>Account: <b>{status.accountId || 'Connected'}</b></span>
-                    <span className="text-[10px] text-pink-300/80">Webhook: <code>/api/instagram/webhook</code></span>
+            {/* Logged in view */}
+            {status?.isLoggedIn ? (
+                <div className="p-3 rounded-2xl bg-gradient-to-r from-pink-950/40 to-purple-950/30 border border-pink-500/30 flex flex-col gap-2.5 text-xs text-pink-200">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                            {status.profilePicUrl ? (
+                                <img src={status.profilePicUrl} alt="" className="w-7 h-7 rounded-full border border-pink-400/50 object-cover" />
+                            ) : (
+                                <div className="w-7 h-7 rounded-full bg-pink-500/20 text-pink-300 flex items-center justify-center font-bold text-xs">
+                                    IG
+                                </div>
+                            )}
+                            <div>
+                                <span className="font-bold text-white block">@{status.username}</span>
+                                <span className="text-[10px] text-pink-300/80">{status.fullName || 'Logged in'}</span>
+                            </div>
+                        </div>
+                        <button
+                            onClick={handleLogout}
+                            disabled={isLoading}
+                            className="px-2 py-1 rounded-lg bg-slate-900/80 hover:bg-red-950/80 text-slate-400 hover:text-red-300 border border-white/10 hover:border-red-500/30 text-[10px] transition-colors"
+                        >
+                            Logout
+                        </button>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1.5 border-t border-pink-500/20 text-[11px]">
+                        <span className="text-slate-300">
+                            AI Auto-Reply DMs: <b>{status.autoReplyEnabled ? '🟢 ON' : '⚪ OFF'}</b>
+                        </span>
+                        <button
+                            onClick={handleToggleAutoReply}
+                            className="px-2 py-0.5 rounded-md bg-pink-500/20 hover:bg-pink-500/30 text-pink-300 font-medium text-[10px] border border-pink-500/40 transition-colors"
+                        >
+                            {status.autoReplyEnabled ? 'Disable' : 'Enable'}
+                        </button>
+                    </div>
                 </div>
             ) : (
-                <div className="p-2.5 rounded-xl bg-slate-900/70 border border-white/10 text-center">
-                    <span className="text-[11px] text-slate-400">
-                        Add <code>INSTAGRAM_PAGE_ACCESS_TOKEN</code> in <code>.env</code> to activate.
-                    </span>
+                /* Logged out / Login form */
+                <div className="p-3 rounded-2xl bg-slate-950/80 border border-white/10 flex flex-col gap-2.5 text-xs">
+                    {!showLoginForm ? (
+                        <div className="flex flex-col gap-2 text-center py-1">
+                            <p className="text-[11px] text-slate-400">
+                                Instagram ID aur Password se direct login karein taaki Friday aapke DMs read aur auto-reply kar sake.
+                            </p>
+                            <button
+                                onClick={() => setShowLoginForm(true)}
+                                className="w-full py-2 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white font-bold text-xs shadow-[0_0_15px_rgba(236,72,153,0.3)] transition-all cursor-pointer"
+                            >
+                                🔐 Login with Instagram ID & Password
+                            </button>
+                        </div>
+                    ) : (
+                        <form onSubmit={handleLogin} className="flex flex-col gap-2">
+                            <div className="flex items-center justify-between pb-1 border-b border-white/10">
+                                <span className="font-semibold text-white text-[11px]">Instagram Credentials:</span>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowLoginForm(false)}
+                                    className="text-[10px] text-slate-400 hover:text-white"
+                                >
+                                    Cancel
+                                </button>
+                            </div>
+
+                            <input
+                                type="text"
+                                required
+                                placeholder="Instagram Username / Handle (e.g. divakar_01)"
+                                value={usernameInput}
+                                onChange={(e) => setUsernameInput(e.target.value)}
+                                className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 text-xs focus:border-pink-500 outline-none"
+                            />
+
+                            <input
+                                type="password"
+                                required
+                                placeholder="Instagram Password"
+                                value={passwordInput}
+                                onChange={(e) => setPasswordInput(e.target.value)}
+                                className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 text-xs focus:border-pink-500 outline-none"
+                            />
+
+                            {/* 2FA input if required */}
+                            {status?.requiresTwoFactor && (
+                                <div className="flex flex-col gap-1 p-2 rounded-xl bg-amber-950/40 border border-amber-500/40">
+                                    <span className="text-[10px] text-amber-300 font-semibold">2FA Security OTP (SMS / App Code):</span>
+                                    <input
+                                        type="text"
+                                        placeholder="6-digit 2FA code"
+                                        value={twoFactorCode}
+                                        onChange={(e) => setTwoFactorCode(e.target.value)}
+                                        className="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-amber-500/50 text-amber-200 text-xs font-mono tracking-widest outline-none"
+                                    />
+                                </div>
+                            )}
+
+                            {error && (
+                                <div className="p-2 rounded-lg bg-red-950/60 border border-red-500/40 text-red-300 text-[11px]">
+                                    {error}
+                                </div>
+                            )}
+
+                            {message && (
+                                <div className="p-2 rounded-lg bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 text-[11px]">
+                                    {message}
+                                </div>
+                            )}
+
+                            <button
+                                type="submit"
+                                disabled={isLoading}
+                                className="w-full py-2 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white font-bold text-xs shadow-[0_0_15px_rgba(236,72,153,0.35)] transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                            >
+                                {isLoading ? (
+                                    <>
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                        <span>Logging in...</span>
+                                    </>
+                                ) : (
+                                    <span>Connect Instagram</span>
+                                )}
+                            </button>
+                        </form>
+                    )}
                 </div>
             )}
         </div>
@@ -3186,8 +3422,8 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                                             exit={{ height: 0, opacity: 0 }}
                                             className="px-4 pb-4 pt-1 space-y-4 border-t border-slate-800/60"
                                         >
-                                            {/* Baileys Backup WhatsApp Toggle */}
-                                            <BaileysToggle />
+                                            {/* Baileys Backup WhatsApp Toggle & Link Button */}
+                                            <BaileysToggle onOpenPairModal={() => setShowWhatsAppModal(true)} />
 
                                             {/* Friday Telegram Bot Card */}
                                             <TelegramBotCard />

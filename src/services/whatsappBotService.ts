@@ -7,12 +7,14 @@ import { db } from "./firebaseAdmin";
 import { contactsService } from "./contactsService";
 import { dailyUpdateService } from "./dailyUpdateService";
 import { visionMemoryService } from "./visionMemoryService";
+import { humanBotFirewallService } from "./humanBotFirewallService";
 
 // Resolve Baileys exports safely across CJS/ESM bundling
 const baileys: any = BaileysModule;
 const makeWASocket = baileys.default?.default || baileys.default || baileys.makeWASocket || baileys;
 const DisconnectReason = baileys.DisconnectReason || baileys.default?.DisconnectReason;
 const fetchLatestBaileysVersion = baileys.fetchLatestBaileysVersion || baileys.default?.fetchLatestBaileysVersion;
+const Browsers = baileys.Browsers || baileys.default?.Browsers;
 
 type WASocket = any;
 
@@ -122,14 +124,16 @@ class WhatsAppBotService {
     this.keepAliveTimer = setInterval(async () => {
       if (!this.sock || !this.isConnected) return;
       try {
-        await this.sock.sendPresenceUpdate("available");
+        // Send "unavailable" (Offline) as background keep-alive ping.
+        // Keeps the socket open indefinitely without ever broadcasting "Online" 24/7!
+        await this.sock.sendPresenceUpdate("unavailable");
       } catch (e) {
         console.warn("[WhatsAppBot] Keep-alive ping failed, triggering reconnect:", (e as any)?.message);
         this.isConnected = false;
         this.scheduleReconnect(3000);
       }
     }, 4 * 60 * 1000);
-    console.log("[WhatsAppBot] Keep-alive timer started (4 min interval).");
+    console.log("[WhatsAppBot] Keep-alive timer started (Offline background mode).");
   }
 
   private stopKeepAlive() {
@@ -933,7 +937,7 @@ YOUR RULES FOR GENERATING THE WHATSAPP REPLY:
         keepAliveIntervalMs: 30_000,
         connectTimeoutMs: 90_000,
         defaultQueryTimeoutMs: 90_000,
-        browser: ["Ubuntu", "Chrome", "20.0.04"],
+        browser: Browsers?.windows ? Browsers.windows("Chrome") : ["Windows", "Chrome", "131.0.6778.205"],
         syncFullHistory: false,
       });
 
@@ -979,9 +983,11 @@ YOUR RULES FOR GENERATING THE WHATSAPP REPLY:
           this.pairingCodeMode = false;
           // FIX 3: Persist phone to Firestore so dashboard shows 'linked' after server restart
           if (this.dedicatedPhone) this.savePhoneToFirestore(this.dedicatedPhone).catch(() => {});
-          // FIX 4: Start app-level keep-alive ping every 4 min
+          // FIX 4: Start app-level keep-alive ping every 4 min (Offline background mode)
           this.startKeepAlive();
-          console.log("[WhatsAppBot] Connected! Keep-alive active.");
+          // By default, stay OFFLINE until someone sends a message
+          this.sock.sendPresenceUpdate("unavailable").catch(() => {});
+          console.log("[WhatsAppBot] Connected! Natural Offline mode active.");
         }
       });
     } catch (err) {
@@ -1067,37 +1073,25 @@ YOUR RULES FOR GENERATING THE WHATSAPP REPLY:
    * 4. Sends the actual message
    * This avoids WhatsApp anti-spam automated bot detection heuristics.
    */
-  private async sendHumanLikeMessage(jid: string, text: string): Promise<any> {
+  private async sendHumanLikeMessage(jid: string, text: string, incomingText?: string, messageKey?: any): Promise<any> {
     if (!this.sock) return null;
 
     const trimmed = text.trim();
-    const wordCount = trimmed.split(/\s+/).length;
+    const recipientKey = jid.replace(/@.*$/, "");
 
-    // Realistic human typing calculation:
-    // Base "reading/thinking" time: 600ms - 1200ms
-    // Typing time: ~120ms - 180ms per word
-    // Plus random jitter to prevent static interval patterns
-    const baseDelay = 600 + Math.floor(Math.random() * 600);
-    const typingDelay = Math.min(Math.max(wordCount * 140, 800), 3800);
-    const jitter = Math.floor(Math.random() * 400) - 200;
-    const totalTypingTime = Math.min(Math.max(baseDelay + typingDelay + jitter, 1200), 4500);
+    // Use HumanBotFirewall for Gaussian typing presence and reading delays
+    await humanBotFirewallService.simulateWhatsAppHumanTyping(
+      this.sock,
+      jid,
+      messageKey,
+      incomingText || "",
+      trimmed
+    );
 
-    try {
-      // 1. Show 'typing...' status on recipient's WhatsApp
-      await this.sock.sendPresenceUpdate('composing', jid);
-    } catch { /* non-critical */ }
+    // Record message dispatch with firewall
+    humanBotFirewallService.recordDispatchedMessage("whatsapp", recipientKey);
 
-    // 2. Wait realistic human typing duration
-    await new Promise((resolve) => setTimeout(resolve, totalTypingTime));
-
-    try {
-      // 3. Stop typing status
-      await this.sock.sendPresenceUpdate('paused', jid);
-      // Brief human finger tap delay (150ms - 300ms)
-      await new Promise((resolve) => setTimeout(resolve, 200));
-    } catch { /* non-critical */ }
-
-    // 4. Send the message
+    // Send the message
     return await this.sock.sendMessage(jid, { text: trimmed });
   }
 
@@ -1163,6 +1157,36 @@ YOUR RULES FOR GENERATING THE WHATSAPP REPLY:
       this.isConnected = false;
       setTimeout(() => this.initSocket(), 500);
       return { success: false, message: `Failed to send WhatsApp message: ${err?.message || err}` };
+    }
+  }
+
+  /**
+   * Sends a Photo/Image with realistic 0.5s human attachment selection and typing presence.
+   */
+  public async sendPhotoMessage(toPhone: string, imageSource: string | Buffer, caption?: string): Promise<{ success: boolean; message: string }> {
+    let cleanPhone = toPhone.replace(/[\s\-\(\)\+]/g, "").trim();
+    if (cleanPhone.length === 10) cleanPhone = `91${cleanPhone}`;
+
+    if (!this.isConnected || !this.sock) {
+      return { success: false, message: "WhatsApp bot is not connected." };
+    }
+
+    try {
+      const jid = `${cleanPhone}@s.whatsapp.net`;
+      
+      // Simulate Human Attachment + Gallery pick + Caption typing (0.5s gaps)
+      await humanBotFirewallService.simulateWhatsAppPhotoDelays(this.sock, jid, caption);
+
+      const imagePayload = typeof imageSource === "string" ? { url: imageSource } : imageSource;
+      await this.sock.sendMessage(jid, {
+        image: imagePayload,
+        caption: caption ? caption.trim() : undefined,
+      });
+
+      humanBotFirewallService.recordDispatchedMessage("whatsapp", cleanPhone);
+      return { success: true, message: `Photo successfully delivered to +${cleanPhone}!` };
+    } catch (e: any) {
+      return { success: false, message: `Failed to send photo: ${e?.message || e}` };
     }
   }
 

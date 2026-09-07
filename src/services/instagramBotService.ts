@@ -1,13 +1,22 @@
+import { IgApiClient } from "instagram-private-api";
 import { GoogleGenAI } from "@google/genai";
 import { db } from "./firebaseAdmin";
 import { contactsService } from "./contactsService";
 import { dailyUpdateService } from "./dailyUpdateService";
+import { humanBotFirewallService } from "./humanBotFirewallService";
+import fs from "fs";
+import path from "path";
 
 export interface InstagramStatus {
-  isConfigured: boolean;
-  accountId: string | null;
-  lastWebhookAt: number | null;
+  isLoggedIn: boolean;
+  username: string | null;
+  fullName: string | null;
+  profilePicUrl?: string | null;
+  lastCheckedAt: number | null;
   totalMessagesProcessed: number;
+  autoReplyEnabled: boolean;
+  requiresTwoFactor?: boolean;
+  twoFactorInfo?: any;
 }
 
 export interface InstagramUserProfile {
@@ -18,12 +27,20 @@ export interface InstagramUserProfile {
   messageCount: number;
 }
 
+const LOCAL_SESSION_FILE = path.resolve(process.cwd(), "data", "instagram_session.json");
+
 class InstagramBotService {
-  private pageAccessToken: string = "";
-  private accountId: string = "";
-  private verifyToken: string = "";
-  private lastWebhookAt: number | null = null;
+  private ig: IgApiClient | null = null;
+  private isLoggedIn: boolean = false;
+  private currentUsername: string | null = null;
+  private currentFullName: string | null = null;
+  private currentProfilePicUrl: string | null = null;
+  private lastCheckedAt: number | null = null;
   private totalMessagesProcessed: number = 0;
+  private autoReplyEnabled: boolean = true;
+  private pollInterval: any = null;
+  private processedItemIds: Set<string> = new Set();
+  private pendingTwoFactor: { twoFactorIdentifier: string; username: string } | null = null;
   private messageCallback: ((msg: { sender: string; text: string; time: string; igid: string }) => void) | null = null;
 
   // Multi-tier model fallback chain
@@ -37,38 +54,248 @@ class InstagramBotService {
   ];
 
   constructor() {
-    this.refreshConfig();
+    this.initSession();
   }
 
-  public refreshConfig() {
-    this.pageAccessToken = (
-      process.env.INSTAGRAM_PAGE_ACCESS_TOKEN ||
-      process.env.INSTAGRAM_ACCESS_TOKEN ||
-      process.env.META_PAGE_ACCESS_TOKEN ||
-      ""
-    ).trim();
-
-    this.accountId = (process.env.INSTAGRAM_ACCOUNT_ID || "").trim();
-    this.verifyToken = (
-      process.env.INSTAGRAM_VERIFY_TOKEN ||
-      process.env.WHATSAPP_CLOUD_VERIFY_TOKEN ||
-      "friday_instagram_secret"
-    ).trim();
+  private ensureDataDir() {
+    const dir = path.dirname(LOCAL_SESSION_FILE);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
   }
 
-  public get isConfigured(): boolean {
-    this.refreshConfig();
-    return !!this.pageAccessToken && this.pageAccessToken.length > 20;
+  /**
+   * Initializes session from Firestore or Local JSON or .env credentials
+   */
+  public async initSession() {
+    try {
+      // 1. Try restore from Firestore
+      const sessionDoc = await db.collection("instagram_auth").doc("session").get().catch(() => null);
+      if (sessionDoc && sessionDoc.exists) {
+        const data = sessionDoc.data() as any;
+        if (data?.session && data?.username) {
+          console.log(`[InstagramBot] Restoring session from Firestore for @${data.username}...`);
+          const restored = await this.restoreSession(data.username, data.session);
+          if (restored) return;
+        }
+      }
+
+      // 2. Try restore from Local File
+      if (fs.existsSync(LOCAL_SESSION_FILE)) {
+        try {
+          const raw = fs.readFileSync(LOCAL_SESSION_FILE, "utf-8");
+          const data = JSON.parse(raw);
+          if (data?.session && data?.username) {
+            console.log(`[InstagramBot] Restoring session from local cache for @${data.username}...`);
+            const restored = await this.restoreSession(data.username, data.session);
+            if (restored) return;
+          }
+        } catch {}
+      }
+
+      // 3. Fallback: Auto-login with .env credentials if provided
+      const envUser = (process.env.INSTAGRAM_USERNAME || "").trim();
+      const envPass = (process.env.INSTAGRAM_PASSWORD || "").trim();
+      if (envUser && envPass) {
+        console.log(`[InstagramBot] Auto-logging in via .env credentials for @${envUser}...`);
+        await this.login(envUser, envPass);
+      }
+    } catch (e: any) {
+      console.warn("[InstagramBot] Init session standby:", e?.message || e);
+    }
+  }
+
+  private async saveSessionToStorage(username: string, sessionState: any) {
+    try {
+      this.ensureDataDir();
+      fs.writeFileSync(LOCAL_SESSION_FILE, JSON.stringify({ username, session: sessionState }, null, 2));
+
+      await db.collection("instagram_auth").doc("session").set(
+        {
+          username,
+          session: sessionState,
+          updatedAt: Date.now(),
+        },
+        { merge: true }
+      ).catch(() => {});
+    } catch (e: any) {
+      console.warn("[InstagramBot] Failed to save session to storage:", e?.message || e);
+    }
+  }
+
+  /**
+   * Configures a genuine Indian Mobile Device profile for Instagram API client
+   * matching standard Android device identity with IST timezone (+05:30) and Indian locale.
+   */
+  private configureIndianDevice(ig: IgApiClient, username: string) {
+    ig.state.generateDevice(username);
+    ig.state.timezoneOffset = "19800"; // +05:30 IST
+    ig.state.language = "en_IN";
+    ig.state.radioType = "wifi-none";
+  }
+
+  private async restoreSession(username: string, sessionState: any): Promise<boolean> {
+    try {
+      const ig = new IgApiClient();
+      this.configureIndianDevice(ig, username);
+      await ig.state.deserialize(sessionState);
+
+      // Verify that session is valid
+      const currentUser = await ig.account.currentUser();
+      if (currentUser && currentUser.pk) {
+        this.ig = ig;
+        this.isLoggedIn = true;
+        this.currentUsername = currentUser.username;
+        this.currentFullName = currentUser.full_name || currentUser.username;
+        this.currentProfilePicUrl = currentUser.profile_pic_url || null;
+        console.log(`[InstagramBot] Session active & verified for @${currentUser.username} (${currentUser.full_name})!`);
+
+        this.startInboxPolling();
+        return true;
+      }
+    } catch (e: any) {
+      console.warn("[InstagramBot] Saved session expired or invalid:", e?.message || e);
+    }
+    return false;
+  }
+
+  /**
+   * Direct Login with Instagram Username & Password (and optional 2FA / Verification code)
+   */
+  public async login(username: string, password?: string, verificationCode?: string): Promise<{ success: boolean; requiresTwoFactor?: boolean; message: string }> {
+    const cleanUser = username.trim().replace(/^@/, "").toLowerCase();
+
+    try {
+      // If resolving 2FA challenge
+      if (verificationCode && this.pendingTwoFactor && this.ig) {
+        console.log(`[InstagramBot] Submitting 2FA code for @${cleanUser}...`);
+        const twoFactorRes = await this.ig.account.twoFactorLogin({
+          username: cleanUser,
+          verificationCode: verificationCode.trim(),
+          twoFactorIdentifier: this.pendingTwoFactor.twoFactorIdentifier,
+          verificationMethod: "1", // SMS or Authenticator App
+        });
+
+        this.isLoggedIn = true;
+        const userObj: any = twoFactorRes;
+        this.currentUsername = userObj.username || userObj.logged_in_user?.username || cleanUser;
+        this.currentFullName = userObj.full_name || userObj.logged_in_user?.full_name || this.currentUsername;
+        this.currentProfilePicUrl = userObj.profile_pic_url || userObj.logged_in_user?.profile_pic_url || null;
+        this.pendingTwoFactor = null;
+
+        const sessionState = await this.ig.state.serialize();
+        await this.saveSessionToStorage(cleanUser, sessionState);
+        this.startInboxPolling();
+
+        return {
+          success: true,
+          message: `Instagram login successful for @${this.currentUsername}! 🎉`,
+        };
+      }
+
+      if (!password) {
+        return { success: false, message: "Password is required for Instagram login." };
+      }
+
+      console.log(`[InstagramBot] Logging in to Instagram as @${cleanUser}...`);
+      const ig = new IgApiClient();
+      this.configureIndianDevice(ig, cleanUser);
+
+      try {
+        const user = await ig.account.login(cleanUser, password);
+        this.ig = ig;
+        this.isLoggedIn = true;
+        this.currentUsername = user.username;
+        this.currentFullName = user.full_name || user.username;
+        this.currentProfilePicUrl = user.profile_pic_url || null;
+
+        const sessionState = await ig.state.serialize();
+        await this.saveSessionToStorage(cleanUser, sessionState);
+        this.startInboxPolling();
+
+        console.log(`[InstagramBot] Logged in successfully as @${user.username}!`);
+        return {
+          success: true,
+          message: `Instagram login successful for @${user.username}! 🎉`,
+        };
+      } catch (loginError: any) {
+        // Handle 2FA / Two-Factor Authentication requirement
+        if (loginError.name === "IgLoginTwoFactorRequiredError" || loginError.response?.body?.two_factor_required) {
+          const twoFactorInfo = loginError.response?.body?.two_factor_info || {};
+          this.ig = ig;
+          this.pendingTwoFactor = {
+            twoFactorIdentifier: twoFactorInfo.two_factor_identifier || "",
+            username: cleanUser,
+          };
+          return {
+            success: false,
+            requiresTwoFactor: true,
+            message: "Instagram 2FA verification code required. Please enter the OTP sent to your phone/authenticator.",
+          };
+        }
+
+        // Handle Checkpoint / Challenge
+        if (loginError.name === "IgCheckpointError") {
+          return {
+            success: false,
+            message: "Instagram security checkpoint triggered. Please open Instagram on your phone once to tap 'This Was Me', then login again.",
+          };
+        }
+
+        throw loginError;
+      }
+    } catch (e: any) {
+      console.error("[InstagramBot] Login error:", e?.message || e);
+      return {
+        success: false,
+        message: e?.message || "Instagram login failed. Please verify credentials.",
+      };
+    }
+  }
+
+  /**
+   * Log out & clear saved sessions
+   */
+  public async logout(): Promise<{ success: boolean; message: string }> {
+    try {
+      this.isLoggedIn = false;
+      this.currentUsername = null;
+      this.currentFullName = null;
+      this.currentProfilePicUrl = null;
+      this.ig = null;
+
+      if (this.pollInterval) {
+        clearInterval(this.pollInterval);
+        this.pollInterval = null;
+      }
+
+      // Remove from Firestore & Local file
+      await db.collection("instagram_auth").doc("session").delete().catch(() => {});
+      if (fs.existsSync(LOCAL_SESSION_FILE)) {
+        try { fs.unlinkSync(LOCAL_SESSION_FILE); } catch {}
+      }
+
+      return { success: true, message: "Logged out from Instagram successfully." };
+    } catch (e: any) {
+      return { success: false, message: e?.message || "Failed to logout." };
+    }
   }
 
   public getStatus(): InstagramStatus {
-    this.refreshConfig();
     return {
-      isConfigured: this.isConfigured,
-      accountId: this.accountId || null,
-      lastWebhookAt: this.lastWebhookAt,
+      isLoggedIn: this.isLoggedIn,
+      username: this.currentUsername,
+      fullName: this.currentFullName,
+      profilePicUrl: this.currentProfilePicUrl,
+      lastCheckedAt: this.lastCheckedAt,
       totalMessagesProcessed: this.totalMessagesProcessed,
+      autoReplyEnabled: this.autoReplyEnabled,
+      requiresTwoFactor: !!this.pendingTwoFactor,
     };
+  }
+
+  public setAutoReply(enabled: boolean) {
+    this.autoReplyEnabled = enabled;
   }
 
   public setMessageCallback(cb: (msg: { sender: string; text: string; time: string; igid: string }) => void) {
@@ -76,55 +303,199 @@ class InstagramBotService {
   }
 
   /**
-   * Verifies the Meta Instagram Webhook GET request.
+   * Starts periodic inbox polling with randomized Gaussian jitter and circadian awareness
+   * to avoid repetitive machine interval signatures on Meta servers.
    */
-  public verifyWebhook(mode: string, challenge: string, verifyToken: string): string | null {
-    this.refreshConfig();
-    if (mode === "subscribe" && verifyToken === this.verifyToken) {
-      console.log("[InstagramBot] Webhook verified successfully by Meta!");
-      return challenge;
-    }
-    console.warn(`[InstagramBot] Webhook verify failed. Expected "${this.verifyToken}", got "${verifyToken}"`);
-    return null;
+  private startInboxPolling() {
+    if (this.pollInterval) clearTimeout(this.pollInterval);
+
+    // Initial check after 3.5s
+    setTimeout(() => {
+      this.checkInbox().catch(() => {});
+      this.scheduleNextInboxCheck();
+    }, 3500);
+  }
+
+  private scheduleNextInboxCheck() {
+    if (this.pollInterval) clearTimeout(this.pollInterval);
+    if (!this.isLoggedIn) return;
+
+    // Random interval between 18s and 32s scaled by Circadian night/day multiplier
+    const circadian = humanBotFirewallService.getCircadianDelayMultiplier();
+    const baseMs = 18000 + Math.floor(Math.random() * 14000); // 18s - 32s
+    const actualDelay = Math.round(baseMs * circadian.multiplier);
+
+    this.pollInterval = setTimeout(async () => {
+      try {
+        await this.checkInbox();
+      } catch {}
+      this.scheduleNextInboxCheck();
+    }, actualDelay);
   }
 
   /**
-   * Sends an outbound Instagram Direct Message via Meta Graph API.
+   * Polls Direct Inbox for new incoming messages
    */
-  public async sendDirectMessage(
-    recipientId: string,
-    text: string
-  ): Promise<{ success: boolean; messageId?: string; error?: string }> {
-    this.refreshConfig();
-    if (!this.isConfigured) {
+  public async checkInbox() {
+    if (!this.ig || !this.isLoggedIn) return;
+
+    try {
+      this.lastCheckedAt = Date.now();
+      const inbox = this.ig.feed.directInbox();
+      const threads = await inbox.items();
+
+      for (const thread of threads) {
+        if (!thread.items || thread.items.length === 0) continue;
+
+        const latestItem = thread.items[0];
+        const itemId = latestItem.item_id;
+
+        // Skip already processed items
+        if (this.processedItemIds.has(itemId)) continue;
+        this.processedItemIds.add(itemId);
+
+        // Keep set size reasonable
+        if (this.processedItemIds.size > 500) {
+          const arr = Array.from(this.processedItemIds);
+          this.processedItemIds = new Set(arr.slice(-250));
+        }
+
+        // Only process text messages not sent by logged in user
+        const isFromSelf = String(latestItem.user_id) === String(this.ig.state.cookieUserId);
+        if (isFromSelf || latestItem.item_type !== "text") continue;
+
+        const text = latestItem.text?.trim() || "";
+        if (!text) continue;
+
+        const senderUser = thread.users?.[0];
+        const senderName = senderUser?.full_name || senderUser?.username || "Instagram User";
+        const senderUsername = senderUser?.username || "";
+        const senderPk = senderUser?.pk?.toString() || "";
+
+        this.totalMessagesProcessed++;
+
+        // Save sender user to Firestore
+        if (senderPk) {
+          this.saveInstagramUser(senderPk, senderName, senderUsername).catch(() => {});
+        }
+
+        // Notify UI
+        if (this.messageCallback) {
+          this.messageCallback({
+            sender: `📸 ${senderName} (@${senderUsername})`,
+            text,
+            time: new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" }),
+            igid: senderPk,
+          });
+        }
+
+        // Auto-reply if enabled
+        if (this.autoReplyEnabled) {
+          const recipientKey = senderUsername || senderPk;
+          const firewallCheck = humanBotFirewallService.canSendAutoReply("instagram", recipientKey);
+          
+          if (!firewallCheck.allowed) {
+            console.log(`[InstagramBot] Auto-reply rate-limited by Human Firewall: ${firewallCheck.reason}`);
+          } else {
+            try {
+              console.log(`[InstagramBot] Generating human-like AI reply for @${senderUsername}: "${text}"`);
+              const reply = await this.generateSmartAutoReply(senderName, text);
+              
+              // Simulate human reading time + typing presence
+              await humanBotFirewallService.simulateInstagramHumanTyping(this.ig, thread.thread_id, itemId, text, reply);
+
+              const directThread = this.ig.entity.directThread(thread.thread_id);
+              await directThread.broadcastText(reply);
+              humanBotFirewallService.recordDispatchedMessage("instagram", recipientKey);
+
+              console.log(`[InstagramBot] Sent Human AI reply to @${senderUsername}: "${reply.substring(0, 50)}..."`);
+            } catch (replyErr: any) {
+              console.warn(`[InstagramBot] Failed to auto-reply to @${senderUsername}:`, replyErr?.message || replyErr);
+            }
+          }
+        }
+      }
+    } catch (e: any) {
+      // If login session expired during poll
+      if (e?.message?.includes("login_required") || e?.name === "IgLoginRequiredError") {
+        console.warn("[InstagramBot] Session expired during inbox check. Marking logged out.");
+        this.isLoggedIn = false;
+      }
+    }
+  }
+
+  /**
+   * Sends an Instagram DM directly by username or user ID.
+   */
+  public async sendMessageToTarget(
+    target: string,
+    message: string
+  ): Promise<{ success: boolean; message: string; resolvedName?: string }> {
+    if (!this.ig || !this.isLoggedIn) {
       return {
         success: false,
-        error: "INSTAGRAM_PAGE_ACCESS_TOKEN not configured in .env",
+        message: "Instagram is not connected. Please log in with your Instagram ID & Password in Friday settings.",
       };
     }
 
+    const cleanTarget = String(target || "").trim().replace(/^@/, "");
+    if (!cleanTarget || !message) {
+      return { success: false, message: "Recipient and message text are required." };
+    }
+
     try {
-      const url = `https://graph.facebook.com/v21.0/me/messages?access_token=${this.pageAccessToken}`;
-      const payload = {
-        recipient: { id: recipientId },
-        message: { text },
-      };
+      let targetPk: string | null = null;
+      let displayName: string = cleanTarget;
 
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      const json = await res.json();
-      if (!res.ok || json.error) {
-        throw new Error(json.error?.message || "Instagram DM API failed");
+      // 1. If numeric PK
+      if (/^\d{6,25}$/.test(cleanTarget)) {
+        targetPk = cleanTarget;
+      } else {
+        // 2. Search exact username using Instagram API
+        try {
+          const user = await this.ig.user.searchExact(cleanTarget);
+          if (user && user.pk) {
+            targetPk = user.pk.toString();
+            displayName = user.full_name || `@${user.username}`;
+          }
+        } catch {
+          // If searchExact fails, fallback to general search
+          const searchRes = await this.ig.user.search(cleanTarget);
+          if (searchRes.users && searchRes.users.length > 0) {
+            const first = searchRes.users[0];
+            targetPk = first.pk.toString();
+            displayName = first.full_name || `@${first.username}`;
+          }
+        }
       }
 
-      return { success: true, messageId: json.message_id || json.recipient_id };
+      if (!targetPk) {
+        return {
+          success: false,
+          message: `Boss, Instagram par '${target}' ka account nahi mila. Kripya correct username check karein.`,
+        };
+      }
+
+      // Simulate human typing delay before sending DM
+      const typingDelay = humanBotFirewallService.calculateDynamicTypingDelay(message);
+      await new Promise((resolve) => setTimeout(resolve, Math.min(typingDelay, 4000)));
+
+      // Create or get direct thread and send text
+      const thread = this.ig.entity.directThread([targetPk]);
+      await thread.broadcastText(message);
+      humanBotFirewallService.recordDispatchedMessage("instagram", cleanTarget);
+
+      return {
+        success: true,
+        resolvedName: displayName,
+        message: `Boss, Instagram par ${displayName} ko DM bhej diya gaya hai: "${message}" ✅`,
+      };
     } catch (e: any) {
-      console.error(`[InstagramBot] Send DM to ${recipientId} failed:`, e?.message || e);
-      return { success: false, error: e?.message || String(e) };
+      console.error(`[InstagramBot] Send DM to ${target} failed:`, e?.message || e);
+      return {
+        success: false,
+        message: `Instagram DM send failed: ${e?.message || String(e)}`,
+      };
     }
   }
 
@@ -153,88 +524,7 @@ class InstagramBotService {
   }
 
   /**
-   * Resolves a target (Name, @username, or IGID) to a valid recipient IGID.
-   */
-  public async resolveTargetId(target: string): Promise<{ igid?: string; name?: string; error?: string }> {
-    const raw = String(target || "").trim();
-    if (!raw) return { error: "Recipient name ya Instagram handle required hai." };
-
-    // 1. Direct numeric IGID
-    if (/^\d{6,25}$/.test(raw)) {
-      return { igid: raw, name: `User (${raw})` };
-    }
-
-    const clean = raw.replace(/^@/, "").toLowerCase().trim();
-
-    try {
-      // 2. Search Firestore instagramUsers collection
-      const snap = await db.collection("instagramUsers").get();
-      const users = snap.docs.map((d) => d.data() as InstagramUserProfile);
-
-      // Exact username match
-      const byUsername = users.find((u) => u.username && u.username.toLowerCase() === clean);
-      if (byUsername) return { igid: byUsername.igid, name: byUsername.name || `@${byUsername.username}` };
-
-      // Name match
-      const byName = users.find(
-        (u) =>
-          (u.name && u.name.toLowerCase().includes(clean)) ||
-          (u.username && u.username.toLowerCase().includes(clean))
-      );
-      if (byName) return { igid: byName.igid, name: byName.name };
-
-      // 3. Search contactsService
-      const allContacts = await contactsService.getAllContacts();
-      const matchedContact = allContacts.find((c) =>
-        c.name.toLowerCase().includes(clean)
-      );
-
-      if (matchedContact) {
-        const userByContact = users.find((u) => u.name && u.name.toLowerCase().includes(matchedContact.name.toLowerCase()));
-        if (userByContact) return { igid: userByContact.igid, name: matchedContact.name };
-      }
-    } catch (e) {
-      console.warn("[InstagramBot] Error resolving Instagram contact:", e);
-    }
-
-    return {
-      error: `Boss, '${target}' ka Instagram ID nahi mila. Unhone abhi tak aapke account par DM nahi bheja hai ya unka username mapped nahi hai.`,
-    };
-  }
-
-  /**
-   * Sends an Instagram DM to any person or handle.
-   */
-  public async sendMessageToTarget(
-    target: string,
-    message: string
-  ): Promise<{ success: boolean; message: string; resolvedName?: string }> {
-    const res = await this.resolveTargetId(target);
-    if (!res.igid) {
-      return {
-        success: false,
-        message: res.error || `Could not find Instagram user "${target}".`,
-      };
-    }
-
-    const sendRes = await this.sendDirectMessage(res.igid, message);
-    if (sendRes.success) {
-      return {
-        success: true,
-        resolvedName: res.name,
-        message: `Boss, Instagram par ${res.name || target} ko DM bhej diya gaya hai: "${message}" ✅`,
-      };
-    } else {
-      return {
-        success: false,
-        message: `Instagram DM send failed: ${sendRes.error}`,
-      };
-    }
-  }
-
-  /**
    * Checks if an incoming message is requesting a sensitive / privileged action.
-   * Strict Rule: Sensitive actions are STRICTLY FORBIDDEN from Instagram.
    */
   private isSensitiveAction(text: string): boolean {
     const sensitivePatterns = [
@@ -251,20 +541,16 @@ class InstagramBotService {
    * Generates a smart conversational reply using Gemini multi-tier model fallback.
    */
   private async generateSmartAutoReply(senderName: string, messageText: string): Promise<string> {
-    // 1. Check if the message is a sensitive action request -> Strict Shield!
     if (this.isSensitiveAction(messageText)) {
       return `Haanji ${senderName}! Main Friday hoon (DK Boss ka AI assistant). Security policy ke mutabiq sensitive actions ya confidential settings Instagram se allow nahi hain. Kripya DK se direct WhatsApp ya Voice call par sampark karein. 🙏`;
     }
 
-    // 2. Try factual answer from today's daily update
     try {
       const updateAnswer = await dailyUpdateService.answerFromTodayUpdate(messageText);
       if (updateAnswer) {
         return `Haanji ${senderName}! ${updateAnswer}`;
       }
-    } catch {
-      // continue
-    }
+    } catch {}
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
@@ -308,11 +594,10 @@ INSTRUCTIONS:
         );
         const reply = response.text?.trim();
         if (reply) {
-          console.log(`[InstagramBot] Auto-reply generated using ${model}`);
           return reply;
         }
       } catch (err: any) {
-        console.warn(`[InstagramBot] ${model} failed (${err?.message || err}), falling back...`);
+        console.warn(`[InstagramBot] ${model} fallback:`, err?.message || err);
       }
     }
 
@@ -320,52 +605,220 @@ INSTRUCTIONS:
   }
 
   /**
-   * Handles incoming webhook payload from Meta Instagram Graph API.
+   * Sends a Photo/Image with realistic 0.5s tap simulation for picker and send action.
    */
-  public async handleWebhook(body: any): Promise<void> {
-    this.lastWebhookAt = Date.now();
-    this.totalMessagesProcessed++;
-
-    if (!body || body.object !== "instagram" && body.object !== "page") {
-      return;
+  public async sendPhotoMessage(target: string, imageBuffer: Buffer): Promise<{ success: boolean; message: string }> {
+    if (!this.ig || !this.isLoggedIn) {
+      return { success: false, message: "Instagram is not connected. Please log in first." };
     }
 
-    const entries = body.entry || [];
-    for (const entry of entries) {
-      const messaging = entry.messaging || [];
-      for (const event of messaging) {
-        const senderId = event.sender?.id;
-        const text = event.message?.text?.trim();
-
-        // Skip messages sent by the bot itself or empty messages
-        if (!senderId || !text || event.message?.is_echo) {
-          continue;
-        }
-
-        const senderName = "Instagram User";
-
-        // Save user to Firestore for future direct messaging
-        this.saveInstagramUser(senderId, senderName).catch(() => {});
-
-        // Broadcast to connected Live UI clients
-        if (this.messageCallback) {
-          this.messageCallback({
-            sender: `📸 ${senderName}`,
-            text,
-            time: new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" }),
-            igid: senderId,
-          });
-        }
-
-        // Generate and send smart AI auto-reply
-        try {
-          const replyText = await this.generateSmartAutoReply(senderName, text);
-          await this.sendDirectMessage(senderId, replyText);
-          console.log(`[InstagramBot] Replied to ${senderId}: "${replyText.substring(0, 60)}..."`);
-        } catch (e: any) {
-          console.error("[InstagramBot] Failed to handle incoming Instagram DM:", e?.message || e);
-        }
+    try {
+      const cleanTarget = String(target || "").trim().replace(/^@/, "");
+      const user = await this.ig.user.searchExact(cleanTarget);
+      if (!user || !user.pk) {
+        return { success: false, message: `Instagram user @${target} not found.` };
       }
+
+      // Simulate Human Photo Picker & Taps (0.5s intervals)
+      await humanBotFirewallService.simulateInstagramPhotoDelays();
+
+      const thread = this.ig.entity.directThread([user.pk.toString()]);
+      await thread.broadcastPhoto({ file: imageBuffer });
+      humanBotFirewallService.recordDispatchedMessage("instagram", cleanTarget);
+
+      return { success: true, message: `Photo sent to @${cleanTarget} on Instagram!` };
+    } catch (e: any) {
+      return { success: false, message: `Failed to send photo on Instagram: ${e?.message || e}` };
+    }
+  }
+
+  /**
+   * Human-Paced Search:
+   * Simulates typing in search bar with 0.25s char delay + 0.5s pause to view results.
+   */
+  public async searchUserHumanPaced(query: string): Promise<any> {
+    if (!this.ig || !this.isLoggedIn) {
+      return { success: false, message: "Instagram is not connected. Please log in first." };
+    }
+
+    try {
+      const clean = String(query || "").trim();
+      
+      // Human search bar typing simulation
+      await humanBotFirewallService.simulateInstagramSearchTyping(clean);
+
+      const searchRes = await this.ig.user.search(clean);
+      const candidates = (searchRes.users || []).slice(0, 5).map((u) => ({
+        pk: u.pk,
+        username: u.username,
+        fullName: u.full_name,
+        isVerified: u.is_verified,
+        isPrivate: u.is_private,
+        profilePicUrl: u.profile_pic_url,
+      }));
+
+      return {
+        success: true,
+        query: clean,
+        results: candidates,
+      };
+    } catch (e: any) {
+      return { success: false, message: `Search failed: ${e?.message || e}` };
+    }
+  }
+
+  /**
+   * Human-Paced Profile & Feed Inspector:
+   * Inspects profile bio, counts, and scrolls through recent posts with 0.5s-0.7s human scroll steps.
+   */
+  public async getUserFeedAndPostsHumanPaced(username: string, maxPosts = 6): Promise<any> {
+    if (!this.ig || !this.isLoggedIn) {
+      return { success: false, message: "Instagram is not connected." };
+    }
+
+    try {
+      const clean = String(username || "").trim().replace(/^@/, "");
+      
+      // 1. Human search / open profile pause: 0.5s
+      await humanBotFirewallService.simulateInstagramSearchTyping(clean);
+
+      const user = await this.ig.user.searchExact(clean);
+      if (!user || !user.pk) {
+        return { success: false, message: `User @${username} not found on Instagram.` };
+      }
+
+      // 2. Fetch user detailed info
+      const userInfo = await this.ig.user.info(user.pk);
+
+      // 3. User Feed: Scroll posts one-by-one with human pauses
+      const userFeed = this.ig.feed.user(user.pk);
+      const items = await userFeed.items();
+      const posts: any[] = [];
+
+      for (let i = 0; i < Math.min(items.length, maxPosts); i++) {
+        // Human scroll gesture pause (0.5s - 0.7s)
+        await humanBotFirewallService.simulateInstagramScrollStep();
+
+        const item: any = items[i];
+        posts.push({
+          id: item.id,
+          code: item.code,
+          caption: item.caption?.text || "",
+          likeCount: item.like_count || 0,
+          commentCount: item.comment_count || 0,
+          mediaType: item.media_type === 2 ? "Video/Reel" : item.media_type === 8 ? "Carousel" : "Photo",
+          takenAt: item.taken_at ? new Date(item.taken_at * 1000).toISOString() : undefined,
+          postUrl: `https://www.instagram.com/p/${item.code}/`,
+        });
+      }
+
+      return {
+        success: true,
+        username: userInfo.username,
+        fullName: userInfo.full_name,
+        biography: userInfo.biography,
+        followersCount: userInfo.follower_count,
+        followingCount: userInfo.following_count,
+        totalPosts: userInfo.media_count,
+        isPrivate: userInfo.is_private,
+        isVerified: userInfo.is_verified,
+        posts,
+      };
+    } catch (e: any) {
+      return { success: false, message: `Failed to inspect profile: ${e?.message || e}` };
+    }
+  }
+
+  /**
+   * Human-Paced Post Like:
+   * Pauses 0.5s on post, double-taps/likes, and pauses 0.5s.
+   */
+  public async likeMediaHumanPaced(mediaId: string): Promise<any> {
+    if (!this.ig || !this.isLoggedIn) {
+      return { success: false, message: "Instagram is not connected." };
+    }
+
+    try {
+      await humanBotFirewallService.simulateInstagramLikeTap();
+      await this.ig.media.like({
+        mediaId,
+        d: 0,
+        moduleInfo: {
+          module_name: "profile",
+          username: this.currentUsername || "",
+          user_id: this.ig.state.cookieUserId,
+        } as any,
+      });
+      return { success: true, message: `Post ${mediaId} liked with natural human gesture! ❤️` };
+    } catch (e: any) {
+      return { success: false, message: `Like failed: ${e?.message || e}` };
+    }
+  }
+
+  /**
+   * Human-Paced Post Comment:
+   * Types comment with 0.5s inter-word gap and 0.5s post button tap.
+   */
+  public async commentMediaHumanPaced(mediaId: string, text: string): Promise<any> {
+    if (!this.ig || !this.isLoggedIn) {
+      return { success: false, message: "Instagram is not connected." };
+    }
+
+    try {
+      await humanBotFirewallService.simulateInstagramCommentTyping(text);
+      const res: any = await this.ig.media.comment({
+        mediaId,
+        text: text.trim(),
+      });
+      return { success: true, message: `Comment posted on ${mediaId} with natural typing delays! 💬`, commentId: res?.pk || res?.id || "posted" };
+    } catch (e: any) {
+      return { success: false, message: `Comment failed: ${e?.message || e}` };
+    }
+  }
+
+  /**
+   * Human-Paced Followers / Following Scroll List:
+   */
+  public async getUserFollowersHumanPaced(username: string, maxCount = 15): Promise<any> {
+    if (!this.ig || !this.isLoggedIn) {
+      return { success: false, message: "Instagram is not connected." };
+    }
+
+    try {
+      const clean = String(username || "").trim().replace(/^@/, "");
+      await humanBotFirewallService.simulateInstagramSearchTyping(clean);
+
+      const user = await this.ig.user.searchExact(clean);
+      if (!user || !user.pk) {
+        return { success: false, message: `User @${username} not found.` };
+      }
+
+      // Tap followers list & scroll with human pauses
+      await humanBotFirewallService.sleep(500);
+
+      const followersFeed = this.ig.feed.accountFollowers(user.pk);
+      const items = await followersFeed.items();
+      const list: any[] = [];
+
+      for (let i = 0; i < Math.min(items.length, maxCount); i++) {
+        await humanBotFirewallService.simulateInstagramScrollStep();
+        const f = items[i];
+        list.push({
+          username: f.username,
+          fullName: f.full_name,
+          isVerified: f.is_verified,
+          profilePicUrl: f.profile_pic_url,
+        });
+      }
+
+      return {
+        success: true,
+        target: clean,
+        count: list.length,
+        followers: list,
+      };
+    } catch (e: any) {
+      return { success: false, message: `Failed to fetch followers: ${e?.message || e}` };
     }
   }
 }

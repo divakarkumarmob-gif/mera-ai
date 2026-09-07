@@ -38,6 +38,7 @@ import { youtubeMusicService } from "../services/youtubeMusicService";
 import { calendarEventService } from "../services/calendarEventService";
 import { productPriceService } from "../services/productPriceService";
 import { priceDropTrackerService } from "../services/priceDropTrackerService";
+import { humanBotFirewallService } from "../services/humanBotFirewallService";
 import { ecommerceOrderService } from "../services/ecommerceOrderService";
 import { autonomousBuyerService } from "../services/autonomousBuyerService";
 import { sherlockService } from "../services/sherlockService";
@@ -887,8 +888,11 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     const baileysStatus = whatsappBotService.getStatus();
     const cloudStatus = whatsappCloudService.getStatus();
     res.json({
-      isConnected: baileysStatus.isConnected || cloudStatus.configured,
-      dedicatedPhone: baileysStatus.dedicatedPhone || (cloudStatus.configured ? cloudStatus.fromNumber : null),
+      isConnected: baileysStatus.isConnected,
+      isBaileysConnected: baileysStatus.isConnected,
+      isCloudConfigured: cloudStatus.configured,
+      dedicatedPhone: baileysStatus.dedicatedPhone,
+      cloudPhone: cloudStatus.configured ? cloudStatus.fromNumber : null,
       qrCodeDataUrl: baileysStatus.qrCodeDataUrl,
       pairingCode: baileysStatus.pairingCode,
       baileys: baileysStatus,
@@ -1160,28 +1164,28 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  // ── Instagram Direct Bot Webhook & REST Endpoints (Meta Graph API) ─────────
-  app.get("/api/instagram/webhook", (req, res) => {
-    const mode = req.query["hub.mode"] as string;
-    const challenge = req.query["hub.challenge"] as string;
-    const verifyToken = req.query["hub.verify_token"] as string;
-    const result = instagramBotService.verifyWebhook(mode, challenge, verifyToken);
-    if (result !== null) {
-      res.status(200).send(result);
-    } else {
-      console.warn("[Server] Instagram webhook verify failed — check INSTAGRAM_VERIFY_TOKEN in .env");
-      res.status(403).send("Forbidden");
-    }
-  });
-
-  app.post("/api/instagram/webhook", express.json(), (req, res) => {
-    res.sendStatus(200); // Instant ACK to Meta
-    instagramBotService.handleWebhook(req.body).catch((err) =>
-      console.error("[Server] Instagram webhook handler error:", err)
-    );
-  });
-
+  // ── Instagram Direct Bot Endpoints (Direct ID & Password Automation) ─────────
   app.get("/api/instagram/status", (_req, res) => {
+    res.json({ ok: true, ...instagramBotService.getStatus() });
+  });
+
+  app.post("/api/instagram/login", async (req, res) => {
+    const { username, password, verificationCode } = req.body || {};
+    if (!username) return res.status(400).json({ ok: false, error: "username_required" });
+    const result = await instagramBotService.login(username, password, verificationCode);
+    res.json({ ok: result.success, ...result });
+  });
+
+  app.post("/api/instagram/logout", async (_req, res) => {
+    const result = await instagramBotService.logout();
+    res.json({ ok: result.success, ...result });
+  });
+
+  app.post("/api/instagram/toggle-auto-reply", (req, res) => {
+    const { enabled } = req.body || {};
+    if (typeof enabled === "boolean") {
+      instagramBotService.setAutoReply(enabled);
+    }
     res.json({ ok: true, ...instagramBotService.getStatus() });
   });
 
@@ -1190,6 +1194,11 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     if (!recipient || !message) return res.status(400).json({ error: "recipient_and_message_required" });
     const result = await instagramBotService.sendMessageToTarget(recipient, message);
     res.json(result);
+  });
+
+  // ── Social Anti-Bot & Human Simulation Firewall Status ───────────────────
+  app.get("/api/firewall/social-status", (_req, res) => {
+    res.json({ ok: true, ...humanBotFirewallService.getStats() });
   });
 
   // ── Voice Biometrics & Calibration REST Endpoints ─────────────────────────

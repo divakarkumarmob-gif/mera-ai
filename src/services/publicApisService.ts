@@ -12,6 +12,8 @@
 // change their response shape, this is the file to fix.
 // ---------------------------------------------------------------------------
 
+import { instagramBotService } from "./instagramBotService";
+
 async function fetchJson(url: string, timeoutMs = 12000): Promise<any> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -3090,6 +3092,20 @@ class PublicApisService {
     const cleanHandle = this.resolveSocialHandle(rawInput, "ig");
     const profileUrl = `https://www.instagram.com/${cleanHandle}/`;
 
+    // 0. If Instagram account is connected in Friday, use human-paced session browsing (0.5s gaps)
+    if (instagramBotService.getStatus().isLoggedIn) {
+      try {
+        const humanRes = await instagramBotService.getUserFeedAndPostsHumanPaced(cleanHandle);
+        if (humanRes && humanRes.success) {
+          return {
+            ...humanRes,
+            profileUrl,
+            sourceProvider: "instagram_human_session",
+          };
+        }
+      } catch {}
+    }
+
     // 1. Official Web Profile API with browser headers
     try {
       const res = await fetch(
@@ -3283,6 +3299,30 @@ class PublicApisService {
 
     const clean = raw.toLowerCase();
     const candidates: any[] = [];
+
+    // 0. If Instagram account is connected in Friday, use human-paced search API (0.5s gaps)
+    if (instagramBotService.getStatus().isLoggedIn) {
+      try {
+        const humanSearch = await instagramBotService.searchUserHumanPaced(raw);
+        if (humanSearch && humanSearch.success && Array.isArray(humanSearch.results) && humanSearch.results.length > 0) {
+          return {
+            success: true,
+            query: raw,
+            totalFound: humanSearch.results.length,
+            profiles: humanSearch.results.map((r: any, idx: number) => ({
+              rank: idx + 1,
+              username: r.username,
+              fullName: r.fullName || r.username,
+              profileUrl: `https://www.instagram.com/${r.username}/`,
+              isVerified: r.isVerified,
+              isPrivate: r.isPrivate,
+            })),
+            sourceProvider: "instagram_human_session",
+            message: `Instagram par "${raw}" ke ${humanSearch.results.length} real profiles mil gaye hain.`,
+          };
+        }
+      } catch {}
+    }
 
     // 1. Check direct name category in registry
     for (const [k, profiles] of Object.entries(PublicApisService.NAME_TO_REAL_PROFILES)) {
