@@ -45,6 +45,7 @@ class InstagramBotService {
   private pendingTwoFactor: { twoFactorIdentifier: string; username: string } | null = null;
   private messageCallback: ((msg: { sender: string; text: string; time: string; igid: string }) => void) | null = null;
   private lastError: string | null = null;
+  private activeSessionId: string | null = null;
 
   // Multi-tier model fallback chain
   private static readonly MODEL_FALLBACK_CHAIN = [
@@ -58,6 +59,18 @@ class InstagramBotService {
 
   constructor() {
     this.initSession();
+  }
+
+  public getActiveSessionId(): string | null {
+    if (this.activeSessionId) return this.activeSessionId;
+    const envSession = (process.env.INSTAGRAM_SESSION_ID || process.env.INSTAGRAM_SESSIONID || process.env.INSTAGRAM_COOKIE || "").trim();
+    if (envSession) {
+      let clean = envSession;
+      if (clean.startsWith("sessionid=")) clean = clean.substring("sessionid=".length).trim();
+      clean = clean.replace(/^["']|["']$/g, "");
+      if (clean) return clean;
+    }
+    return null;
   }
 
   private ensureDataDir() {
@@ -325,6 +338,7 @@ class InstagramBotService {
         return { success: false, message: "Valid Instagram sessionid is required." };
       }
 
+      this.activeSessionId = cleanSession;
       console.log("[InstagramBot] Logging in via Session ID cookie...");
       const ig = new IgApiClient();
 
@@ -543,6 +557,7 @@ class InstagramBotService {
       this.currentFullName = null;
       this.currentProfilePicUrl = null;
       this.ig = null;
+      this.activeSessionId = null;
 
       if (this.pollInterval) {
         clearInterval(this.pollInterval);
@@ -918,38 +933,294 @@ INSTRUCTIONS:
   }
 
   /**
-   * Human-Paced Search:
-   * Simulates typing in search bar with 0.25s char delay + 0.5s pause to view results.
+   * Human-Paced Search / Live Search via Instagram Session:
+   * Uses authenticated Session ID topsearch and IgApiClient search to find real Instagram users.
    */
   public async searchUserHumanPaced(query: string): Promise<any> {
-    if (!this.ig || !this.isLoggedIn) {
-      return { success: false, message: "Instagram is not connected. Please log in first." };
+    return this.searchUserLive(query);
+  }
+
+  /**
+   * Real-time Instagram Live Search using Session ID & IgApiClient:
+   * 1. If logged in to IgApiClient -> searches live via ig.user.search(query)
+   * 2. If Session ID is available -> searches live via Instagram Web Topsearch API (context=blended)
+   * 3. Fallback -> Instagram Web Topsearch / profile query
+   */
+  public async searchUserLive(query: string): Promise<any> {
+    const raw = String(query || "").replace(/^@/, "").trim();
+    if (!raw) {
+      return { success: false, message: "Search query zaroori hai." };
     }
 
+    const sessionId = this.getActiveSessionId();
+    let dsUserId = "0";
+    if (sessionId) {
+      const parts = sessionId.split(/%3A|:/);
+      if (parts.length > 0 && /^\d+$/.test(parts[0])) {
+        dsUserId = parts[0];
+      }
+    }
+
+    // 1. Try via IgApiClient session if logged in
+    if (this.ig && this.isLoggedIn) {
+      try {
+        await humanBotFirewallService.simulateInstagramSearchTyping(raw);
+        const searchRes = await this.ig.user.search(raw);
+        if (searchRes && Array.isArray(searchRes.users) && searchRes.users.length > 0) {
+          const profiles = searchRes.users.slice(0, 8).map((u, idx) => ({
+            rank: idx + 1,
+            pk: u.pk?.toString(),
+            username: u.username,
+            fullName: u.full_name || u.username,
+            profileUrl: `https://www.instagram.com/${u.username}/`,
+            isVerified: !!u.is_verified,
+            isPrivate: !!u.is_private,
+            profilePicUrl: u.profile_pic_url || null,
+          }));
+
+          return {
+            success: true,
+            query: raw,
+            totalFound: profiles.length,
+            profiles,
+            sourceProvider: "instagram_logged_in_session",
+            message: `Instagram session se "${raw}" ke ${profiles.length} real profiles mil gaye hain.`,
+          };
+        }
+      } catch (igErr: any) {
+        console.warn("[InstagramBot] IgApiClient searchUser notice:", igErr?.message || igErr);
+      }
+    }
+
+    // 2. Query Instagram Live Web Topsearch with Session ID cookie
     try {
-      const clean = String(query || "").trim();
-      
-      // Human search bar typing simulation
-      await humanBotFirewallService.simulateInstagramSearchTyping(clean);
-
-      const searchRes = await this.ig.user.search(clean);
-      const candidates = (searchRes.users || []).slice(0, 5).map((u) => ({
-        pk: u.pk,
-        username: u.username,
-        fullName: u.full_name,
-        isVerified: u.is_verified,
-        isPrivate: u.is_private,
-        profilePicUrl: u.profile_pic_url,
-      }));
-
-      return {
-        success: true,
-        query: clean,
-        results: candidates,
+      const headers: Record<string, string> = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+        "X-IG-App-ID": "936619743392459",
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://www.instagram.com/",
       };
-    } catch (e: any) {
-      return { success: false, message: `Search failed: ${e?.message || e}` };
+
+      if (sessionId) {
+        headers["Cookie"] = `sessionid=${sessionId}; ds_user_id=${dsUserId};`;
+      }
+
+      const searchUrl = `https://www.instagram.com/api/v1/web/search/topsearch/?context=blended&query=${encodeURIComponent(raw)}&rank_token=${Math.random().toString(36).substring(2, 10)}`;
+      const res = await fetch(searchUrl, { headers });
+
+      if (res.ok) {
+        const data: any = await res.json();
+        const rawUsers = data?.users || [];
+        if (Array.isArray(rawUsers) && rawUsers.length > 0) {
+          const profiles = rawUsers.slice(0, 8).map((item: any, idx: number) => {
+            const u = item.user || item;
+            return {
+              rank: idx + 1,
+              pk: u.pk?.toString() || u.id?.toString(),
+              username: u.username,
+              fullName: u.full_name || u.username,
+              profileUrl: `https://www.instagram.com/${u.username}/`,
+              isVerified: !!u.is_verified,
+              isPrivate: !!u.is_private,
+              profilePicUrl: u.profile_pic_url || null,
+            };
+          });
+
+          return {
+            success: true,
+            query: raw,
+            totalFound: profiles.length,
+            profiles,
+            sourceProvider: sessionId ? "instagram_session_topsearch" : "instagram_web_topsearch",
+            message: `Instagram session se "${raw}" ke ${profiles.length} live profiles search ho gaye hain.`,
+          };
+        }
+      }
+    } catch (webSearchErr: any) {
+      console.warn("[InstagramBot] Web TopSearch failed:", webSearchErr?.message || webSearchErr);
     }
+
+    // 3. If query might be a direct handle, check live profile info
+    try {
+      const infoRes = await this.getUserInfoLive(raw);
+      if (infoRes && infoRes.success && infoRes.username) {
+        return {
+          success: true,
+          query: raw,
+          totalFound: 1,
+          profiles: [
+            {
+              rank: 1,
+              username: infoRes.username,
+              fullName: infoRes.fullName || infoRes.username,
+              profileUrl: infoRes.profileUrl || `https://www.instagram.com/${infoRes.username}/`,
+              isVerified: !!infoRes.isVerified,
+              isPrivate: !!infoRes.isPrivate,
+              followersCount: infoRes.followersCount,
+              followingCount: infoRes.followingCount,
+              totalPosts: infoRes.totalPosts,
+              bio: infoRes.biography,
+              profilePicUrl: infoRes.profilePicUrl,
+            },
+          ],
+          sourceProvider: infoRes.sourceProvider || "instagram_live_profile",
+          message: `Instagram par @${infoRes.username} ka live profile mil gaya hai.`,
+        };
+      }
+    } catch {}
+
+    // 4. Honest response if not found anywhere on Instagram
+    return {
+      success: true,
+      query: raw,
+      totalFound: 0,
+      profiles: [],
+      notFound: true,
+      message: `Boss, Instagram par "${raw}" search karne par koi profile nahi mila. Kripya correct spelling ya exact username check karein.`,
+      instagramSearchUrl: `https://www.instagram.com/explore/search/keyword/?q=${encodeURIComponent(raw)}`,
+    };
+  }
+
+  /**
+   * Live Instagram User Info Lookup via Session ID / IgApiClient / Web Profile API:
+   */
+  public async getUserInfoLive(usernameOrQuery: string): Promise<any> {
+    const raw = String(usernameOrQuery || "").replace(/^@/, "").trim();
+    if (!raw) return { success: false, message: "Instagram username zaroori hai." };
+
+    const clean = raw.toLowerCase().replace(/\s+/g, ".");
+    const profileUrl = `https://www.instagram.com/${clean}/`;
+    const sessionId = this.getActiveSessionId();
+    let dsUserId = "0";
+    if (sessionId) {
+      const parts = sessionId.split(/%3A|:/);
+      if (parts.length > 0 && /^\d+$/.test(parts[0])) {
+        dsUserId = parts[0];
+      }
+    }
+
+    // 1. Try human-paced IgApiClient inspector if logged in
+    if (this.ig && this.isLoggedIn) {
+      try {
+        const clientRes = await this.getUserFeedAndPostsHumanPaced(clean);
+        if (clientRes && clientRes.success) {
+          return {
+            ...clientRes,
+            profileUrl,
+            sourceProvider: "instagram_logged_in_session",
+          };
+        }
+      } catch {}
+    }
+
+    // 2. Query Web Profile Info API with session cookie
+    try {
+      const headers: Record<string, string> = {
+        "x-ig-app-id": "936619743392459",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": profileUrl,
+      };
+      if (sessionId) {
+        headers["Cookie"] = `sessionid=${sessionId}; ds_user_id=${dsUserId};`;
+      }
+
+      const res = await fetch(`https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(clean)}`, {
+        headers,
+      });
+
+      if (res.ok) {
+        const json = await res.json();
+        const user = json?.data?.user;
+        if (user) {
+          const edges = user.edge_owner_to_timeline_media?.edges || [];
+          const latestPosts = edges.slice(0, 4).map((e: any) => {
+            const node = e.node;
+            const caption = node.edge_media_to_caption?.edges?.[0]?.node?.text || "";
+            return {
+              type: node.is_video ? "Reel / Video" : "Photo",
+              caption: caption.length > 120 ? caption.slice(0, 120) + "..." : caption,
+              likes: node.edge_liked_by?.count || node.edge_media_preview_like?.count || 0,
+              comments: node.edge_media_to_comment?.count || 0,
+              views: node.video_view_count || undefined,
+              postUrl: `https://www.instagram.com/p/${node.shortcode}/`,
+              shortcode: node.shortcode,
+            };
+          });
+
+          return {
+            success: true,
+            username: user.username,
+            fullName: user.full_name || user.username,
+            biography: user.biography || "",
+            followersCount: user.edge_followed_by?.count || 0,
+            followingCount: user.edge_follow?.count || 0,
+            totalPosts: user.edge_owner_to_timeline_media?.count || 0,
+            isVerified: !!user.is_verified,
+            isPrivate: !!user.is_private,
+            profilePicUrl: user.profile_pic_url_hd || user.profile_pic_url,
+            profileUrl,
+            recentPostsCount: latestPosts.length,
+            latestPosts,
+            sourceProvider: sessionId ? "instagram_session_api" : "instagram_web_api",
+          };
+        }
+      }
+    } catch (webErr: any) {
+      console.warn("[InstagramBot] web_profile_info fetch notice:", webErr?.message || webErr);
+    }
+
+    // 3. Fallback: Instagram HTML Meta Scraper
+    try {
+      const res = await fetch(profileUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        },
+      });
+
+      if (res.ok) {
+        const html = await res.text();
+        const ogTitleMatch = html.match(/<meta\s+(?:property|name)="og:title"\s+content="([^"]*)"/i) || html.match(/<meta\s+content="([^"]*)"\s+(?:property|name)="og:title"/i);
+        const descMatch = html.match(/<meta\s+name="description"\s+content="([^"]*)"/i) || html.match(/<meta\s+content="([^"]*)"\s+name="description"/i);
+
+        const ogTitle = ogTitleMatch ? ogTitleMatch[1] : "";
+        const metaDesc = descMatch ? descMatch[1] : "";
+
+        let fullName = "";
+        const nameMatch = ogTitle.match(/^(.*?)\s*\(@[a-zA-Z0-9._]+\)/);
+        if (nameMatch) fullName = nameMatch[1].trim();
+
+        const followersMatch = metaDesc.match(/([0-9.,]+[KkMmBb]?)\s+Followers/i);
+        const followingMatch = metaDesc.match(/([0-9.,]+[KkMmBb]?)\s+Following/i);
+        const postsMatch = metaDesc.match(/([0-9.,]+[KkMmBb]?)\s+Posts/i);
+
+        if (fullName || followersMatch) {
+          return {
+            success: true,
+            username: clean,
+            fullName: fullName || clean,
+            followersCount: followersMatch ? followersMatch[1] : undefined,
+            followingCount: followingMatch ? followingMatch[1] : undefined,
+            totalPosts: postsMatch ? postsMatch[1] : undefined,
+            profileUrl,
+            sourceProvider: "instagram_html_meta",
+          };
+        }
+      }
+    } catch {}
+
+    // Default basic link
+    return {
+      success: true,
+      username: clean,
+      fullName: raw,
+      profileUrl,
+      message: `Instagram par @${clean} ka profile link: ${profileUrl}`,
+      sourceProvider: "instagram_profile_link",
+    };
   }
 
   /**

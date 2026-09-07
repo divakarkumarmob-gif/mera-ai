@@ -1200,6 +1200,18 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     res.json(result);
   });
 
+  app.get("/api/instagram/search", async (req, res) => {
+    const query = String(req.query.q || req.query.query || "");
+    const result = await instagramBotService.searchUserLive(query);
+    res.json(result);
+  });
+
+  app.get("/api/instagram/user-info", async (req, res) => {
+    const username = String(req.query.username || req.query.u || "");
+    const result = await instagramBotService.getUserInfoLive(username);
+    res.json(result);
+  });
+
   // ── Social Anti-Bot & Human Simulation Firewall Status ───────────────────
   app.get("/api/firewall/social-status", (_req, res) => {
     res.json({ ok: true, ...humanBotFirewallService.getStats() });
