@@ -104,6 +104,8 @@ class WhatsAppBotService {
       latestMsgKey: any;
     }
   > = new Map();
+  // Set of message IDs dispatched by Friday bot itself to prevent self-trigger/echo loops
+  private botSentMessageIds: Set<string> = new Set();
 
   constructor() {
     // Restore last-known phone from Firestore so dashboard shows 'linked' even after restart
@@ -362,6 +364,54 @@ class WhatsAppBotService {
     };
   }
 
+  /**
+   * Robustly checks if a sender is Boss (DK / Owner):
+   * 1. Matches OWNER_WHATSAPP_NUMBER, BOSS_WHATSAPP_NUMBER, OWNER_PHONE, BOSS_PHONE (handles country code +91, 91, 10-digit suffix)
+   * 2. Matches Contacts book relation ("owner", "boss", "self") or name ("DK (Boss)", "Boss", "Divakar")
+   * 3. Matches push name / display name if marked Boss/DK
+   */
+  public isOwnerSender(
+    senderPhone: string,
+    senderDisplayName = "",
+    senderJid = "",
+    contact?: any
+  ): boolean {
+    const envNumbers = [
+      process.env.OWNER_WHATSAPP_NUMBER,
+      process.env.BOSS_WHATSAPP_NUMBER,
+      process.env.OWNER_PHONE,
+      process.env.BOSS_PHONE,
+      process.env.EMERGENCY_CONTACT_PHONE,
+    ].filter(Boolean) as string[];
+
+    const cleanSender = (senderPhone || "").replace(/\D/g, "");
+    const last10Sender = cleanSender.slice(-10);
+
+    for (const envNum of envNumbers) {
+      const cleanEnv = envNum.replace(/\D/g, "");
+      if (!cleanEnv) continue;
+      if (cleanSender === cleanEnv) return true;
+      const last10Env = cleanEnv.slice(-10);
+      if (last10Sender.length === 10 && last10Env.length === 10 && last10Sender === last10Env) {
+        return true;
+      }
+    }
+
+    if (contact) {
+      const rel = (contact.relation || "").toLowerCase().trim();
+      const name = (contact.name || "").toLowerCase().trim();
+      if (rel === "owner" || rel === "boss" || rel === "self") return true;
+      if (name === "dk" || name === "boss" || name === "dk (boss)" || name.includes("divakar")) return true;
+    }
+
+    const lowerDisplay = (senderDisplayName || "").toLowerCase().trim();
+    if (lowerDisplay === "dk (boss)" || lowerDisplay === "divakar kumar (boss)" || lowerDisplay === "boss") {
+      return true;
+    }
+
+    return false;
+  }
+
   private async getGroupName(groupJid: string): Promise<string> {
     if (this.groupNameCache.has(groupJid)) return this.groupNameCache.get(groupJid)!;
     try {
@@ -573,91 +623,109 @@ class WhatsAppBotService {
 
       for (const msg of messages) {
         try {
-          // Log outgoing messages from Boss so they are stored in history forever
-          if (msg.key.fromMe) {
-            const remoteJid: string = msg.key.remoteJid || "";
-            const text = this.extractMessageText(msg);
-            if (text && remoteJid) {
-              const ts = msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : Date.now();
-              const outgoing: IncomingMessage = {
-                id: msg.key.id || Math.random().toString(36).substring(2, 9),
-                senderPhone: "me",
-                senderName: "DK (Boss)",
-                senderDisplayName: "Me",
-                replyJid: remoteJid,
-                groupId: remoteJid.endsWith("@g.us") ? remoteJid : null,
-                groupName: null,
-                isGroup: remoteJid.endsWith("@g.us"),
-                isUnknownContact: false,
-                text,
-                timestamp: ts,
-                dateStr: new Date(ts).toLocaleString("en-IN", {
-                  timeZone: "Asia/Kolkata",
-                  day: "numeric",
-                  month: "short",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                }),
-                isRead: true,
-              };
-              this.saveToFirestore(outgoing).catch(() => {});
-            }
-            continue;
-          }
-
-          const remoteJid: string = msg.key.remoteJid;
+          const remoteJid: string = msg.key?.remoteJid || "";
           if (!remoteJid) continue;
 
           const text = this.extractMessageText(msg);
           if (!text) continue;
 
           const isGroup = remoteJid.endsWith("@g.us");
-          const isLid = remoteJid.endsWith("@lid");
+          const isFromMe = !!msg.key?.fromMe;
+          const isBotSelfEcho = isFromMe && !!msg.key?.id && this.botSentMessageIds.has(msg.key.id);
+
+          // Log outgoing messages from Boss or Bot so they are stored in history forever
+          if (isFromMe) {
+            const ts = msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : Date.now();
+            const outgoing: IncomingMessage = {
+              id: msg.key.id || Math.random().toString(36).substring(2, 9),
+              senderPhone: "me",
+              senderName: "DK (Boss)",
+              senderDisplayName: "Me",
+              replyJid: remoteJid,
+              groupId: isGroup ? remoteJid : null,
+              groupName: isGroup ? await this.getGroupName(remoteJid) : null,
+              isGroup,
+              isUnknownContact: false,
+              text,
+              timestamp: ts,
+              dateStr: new Date(ts).toLocaleString("en-IN", {
+                timeZone: "Asia/Kolkata",
+                day: "numeric",
+                month: "short",
+                hour: "2-digit",
+                minute: "2-digit",
+              }),
+              isRead: true,
+            };
+            this.saveToFirestore(outgoing).catch(() => {});
+
+            // If this message was dispatched by the bot itself, skip processing to avoid echo loops
+            if (isBotSelfEcho) {
+              continue;
+            }
+
+            // If Boss typed on phone in a 1-on-1 personal chat with someone else, don't auto-reply
+            if (!isGroup) {
+              continue;
+            }
+          }
+
           const senderJid: string = isGroup
             ? (msg.key.participant || msg.key.participantAlt || remoteJid)
             : remoteJid;
 
-          // WhatsApp's newer LID (Linked ID) system means remoteJid/participant
-          // can be an internal ID like "123456@lid" instead of a real phone
-          // number JID ("91XXXXXXXXXX@s.whatsapp.net"). If we blindly strip
-          // digits from a @lid JID we get a fake "phone number" that will
-          // never match a saved contact and can never be sent a message.
-          // Baileys attaches the real phone-number JID as senderPn / participantPn
-          // (or msg.key.remoteJidAlt / participantAlt) when a message arrives
-          // via LID — prefer that for phone extraction and future sends.
+          // Check if sender is a WhatsApp LID (Linked ID)
+          const isParticipantLid = senderJid.endsWith("@lid");
+
+          // WhatsApp LID handling: prefer real phone JID if available
           const realPhoneJid: string | undefined =
             (msg as any).key?.senderPn ||
             (msg as any).key?.participantPn ||
             (isGroup ? (msg as any).key?.participantAlt : (msg as any).key?.remoteJidAlt) ||
-            (!isLid ? senderJid : undefined);
+            (!isParticipantLid ? senderJid : undefined);
 
-          const senderPhone = (realPhoneJid || senderJid || "")
+          const ownerPhone = (process.env.OWNER_WHATSAPP_NUMBER || "").replace(/\D/g, "");
+          let senderPhone = (realPhoneJid || senderJid || "")
             .split("@")[0]
             .split(":")[0]
             .replace(/\D/g, "");
-          const senderDisplayName: string = msg.pushName || (senderPhone ? `+${senderPhone}` : "Unknown");
 
-          // Keep the raw JID actually usable for a reply. If we only have a
-          // @lid identity and no resolved phone JID, replying must go back
-          // to that same @lid JID — sending to "@s.whatsapp.net" with the
-          // decoded LID digits will silently fail (wrong recipient / no-op).
-          const replyJid: string = realPhoneJid
+          if (isFromMe) {
+            senderPhone = ownerPhone || this.dedicatedPhone || "me";
+          }
+
+          const senderDisplayName: string = isFromMe
+            ? "DK (Boss)"
+            : (msg.pushName || (senderPhone ? `+${senderPhone}` : "Unknown"));
+
+          // Keep the raw JID actually usable for a reply
+          const replyJid: string = isGroup
+            ? remoteJid
+            : realPhoneJid
             ? `${senderPhone}@s.whatsapp.net`
             : senderJid;
 
           let groupName: string | null = null;
           if (isGroup) groupName = await this.getGroupName(remoteJid);
 
-          // Resolve name from DK's contacts book
-          let senderName = senderDisplayName;
-          let isUnknownContact = true;
+          let senderContact: any = null;
           try {
-            const contact = await contactsService.findContact(senderPhone);
-            if (contact && contact.id !== "temp") {
-              senderName = contact.name;
-              isUnknownContact = false; // Found in contacts book
-            }
+            senderContact = await contactsService.findContact(senderPhone);
           } catch {}
+
+          const isSenderOwner = isFromMe || this.isOwnerSender(senderPhone, senderDisplayName, senderJid, senderContact);
+          const isFromOwner = !isGroup && isSenderOwner;
+
+          // Resolve name from DK's contacts book & Boss recognition
+          let senderName = senderDisplayName;
+          let isUnknownContact = !isFromMe && !isSenderOwner;
+          if (isSenderOwner) {
+            senderName = "DK (Boss)";
+            isUnknownContact = false;
+          } else if (senderContact && senderContact.id !== "temp") {
+            senderName = senderContact.name;
+            isUnknownContact = false; // Found in contacts book
+          }
 
           const ts = msg.messageTimestamp
             ? Number(msg.messageTimestamp) * 1000
@@ -867,9 +935,6 @@ class WhatsAppBotService {
             }
           }
 
-          const ownerPhone = (process.env.OWNER_WHATSAPP_NUMBER || "").replace(/\D/g, "");
-          const isFromOwner = !isGroup && !!ownerPhone && senderPhone === ownerPhone;
-
           let consumedByDailyUpdate = false;
           if (isFromOwner) {
             // 1. Check if DK is setting/updating the Voice PIN (e.g. "voice pin - 123456", "voice pin: 994411")
@@ -922,20 +987,18 @@ class WhatsAppBotService {
             this.queueIncomingForAutoReply(senderName, senderPhone, text, isUnknownContact, replyJid, msg.key, quotedMessage);
           } else if (isGroup && this.autoReplyEnabled && this.sock && this.isConnected) {
             // ── WhatsApp Group Behavior: Silent listener by default, responds when called/tagged ──
-            const dedicatedPhone = this.dedicatedPhone || "";
-            const isMentioned =
-              /\b(friday|@friday|\/friday)\b/i.test(text) ||
-              (quotedMessage && (quotedMessage.sender.toLowerCase().includes("friday") || (dedicatedPhone && quotedMessage.senderPhone?.includes(dedicatedPhone))));
+            const isMentioned = this.isBotMentionedInGroup(msg, text, quotedMessage);
 
             if (isMentioned) {
-              const isSenderOwner = !!ownerPhone && senderPhone === ownerPhone;
               if (isSenderOwner) {
                 // Boss called Friday in the group
+                console.log(`[WhatsAppBot] Boss mentioned Friday in group "${groupName || remoteJid}"`);
                 this.handleOwnerWhatsAppMessage(senderName, senderPhone, text, remoteJid, msg.key, quotedMessage).catch((e) =>
                   console.error("[WhatsAppBot] Group Boss Friday processing error:", e)
                 );
               } else {
                 // Group member called Friday
+                console.log(`[WhatsAppBot] Member ${senderName} mentioned Friday in group "${groupName || remoteJid}"`);
                 this.handleGroupMentionAutoReply(senderName, senderPhone, text, remoteJid, groupName || "Group", msg.key, quotedMessage).catch((e) =>
                   console.error("[WhatsAppBot] Group Mention AI processing error:", e)
                 );
@@ -1732,8 +1795,79 @@ COMMUNICATION STYLE:
   }
 
   /**
+   * Checks if Friday is tagged, mentioned, or replied to in a WhatsApp Group message.
+   * Handles:
+   * 1. Direct text triggers: "friday", "@friday", "hello friday", "friday hello", "/friday", "fridaay"
+   * 2. WhatsApp native UI @mentions (mentionedJid array containing bot's JID or phone)
+   * 3. Swipe-to-reply quoting a message from Friday or bot phone
+   */
+  private isBotMentionedInGroup(msg: any, text: string, quotedMessage?: QuotedMessageContext | null): boolean {
+    const cleanText = (text || "").toLowerCase().trim();
+
+    // 1. Direct name / trigger keywords anywhere in message
+    const nameTriggers = [
+      "friday",
+      "@friday",
+      "/friday",
+      "#friday",
+      "fridaay",
+      "fryday",
+      "fraiday",
+      "frieday",
+    ];
+    if (nameTriggers.some((t) => cleanText.includes(t))) {
+      return true;
+    }
+
+    // 2. Hinglish / voice transcription regex variations
+    if (/(?:^|\s|[^\w])(?:@?friday|fridaay|fryday|fraiday)(?:$|\s|[^\w])/i.test(cleanText)) {
+      return true;
+    }
+
+    // 3. WhatsApp native UI @mention (mentionedJid in contextInfo)
+    const contextInfo =
+      msg.message?.extendedTextMessage?.contextInfo ||
+      msg.message?.imageMessage?.contextInfo ||
+      msg.message?.videoMessage?.contextInfo ||
+      msg.message?.documentMessage?.contextInfo;
+
+    const mentionedJids: string[] = contextInfo?.mentionedJid || [];
+    if (mentionedJids.length > 0) {
+      const botJid = this.sock?.user?.id || "";
+      const botPhone = (this.dedicatedPhone || botJid.split(":")[0].split("@")[0]).replace(/\D/g, "");
+      for (const jid of mentionedJids) {
+        const cleanJidPhone = jid.split("@")[0].split(":")[0].replace(/\D/g, "");
+        if (botPhone && cleanJidPhone && (cleanJidPhone === botPhone || botPhone.includes(cleanJidPhone) || cleanJidPhone.includes(botPhone))) {
+          return true;
+        }
+        if (botJid && jid.includes(botJid.split(":")[0])) {
+          return true;
+        }
+      }
+    }
+
+    // 4. Swipe-to-reply quoting Friday's previous message or bot number
+    if (quotedMessage && quotedMessage.isReply) {
+      const quotedSender = (quotedMessage.sender || "").toLowerCase();
+      const quotedPhone = (quotedMessage.senderPhone || "").replace(/\D/g, "");
+      const botPhone = (this.dedicatedPhone || (this.sock?.user?.id || "").split(":")[0].split("@")[0]).replace(/\D/g, "");
+
+      if (
+        quotedSender.includes("friday") ||
+        quotedSender.includes("me") ||
+        (botPhone && quotedPhone && (botPhone === quotedPhone || botPhone.includes(quotedPhone) || quotedPhone.includes(botPhone)))
+      ) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
    * Generates a concise, polite AI reply when Friday is tagged or mentioned in a WhatsApp Group.
    * Strictly enforces privacy rules to protect Boss DK's personal confidential information.
+   * Uses the full AUTO_REPLY_MODEL_CHAIN with timeout and fallback to guarantee response delivery.
    */
   private async handleGroupMentionAutoReply(
     senderName: string,
@@ -1744,8 +1878,15 @@ COMMUNICATION STYLE:
     messageKey: any,
     quotedMessage?: QuotedMessageContext | null
   ): Promise<void> {
+    const fallbackText = () => {
+      return `Main sun rahi hoon ${senderName}! Main Friday hoon — DK Boss ki AI assistant. DK abhi thode busy hain, agar koi important kaam hai to batayein main unhe note karwa dungi! 👍`;
+    };
+
     const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) return;
+    if (!apiKey) {
+      await this.sendHumanLikeMessage(groupJid, fallbackText(), text, messageKey);
+      return;
+    }
 
     const ai = new GoogleGenAI({ apiKey });
     const quotedSnippet = quotedMessage && quotedMessage.isReply
@@ -1764,18 +1905,35 @@ RULES FOR GROUP REPLIES:
 4. If they ask who you are: "Main Friday hoon — DK Boss ka intelligent AI assistant! ⚡"
 5. Do NOT use prefixes like 'Friday:' or markdown header hashes. Format with clean WhatsApp bold/italics.`;
 
-    try {
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash-lite",
-        contents: prompt,
-      });
-      const reply = response.text?.trim();
-      if (reply) {
-        await this.sendHumanLikeMessage(groupJid, reply, text, messageKey);
-        console.log(`[WhatsAppBot] Group Reply sent to "${groupName}" for ${senderName}: "${reply}"`);
+    const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T> =>
+      Promise.race([
+        p,
+        new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms)),
+      ]);
+
+    for (const model of WhatsAppBotService.AUTO_REPLY_MODEL_CHAIN) {
+      try {
+        const response = await withTimeout(
+          ai.models.generateContent({ model, contents: prompt }),
+          8000
+        );
+        const reply = response.text?.trim();
+        if (reply) {
+          await this.sendHumanLikeMessage(groupJid, reply, text, messageKey);
+          console.log(`[WhatsAppBot] Group Reply sent to "${groupName}" using ${model} for ${senderName}: "${reply}"`);
+          return;
+        }
+      } catch (err: any) {
+        console.warn(`[WhatsAppBot] Group mention model ${model} failed (${err?.message || err}), trying next model...`);
       }
-    } catch (e: any) {
-      console.error("[WhatsAppBot] Group mention auto-reply error:", e);
+    }
+
+    // Graceful fallback if all models fail
+    try {
+      await this.sendHumanLikeMessage(groupJid, fallbackText(), text, messageKey);
+      console.log(`[WhatsAppBot] Group fallback reply sent to "${groupName}" for ${senderName}`);
+    } catch (fallbackErr) {
+      console.error("[WhatsAppBot] Failed to send group fallback reply:", fallbackErr);
     }
   }
 
@@ -2240,8 +2398,22 @@ YOUR RULES FOR GENERATING THE WHATSAPP REPLY:
     // Record message dispatch with firewall
     humanBotFirewallService.recordDispatchedMessage("whatsapp", recipientKey);
 
+    // Quote the original message if messageKey is provided
+    const sendOptions: any = {};
+    if (messageKey) {
+      sendOptions.quoted = (messageKey as any).key ? messageKey : { key: messageKey };
+    }
+
     // Send the message
-    return await this.sock.sendMessage(jid, { text: trimmed });
+    const result = await this.sock.sendMessage(jid, { text: trimmed }, sendOptions);
+    if (result?.key?.id) {
+      this.botSentMessageIds.add(result.key.id);
+      if (this.botSentMessageIds.size > 500) {
+        const oldest = Array.from(this.botSentMessageIds).slice(0, 100);
+        oldest.forEach((id) => this.botSentMessageIds.delete(id));
+      }
+    }
+    return result;
   }
 
   public async sendMessage(toPhone: string, text: string): Promise<{ success: boolean; message: string }> {
