@@ -18,6 +18,15 @@ const Browsers = baileys.Browsers || baileys.default?.Browsers;
 
 type WASocket = any;
 
+export interface QuotedMessageContext {
+  isReply: boolean;
+  sender: string;
+  senderPhone?: string;
+  text: string;
+  mediaType: "text" | "photo" | "video" | "document" | "audio" | "location" | "contact" | "sticker";
+  stanzaId?: string;
+}
+
 // ---------------------------------------------------------------------------
 // Incoming message shape stored in RAM cache + Firestore whatsapp_inbox
 // ---------------------------------------------------------------------------
@@ -35,6 +44,8 @@ export interface IncomingMessage {
   timestamp: number;            // ms epoch
   dateStr: string;              // Formatted IST date string
   isRead: boolean;
+  // Swipe-to-reply: context of the original message that was replied to
+  quotedMessage?: QuotedMessageContext | null;
   // Only set on messages from DK's own paired number: true if this message
   // was already consumed as an answer to a forwarded daily-update question,
   // so other owner-reply listeners (e.g. coding-agent approval) should skip it.
@@ -268,6 +279,87 @@ class WhatsAppBotService {
       (m.reactionMessage ? `[Reaction: ${m.reactionMessage.text}]` : "") ||
       ""
     );
+  }
+
+  /**
+   * Extracts the full context of a swipe-to-reply (Quoted Message).
+   * Works across text, photo, video, document, audio, link, and contacts.
+   */
+  public extractQuotedContext(msg: any): QuotedMessageContext | null {
+    const m = msg.message;
+    if (!m) return null;
+
+    const contextInfo =
+      m.extendedTextMessage?.contextInfo ||
+      m.imageMessage?.contextInfo ||
+      m.videoMessage?.contextInfo ||
+      m.documentMessage?.contextInfo ||
+      m.audioMessage?.contextInfo ||
+      m.stickerMessage?.contextInfo ||
+      m.buttonsResponseMessage?.contextInfo ||
+      m.templateButtonReplyMessage?.contextInfo ||
+      m.interactiveResponseMessage?.contextInfo;
+
+    if (!contextInfo || !contextInfo.quotedMessage) return null;
+
+    const q = contextInfo.quotedMessage;
+    let text = "";
+    let mediaType: QuotedMessageContext["mediaType"] = "text";
+
+    if (q.conversation) {
+      text = q.conversation;
+      mediaType = "text";
+    } else if (q.extendedTextMessage?.text) {
+      text = q.extendedTextMessage.text;
+      mediaType = "text";
+    } else if (q.imageMessage) {
+      mediaType = "photo";
+      text = q.imageMessage.caption ? `[Photo: ${q.imageMessage.caption}]` : "[Photo / Image]";
+    } else if (q.videoMessage) {
+      mediaType = "video";
+      text = q.videoMessage.caption ? `[Video: ${q.videoMessage.caption}]` : "[Video Clip]";
+    } else if (q.documentMessage) {
+      mediaType = "document";
+      const name = q.documentMessage.fileName || "Document";
+      text = q.documentMessage.caption ? `[Document ${name}: ${q.documentMessage.caption}]` : `[Document: ${name}]`;
+    } else if (q.audioMessage) {
+      mediaType = "audio";
+      text = q.audioMessage.ptt ? "[Voice Note]" : "[Audio Recording]";
+    } else if (q.locationMessage) {
+      mediaType = "location";
+      text = `[Location: Lat ${q.locationMessage.degreesLatitude}, Long ${q.locationMessage.degreesLongitude}]`;
+    } else if (q.contactMessage) {
+      mediaType = "contact";
+      text = `[Contact Card: ${q.contactMessage.displayName}]`;
+    } else if (q.stickerMessage) {
+      mediaType = "sticker";
+      text = "[Sticker]";
+    }
+
+    // Resolve sender of the quoted message
+    let sender = "Someone";
+    let senderPhone: string | undefined;
+    const participant = contextInfo.participant || contextInfo.participantAlt || "";
+    const ownerNum = (process.env.OWNER_WHATSAPP_NUMBER || "").replace(/\D/g, "");
+    const partPhone = participant.split("@")[0].split(":")[0].replace(/\D/g, "");
+
+    if (partPhone) {
+      senderPhone = partPhone;
+      if (ownerNum && (partPhone.endsWith(ownerNum) || ownerNum.endsWith(partPhone))) {
+        sender = "DK (Boss)";
+      } else {
+        sender = `+${partPhone}`;
+      }
+    }
+
+    return {
+      isReply: true,
+      sender,
+      senderPhone,
+      text: text.trim(),
+      mediaType,
+      stanzaId: contextInfo.stanzaId,
+    };
   }
 
   private async getGroupName(groupJid: string): Promise<string> {
@@ -571,6 +663,8 @@ class WhatsAppBotService {
             ? Number(msg.messageTimestamp) * 1000
             : Date.now();
 
+          const quotedMessage = this.extractQuotedContext(msg);
+
           const incoming: IncomingMessage = {
             id: msg.key.id || Math.random().toString(36).substring(2, 9),
             senderPhone,
@@ -591,6 +685,7 @@ class WhatsAppBotService {
               minute: "2-digit",
             }),
             isRead: false,
+            quotedMessage,
           };
 
           // RAM cache (newest first, max 200)
@@ -818,13 +913,34 @@ class WhatsAppBotService {
 
             // 3. MASTER BOSS FRIDAY ASSISTANT ON WHATSAPP: Full Intelligence & Tool Calling for Boss
             if (!consumedByDailyUpdate && this.sock && this.isConnected) {
-              this.handleOwnerWhatsAppMessage(senderName, senderPhone, text, replyJid, msg.key).catch((e) =>
+              this.handleOwnerWhatsAppMessage(senderName, senderPhone, text, replyJid, msg.key, quotedMessage).catch((e) =>
                 console.error("[WhatsAppBot] Owner Master Friday processing error:", e)
               );
             }
           } else if (!isGroup && this.autoReplyEnabled && this.sock && this.isConnected) {
             // ── Smart AI Auto-Reply with Burst Debounce for 1-on-1 Personal Chats ──
-            this.queueIncomingForAutoReply(senderName, senderPhone, text, isUnknownContact, replyJid, msg.key);
+            this.queueIncomingForAutoReply(senderName, senderPhone, text, isUnknownContact, replyJid, msg.key, quotedMessage);
+          } else if (isGroup && this.autoReplyEnabled && this.sock && this.isConnected) {
+            // ── WhatsApp Group Behavior: Silent listener by default, responds when called/tagged ──
+            const dedicatedPhone = this.dedicatedPhone || "";
+            const isMentioned =
+              /\b(friday|@friday|\/friday)\b/i.test(text) ||
+              (quotedMessage && (quotedMessage.sender.toLowerCase().includes("friday") || (dedicatedPhone && quotedMessage.senderPhone?.includes(dedicatedPhone))));
+
+            if (isMentioned) {
+              const isSenderOwner = !!ownerPhone && senderPhone === ownerPhone;
+              if (isSenderOwner) {
+                // Boss called Friday in the group
+                this.handleOwnerWhatsAppMessage(senderName, senderPhone, text, remoteJid, msg.key, quotedMessage).catch((e) =>
+                  console.error("[WhatsAppBot] Group Boss Friday processing error:", e)
+                );
+              } else {
+                // Group member called Friday
+                this.handleGroupMentionAutoReply(senderName, senderPhone, text, remoteJid, groupName || "Group", msg.key, quotedMessage).catch((e) =>
+                  console.error("[WhatsAppBot] Group Mention AI processing error:", e)
+                );
+              }
+            }
           }
 
           // Notify server → broadcast to WebSocket clients. Flag whether this
@@ -847,6 +963,7 @@ class WhatsAppBotService {
   /**
    * Master FRIDAY AI Assistant for Boss (DK) on WhatsApp.
    * Gives DK 100% full autonomous access via WhatsApp chat:
+   * - Swipe-to-reply (Quoted Message) contextual awareness across all media
    * - YouTube analysis & timestamps
    * - RailRadar live train status, PNR, fares, seats, station boards
    * - Photo / Vision / Document / Video intelligence
@@ -858,15 +975,19 @@ class WhatsAppBotService {
     senderPhone: string,
     text: string,
     replyJid: string,
-    messageKey: any
+    messageKey: any,
+    quotedMessage?: QuotedMessageContext | null
   ): Promise<void> {
     const rawText = (text || "").trim();
     if (!rawText) return;
 
+    // Combined context text for link/train detection
+    const fullSearchContext = quotedMessage?.text ? `${quotedMessage.text}\n${rawText}` : rawText;
+
     // 1. YouTube Video Intelligence ("https://youtube.com/..." / "https://youtu.be/...")
     try {
       const { youtubeService } = await import("./youtubeService");
-      const ytVideoId = youtubeService.extractVideoId(rawText);
+      const ytVideoId = youtubeService.extractVideoId(rawText) || (quotedMessage?.text ? youtubeService.extractVideoId(quotedMessage.text) : null);
       if (ytVideoId && !/^(media\s*search|vault\s*search)/i.test(rawText)) {
         await this.sendHumanLikeMessage(replyJid, "🎬 *YouTube Video analyze ho raha hai... (Transcripts & Timestamps)* ⚡", rawText, messageKey);
         const analysis = await youtubeService.analyzeVideo(ytVideoId);
@@ -915,16 +1036,20 @@ class WhatsAppBotService {
       const trainMatch =
         rawText.match(/^(?:\/train|train|live\s*train|railradar)\s+(\d{4,5}|\w+)/i) ||
         rawText.match(/\b(\d{5})\b(?:\s+train|\s+running|\s+status|\s+kahan)/i) ||
-        rawText.match(/train\s+(?:status|kahan\s*hai|live|no|number)?\s*[:=-]?\s*(\d{4,5})/i);
-      if (trainMatch) {
+        rawText.match(/train\s+(?:status|kahan\s*hai|live|no|number)?\s*[:=-]?\s*(\d{4,5})/i) ||
+        (quotedMessage?.text ? quotedMessage.text.match(/\b(\d{5})\b/) : null);
+      if (trainMatch && (/(status|train|kahan|late|delay|running)/i.test(rawText) || rawText.match(/\b\d{5}\b/))) {
         const trainQuery = trainMatch[1];
         const trainStatus = await railRadarService.getLiveTrainStatus(trainQuery);
         await this.sendHumanLikeMessage(replyJid, trainStatus.message, rawText, messageKey);
         return;
       }
 
-      const pnrMatch = rawText.match(/^(?:\/pnr|pnr|pnr\s*status)\s+(\d{10})/i) || rawText.match(/\b(\d{10})\b/i);
-      if (pnrMatch && (/pnr/i.test(rawText) || pnrMatch[0].startsWith("/pnr") || rawText.length === 10)) {
+      const pnrMatch =
+        rawText.match(/^(?:\/pnr|pnr|pnr\s*status)\s+(\d{10})/i) ||
+        rawText.match(/\b(\d{10})\b/i) ||
+        (quotedMessage?.text ? quotedMessage.text.match(/\b(\d{10})\b/) : null);
+      if (pnrMatch && (/pnr/i.test(rawText) || /pnr/i.test(quotedMessage?.text || "") || pnrMatch[0].startsWith("/pnr") || rawText.length === 10)) {
         const pnrNum = pnrMatch[1];
         const pnrRes = await railRadarService.getPnrStatus(pnrNum);
         await this.sendHumanLikeMessage(replyJid, pnrRes.message, rawText, messageKey);
@@ -1087,7 +1212,7 @@ class WhatsAppBotService {
 
     // 10. AUTONOMOUS MASTER FRIDAY AI WITH TOOL CALLING FOR BOSS
     try {
-      const reply = await this.executeBossChatAI(senderName, rawText);
+      const reply = await this.executeBossChatAI(senderName, rawText, quotedMessage);
       await this.sendHumanLikeMessage(replyJid, reply, rawText, messageKey);
     } catch (aiErr: any) {
       console.error("[WhatsAppBot] Error in executeBossChatAI:", aiErr);
@@ -1097,8 +1222,13 @@ class WhatsAppBotService {
 
   /**
    * Autonomous AI Chat Engine for Boss (DK) with tool calling.
+   * Understands swipe-to-reply quoted messages across text, media, documents, and links.
    */
-  private async executeBossChatAI(senderName: string, messageText: string): Promise<string> {
+  private async executeBossChatAI(
+    senderName: string,
+    messageText: string,
+    quotedMessage?: QuotedMessageContext | null
+  ): Promise<string> {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       return `Haanji Boss! Main Friday hoon. API Key abhi configure nahi hai, par main aapki baat note kar rahi hoon!`;
@@ -1277,6 +1407,13 @@ You have FULL AUTONOMOUS ACCESS to execute all tools:
 2. Cross-platform bridging: Forward any text/photo/video/file between WhatsApp and Telegram using 'forward_to_telegram' and 'forward_from_telegram_to_whatsapp'.
 3. Send WhatsApp messages, lookup contacts, set reminders, take notes, track expenses, fetch weather, news, search web, and answer any technical, coding, personal, or life questions Boss asks.
 
+SWIPE-TO-REPLY / QUOTED MESSAGE REASONING (CRITICAL):
+When Boss replies to a previous message by swiping left on WhatsApp:
+You will receive:
+- '📩 PREVIOUS QUOTED MESSAGE' (The original message, photo/image description, video clip, PDF/document, YouTube link, or question that was swiped on).
+- '💬 BOSS'S SWIPE-REPLY & QUESTION/INSTRUCTION' (What Boss wrote in response).
+RULE: You MUST FIRST read and understand the PREVIOUS QUOTED MESSAGE, and THEN answer or execute Boss's reply instruction in that exact context! (For example, if Boss quotes a photo and writes "analysis", analyze that photo. If Boss quotes a document or text and asks "iska kya matlab hai?", explain the quoted content).
+
 BOSS IDENTITY & MEMORY:
 ${memoryContext}
 
@@ -1409,6 +1546,18 @@ COMMUNICATION STYLE:
       return { status: "unknown_tool" };
     };
 
+    let userTurnMessage = messageText;
+    if (quotedMessage && quotedMessage.isReply) {
+      userTurnMessage = `[SWIPE-TO-REPLY CONTEXT: Boss replied by swiping left on a previous message/media]
+📩 PREVIOUS QUOTED MESSAGE (From: ${quotedMessage.sender}, Type: ${quotedMessage.mediaType.toUpperCase()}):
+"${quotedMessage.text}"
+
+💬 BOSS'S SWIPE-REPLY & QUESTION/INSTRUCTION:
+"${messageText}"
+
+(CRITICAL REASONING: Read and understand the previous quoted message first, and then directly answer/execute Boss's reply in that precise context!)`;
+    }
+
     for (const model of ["gemini-2.5-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.6-flash"]) {
       try {
         const chat = ai.chats.create({
@@ -1419,7 +1568,7 @@ COMMUNICATION STYLE:
           },
         });
 
-        let response = await chat.sendMessage({ message: messageText });
+        let response = await chat.sendMessage({ message: userTurnMessage });
 
         let turns = 0;
         while (response.functionCalls && response.functionCalls.length > 0 && turns < 4) {
@@ -1462,11 +1611,12 @@ COMMUNICATION STYLE:
     text: string,
     isUnknownContact: boolean,
     replyJid: string,
-    messageKey: any
+    messageKey: any,
+    quotedMessage?: QuotedMessageContext | null
   ) {
     const senderKey = senderPhone || replyJid;
 
-    const existing = this.incomingDebounceMap.get(senderKey);
+    const existing: any = this.incomingDebounceMap.get(senderKey);
     if (existing) {
       if (existing.timer) clearTimeout(existing.timer);
       existing.texts.push(text);
@@ -1474,6 +1624,7 @@ COMMUNICATION STYLE:
       existing.isUnknownContact = isUnknownContact;
       existing.replyJid = replyJid;
       existing.latestMsgKey = messageKey;
+      if (quotedMessage) existing.quotedMessage = quotedMessage;
     } else {
       this.incomingDebounceMap.set(senderKey, {
         timer: null,
@@ -1483,10 +1634,11 @@ COMMUNICATION STYLE:
         isUnknownContact,
         replyJid,
         latestMsgKey: messageKey,
-      });
+        quotedMessage,
+      } as any);
     }
 
-    const entry = this.incomingDebounceMap.get(senderKey)!;
+    const entry: any = this.incomingDebounceMap.get(senderKey)!;
     entry.timer = setTimeout(async () => {
       this.incomingDebounceMap.delete(senderKey);
       const combinedText = entry.texts.join("\n");
@@ -1497,7 +1649,8 @@ COMMUNICATION STYLE:
           combinedText,
           entry.isUnknownContact,
           entry.replyJid,
-          entry.latestMsgKey
+          entry.latestMsgKey,
+          entry.quotedMessage
         );
       } catch (e) {
         console.error("[WhatsAppBot] Auto-reply handling failed:", e);
@@ -1526,7 +1679,8 @@ COMMUNICATION STYLE:
     text: string,
     isUnknownContact: boolean,
     replyJid: string,
-    messageKey?: any
+    messageKey?: any,
+    quotedMessage?: QuotedMessageContext | null
   ) {
     // 1. Check for a pending "should I ask DK?" confirmation from this sender.
     const pending = await dailyUpdateService.getRecentPendingForSender(senderPhone);
@@ -1574,7 +1728,55 @@ COMMUNICATION STYLE:
     }
 
     // 4. Ordinary chat — fall through to the normal AI reply, rate-limited.
-    await this.tryFactualOrChatReply(senderName, senderPhone, text, isUnknownContact, replyJid, messageKey);
+    await this.tryFactualOrChatReply(senderName, senderPhone, text, isUnknownContact, replyJid, messageKey, quotedMessage);
+  }
+
+  /**
+   * Generates a concise, polite AI reply when Friday is tagged or mentioned in a WhatsApp Group.
+   * Strictly enforces privacy rules to protect Boss DK's personal confidential information.
+   */
+  private async handleGroupMentionAutoReply(
+    senderName: string,
+    senderPhone: string,
+    text: string,
+    groupJid: string,
+    groupName: string,
+    messageKey: any,
+    quotedMessage?: QuotedMessageContext | null
+  ): Promise<void> {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) return;
+
+    const ai = new GoogleGenAI({ apiKey });
+    const quotedSnippet = quotedMessage && quotedMessage.isReply
+      ? `\n- PREVIOUS QUOTED MESSAGE IN GROUP (From: ${quotedMessage.sender}, Type: ${quotedMessage.mediaType}): "${quotedMessage.text}"`
+      : "";
+
+    const prompt = `You are Friday, the ultra-smart, witty and polite AI assistant of DK (Divakar Kumar).
+You have been tagged or mentioned in a WhatsApp Group named "${groupName}".
+Message Sender: "${senderName}" (+${senderPhone})${quotedSnippet}
+Message in Group: "${text}"
+
+RULES FOR GROUP REPLIES:
+1. Speak in crisp, natural, intelligent Hinglish (maximum 1-3 short lines).
+2. Answer their question or request directly (if they ask for general knowledge, coding help, calculations, facts, train status, weather, or greetings).
+3. PRIVACY & SECURITY (STRICT): NEVER disclose DK Boss's confidential private information (home address, personal passwords, bank details, private schedule) in a public group.
+4. If they ask who you are: "Main Friday hoon — DK Boss ka intelligent AI assistant! ⚡"
+5. Do NOT use prefixes like 'Friday:' or markdown header hashes. Format with clean WhatsApp bold/italics.`;
+
+    try {
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash-lite",
+        contents: prompt,
+      });
+      const reply = response.text?.trim();
+      if (reply) {
+        await this.sendHumanLikeMessage(groupJid, reply, text, messageKey);
+        console.log(`[WhatsAppBot] Group Reply sent to "${groupName}" for ${senderName}: "${reply}"`);
+      }
+    } catch (e: any) {
+      console.error("[WhatsAppBot] Group mention auto-reply error:", e);
+    }
   }
 
   /** The rate-limited Gemini smart-reply path for ordinary chit-chat, subject to the daily per-contact limit. */
@@ -1584,7 +1786,8 @@ COMMUNICATION STYLE:
     text: string,
     isUnknownContact: boolean,
     replyJid: string,
-    messageKey?: any
+    messageKey?: any,
+    quotedMessage?: QuotedMessageContext | null
   ) {
     const now = Date.now();
     const senderKey = senderPhone || replyJid;
@@ -1617,7 +1820,7 @@ COMMUNICATION STYLE:
     this.lastReplyAt.set(senderKey, now);
     try {
       if (this.sock && this.isConnected) {
-        const aiReply = await this.generateSmartAutoReply(senderName, senderPhone, text, isUnknownContact);
+        const aiReply = await this.generateSmartAutoReply(senderName, senderPhone, text, isUnknownContact, undefined, quotedMessage);
         await this.sendHumanLikeMessage(replyJid, aiReply, text, messageKey);
         console.log(`[WhatsAppBot] Smart AI Reply sent to ${senderName} (+${senderPhone}): "${aiReply}"`);
       }
@@ -1772,7 +1975,8 @@ COMMUNICATION STYLE:
     senderPhone: string,
     messageText: string,
     isUnknownContact: boolean,
-    relation?: string
+    relation?: string,
+    quotedMessage?: QuotedMessageContext | null
   ): Promise<string> {
     const fallbackText = () => {
       return `Boss 🧑‍🦱 abhi busy hain, unke aate hi unko bataunga aapka msg aaya hai, reply jaldi milega 😊😶‍🌫️`;
@@ -1785,13 +1989,17 @@ COMMUNICATION STYLE:
     }
 
     const ai = new GoogleGenAI({ apiKey });
+    const quotedSnippet = quotedMessage && quotedMessage.isReply
+      ? `\n- PREVIOUS QUOTED MESSAGE (Sender: ${quotedMessage.sender}, Type: ${quotedMessage.mediaType}): "${quotedMessage.text}"`
+      : "";
+
     const prompt = `You are Friday, the highly intelligent, polite, warm, witty and deeply human-like personal voice AI companion of DK (Divakar Kumar).
 You are managing DK's personal WhatsApp account while DK is away/busy.
 
 Incoming WhatsApp message details:
 - Sender Name: "${senderName}"
 - Contact Status: ${isUnknownContact ? "Unknown Contact (Not saved in phonebook)" : `Saved in phonebook${relation ? ` (Relationship: ${relation})` : ""}`}
-- Sender Phone: +${senderPhone}
+- Sender Phone: +${senderPhone}${quotedSnippet}
 - Message Received: "${messageText}"
 
 YOUR RULES FOR GENERATING THE WHATSAPP REPLY:
