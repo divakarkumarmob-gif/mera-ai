@@ -188,6 +188,18 @@ async function startServer() {
     }
   });
 
+  whatsappBotService.setCallTriggerCallback((callData) => {
+    const payload = JSON.stringify({
+      type: "trigger_incoming_call",
+      callerName: callData.callerName,
+      isOwner: callData.isOwner,
+      callId: callData.callId,
+    });
+    for (const client of connectedClients) {
+      if (client.readyState === client.OPEN) client.send(payload);
+    }
+  });
+
   whatsappCloudService.setMessageCallback((msg) => {
     const payload = JSON.stringify({
       type: "whatsapp_incoming",

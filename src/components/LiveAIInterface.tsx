@@ -22,6 +22,7 @@ import { ProductDeckCarousel } from './ProductDeckCarousel';
 import { EcomProduct } from '@/services/productPriceService';
 import AppAccessSection from './AppAccessSection';
 import EcommerceAccountsSection from './EcommerceAccountsSection';
+import IncomingCallScreen from './IncomingCallScreen';
 import { ShoppingBag } from 'lucide-react';
 
 interface LiveAIInterfaceProps {
@@ -907,6 +908,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
     const [inactivityCountdown, setInactivityCountdown] = useState<number | null>(null);
     const [showCaptions, setShowCaptions] = useState(true);
     const [captionText, setCaptionText] = useState('');
+    const [remoteIncomingCall, setRemoteIncomingCall] = useState<{ callerName: string; callId: string } | null>(null);
     const [showChatHistory, setShowChatHistory] = useState(false);
     const [showCodeAgent, setShowCodeAgent] = useState(false);
     const [showWebCrawler, setShowWebCrawler] = useState(false);
@@ -2304,6 +2306,12 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                         }, 300);
                     }
 
+                } else if (msg.type === 'trigger_incoming_call') {
+                    console.log('[LiveAIInterface] 📞 Remote incoming call trigger received:', msg);
+                    setRemoteIncomingCall({
+                        callerName: msg.callerName || 'FRIDAY AI',
+                        callId: msg.callId,
+                    });
                 } else if (msg.type === 'session_reconnecting') {
                     isInitializedRef.current = false;
                     isAiSpeaking.current = false;
@@ -3667,6 +3675,20 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                     src={`https://www.youtube-nocookie.com/embed/${nowPlayingMusic.videoId}?autoplay=1&enablejsapi=1&controls=0&playsinline=1`}
                     className="fixed -top-[9999px] -left-[9999px] w-[120px] h-[120px] pointer-events-none opacity-1 z-[-99]"
                     allow="autoplay; encrypted-media; fullscreen"
+                />
+            )}
+
+            {/* 📞 Remote Triggered Real Incoming Call Modal */}
+            {remoteIncomingCall && (
+                <IncomingCallScreen
+                    callerName={remoteIncomingCall.callerName}
+                    onAccept={() => {
+                        setRemoteIncomingCall(null);
+                        ensureConnection(true).catch(() => {});
+                    }}
+                    onDecline={() => {
+                        setRemoteIncomingCall(null);
+                    }}
                 />
             )}
         </div>

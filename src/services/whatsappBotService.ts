@@ -204,11 +204,16 @@ class WhatsAppBotService {
     }, delayMs);
   }
 
-  // ── Public API ─────────────────────────────────────────────────────────────
+  private callTriggerCallback: ((data: { callerName: string; isOwner: boolean; callId: string }) => void) | null = null;
 
   /** Register a callback that fires whenever a new incoming message arrives. */
   public setMessageCallback(cb: (msg: IncomingMessage) => void) {
     this.messageCallback = cb;
+  }
+
+  /** Register a callback that fires to ring connected phone app */
+  public setCallTriggerCallback(cb: (data: { callerName: string; isOwner: boolean; callId: string }) => void) {
+    this.callTriggerCallback = cb;
   }
 
   /** Add an incoming message (e.g. from WhatsApp Cloud API) to RAM cache */
@@ -1220,14 +1225,27 @@ class WhatsAppBotService {
       console.warn("[WhatsAppBot] Direct recent media Q&A notice:", recentMediaErr);
     }
 
-    // 0.08 1-Click Live Voice Call Room ("call me", "friday call me", "call karo", "mujhe call karo", "@call", "/call", "live call", "voice call")
+    // 0.08 Direct Auto-Ring Calling Engine ("call me", "friday call me", "call karo", "mujhe call karo", "@call", "/call", "live call", "voice call")
     if (
       /^(?:@call|\/call|call\s*me|call\s*karo|mujhe\s*call\s*karo|friday\s*call\s*me|voice\s*call|live\s*call|call\s*lagao|baat\s*karni\s*hai\s*call\s*par)/i.test(rawText) ||
       rawText.toLowerCase() === "call"
     ) {
       const { whatsappFeatureEngine } = await import("./whatsappFeatureEngine");
       const callCard = whatsappFeatureEngine.generateLiveVoiceCallCard("Boss DK", true);
-      await this.sendHumanLikeMessage(replyJid, callCard, rawText, messageKey);
+      const callIdMatch = callCard.match(/callId=([a-zA-Z0-9_]+)/);
+      const callId = callIdMatch ? callIdMatch[1] : `call_${Date.now()}`;
+
+      // Broadcast instant remote incoming call ring to Friday Call App on phone
+      if (this.callTriggerCallback) {
+        this.callTriggerCallback({ callerName: "FRIDAY AI (Boss)", isOwner: true, callId });
+      }
+
+      await this.sendHumanLikeMessage(
+        replyJid,
+        `📞 *Boss DK, Friday aapke phone par direct call mila rahi hai...* ⚡\n\n🔔 *Phone par ghanti baj rahi hai! Phone screen par Green button swipe karke baat kijiye.*\n\n${callCard}`,
+        rawText,
+        messageKey
+      );
       return;
     }
 
