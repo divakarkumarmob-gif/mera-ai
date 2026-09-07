@@ -922,6 +922,16 @@ YOUR RULES FOR GENERATING THE WHATSAPP REPLY:
         return;
       }
       this.stopKeepAlive();
+
+      // Cleanly teardown previous socket and listeners to prevent socket memory leak
+      if (this.sock) {
+        try {
+          this.sock.ev.removeAllListeners?.();
+          this.sock.end(undefined);
+        } catch {}
+        this.sock = null;
+      }
+
       const { state, saveCreds, clearAuth } = await useFirestoreAuthState();
       this.clearAuthFn = clearAuth;
       const versionResult = await fetchLatestBaileysVersion?.();

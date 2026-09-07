@@ -610,7 +610,7 @@ class InstagramBotService {
     if (this.pollInterval) clearTimeout(this.pollInterval);
 
     // Initial check after 3.5s
-    setTimeout(() => {
+    this.pollInterval = setTimeout(() => {
       this.checkInbox().catch(() => {});
       this.scheduleNextInboxCheck();
     }, 3500);

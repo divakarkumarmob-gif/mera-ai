@@ -93,6 +93,16 @@ class LiveScratchService {
       spokenTimeIST,
     };
 
+    // Keep inMemoryScratch bounded to avoid unbounded RAM growth
+    if (this.inMemoryScratch.size > 300) {
+      const cutoff = now - MS_24_HOURS;
+      for (const [tId, t] of this.inMemoryScratch.entries()) {
+        if (t.timestamp < cutoff) {
+          this.inMemoryScratch.delete(tId);
+        }
+      }
+    }
+
     this.inMemoryScratch.set(id, turn);
 
     // Write encrypted asynchronously to Firestore

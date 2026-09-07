@@ -1786,7 +1786,7 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     const stopAudio = () => {
         if (outputAudioCtx.current && outputAudioCtx.current.state !== 'closed') {
             try { outputAudioCtx.current.close(); } catch {}
-            outputAudioCtx.current = createAudioContext(24000);
+            outputAudioCtx.current = null;
         }
     };
 
@@ -1795,7 +1795,10 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
         ws.current?.close();
         processor.current?.disconnect();
         processor.current = null;
-        if (inputAudioCtx.current && inputAudioCtx.current.state !== 'closed') inputAudioCtx.current.close();
+        if (inputAudioCtx.current && inputAudioCtx.current.state !== 'closed') {
+            try { inputAudioCtx.current.close(); } catch {}
+            inputAudioCtx.current = null;
+        }
         mediaStreamRef.current?.getTracks().forEach(t => t.stop());
         mediaStreamRef.current = null;
         stopAudio();
@@ -1828,7 +1831,18 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
     }, [isRecording]);
 
     useEffect(() => {
-        return () => { stopRecording(); };
+        return () => {
+            stopRecording();
+            stopMusicPlayback();
+            if (musicDspAudioCtxRef.current && musicDspAudioCtxRef.current.state !== 'closed') {
+                try { musicDspAudioCtxRef.current.close(); } catch {}
+                musicDspAudioCtxRef.current = null;
+            }
+            if (music8dIntervalRef.current) {
+                clearInterval(music8dIntervalRef.current);
+                music8dIntervalRef.current = null;
+            }
+        };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
@@ -2129,7 +2143,13 @@ export default function LiveAIInterface({ onClose }: LiveAIInterfaceProps) {
                 if (typeof event.data !== 'string') return;
                 const msg = JSON.parse(event.data);
                 if (msg.audio) {
+                    if (!outputAudioCtx.current || outputAudioCtx.current.state === 'closed') {
+                        outputAudioCtx.current = createAudioContext(24000);
+                    }
                     if (outputAudioCtx.current) {
+                        if (outputAudioCtx.current.state === 'suspended') {
+                            outputAudioCtx.current.resume().catch(() => {});
+                        }
                         aiTurnActiveRef.current = true;
                         turnCompletePendingRef.current = false;
                         setStatus("Speaking...");

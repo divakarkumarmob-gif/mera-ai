@@ -80,6 +80,16 @@ class MemoryEngine {
 
   public startSession(sessionId: string): ConversationSession {
     const now = Date.now();
+    // Prune stale sessions (> 6 hours old) if map grows large to prevent memory leak
+    if (this.activeSessions.size > 40) {
+      const staleCutoff = now - 6 * 60 * 60 * 1000;
+      for (const [id, s] of this.activeSessions.entries()) {
+        if (s.startTime < staleCutoff) {
+          this.activeSessions.delete(id);
+        }
+      }
+    }
+
     const session: ConversationSession = {
       id: sessionId,
       startTime: now,
