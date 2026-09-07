@@ -17,6 +17,8 @@ export interface InstagramStatus {
   autoReplyEnabled: boolean;
   requiresTwoFactor?: boolean;
   twoFactorInfo?: any;
+  lastError?: string | null;
+  isEnvConfigured?: boolean;
 }
 
 export interface InstagramUserProfile {
@@ -42,6 +44,7 @@ class InstagramBotService {
   private processedItemIds: Set<string> = new Set();
   private pendingTwoFactor: { twoFactorIdentifier: string; username: string } | null = null;
   private messageCallback: ((msg: { sender: string; text: string; time: string; igid: string }) => void) | null = null;
+  private lastError: string | null = null;
 
   // Multi-tier model fallback chain
   private static readonly MODEL_FALLBACK_CHAIN = [
@@ -65,22 +68,41 @@ class InstagramBotService {
   }
 
   /**
-   * Initializes session from Firestore or Local JSON or .env credentials
+   * Initializes session from .env Session ID or Firestore or Local JSON or .env credentials
    */
   public async initSession() {
     try {
-      // 1. Try restore from Firestore
+      // 1. Priority 1: Check .env INSTAGRAM_SESSION_ID or INSTAGRAM_SESSIONID or INSTAGRAM_COOKIE
+      const envSession = (process.env.INSTAGRAM_SESSION_ID || process.env.INSTAGRAM_SESSIONID || process.env.INSTAGRAM_COOKIE || "").trim();
+      const envUser = (process.env.INSTAGRAM_USERNAME || "").trim();
+
+      if (envSession) {
+        console.log("[InstagramBot] Auto-logging in via .env INSTAGRAM_SESSION_ID...");
+        const res = await this.loginWithSessionId(envSession, envUser || undefined);
+        if (res.success) {
+          this.lastError = null;
+          return;
+        } else {
+          this.lastError = res.message;
+          console.warn("[InstagramBot] .env session login failed:", res.message);
+        }
+      }
+
+      // 2. Priority 2: Try restore from Firestore
       const sessionDoc = await db.collection("instagram_auth").doc("session").get().catch(() => null);
       if (sessionDoc && sessionDoc.exists) {
         const data = sessionDoc.data() as any;
         if (data?.session && data?.username) {
           console.log(`[InstagramBot] Restoring session from Firestore for @${data.username}...`);
           const restored = await this.restoreSession(data.username, data.session);
-          if (restored) return;
+          if (restored) {
+            this.lastError = null;
+            return;
+          }
         }
       }
 
-      // 2. Try restore from Local File
+      // 3. Priority 3: Try restore from Local File
       if (fs.existsSync(LOCAL_SESSION_FILE)) {
         try {
           const raw = fs.readFileSync(LOCAL_SESSION_FILE, "utf-8");
@@ -88,20 +110,28 @@ class InstagramBotService {
           if (data?.session && data?.username) {
             console.log(`[InstagramBot] Restoring session from local cache for @${data.username}...`);
             const restored = await this.restoreSession(data.username, data.session);
-            if (restored) return;
+            if (restored) {
+              this.lastError = null;
+              return;
+            }
           }
         } catch {}
       }
 
-      // 3. Fallback: Auto-login with .env credentials if provided
-      const envUser = (process.env.INSTAGRAM_USERNAME || "").trim();
+      // 4. Priority 4: Fallback auto-login with .env username/password if provided
       const envPass = (process.env.INSTAGRAM_PASSWORD || "").trim();
       if (envUser && envPass) {
         console.log(`[InstagramBot] Auto-logging in via .env credentials for @${envUser}...`);
-        await this.login(envUser, envPass);
+        const res = await this.login(envUser, envPass);
+        if (res.success) {
+          this.lastError = null;
+        } else {
+          this.lastError = res.message;
+        }
       }
     } catch (e: any) {
       console.warn("[InstagramBot] Init session standby:", e?.message || e);
+      this.lastError = e?.message || String(e);
     }
   }
 
@@ -532,6 +562,9 @@ class InstagramBotService {
   }
 
   public getStatus(): InstagramStatus {
+    const hasEnvSession = !!(process.env.INSTAGRAM_SESSION_ID || process.env.INSTAGRAM_SESSIONID || process.env.INSTAGRAM_COOKIE);
+    const hasEnvCreds = !!(process.env.INSTAGRAM_USERNAME && process.env.INSTAGRAM_PASSWORD);
+
     return {
       isLoggedIn: this.isLoggedIn,
       username: this.currentUsername,
@@ -541,6 +574,8 @@ class InstagramBotService {
       totalMessagesProcessed: this.totalMessagesProcessed,
       autoReplyEnabled: this.autoReplyEnabled,
       requiresTwoFactor: !!this.pendingTwoFactor,
+      lastError: this.lastError,
+      isEnvConfigured: hasEnvSession || hasEnvCreds,
     };
   }
 
