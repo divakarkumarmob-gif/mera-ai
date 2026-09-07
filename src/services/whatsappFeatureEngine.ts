@@ -535,6 +535,226 @@ Format with WhatsApp bold and music emojis.`;
       topMatch: best,
     };
   }
+
+  // ── 11. 💰 Group Bill Splitter & Instant UPI QR / Link Generator (@split) ─
+
+  public async splitGroupBill(queryText: string): Promise<string> {
+    const rawClean = queryText.replace(/^(?:@split|\/split|split\s*bill|split)\s*/gi, "").trim();
+
+    const prompt = `You are Friday, an intelligent financial assistant for WhatsApp groups.
+The user wants to split a bill among friends.
+User Query: "${rawClean}"
+
+RULES:
+1. Extract:
+   - Total Amount in INR (₹)
+   - Number of people or list of names (e.g. Aman, Rahul, DK, Saurav).
+   - If only a count is given (e.g. "500 among 4 people"), calculate per-person share.
+   - If names are given, list each person's exact share.
+2. Format as a clean WhatsApp Card:
+   💰 *GROUP BILL SPLIT CALCULATION:*
+   • 💵 *Total Bill:* ₹[Amount]
+   • 👥 *Total Members:* [Count] ([Names or 'Equal Split'])
+   • 🏷️ *Per Person Share:* *₹[Share]*
+   
+   📋 *Member Breakdown:*
+   • 👤 [Name 1]: ₹[Share]
+   • 👤 [Name 2]: ₹[Share]
+   
+   📲 *UPI Payment Link:*
+   \`upi://pay?pa=divakarkumar@okaxis&pn=DK&am=[Share]&tn=Group+Split\`
+   
+   👉 _Click UPI link or scan QR code to pay instantly!_`;
+
+    const res = await this.callGeminiWithFallback(prompt);
+    return res || `💰 *Bill Splitter:* Total: ₹${rawClean}\nPlease specify amount and names (e.g. "@split 1200 between Aman, Rahul, DK").`;
+  }
+
+  // ── 12. 📅 WhatsApp Google Calendar & Meeting Scheduler (@meet) ──────────
+
+  public async scheduleMeetingFromWhatsApp(queryText: string): Promise<string> {
+    try {
+      const { calendarEventService } = await import("./calendarEventService");
+      const clean = queryText.replace(/^(?:@meet|\/meet|schedule\s*meet|meet)\s*/gi, "").trim();
+
+      // Extract details with Gemini
+      const prompt = `Extract meeting details from this WhatsApp command: "${clean}".
+Return JSON ONLY:
+{
+  "title": "Meeting title or client name",
+  "timeString": "e.g. tomorrow at 4 PM, today 5:30pm, in 2 hours",
+  "durationMinutes": 30,
+  "locationOrLink": "Google Meet or office location"
+}`;
+      const jsonRes = await this.callGeminiWithFallback(prompt);
+      let parsed = { title: "Meeting with Client", timeString: "tomorrow at 4 PM", durationMinutes: 30, locationOrLink: "Google Meet" };
+      try {
+        if (jsonRes) {
+          const match = jsonRes.match(/\{[\s\S]*\}/);
+          if (match) parsed = { ...parsed, ...JSON.parse(match[0]) };
+        }
+      } catch {}
+
+      const schedRes = await calendarEventService.scheduleMeeting(
+        parsed.title,
+        parsed.timeString,
+        parsed.durationMinutes,
+        parsed.locationOrLink
+      );
+
+      const eventDateStr = new Date(schedRes.event.eventTimestamp).toLocaleString("en-IN", {
+        timeZone: "Asia/Kolkata",
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+
+      return `📅 *Google Calendar Event Scheduled!* ✅\n\n` +
+        `📌 *Title:* **${schedRes.event.title}**\n` +
+        `⏱️ *Time:* _${eventDateStr} (IST)_\n` +
+        `⏳ *Duration:* ${schedRes.event.durationMinutes} Minutes\n` +
+        `📍 *Platform:* ${schedRes.event.locationOrLink || "Google Meet"}\n\n` +
+        `_Meeting invite aapke calendar me add ho gaya hai aur time se 15 min pehle main remind kar dungi Boss!_ ✨`;
+    } catch (e: any) {
+      return `⚠️ Meeting schedule karne me issue aaya: ${e?.message || e}`;
+    }
+  }
+
+  // ── 13. 📍 Live Location & Nearby / Route Finder (@nearby, @route) ────────
+
+  public async searchNearbyOrRoute(queryText: string, locationPin?: { lat: number; lng: number }): Promise<string> {
+    try {
+      const { googleMapsService } = await import("./googleMapsService");
+      const clean = queryText.replace(/^(?:@nearby|\/nearby|@route|\/route|nearby|route)\s*/gi, "").trim();
+
+      // Case A: Route / Directions ("to Patna Airport", "from X to Y")
+      if (/^(?:to|from)\s+/i.test(clean) || clean.includes(" to ")) {
+        const parts = clean.split(/\s+to\s+/i);
+        const origin = parts.length > 1 ? parts[0].replace(/^from\s+/i, "").trim() : (locationPin ? `${locationPin.lat},${locationPin.lng}` : "Patna, India");
+        const destination = parts.length > 1 ? parts[1].trim() : parts[0].replace(/^to\s+/i, "").trim();
+
+        const dirRes = await googleMapsService.getDirections(origin, destination);
+        if (dirRes.success) {
+          return `📍 *Live Route & Navigation:* **${dirRes.from} ➡️ ${dirRes.to}**\n\n` +
+            `📏 *Distance:* ${dirRes.distanceKm}\n` +
+            `⏱️ *Estimated Travel Time:* *${dirRes.durationInTrafficText || dirRes.durationText}*\n` +
+            `🚦 *Traffic Status:* ${dirRes.durationInTrafficText ? "Live traffic accounted" : "Normal traffic"}\n\n` +
+            `🗺️ *Google Maps Navigation Link:*\n${dirRes.googleMapsUrl}\n\n` +
+            `💡 _Tap the link above to start turn-by-turn navigation!_`;
+        }
+      }
+
+      // Case B: Nearby places search ("petrol pump", "hospital", "restaurant")
+      const searchLocation = locationPin ? `${locationPin.lat},${locationPin.lng}` : "Patna, Bihar";
+      const placeRes = await googleMapsService.searchNearbyPlaces(clean || "petrol pump", searchLocation);
+
+      if (placeRes.success && placeRes.places.length > 0) {
+        let card = `📍 *Nearby Top Results for "${clean || "Places"}":*\n\n`;
+        placeRes.places.slice(0, 4).forEach((p, i) => {
+          const ratingTxt = p.rating ? ` ⭐ ${p.rating}` : "";
+          card += `${i + 1}. *${p.name}*${ratingTxt}\n   🏠 _${p.address || "Near location"}_\n   🗺️ [Open in Maps](${p.googleMapsUrl})\n\n`;
+        });
+        return card.trim();
+      }
+
+      return `📍 *Google Maps Search:* Searched for "${clean}".\n🗺️ Link: https://www.google.com/maps/search/${encodeURIComponent(clean)}`;
+    } catch (e: any) {
+      return `⚠️ Maps search error: ${e?.message || e}`;
+    }
+  }
+
+  // ── 14. ☀️ Daily Morning WhatsApp Executive Briefing (@briefing) ──────────
+
+  public async generateMorningBriefingCard(city = "Patna, India"): Promise<string> {
+    try {
+      const { morningBriefingService } = await import("./morningBriefingService");
+      const b = await morningBriefingService.generateMorningBriefing(city);
+
+      let card = `☀️ *Good Morning Boss! Friday Daily Briefing* 🌅\n`;
+      card += `📅 *${b.dateStr}* | ⏱️ *${b.timeStr}*\n\n`;
+      card += `🌤️ *Mausam (${b.weather.city}):* ${b.weather.temp}, ${b.weather.condition}\n\n`;
+
+      if (b.pendingTasks && b.pendingTasks.length > 0) {
+        card += `📋 *Today's Top Tasks & Meetings:*\n`;
+        b.pendingTasks.forEach((t) => (card += `• 📌 ${t.title} (${t.timeString})\n`));
+        card += `\n`;
+      }
+
+      if (b.newsHeadlines && b.newsHeadlines.length > 0) {
+        card += `📰 *Top News Headlines:*\n`;
+        b.newsHeadlines.forEach((n) => (card += `• ${n.title}\n`));
+        card += `\n`;
+      }
+
+      if (b.marketSummary) {
+        card += `📈 *Market Pulse:* ${b.marketSummary.nifty} | ${b.marketSummary.gold}\n\n`;
+      }
+
+      card += `✨ *Thought of the Day:*\n_"${b.motivationalQuote}"_\n\n`;
+      card += `🚀 _Aapka din shubh aur productive rahe Boss! Let's conquer the day!_`;
+
+      return card;
+    } catch (e: any) {
+      return `☀️ *Morning Briefing:* Good morning Boss! Have a productive day ahead!`;
+    }
+  }
+
+  // ── 15. 🧠 Smart Fact & Memory Vault (@remember, @recall) ──────────────────
+
+  public async saveSmartMemory(factText: string): Promise<string> {
+    try {
+      const { memoryEngine } = await import("./memoryEngine");
+      const cleanFact = factText
+        .replace(/^(?:@remember|\/remember|friday\s*yaad\s*rakhna|yaad\s*rakhna|remember)\s*[:=-]?\s*/gi, "")
+        .trim();
+
+      if (!cleanFact) return "Boss, kya yaad rakhna hai kripya wo fact batayein!";
+
+      await memoryEngine.addPinnedMemory(cleanFact);
+      await memoryEngine.addPersonalVaultFact("user_saved_facts", cleanFact);
+
+      try {
+        await db.collection("smart_memories_vault").add({
+          fact: cleanFact,
+          timestamp: Date.now(),
+          dateStr: new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
+        });
+      } catch {}
+
+      return `🧠 *Memory Permanently Saved in Vault!* ✅\n\n📌 *Fact:* _"${cleanFact}"_\n\n_Maine isko apne permanent memory vault me lock kar diya hai. Aap kabhi bhi poochhenge to main yaad dila dungi!_`;
+    } catch (e: any) {
+      return `⚠️ Memory save karne me issue: ${e?.message || e}`;
+    }
+  }
+
+  public async recallSmartMemory(queryText: string): Promise<string> {
+    try {
+      const { memoryEngine } = await import("./memoryEngine");
+      const cleanQuery = queryText
+        .replace(/^(?:@recall|\/recall|friday\s*mujhe\s*yaad\s*dilao|yaad\s*dilao|kahan\s*rakha\s*tha|recall)\s*[:=-]?\s*/gi, "")
+        .trim();
+
+      const memorySummary = await memoryEngine.compileLeanMemoryPrompt();
+
+      const prompt = `You are Friday AI, recalling a personal memory for DK Boss.
+Boss is asking: "${queryText}"
+Known Memory Vault:
+${memorySummary}
+
+Search the memory vault for the answer.
+If found:
+State the answer warmly with exact details in Hinglish.
+If not found:
+State politely that this specific detail is not recorded yet in the vault.`;
+
+      const res = await this.callGeminiWithFallback(prompt);
+      return res || `🧠 *Memory Vault:* Searched memory for "${cleanQuery}".`;
+    } catch (e: any) {
+      return `⚠️ Memory recall error: ${e?.message || e}`;
+    }
+  }
 }
 
 export const whatsappFeatureEngine = new WhatsAppFeatureEngine();

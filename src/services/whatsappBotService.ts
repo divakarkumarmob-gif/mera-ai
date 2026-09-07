@@ -824,7 +824,7 @@ class WhatsAppBotService {
                     const fileName = msg.message?.documentMessage?.fileName;
                     const { visionMemoryService } = await import("./visionMemoryService");
 
-                    // 1. Boss Voice Note -> STT + Autonomous Command Execution
+                    // 1. Boss Voice Note -> STT + Voice Note to Voice Note Response (Friday Speaks Back!)
                     if (isVoice && isFromOwner) {
                       try {
                         const { voiceBridgeService } = await import("./voiceBridgeService");
@@ -832,7 +832,9 @@ class WhatsAppBotService {
                         if (transcribed && transcribed.trim()) {
                           console.log(`[WhatsAppBot] Boss Voice Transcribed: "${transcribed}"`);
                           await this.sendHumanLikeMessage(replyJid, `🎙️ *Aapki Aawaz (Transcription):*\n_"${transcribed}"_`, "", msg.key);
-                          await this.handleOwnerWhatsAppMessage(senderName, senderPhone, transcribed, replyJid, msg.key);
+                          
+                          // Execute Boss AI and generate spoken voice response
+                          await this.handleOwnerWhatsAppMessage(senderName, senderPhone, transcribed, replyJid, msg.key, quotedMessage);
                           return;
                         }
                       } catch (sttErr) {
@@ -1539,6 +1541,85 @@ class WhatsAppBotService {
       const musicCard = await whatsappFeatureEngine.searchMusicWithLyrics(songQuery);
       await this.sendHumanLikeMessage(replyJid, musicCard, rawText, messageKey);
       return;
+    }
+
+    // J. Group Bill Splitter & Instant UPI ("@split 1200 between Aman, Rahul, DK")
+    const splitMatch = rawText.match(/^(?:@split|\/split|split\s*bill|bill\s*split|split)\s*[:=-]?\s*(.+)/i);
+    if (splitMatch) {
+      const splitCard = await whatsappFeatureEngine.splitGroupBill(rawText);
+      await this.sendHumanLikeMessage(replyJid, splitCard, rawText, messageKey);
+      return;
+    }
+
+    // K. Google Calendar Meeting Scheduler ("@meet with Client tomorrow 4pm")
+    const meetMatch = rawText.match(/^(?:@meet|\/meet|schedule\s*meeting|schedule\s*meet|meeting)\s*[:=-]?\s*(.+)/i);
+    if (meetMatch) {
+      await this.sendHumanLikeMessage(replyJid, "📅 *Meeting schedule ho rahi hai Boss...* ⚡", rawText, messageKey);
+      const meetCard = await whatsappFeatureEngine.scheduleMeetingFromWhatsApp(rawText);
+      await this.sendHumanLikeMessage(replyJid, meetCard, rawText, messageKey);
+      return;
+    }
+
+    // L. Live Location, Routes & Nearby Places ("@nearby petrol pump", "@route to Patna Airport")
+    const mapsMatch = rawText.match(/^(?:@nearby|\/nearby|@route|\/route|nearby|route\s*to)\s*[:=-]?\s*(.+)/i);
+    if (mapsMatch) {
+      await this.sendHumanLikeMessage(replyJid, "📍 *Google Maps & Traffic route check ho raha hai...* ⚡", rawText, messageKey);
+      const mapsCard = await whatsappFeatureEngine.searchNearbyOrRoute(rawText);
+      await this.sendHumanLikeMessage(replyJid, mapsCard, rawText, messageKey);
+      return;
+    }
+
+    // M. Daily Morning Executive Briefing ("@briefing", "aaj ka briefing", "morning briefing")
+    if (/^(?:@briefing|\/briefing|briefing|aaj\s*ka\s*briefing|morning\s*briefing|daily\s*update)/i.test(rawText)) {
+      await this.sendHumanLikeMessage(replyJid, "☀️ *Boss ka Daily Executive Briefing prepare ho raha hai...* ⚡", rawText, messageKey);
+      const briefingCard = await whatsappFeatureEngine.generateMorningBriefingCard();
+      await this.sendHumanLikeMessage(replyJid, briefingCard, rawText, messageKey);
+      return;
+    }
+
+    // N. Smart Memory Vault Save ("@remember ...", "friday yaad rakhna ...", "yaad rakhna ...")
+    const rememberMatch = rawText.match(/^(?:@remember|\/remember|friday\s*yaad\s*rakhna|yaad\s*rakhna)\s*[:=-]?\s*(.+)/i);
+    if (rememberMatch) {
+      const memRes = await whatsappFeatureEngine.saveSmartMemory(rawText);
+      await this.sendHumanLikeMessage(replyJid, memRes, rawText, messageKey);
+      return;
+    }
+
+    // O. Smart Memory Recall ("@recall ...", "kahan rakha tha", "mujhe yaad dilao", "kab hai")
+    const recallMatch = rawText.match(/^(?:@recall|\/recall|friday\s*mujhe\s*yaad\s*dilao|kahan\s*rakha\s*tha|kab\s*hai|yaad\s*dilao)\s*[:=-]?\s*(.*)/i) ||
+      (rawText.includes("kahan") && (rawText.includes("rakha") || rawText.includes("hai")));
+    if (recallMatch) {
+      const recallRes = await whatsappFeatureEngine.recallSmartMemory(rawText);
+      await this.sendHumanLikeMessage(replyJid, recallRes, rawText, messageKey);
+      return;
+    }
+
+    // P. WhatsApp Reminder Ping ("@remind me in 30 mins to ...")
+    const remindMatch = rawText.match(/^(?:@remind|\/remind|remind\s*me)\s+(?:in|after|at)?\s*([^:\n]+?)[:=-]\s*(.+)/i);
+    if (remindMatch) {
+      const timeInst = remindMatch[1].trim();
+      const taskBody = remindMatch[2].trim();
+      const schedRes = await whatsappFeatureEngine.scheduleMessage(
+        senderPhone,
+        `🔔 *REMINDER FOR BOSS:* _"${taskBody}"_`,
+        timeInst
+      );
+      await this.sendHumanLikeMessage(replyJid, schedRes.message, rawText, messageKey);
+      return;
+    }
+
+    // Q. Voice Synthesis / Speak Command ("@speak <text>", "bol kar sunao <text>")
+    const speakMatch = rawText.match(/^(?:@speak|\/speak|bol\s*kar\s*sunao|bol\s*kar\s*batao|voice\s*me\s*bolo)\s*[:=-]?\s*(.+)/i);
+    if (speakMatch) {
+      const textToSpeak = speakMatch[1].trim();
+      try {
+        const { voiceBridgeService } = await import("./voiceBridgeService");
+        const audioBuf = await voiceBridgeService.textToSpeechBuffer(textToSpeak, VoiceBridgeService.FEMALE_VOICE);
+        await this.sendVoiceMessage(replyJid, audioBuf, messageKey);
+        return;
+      } catch (voiceErr) {
+        console.warn("[WhatsAppBot] @speak TTS error:", voiceErr);
+      }
     }
 
     // 11. AUTONOMOUS MASTER FRIDAY AI WITH TOOL CALLING FOR BOSS
@@ -2476,6 +2557,41 @@ COMMUNICATION STYLE:
       return;
     }
 
+    // 11. Group Bill Splitter ("@split 1500 between Aman, Rahul, DK")
+    const splitMatch = text.match(/^(?:@split|\/split|split\s*bill|bill\s*split|split)\s*[:=-]?\s*(.+)/i) ||
+      (text.includes("@split") ? text.match(/@split\s+(.+)/i) : null);
+    if (splitMatch) {
+      const splitCard = await whatsappFeatureEngine.splitGroupBill(text);
+      await this.sendHumanLikeMessage(groupJid, splitCard, text, messageKey);
+      return;
+    }
+
+    // 12. Group Google Calendar Meeting Scheduler ("@meet with team tomorrow 5pm")
+    const meetMatch = text.match(/^(?:@meet|\/meet|schedule\s*meeting|schedule\s*meet)\s*[:=-]?\s*(.+)/i) ||
+      (text.includes("@meet") ? text.match(/@meet\s+(.+)/i) : null);
+    if (meetMatch) {
+      const meetCard = await whatsappFeatureEngine.scheduleMeetingFromWhatsApp(text);
+      await this.sendHumanLikeMessage(groupJid, meetCard, text, messageKey);
+      return;
+    }
+
+    // 13. Live Location, Traffic & Nearby Places ("@nearby petrol pump", "@route to Patna Airport")
+    const mapsMatch = text.match(/^(?:@nearby|\/nearby|@route|\/route|nearby|route\s*to)\s*[:=-]?\s*(.+)/i) ||
+      (text.includes("@nearby") ? text.match(/@nearby\s+(.+)/i) : null) ||
+      (text.includes("@route") ? text.match(/@route\s+(.+)/i) : null);
+    if (mapsMatch) {
+      const mapsCard = await whatsappFeatureEngine.searchNearbyOrRoute(text);
+      await this.sendHumanLikeMessage(groupJid, mapsCard, text, messageKey);
+      return;
+    }
+
+    // 14. Morning Executive Briefing ("@briefing", "aaj ka briefing")
+    if (/^(?:@briefing|\/briefing|briefing|aaj\s*ka\s*briefing|morning\s*briefing)/i.test(text)) {
+      const briefingCard = await whatsappFeatureEngine.generateMorningBriefingCard();
+      await this.sendHumanLikeMessage(groupJid, briefingCard, text, messageKey);
+      return;
+    }
+
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       await this.sendHumanLikeMessage(groupJid, fallbackText(), text, messageKey);
@@ -2845,6 +2961,32 @@ YOUR RULES FOR GENERATING THE WHATSAPP REPLY:
       // Wire up incoming message listener
       this.setupMessageListener();
 
+      // Wire up group participant updates (Smart Group Welcome & Rules)
+      this.sock.ev.on("group-participants.update", async (update: any) => {
+        const { id: groupJid, participants, action } = update;
+        if (action === "add" && participants && participants.length > 0) {
+          try {
+            const groupName = await this.getGroupName(groupJid);
+            const welcomeMsg = `👋 *Welcome to "${groupName}"!* ✨\n\n` +
+              `Main *Friday* hoon — DK Boss ki intelligent AI assistant! ⚡\n\n` +
+              `📌 *Group me aap yeh sab use kar sakte hain:*\n` +
+              `• 🎨 \`@image <prompt>\` — AI Image generate karein\n` +
+              `• 📊 \`@summary\` — Chat summary lein\n` +
+              `• 🗳️ \`@poll <question>\` — Interactive Poll banayein\n` +
+              `• 🎯 \`@quiz <topic>\` — Trivia Quiz khele\n` +
+              `• 💰 \`@split <amount> between <names>\` — Bill split karein\n` +
+              `• 🌐 \`@translate <lang>\` — Messages translate karein\n` +
+              `• 🔎 \`friday kisi ne ... bola tha\` — Purana message dhoondhein\n` +
+              `• 📍 \`@nearby / @route\` — Location routes\n\n` +
+              `_Aapka welcome hai! Enjoy your stay 👍_`;
+
+            await this.sendHumanLikeMessage(groupJid, welcomeMsg);
+          } catch (welcomeErr) {
+            console.warn("[WhatsAppBot] Group welcome error:", welcomeErr);
+          }
+        }
+      });
+
       this.sock.ev.on("connection.update", async (update: any) => {
         const { connection, lastDisconnect, qr } = update;
 
@@ -3160,6 +3302,78 @@ YOUR RULES FOR GENERATING THE WHATSAPP REPLY:
     } catch (e: any) {
       console.error("[WhatsAppBot] Failed to send photo:", e);
       return { success: false, message: `Failed to send photo: ${e?.message || e}` };
+    }
+  }
+
+  /**
+   * Sends an Audio / Voice Note (PTT) with realistic human recording presence.
+   */
+  public async sendVoiceMessage(
+    target: string,
+    audioBuffer: Buffer,
+    messageKey?: any
+  ): Promise<{ success: boolean; message: string }> {
+    if (!this.isConnected || !this.sock) {
+      return { success: false, message: "WhatsApp bot is not connected." };
+    }
+
+    try {
+      let jid = target;
+      if (!jid.includes("@")) {
+        let cleanPhone = target.replace(/[\s\-\(\)\+]/g, "").trim();
+        if (cleanPhone.length === 10) cleanPhone = `91${cleanPhone}`;
+        jid = `${cleanPhone}@s.whatsapp.net`;
+      }
+
+      // Send recording presence update
+      try {
+        await this.sock.sendPresenceUpdate("recording", jid);
+        await new Promise((r) => setTimeout(r, 1200));
+        await this.sock.sendPresenceUpdate("paused", jid);
+      } catch {}
+
+      const sendOptions: any = {};
+      if (messageKey) {
+        if (messageKey.message) {
+          sendOptions.quoted = messageKey;
+        } else {
+          const cleanKey = messageKey.key || messageKey;
+          sendOptions.quoted = {
+            key: cleanKey,
+            message: { conversation: "[Voice Note]" },
+          };
+        }
+      }
+
+      let sendRes: any = null;
+      try {
+        sendRes = await this.sock.sendMessage(
+          jid,
+          {
+            audio: audioBuffer,
+            mimetype: "audio/mp4",
+            ptt: true,
+          },
+          sendOptions
+        );
+      } catch (quotedErr) {
+        sendRes = await this.sock.sendMessage(jid, {
+          audio: audioBuffer,
+          mimetype: "audio/mp4",
+          ptt: true,
+        });
+      }
+
+      if (sendRes?.key?.id) {
+        this.botSentMessageIds.add(sendRes.key.id);
+      }
+
+      const recipientKey = jid.replace(/@.*$/, "");
+      humanBotFirewallService.recordDispatchedMessage("whatsapp", recipientKey);
+      return { success: true, message: `Voice note delivered to ${jid}!` };
+    } catch (e: any) {
+      console.error("[WhatsAppBot] Failed to send voice note:", e);
+      return { success: false, message: `Failed to send voice note: ${e?.message || e}` };
     }
   }
 
