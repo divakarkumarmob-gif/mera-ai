@@ -25,6 +25,8 @@ export interface QuotedMessageContext {
   text: string;
   mediaType: "text" | "photo" | "video" | "document" | "audio" | "location" | "contact" | "sticker";
   stanzaId?: string;
+  rawQuotedMessage?: any;
+  fileName?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -386,6 +388,8 @@ class WhatsAppBotService {
       text: text.trim(),
       mediaType,
       stanzaId: contextInfo.stanzaId,
+      rawQuotedMessage: q,
+      fileName: q.documentMessage?.fileName,
     };
   }
 
@@ -836,30 +840,32 @@ class WhatsAppBotService {
                       }
                     }
 
-                    // 2. Boss Photo -> Conditional Vision AI Analysis or Firestore Memory Saving
-                    if (isPhoto && isFromOwner) {
+                    // 2. Photo -> Vision AI Summary / Analysis / Memory Saving
+                    if (isPhoto) {
                       try {
                         const cap = (caption || "").trim();
-                        const isAnalysisRequested =
-                          /^(analysis|analyze|analyse|photo\s*analyze|ocr|dekho|check|batao|kya\s*hai|read)/i.test(cap) ||
-                          /\b(analysis|analyze|kya\s*likha\s*hai|check\s*karo|padho|scan)\b/i.test(cap);
+                        const isSummaryRequested =
+                          /\b(summary|summarize|summarise|friday\s*summary|analysis|analyze|analyse|photo\s*analyze|ocr|dekho|check|batao|kya\s*hai|padho|scan|explain)\b/i.test(cap) ||
+                          cap.startsWith("@summary") ||
+                          cap.startsWith("/summary") ||
+                          cap.startsWith("@friday");
                         const isFaceIdQuery = /^(ye\s*kaun\s*hai|pehchano|who\s*is\s*this|identify)/i.test(cap);
 
-                        // A. Explicit Analysis or Face ID Requested
-                        if (isAnalysisRequested || isFaceIdQuery) {
-                          await this.sendHumanLikeMessage(replyJid, "👁️ *Photo analyze ho rahi hai...*", "", msg.key);
+                        // A. Explicit Summary or Face ID Requested
+                        if (isSummaryRequested || isFaceIdQuery) {
+                          await this.sendHumanLikeMessage(replyJid, "👁️ *Photo analyze & summarize ho rahi hai...* ⚡", "", msg.key);
                           if (isFaceIdQuery) {
                             const idRes = await visionMemoryService.identifyPersonInPhoto(buffer);
                             await this.sendHumanLikeMessage(replyJid, idRes.explanation, "", msg.key);
                           } else {
-                            const analyzed = await visionMemoryService.processIncomingMedia(buffer, "image/jpeg", senderName, cap);
-                            await this.sendHumanLikeMessage(replyJid, `🖼️ *Photo Breakdown & OCR:*\n\n${analyzed.analysis}`, "", msg.key);
+                            const summaryRes = await visionMemoryService.generateMediaSummary(buffer, "image/jpeg", cap);
+                            await this.sendHumanLikeMessage(replyJid, summaryRes, "", msg.key);
                           }
                           return;
                         }
 
-                        // B. Face / Person Memory Saving
-                        if (/^(iska\s*naam|ye\s*photo|save\s*person|inka\s*naam)/i.test(cap)) {
+                        // B. Face / Person Memory Saving (Boss only)
+                        if (isFromOwner && /^(iska\s*naam|ye\s*photo|save\s*person|inka\s*naam)/i.test(cap)) {
                           const nameMatch = cap.match(/(?:naam|name)\s+(?:hai\s+)?([A-Za-z0-9\s]+)/i);
                           const personName = nameMatch ? nameMatch[1].trim() : "Contact";
                           const saveRes = await visionMemoryService.savePersonMemory(personName, "Friend / Contact", cap, buffer);
@@ -868,7 +874,7 @@ class WhatsAppBotService {
                         }
 
                         // C. Boss provided info/description about the photo to remember permanently
-                        if (cap) {
+                        if (isFromOwner && cap) {
                           const { memoryEngine } = await import("./memoryEngine");
                           await memoryEngine.addPinnedMemory(`Photo Info: ${cap}`);
                           await memoryEngine.addPersonalVaultFact("saved_photos_and_documents", cap);
@@ -893,47 +899,53 @@ class WhatsAppBotService {
                           return;
                         }
 
-                        // D. Uncaptioned Photo without "analysis" -> Simple acknowledgement without heavy OCR
-                        try {
-                          await db.collection("visual_memories").add({
-                            caption: "Uncaptioned photo from Boss",
-                            timestamp: Date.now(),
-                            dateStr: new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
-                            senderName,
-                            type: "photo",
-                          });
-                        } catch {}
+                        // D. Uncaptioned Photo without "analysis" from Boss -> Simple acknowledgement
+                        if (isFromOwner) {
+                          try {
+                            await db.collection("visual_memories").add({
+                              caption: "Uncaptioned photo from Boss",
+                              timestamp: Date.now(),
+                              dateStr: new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
+                              senderName,
+                              type: "photo",
+                            });
+                          } catch {}
 
-                        await this.sendHumanLikeMessage(
-                          replyJid,
-                          `📸 *Photo receive ho gayi hai Boss!* (Agar iska analysis chahiye to photo ke niche _"analysis"_ likhkar bhejiye, ya iske baare me koi jaankari save karni ho to likhiye)`,
-                          "",
-                          msg.key
-                        );
-                        return;
+                          await this.sendHumanLikeMessage(
+                            replyJid,
+                            `📸 *Photo receive ho gayi hai Boss!* (Agar iska summary chahiye to photo ke niche _"friday summary"_ ya _"analysis"_ likhiye, ya iske baare me koi jaankari save karni ho to likhiye 👍)`,
+                            "",
+                            msg.key
+                          );
+                          return;
+                        }
                       } catch (photoErr) {
-                        console.error("[WhatsAppBot] Photo processing error for Boss:", photoErr);
+                        console.error("[WhatsAppBot] Photo processing error:", photoErr);
                       }
                     }
 
-                    // 3. Boss Document / PDF -> Detailed OCR & Summary
-                    if (isDoc && isFromOwner) {
+                    // 3. Document / PDF -> Detailed OCR & Executive Summary
+                    if (isDoc) {
                       try {
-                        await this.sendHumanLikeMessage(replyJid, `📄 *Document / PDF analyze ho raha hai (${fileName || "file"})...*`, "", msg.key);
-                        const analyzed = await visionMemoryService.processIncomingMedia(buffer, mimeType, senderName, caption, fileName);
-                        await this.sendHumanLikeMessage(replyJid, `📑 *Document OCR & Summary (${fileName || "file"}):*\n\n${analyzed.analysis}`, "", msg.key);
-                        return;
+                        const cap = (caption || "").trim();
+                        const isDocSummaryReq = isFromOwner || /\b(summary|summarize|summarise|friday\s*summary|analysis|analyze|padho|check|batao|kya\s*hai|explain)\b/i.test(cap) || cap.startsWith("@friday");
+                        if (isDocSummaryReq) {
+                          await this.sendHumanLikeMessage(replyJid, `📄 *Document / PDF (${fileName || "file"}) analyze & summarize ho raha hai...* ⚡`, "", msg.key);
+                          const summaryRes = await visionMemoryService.generateMediaSummary(buffer, mimeType, cap, fileName);
+                          await this.sendHumanLikeMessage(replyJid, summaryRes, "", msg.key);
+                          return;
+                        }
                       } catch (docErr) {
-                        console.error("[WhatsAppBot] Document processing error for Boss:", docErr);
+                        console.error("[WhatsAppBot] Document processing error:", docErr);
                       }
                     }
 
-                    // 4. Boss Video -> Video Actions & Content Breakdown
+                    // 4. Video -> Video Actions & Content Breakdown
                     if (isVideo && isFromOwner) {
                       try {
-                        await this.sendHumanLikeMessage(replyJid, "🎬 *Video analyze ho rahi hai...*", "", msg.key);
-                        const analyzed = await visionMemoryService.processIncomingMedia(buffer, "video/mp4", senderName, caption || "Analyze video", fileName);
-                        await this.sendHumanLikeMessage(replyJid, `🎥 *Video Analysis Breakdown:*\n\n${analyzed.analysis}`, "", msg.key);
+                        await this.sendHumanLikeMessage(replyJid, "🎬 *Video analyze & summarize ho rahi hai...* ⚡", "", msg.key);
+                        const summaryRes = await visionMemoryService.generateMediaSummary(buffer, "video/mp4", caption, fileName);
+                        await this.sendHumanLikeMessage(replyJid, summaryRes, "", msg.key);
                         return;
                       } catch (videoErr) {
                         console.error("[WhatsAppBot] Video processing error for Boss:", videoErr);
@@ -1049,6 +1061,86 @@ class WhatsAppBotService {
   }
 
   /**
+   * Handles swipe-to-reply (Quote) on any photo, PDF, document, video, or link
+   * when the user asks for a summary ("friday summary", "summary", "summarize", "analyze", etc.).
+   */
+  public async handleQuotedMediaSummary(
+    replyJid: string,
+    rawText: string,
+    quotedMessage: QuotedMessageContext,
+    messageKey: any
+  ): Promise<boolean> {
+    const cleanText = rawText.toLowerCase().trim();
+    const isSummaryIntent =
+      /\b(summary|summarize|summarise|friday\s*summary|analysis|analyze|analyse|padho|explain|kya\s*likha\s*hai|kya\s*hai|batao|overview|read|ocr)\b/i.test(cleanText) ||
+      cleanText.startsWith("@summary") ||
+      cleanText.startsWith("/summary") ||
+      cleanText.startsWith("summary");
+
+    if (!isSummaryIntent) return false;
+
+    const { visionMemoryService } = await import("./visionMemoryService");
+    const { whatsappFeatureEngine } = await import("./whatsappFeatureEngine");
+
+    // Case 1: Quoted message has media (Photo / PDF / Document / Video / Audio)
+    if (quotedMessage.rawQuotedMessage && quotedMessage.mediaType !== "text") {
+      const downloadFn = baileys.downloadMediaMessage || baileys.default?.downloadMediaMessage;
+      if (downloadFn) {
+        try {
+          await this.sendHumanLikeMessage(
+            replyJid,
+            `📑 *Quoted ${quotedMessage.mediaType.toUpperCase()} analyze & summarize ho raha hai...* ⚡`,
+            rawText,
+            messageKey
+          );
+
+          const qMsgWrapper = { message: quotedMessage.rawQuotedMessage };
+          const buffer: Buffer = await downloadFn(qMsgWrapper, "buffer", {}, { reuploadRequest: this.sock?.updateMediaMessage });
+
+          if (buffer && buffer.length > 0) {
+            const rawQ = quotedMessage.rawQuotedMessage;
+            const mimeType =
+              rawQ.imageMessage?.mimetype ||
+              rawQ.documentMessage?.mimetype ||
+              rawQ.videoMessage?.mimetype ||
+              rawQ.audioMessage?.mimetype ||
+              (quotedMessage.mediaType === "photo" ? "image/jpeg" : quotedMessage.mediaType === "document" ? "application/pdf" : "video/mp4");
+            const fileName = rawQ.documentMessage?.fileName || quotedMessage.fileName;
+
+            const summaryRes = await visionMemoryService.generateMediaSummary(buffer, mimeType, rawText, fileName);
+            await this.sendHumanLikeMessage(replyJid, summaryRes, rawText, messageKey);
+            return true;
+          }
+        } catch (mediaErr) {
+          console.warn("[WhatsAppBot] Quoted media download/summary error:", mediaErr);
+        }
+      }
+    }
+
+    // Case 2: Quoted message contains a URL / Link
+    const urlMatch = quotedMessage.text.match(/(https?:\/\/[^\s]+)/i);
+    if (urlMatch) {
+      await this.sendHumanLikeMessage(replyJid, `🌐 *Quoted URL analyze ho raha hai...* ⚡\n🔗 _${urlMatch[1]}_`, rawText, messageKey);
+      const webSummary = await whatsappFeatureEngine.summarizeWebUrl(urlMatch[1], rawText);
+      await this.sendHumanLikeMessage(replyJid, webSummary, rawText, messageKey);
+      return true;
+    }
+
+    // Case 3: Quoted message is a long text/message
+    if (quotedMessage.text && quotedMessage.text.length > 20) {
+      await this.sendHumanLikeMessage(replyJid, "📝 *Quoted message ki summary ban rahi hai...* ⚡", rawText, messageKey);
+      const textSummary = await whatsappFeatureEngine.translateText(
+        `Summarize this message clearly in 3-5 concise bullet points in Hinglish:\n"${quotedMessage.text}"`,
+        "Hinglish"
+      );
+      await this.sendHumanLikeMessage(replyJid, `📑 *Quoted Message Summary:*\n\n${textSummary}`, rawText, messageKey);
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
    * Master FRIDAY AI Assistant for Boss (DK) on WhatsApp.
    * Gives DK 100% full autonomous access via WhatsApp chat:
    * - Swipe-to-reply (Quoted Message) contextual awareness across all media
@@ -1072,7 +1164,13 @@ class WhatsAppBotService {
     // Combined context text for link/train detection
     const fullSearchContext = quotedMessage?.text ? `${quotedMessage.text}\n${rawText}` : rawText;
 
-    // 0. AI Image Generation ("@image <prompt>", "/image <prompt>", "image: <prompt>", "photo banao <prompt>")
+    // 0. Quoted Swipe-to-Reply Media / Document / Photo Summary Engine
+    if (quotedMessage && quotedMessage.isReply) {
+      const handledQuoted = await this.handleQuotedMediaSummary(replyJid, rawText, quotedMessage, messageKey);
+      if (handledQuoted) return;
+    }
+
+    // 0.1 AI Image Generation ("@image <prompt>", "/image <prompt>", "image: <prompt>", "photo banao <prompt>")
     const imageGenMatch =
       rawText.match(/^(?:@image|\/image|image:|photo\s*banao|image\s*banao|tasveer\s*banao|generate\s*image|draw\s*image|draw)\s*[:=-]?\s*(.+)/i) ||
       (rawText.includes("@image") ? rawText.match(/@image\s+(.+)/i) : null);
@@ -2049,6 +2147,12 @@ COMMUNICATION STYLE:
     messageKey?: any,
     quotedMessage?: QuotedMessageContext | null
   ) {
+    // 0. Check for Quoted Swipe-to-Reply Media / Document / Photo Summary
+    if (quotedMessage && quotedMessage.isReply) {
+      const handledQuoted = await this.handleQuotedMediaSummary(replyJid, text, quotedMessage, messageKey);
+      if (handledQuoted) return;
+    }
+
     // 1. Check for a pending "should I ask DK?" confirmation from this sender.
     const pending = await dailyUpdateService.getRecentPendingForSender(senderPhone);
     if (pending && pending.status === "awaiting_confirmation") {
@@ -2216,6 +2320,12 @@ COMMUNICATION STYLE:
     };
 
     const { whatsappFeatureEngine } = await import("./whatsappFeatureEngine");
+
+    // 0. Group Quoted Swipe-to-Reply Media / Document / Photo Summary Engine
+    if (quotedMessage && quotedMessage.isReply) {
+      const handledQuoted = await this.handleQuotedMediaSummary(groupJid, text, quotedMessage, messageKey);
+      if (handledQuoted) return;
+    }
 
     // 1. Group Anti-Spam & Phishing Link Guard ("@safety", or suspicious url detection)
     if (/^(?:@safety|\/safety|safety)/i.test(text) || (text.includes("http") && /free|win|prize|hack|mod\s*apk|lottery/i.test(text))) {

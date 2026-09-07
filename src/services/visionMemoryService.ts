@@ -109,7 +109,7 @@ ${caption ? `User caption: "${caption}"` : ""}`;
         const VISION_FALLBACK_MODELS = [
           "gemini-3.6-flash",
           "gemini-3.5-flash",
-          "gemini-2.5-flash",
+          "gemini-3.1-flash-lite",
           "gemini-2.0-flash",
           "gemini-1.5-pro",
           "gemini-1.5-flash",
@@ -239,6 +239,86 @@ ${caption ? `User caption: "${caption}"` : ""}`;
       caption: this.latestMedia.caption,
       timeAgo: `${minutesAgo} minute pehle`,
     };
+  }
+
+  /**
+   * Generates a comprehensive, beautifully structured executive summary of a photo, PDF, document, or video.
+   */
+  public async generateMediaSummary(
+    buffer: Buffer,
+    mimeType: string,
+    userInstruction?: string,
+    fileName?: string
+  ): Promise<string> {
+    const ai = this.getGenAI();
+    if (!ai) {
+      return "⚠️ Summary generate nahi ho payi: Gemini API key configured nahi hai.";
+    }
+
+    const lowerMime = (mimeType || "").toLowerCase();
+    const isDoc = lowerMime.includes("pdf") || lowerMime.includes("document") || lowerMime.includes("text") || lowerMime.includes("sheet") || lowerMime.includes("msword");
+    const isVideo = lowerMime.includes("video");
+    const isAudio = lowerMime.includes("audio") || lowerMime.includes("ogg");
+
+    const normalizedMime = isDoc
+      ? "application/pdf"
+      : isVideo
+      ? "video/mp4"
+      : isAudio
+      ? "audio/ogg"
+      : (lowerMime.includes("png") ? "image/png" : lowerMime.includes("webp") ? "image/webp" : "image/jpeg");
+
+    const base64Data = buffer.toString("base64");
+
+    const prompt = `You are Friday, DK's (Divakar Kumar) ultra-intelligent AI assistant.
+The user requested an executive summary of this attached ${isDoc ? `document/PDF (${fileName || "file"})` : isVideo ? "video" : isAudio ? "audio" : "photo/image"}.
+
+USER INSTRUCTION/NOTE: "${userInstruction || "Provide a complete and structured executive summary."}"
+
+STRUCTURE YOUR RESPONSE IN CLEAN WHATSAPP FORMAT:
+1. 📌 *Main Subject / Heading:* (What is this photo/document about?)
+2. 📝 *Key Summary Points:* (3-6 bullet points covering the core takeaways, facts, message, or OCR text)
+3. 🔍 *Important Specifics:* (Names, dates, amounts, links, or action items if present)
+4. 💡 *Executive Takeaway (in natural Hinglish):* (1-2 lines summarizing the whole thing for quick reading)
+
+Use WhatsApp markdown (*bold*, _italic_, bullet points). Keep it clean, accurate, and easy to read.`;
+
+    const VISION_FALLBACK_MODELS = [
+      "gemini-3.6-flash",
+      "gemini-3.5-flash",
+      "gemini-3.1-flash-lite",
+      "gemini-2.0-flash",
+      "gemini-1.5-pro",
+    ];
+
+    for (const model of VISION_FALLBACK_MODELS) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: [
+            {
+              role: "user",
+              parts: [
+                { text: prompt },
+                {
+                  inlineData: {
+                    mimeType: normalizedMime,
+                    data: base64Data,
+                  },
+                },
+              ],
+            },
+          ],
+        });
+
+        const reply = response.text?.trim();
+        if (reply) return reply;
+      } catch (err: any) {
+        console.warn(`[VisionMemoryService] Summary generation model ${model} failed: ${err?.message || err}`);
+      }
+    }
+
+    return "⚠️ Is file/photo ka summary analyze karne me dikkat aayi. Kripya dobara bhejein!";
   }
 
   /**
