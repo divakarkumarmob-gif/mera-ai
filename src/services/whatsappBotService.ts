@@ -1611,6 +1611,40 @@ class WhatsAppBotService {
       }
     }
 
+    // 📞 1-Click Real Voice Calling Trigger ("call me", "@call", "call karo", "mujhe call karo", "voice call")
+    if (
+      /^(?:@call|\/call|call\s*me|call\s*karo|mujhe\s*call\s*karo|voice\s*call|friday\s*call\s*karo|phone\s*karo|call\s*lagao)/i.test(
+        rawText.trim()
+      )
+    ) {
+      const isOwner =
+        !isGroup &&
+        (senderPhone === (process.env.OWNER_WHATSAPP_NUMBER || "").replace(/\D/g, "") ||
+          senderName.toLowerCase().includes("divakar") ||
+          senderName.toLowerCase().includes("dk") ||
+          senderName.toLowerCase().includes("boss"));
+
+      const callCard = await whatsappFeatureEngine.generateCallSession(senderName, isOwner);
+      const callId = `call_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+      if (this.callTriggerCallback) {
+        console.log(`[WhatsAppBot] 📞 Triggering real incoming call on mobile app for ${senderName} (${callId})`);
+        this.callTriggerCallback({
+          callerName: "FRIDAY AI",
+          isOwner,
+          callId,
+        });
+      }
+
+      await this.sendHumanLikeMessage(
+        replyJid,
+        `📞 *FRIDAY CALLING INITIATED...* 🎙️⚡\n\nBoss, main aapke phone par real-time call connect kar rahi hoon! 📲 (Phone par Ring screen check karein)\n\n${callCard}`,
+        rawText,
+        messageKey
+      );
+      return;
+    }
+
     // I. Music with Lyrics Finder ("@music <song name>")
     const musicMatch = rawText.match(/^(?:@music|\/music|music|song)\s*[:=-]?\s*(.+)/i);
     if (musicMatch) {
@@ -1985,6 +2019,17 @@ class WhatsAppBotService {
           required: ["prompt"],
         },
       },
+      {
+        name: "trigger_voice_call",
+        description: "Trigger a real-time incoming voice call to Boss DK's phone or mobile app with ringtone and vibration.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            reason: { type: "STRING", description: "Reason or context for calling Boss" },
+          },
+          required: [],
+        },
+      },
     ];
 
     const systemInstruction = `YOU ARE FRIDAY: DK's (Divakar Kumar) ultra-intelligent, loyal, warm, witty, and deeply caring AI companion and chief executive assistant.
@@ -2012,6 +2057,19 @@ COMMUNICATION STYLE:
 
     const executeTool = async (toolName: string, args: any): Promise<any> => {
       try {
+        if (toolName === "trigger_voice_call") {
+          const callId = `call_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+          if (this.callTriggerCallback) {
+            this.callTriggerCallback({
+              callerName: "FRIDAY AI",
+              isOwner: true,
+              callId,
+            });
+          }
+          const card = await whatsappFeatureEngine.generateCallSession(senderName, true);
+          return { success: true, message: "Incoming call ringing triggered on Boss phone.", card };
+        }
+
         if (toolName === "send_whatsapp_message") {
           const { contactsService } = await import("./contactsService");
           const { sendWhatsAppUnified } = await import("./whatsappService");
