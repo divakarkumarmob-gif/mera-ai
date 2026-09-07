@@ -96,7 +96,10 @@ class HumanBotFirewallService {
     for (let i = 0; i < inCharCount; i++) {
       baseRead += 250 + Math.floor(Math.random() * 170); // 250ms to 420ms per char (NEVER < 250ms)
     }
-    const readDelayMs = Math.max(750, Math.min(8000, baseRead));
+    // Realistic human reading & comprehension pause (min 2.2s, max 6.5s)
+    const readDelayMs = inCharCount > 0
+      ? Math.max(2200, Math.min(6500, baseRead))
+      : 2200 + Math.floor(Math.random() * 1200);
 
     // 2. Typing Time with Minimum 0.5s (500ms - 950ms) word gap & Typo simulation
     const words = (replyText || "").trim().split(/\s+/).filter(Boolean);
@@ -142,8 +145,8 @@ class HumanBotFirewallService {
       }
     }
 
-    // Clamp typing delay within natural human bounds (minimum 1.8s, maximum 10s)
-    const finalTyping = Math.max(1800, Math.min(10000, Math.round(typingDelayMs)));
+    // Clamp typing delay within natural human bounds (minimum 2.5s, maximum 9s)
+    const finalTyping = Math.max(2500, Math.min(9000, Math.round(typingDelayMs)));
 
     return {
       readDelayMs,
@@ -465,7 +468,7 @@ class HumanBotFirewallService {
         await this.sleep(3500 + Math.floor(Math.random() * 4000));
       }
 
-      // 1. Reading pause while still OFFLINE (Simulating reading from notification bar)
+      // 1. Reading pause while still OFFLINE (Simulating seeing notification & reading)
       await this.sleep(readDelayMs);
 
       // 2. Open WhatsApp -> Go ONLINE
@@ -478,8 +481,8 @@ class HumanBotFirewallService {
         await sock.readMessages([messageKey]).catch(() => {});
       }
 
-      // 4. Brief human finger tap delay (350ms)
-      await this.sleep(350);
+      // 4. Human thinking & reaction pause after opening chat (600ms - 1200ms)
+      await this.sleep(600 + Math.floor(Math.random() * 600));
 
       // 5. Presence "composing" (Shows 'typing...' to sender)
       if (sock.sendPresenceUpdate) {
@@ -489,11 +492,11 @@ class HumanBotFirewallService {
       // 6. Typing duration pause (Includes 0.5s word gap and typo-backspaces)
       await this.sleep(typingDelayMs);
 
-      // 7. Presence "paused" (Before hitting Send)
+      // 7. Presence "paused" (Brief pause before hitting Send button)
       if (sock.sendPresenceUpdate) {
         await sock.sendPresenceUpdate("paused", jid).catch(() => {});
       }
-      await this.sleep(250);
+      await this.sleep(350 + Math.floor(Math.random() * 250));
 
       // 8. Auto-schedule returning to OFFLINE after 14 seconds of inactivity
       this.scheduleGoOffline(sock, 14000);

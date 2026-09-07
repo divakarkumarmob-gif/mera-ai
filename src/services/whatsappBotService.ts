@@ -81,6 +81,18 @@ class WhatsAppBotService {
   private replyCountCache: Map<string, { count: number; dateStr: string }> = new Map();
   private lastReplyAt: Map<string, number> = new Map(); // for the 6s min-gap only
   private limitNoticeSentToday: Map<string, string> = new Map(); // senderKey -> IST date string, so the generic "limit reached" notice only goes out once per day
+  private incomingDebounceMap: Map<
+    string,
+    {
+      timer: any;
+      texts: string[];
+      senderName: string;
+      senderPhone: string;
+      isUnknownContact: boolean;
+      replyJid: string;
+      latestMsgKey: any;
+    }
+  > = new Map();
 
   constructor() {
     // Restore last-known phone from Firestore so dashboard shows 'linked' even after restart
@@ -531,7 +543,7 @@ class WhatsAppBotService {
               if (pinRes.handled && pinRes.replyText) {
                 consumedByDailyUpdate = true;
                 if (this.sock && this.isConnected) {
-                  await this.sendHumanLikeMessage(replyJid, pinRes.replyText);
+                  await this.sendHumanLikeMessage(replyJid, pinRes.replyText, text, msg.key);
                 }
               }
             } catch (pinErr) {
@@ -546,7 +558,7 @@ class WhatsAppBotService {
                 if (keyRes.handled && keyRes.replyText) {
                   consumedByDailyUpdate = true;
                   if (this.sock && this.isConnected) {
-                    await this.sendHumanLikeMessage(replyJid, keyRes.replyText);
+                    await this.sendHumanLikeMessage(replyJid, keyRes.replyText, text, msg.key);
                   }
                 }
               } catch (keyErr) {
@@ -563,10 +575,8 @@ class WhatsAppBotService {
               }
             }
           } else if (!isGroup && this.autoReplyEnabled && this.sock && this.isConnected) {
-            // ── Smart AI Auto-Reply for 1-on-1 Personal Chats ──────────────────
-            this.handleIncomingForAutoReply(senderName, senderPhone, text, isUnknownContact, replyJid).catch((e) =>
-              console.error("[WhatsAppBot] Auto-reply handling failed:", e)
-            );
+            // ── Smart AI Auto-Reply with Burst Debounce for 1-on-1 Personal Chats ──
+            this.queueIncomingForAutoReply(senderName, senderPhone, text, isUnknownContact, replyJid, msg.key);
           }
 
           // Notify server → broadcast to WebSocket clients. Flag whether this
@@ -584,6 +594,61 @@ class WhatsAppBotService {
         }
       }
     });
+  }
+
+  /**
+   * Debounces incoming messages per contact:
+   * If a user sends multiple rapid messages (e.g., "bhai", "ek baat bata", "kal chalna hai kya?"),
+   * we wait 3.5 seconds after their last message, combine their messages into a single context,
+   * and then process the auto-reply with realistic human delays.
+   */
+  private queueIncomingForAutoReply(
+    senderName: string,
+    senderPhone: string,
+    text: string,
+    isUnknownContact: boolean,
+    replyJid: string,
+    messageKey: any
+  ) {
+    const senderKey = senderPhone || replyJid;
+
+    const existing = this.incomingDebounceMap.get(senderKey);
+    if (existing) {
+      if (existing.timer) clearTimeout(existing.timer);
+      existing.texts.push(text);
+      existing.senderName = senderName;
+      existing.isUnknownContact = isUnknownContact;
+      existing.replyJid = replyJid;
+      existing.latestMsgKey = messageKey;
+    } else {
+      this.incomingDebounceMap.set(senderKey, {
+        timer: null,
+        texts: [text],
+        senderName,
+        senderPhone,
+        isUnknownContact,
+        replyJid,
+        latestMsgKey: messageKey,
+      });
+    }
+
+    const entry = this.incomingDebounceMap.get(senderKey)!;
+    entry.timer = setTimeout(async () => {
+      this.incomingDebounceMap.delete(senderKey);
+      const combinedText = entry.texts.join("\n");
+      try {
+        await this.handleIncomingForAutoReply(
+          entry.senderName,
+          entry.senderPhone,
+          combinedText,
+          entry.isUnknownContact,
+          entry.replyJid,
+          entry.latestMsgKey
+        );
+      } catch (e) {
+        console.error("[WhatsAppBot] Auto-reply handling failed:", e);
+      }
+    }, 3500);
   }
 
   /**
@@ -606,7 +671,8 @@ class WhatsAppBotService {
     senderPhone: string,
     text: string,
     isUnknownContact: boolean,
-    replyJid: string
+    replyJid: string,
+    messageKey?: any
   ) {
     // 1. Check for a pending "should I ask DK?" confirmation from this sender.
     const pending = await dailyUpdateService.getRecentPendingForSender(senderPhone);
@@ -614,7 +680,12 @@ class WhatsAppBotService {
       if (dailyUpdateService.isAffirmative(text)) {
         await dailyUpdateService.markAskedDK(pending.id);
         if (this.sock) {
-          await this.sendHumanLikeMessage(replyJid, "Theek hai, main boss se pooch ke aapko jaldi batati hoon 👍");
+          await this.sendHumanLikeMessage(
+            replyJid,
+            "Theek hai, main boss se pooch ke aapko jaldi batati hoon 👍",
+            text,
+            messageKey
+          );
         }
         return;
       }
@@ -626,7 +697,7 @@ class WhatsAppBotService {
     const factualAnswer = await dailyUpdateService.answerFromTodayUpdate(text);
     if (factualAnswer) {
       if (this.sock) {
-        await this.sendHumanLikeMessage(replyJid, factualAnswer);
+        await this.sendHumanLikeMessage(replyJid, factualAnswer, text, messageKey);
         console.log(`[WhatsAppBot] Answered ${senderName} from today's update: "${factualAnswer}"`);
       }
       return;
@@ -640,14 +711,16 @@ class WhatsAppBotService {
       if (this.sock) {
         await this.sendHumanLikeMessage(
           replyJid,
-          "Iske baare mein mujhe pata nahi, boss ne mujhe kuch nahi bataya hai. Chahe to main unse pooch loon?"
+          "Iske baare mein mujhe pata nahi, boss ne mujhe kuch nahi bataya hai. Chahe to main unse pooch loon?",
+          text,
+          messageKey
         );
       }
       return;
     }
 
     // 4. Ordinary chat — fall through to the normal AI reply, rate-limited.
-    await this.tryFactualOrChatReply(senderName, senderPhone, text, isUnknownContact, replyJid);
+    await this.tryFactualOrChatReply(senderName, senderPhone, text, isUnknownContact, replyJid, messageKey);
   }
 
   /** The rate-limited Gemini smart-reply path for ordinary chit-chat, subject to the daily per-contact limit. */
@@ -656,7 +729,8 @@ class WhatsAppBotService {
     senderPhone: string,
     text: string,
     isUnknownContact: boolean,
-    replyJid: string
+    replyJid: string,
+    messageKey?: any
   ) {
     const now = Date.now();
     const senderKey = senderPhone || replyJid;
@@ -673,7 +747,12 @@ class WhatsAppBotService {
       this.limitNoticeSentToday.set(senderKey, today);
       if (this.sock) {
         try {
-          await this.sendHumanLikeMessage(replyJid, LIMIT_REACHED_GENERIC_REPLY(senderName, isUnknownContact));
+          await this.sendHumanLikeMessage(
+            replyJid,
+            LIMIT_REACHED_GENERIC_REPLY(senderName, isUnknownContact),
+            text,
+            messageKey
+          );
         } catch (e) {
           console.error(`[WhatsAppBot] Failed to send limit-reached notice to ${senderPhone}:`, e);
         }
@@ -682,17 +761,15 @@ class WhatsAppBotService {
     }
 
     this.lastReplyAt.set(senderKey, now);
-    setTimeout(async () => {
-      try {
-        if (this.sock && this.isConnected) {
-          const aiReply = await this.generateSmartAutoReply(senderName, senderPhone, text, isUnknownContact);
-          await this.sendHumanLikeMessage(replyJid, aiReply);
-          console.log(`[WhatsAppBot] Smart AI Reply sent to ${senderName} (+${senderPhone}): "${aiReply}"`);
-        }
-      } catch (replyErr) {
-        console.error(`[WhatsAppBot] Failed to send AI auto-reply to ${senderPhone}:`, replyErr);
+    try {
+      if (this.sock && this.isConnected) {
+        const aiReply = await this.generateSmartAutoReply(senderName, senderPhone, text, isUnknownContact);
+        await this.sendHumanLikeMessage(replyJid, aiReply, text, messageKey);
+        console.log(`[WhatsAppBot] Smart AI Reply sent to ${senderName} (+${senderPhone}): "${aiReply}"`);
       }
-    }, 1200);
+    } catch (replyErr) {
+      console.error(`[WhatsAppBot] Failed to send AI auto-reply to ${senderPhone}:`, replyErr);
+    }
   }
 
   /**
