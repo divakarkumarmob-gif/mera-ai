@@ -409,6 +409,132 @@ Format with WhatsApp bold and music emojis.`;
       return `🎵 *Music Finder:* Error searching track: ${e?.message || e}`;
     }
   }
+
+  // ── 10. 🔎 Universal Chat Search & Message Finder (1v1 & Group) ─────────
+
+  public async searchAndLocateMessage(
+    queryText: string,
+    allMessages: Array<{
+      id: string;
+      senderName: string;
+      senderPhone: string;
+      text: string;
+      dateStr: string;
+      groupId?: string | null;
+      groupName?: string | null;
+      isGroup?: boolean;
+    }>,
+    options?: {
+      groupName?: string;
+      isGroup?: boolean;
+      requesterName?: string;
+    }
+  ): Promise<{ found: boolean; replyText: string; topMatch?: any }> {
+    const rawClean = (queryText || "")
+      .replace(/^(?:@?friday|fridaay|fryday|fraiday)/gi, "")
+      .replace(/^(?:@search|\/search|@find|\/find|search|find)\s*/gi, "")
+      .trim();
+
+    // Extract core query from natural language phrases like "kisi ne apple ke bare me bola tha"
+    let targetKeyword = rawClean;
+    const pattern1 = rawClean.match(/(?:kisi\s*ne|kisne)\s+(.+?)\s+(?:ke\s*baare\s*me|ke\s*bare\s*me|ke\s*liye|ko\s*lekar)?\s*(?:bola\s*tha|kaha\s*tha|bheja\s*tha|likha\s*tha|message\s*kiya)/i);
+    const pattern2 = rawClean.match(/(?:dhundo|dhundho|check\s*karo|dekho)\s+(?:kisi\s*ne\s+)?(.+?)(?:\s+bola\s*tha|\s+bheja\s*tha|\s+kaha\s*tha)?$/i);
+    const pattern3 = rawClean.match(/(?:kisi\s*ne\s+)?(.+?)\s+(?:ke\s*bare\s*me\s*kya\s*bola|ke\s*baare\s*me\s*kya\s*bola|ke\s*bare\s*me|ke\s*baare\s*me)/i);
+
+    if (pattern1 && pattern1[1]) {
+      targetKeyword = pattern1[1].trim();
+    } else if (pattern2 && pattern2[1]) {
+      targetKeyword = pattern2[1].trim();
+    } else if (pattern3 && pattern3[1]) {
+      targetKeyword = pattern3[1].trim();
+    }
+
+    // Strip stop words
+    const cleanSearchTerm = targetKeyword
+      .replace(/^(?:kisi\s*ne|kisne|kya|bhai|koi|msg|message|chat\s*me)\s+/gi, "")
+      .replace(/\s+(?:ke\s*baare\s*me|ke\s*bare\s*me|bola\s*tha|kaha\s*tha|bheja\s*tha|tha|kya)$/gi, "")
+      .trim();
+
+    if (!cleanSearchTerm || cleanSearchTerm.length < 2) {
+      return {
+        found: false,
+        replyText: `🔍 *Message Search:*\nAapko chat me kya search karna hai? Example: _"friday kisi ne meeting ke bare me bola tha"_ ya _"friday search project"_\n_Main poori chat scan karke sender aur time ke sath dhoondh dungi!_`,
+      };
+    }
+
+    const tokens = cleanSearchTerm.toLowerCase().split(/\s+/).filter((t) => t.length > 1);
+
+    // Score and filter messages
+    const scoredMatches: Array<{ msg: any; score: number }> = [];
+
+    for (const m of allMessages) {
+      // Don't match the search command message itself
+      if (m.text.toLowerCase().includes("kisi ne") && m.text.toLowerCase().includes("bola tha")) continue;
+
+      const fullContent = `${m.text} ${m.senderName} ${m.groupName || ""}`.toLowerCase();
+      let matchScore = 0;
+
+      // Exact substring match gives high score
+      if (fullContent.includes(cleanSearchTerm.toLowerCase())) {
+        matchScore += 10;
+      }
+
+      // Individual token matches
+      for (const token of tokens) {
+        if (fullContent.includes(token)) {
+          matchScore += 3;
+        }
+      }
+
+      if (matchScore > 0) {
+        scoredMatches.push({ msg: m, score: matchScore });
+      }
+    }
+
+    // Sort by relevance (highest score first)
+    scoredMatches.sort((a, b) => b.score - a.score);
+
+    if (scoredMatches.length === 0) {
+      return {
+        found: false,
+        replyText: `🔍 *Search Result:*\nMujhe chat me *"${cleanSearchTerm}"* se match karta hua koi purana message nahi mila. Aap thoda different keyword try kar sakte hain!`,
+      };
+    }
+
+    const best = scoredMatches[0].msg;
+    const isGroup = !!options?.isGroup;
+
+    let reply = "";
+    if (isGroup) {
+      reply = `🔎 *Haan! Group me yeh message mila:*\n\n` +
+        `👤 *Sender:* **${best.senderName}**\n` +
+        `📅 *Time:* _${best.dateStr}_\n` +
+        `💬 *Message:* \n` +
+        `> _"${best.text.slice(0, 350)}"_\n\n` +
+        `💡 *${best.senderName} ne yeh message bheja tha.*`;
+    } else {
+      reply = `🔎 *Haanji! Mujhe yeh message mil gaya hai:*\n\n` +
+        `👤 *Sender:* **${best.senderName}** (+${best.senderPhone})\n` +
+        `📅 *Date & Time:* _${best.dateStr}_\n` +
+        `💬 *Message Content:* \n` +
+        `> _"${best.text.slice(0, 350)}"_\n\n` +
+        `✨ *${best.senderName} ne yeh message bheja tha.*`;
+    }
+
+    // If there are other notable matches, mention them briefly
+    if (scoredMatches.length > 1) {
+      const otherMatches = scoredMatches.slice(1, 3).map(
+        (sm) => `• *${sm.msg.senderName}* [_${sm.msg.dateStr}_]: _"${sm.msg.text.slice(0, 80)}"_`
+      );
+      reply += `\n\n📌 *Kuch aur related messages bhi mile:*\n${otherMatches.join("\n")}`;
+    }
+
+    return {
+      found: true,
+      replyText: reply,
+      topMatch: best,
+    };
+  }
 }
 
 export const whatsappFeatureEngine = new WhatsAppFeatureEngine();

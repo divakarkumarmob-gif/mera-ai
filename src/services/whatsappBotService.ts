@@ -1426,8 +1426,26 @@ class WhatsAppBotService {
       return;
     }
 
-    // 10. ADVANCED FEATURE SUITE SHORTCUTS FOR BOSS:
+    // 9.1 Natural Language Message Finder ("friday kisi ne apple ke bare me bola tha", "kisne bola tha ...")
     const { whatsappFeatureEngine } = await import("./whatsappFeatureEngine");
+    const naturalFindMatch =
+      rawText.match(/(?:kisi\s*ne|kisne)\s+(.+?)\s*(?:ke\s*baare\s*me|ke\s*bare\s*me|ke\s*liye|bola\s*tha|kaha\s*tha|bheja\s*tha)/i) ||
+      rawText.match(/^(?:@find|\/find|find\s*msg|find\s*message|dhundo|dhundho|dhoondo|search\s*msg)\s*(.*)/i) ||
+      (rawText.includes("kisi ne") && rawText.includes("bola"));
+    if (naturalFindMatch) {
+      const isGroup = replyJid.endsWith("@g.us");
+      const groupName = isGroup ? await this.getGroupName(replyJid) : undefined;
+      const recentMsgs = await this.getMessages({ groupName, limit: 120 });
+      const searchRes = await whatsappFeatureEngine.searchAndLocateMessage(rawText, recentMsgs, {
+        groupName,
+        isGroup,
+        requesterName: senderName,
+      });
+      await this.sendHumanLikeMessage(replyJid, searchRes.replyText, rawText, messageKey);
+      return;
+    }
+
+    // 10. ADVANCED FEATURE SUITE SHORTCUTS FOR BOSS:
 
     // A. Personal Catch-Up Digest ("@digest", "kiska msg aaya", "who messaged me")
     if (/^(?:@digest|\/digest|digest|kiska\s*msg\s*aaya|kiska\s*kiska\s*msg\s*aaya|who\s*messaged|messages\s*digest)/i.test(rawText)) {
@@ -2251,6 +2269,15 @@ COMMUNICATION STYLE:
       "/music",
       "@safety",
       "/safety",
+      "@find",
+      "/find",
+      "@search",
+      "/search",
+      "kisi ne",
+      "kisne bola",
+      "dhundo",
+      "dhundho",
+      "dhoondo",
     ];
     if (nameTriggers.some((t) => cleanText.includes(t))) {
       return true;
@@ -2429,6 +2456,23 @@ COMMUNICATION STYLE:
       await this.sendHumanLikeMessage(groupJid, `🌐 *Webpage analyze ho rahi hai...* ⚡\n🔗 _${targetUrl}_`, text, messageKey);
       const webSummary = await whatsappFeatureEngine.summarizeWebUrl(targetUrl, userQ);
       await this.sendHumanLikeMessage(groupJid, webSummary, text, messageKey);
+      return;
+    }
+
+    // 10. Natural Language Message Finder in Group ("friday kisi ne apple ke bare me bola tha", "@find ...", "kisne bola tha ...")
+    const groupFindMatch =
+      text.match(/(?:kisi\s*ne|kisne)\s+(.+?)\s*(?:ke\s*baare\s*me|ke\s*bare\s*me|ke\s*liye|bola\s*tha|kaha\s*tha|bheja\s*tha)/i) ||
+      text.match(/^(?:@find|\/find|find\s*msg|find\s*message|dhundo|dhundho|dhoondo|search\s*msg)\s*(.*)/i) ||
+      (text.includes("kisi ne") && text.includes("bola"));
+    if (groupFindMatch) {
+      await this.sendHumanLikeMessage(groupJid, `🔎 *Group chat me dhoondh rahi hoon ${senderName}...* ⚡`, text, messageKey);
+      const recentMsgs = await this.getMessages({ groupName, limit: 120 });
+      const searchRes = await whatsappFeatureEngine.searchAndLocateMessage(text, recentMsgs, {
+        groupName,
+        isGroup: true,
+        requesterName: senderName,
+      });
+      await this.sendHumanLikeMessage(groupJid, searchRes.replyText, text, messageKey);
       return;
     }
 
