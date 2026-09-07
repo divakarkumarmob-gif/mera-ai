@@ -544,7 +544,145 @@ class TelegramBotService {
     }
   }
 
-  private customBusyReply: string | null = null;
+  /**
+   * Sends a Photo to a Telegram chat (via Buffer or direct URL).
+   */
+  public async sendPhoto(
+    chatId: number | string,
+    photo: Buffer | string,
+    caption?: string
+  ): Promise<{ success: boolean; messageId?: number; error?: string }> {
+    if (!this.token) return { success: false, error: "TELEGRAM_BOT_TOKEN is not configured." };
+    try {
+      if (typeof photo === "string") {
+        const res = await this.callApi("sendPhoto", {
+          chat_id: chatId,
+          photo,
+          caption,
+          parse_mode: "Markdown",
+        });
+        return { success: true, messageId: res.message_id };
+      }
+
+      const url = `https://api.telegram.org/bot${this.token}/sendPhoto`;
+      const formData = new FormData();
+      formData.append("chat_id", String(chatId));
+      const blob = new Blob([photo], { type: "image/jpeg" });
+      formData.append("photo", blob, "photo.jpg");
+      if (caption) formData.append("caption", caption);
+
+      const res = await fetch(url, { method: "POST", body: formData });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.description || "sendPhoto API failed");
+      return { success: true, messageId: json.result.message_id };
+    } catch (e: any) {
+      console.error(`[TelegramBot] sendPhoto failed to ${chatId}:`, e?.message);
+      return { success: false, error: e?.message || String(e) };
+    }
+  }
+
+  /**
+   * Sends a Video to a Telegram chat (via Buffer or direct URL).
+   */
+  public async sendVideo(
+    chatId: number | string,
+    video: Buffer | string,
+    caption?: string
+  ): Promise<{ success: boolean; messageId?: number; error?: string }> {
+    if (!this.token) return { success: false, error: "TELEGRAM_BOT_TOKEN is not configured." };
+    try {
+      if (typeof video === "string") {
+        const res = await this.callApi("sendVideo", {
+          chat_id: chatId,
+          video,
+          caption,
+          parse_mode: "Markdown",
+        });
+        return { success: true, messageId: res.message_id };
+      }
+
+      const url = `https://api.telegram.org/bot${this.token}/sendVideo`;
+      const formData = new FormData();
+      formData.append("chat_id", String(chatId));
+      const blob = new Blob([video], { type: "video/mp4" });
+      formData.append("video", blob, "video.mp4");
+      if (caption) formData.append("caption", caption);
+
+      const res = await fetch(url, { method: "POST", body: formData });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.description || "sendVideo API failed");
+      return { success: true, messageId: json.result.message_id };
+    } catch (e: any) {
+      console.error(`[TelegramBot] sendVideo failed to ${chatId}:`, e?.message);
+      return { success: false, error: e?.message || String(e) };
+    }
+  }
+
+  /**
+   * Sends a Document / PDF to a Telegram chat.
+   */
+  public async sendDocument(
+    chatId: number | string,
+    document: Buffer | string,
+    fileName: string = "document.pdf",
+    caption?: string
+  ): Promise<{ success: boolean; messageId?: number; error?: string }> {
+    if (!this.token) return { success: false, error: "TELEGRAM_BOT_TOKEN is not configured." };
+    try {
+      if (typeof document === "string") {
+        const res = await this.callApi("sendDocument", {
+          chat_id: chatId,
+          document,
+          caption,
+          parse_mode: "Markdown",
+        });
+        return { success: true, messageId: res.message_id };
+      }
+
+      const url = `https://api.telegram.org/bot${this.token}/sendDocument`;
+      const formData = new FormData();
+      formData.append("chat_id", String(chatId));
+      const blob = new Blob([document], { type: "application/octet-stream" });
+      formData.append("document", blob, fileName);
+      if (caption) formData.append("caption", caption);
+
+      const res = await fetch(url, { method: "POST", body: formData });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.description || "sendDocument API failed");
+      return { success: true, messageId: json.result.message_id };
+    } catch (e: any) {
+      console.error(`[TelegramBot] sendDocument failed to ${chatId}:`, e?.message);
+      return { success: false, error: e?.message || String(e) };
+    }
+  }
+
+  /**
+   * Retrieves recent messages from Telegram history / cache.
+   */
+  public async getRecentTelegramMessages(limit = 10): Promise<Array<{ text: string; sender: string; timeStr: string; type: string }>> {
+    const list: Array<{ text: string; sender: string; timeStr: string; type: string }> = [];
+    for (const profile of this.userProfileCache.values()) {
+      if (profile.recentMessages) {
+        for (const m of profile.recentMessages) {
+          list.push({
+            text: m.text,
+            sender: m.sender || profile.name,
+            timeStr: m.timeStr || "",
+            type: "text",
+          });
+        }
+      }
+    }
+    for (const media of this.mediaVaultCache.values()) {
+      list.push({
+        text: `[${media.mediaType.toUpperCase()}] ${media.caption || media.fileName || media.analysisSummary}`,
+        sender: media.senderName,
+        timeStr: media.dateStr,
+        type: media.mediaType,
+      });
+    }
+    return list.slice(-limit).reverse();
+  }
 
   public async getCustomBusyReply(): Promise<string | null> {
     if (this.customBusyReply) return this.customBusyReply;

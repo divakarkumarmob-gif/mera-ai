@@ -207,6 +207,31 @@ const rawFunctionDeclarations: any[] = [
     }
   },
   {
+    "name": "set_primary_whatsapp_channel",
+    "description": "Set and remember DK's preferred primary/default WhatsApp channel ('whatsapp1' or 'whatsapp2' or 'auto'). Use when DK says 'Primary WhatsApp 2 yaad rakhna', 'Aage se WhatsApp 2 se hi message bhejna', 'WhatsApp 1 ko default bana do', or sets channel preference. Saves preference permanently in database so all future messages automatically use this channel.",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {
+        "channel": {
+          "type": "STRING",
+          "description": "The primary channel to set: 'whatsapp1' (Official Meta Cloud API), 'whatsapp2' (Baileys Dedicated Bot), or 'auto' (Smart Failover)"
+        }
+      },
+      "required": [
+        "channel"
+      ]
+    }
+  },
+  {
+    "name": "get_primary_whatsapp_channel",
+    "description": "Check which WhatsApp channel (WhatsApp 1 or WhatsApp 2 or Auto) is currently set as DK's remembered primary WhatsApp channel.",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
     "name": "pair_dedicated_whatsapp_number",
     "description": "Request an 8-character Pairing Code to link DK's spare phone number to Friday's dedicated WhatsApp bot.",
     "parameters": {

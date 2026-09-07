@@ -106,6 +106,41 @@ class MemoryEngine {
     return Array.from(this.activeSessions.values());
   }
 
+  public async addPinnedMemory(fact: string): Promise<{ success: boolean; id: string; fact: string }> {
+    const id = "pin_" + Math.random().toString(36).substring(2, 9);
+    const now = Date.now();
+    const entry = {
+      id,
+      fact: encryptData(fact.trim()),
+      date: new Date(now).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" }),
+      timestamp: now,
+    };
+    try {
+      await pinnedCol().doc(id).set(entry);
+    } catch (e) {
+      console.warn("[MemoryEngine] Failed to save pinned memory:", e);
+    }
+    return { success: true, id, fact: fact.trim() };
+  }
+
+  public async addVaultFact(category: string, fact: string): Promise<{ success: boolean; id: string; fact: string }> {
+    const id = "vlt_" + Math.random().toString(36).substring(2, 9);
+    const now = Date.now();
+    const entry: PersonalVaultEntry = {
+      id,
+      category: category.trim() || "general",
+      exactFact: encryptData(fact.trim()),
+      date: new Date(now).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" }),
+      timestamp: now,
+    };
+    try {
+      await vaultCol().doc(id).set(entry);
+    } catch (e) {
+      console.warn("[MemoryEngine] Failed to save vault fact:", e);
+    }
+    return { success: true, id, fact: fact.trim() };
+  }
+
   public recordMessage(sessionId: string, sender: "user" | "ai", text: string) {
     if (!text || !text.trim()) return;
     let session = this.activeSessions.get(sessionId);
@@ -482,21 +517,7 @@ ${transcript}`;
     }
   }
 
-  public async addPinnedMemory(fact: string) {
-    if (!fact || !fact.trim()) return;
-    const now = Date.now();
-    const id = Math.random().toString(36).substring(2, 9);
-    try {
-      await pinnedCol().doc(id).set({
-        id,
-        fact: encryptData(fact.trim()),
-        date: new Date(now).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
-        timestamp: now,
-      });
-    } catch (e) {
-      console.error("[MemoryEngine] Failed to add pinned memory:", e);
-    }
-  }
+
 
   public async getMemories() {
     try {

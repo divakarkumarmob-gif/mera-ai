@@ -1,11 +1,14 @@
 import { whatsappCloudService } from "./whatsappCloudService";
 import { whatsappBotService } from "./whatsappBotService";
+import { db } from "./firebaseAdmin";
+
+export type WhatsAppPrimaryChannel = "whatsapp1" | "whatsapp2" | "auto";
 
 export interface SendWhatsAppOptions {
   /**
    * "whatsapp1" = Official Meta WhatsApp Cloud API
    * "whatsapp2" = WhatsApp Baileys Multi-Device Bot
-   * "auto"      = Try WhatsApp 1 first; if fails, smart failover/prompt to WhatsApp 2
+   * "auto"      = Uses remembered primary channel (or smart fallback)
    */
   channel?: "auto" | "whatsapp1" | "whatsapp2";
   baileysEnabled?: boolean;
@@ -20,68 +23,130 @@ export interface SendWhatsAppResult {
   suggestBaileysFallback?: boolean;
 }
 
+const channelMetaDoc = () => db.collection("whatsapp_auth").doc("session").collection("meta").doc("channel_meta");
+
+let cachedPrimaryChannel: WhatsAppPrimaryChannel = "whatsapp1";
+let isChannelLoaded = false;
+
+/**
+ * Gets the current remembered primary WhatsApp channel preference.
+ * Persisted in Firestore so it survives server restarts.
+ */
+export async function getPrimaryWhatsAppChannel(): Promise<WhatsAppPrimaryChannel> {
+  if (isChannelLoaded) return cachedPrimaryChannel;
+  try {
+    const snap = await channelMetaDoc().get();
+    if (snap.exists && snap.data()?.primaryChannel) {
+      cachedPrimaryChannel = snap.data()!.primaryChannel as WhatsAppPrimaryChannel;
+    }
+    isChannelLoaded = true;
+  } catch (e) {
+    console.warn("[WhatsApp] Could not load primary WhatsApp channel preference:", e);
+  }
+  return cachedPrimaryChannel;
+}
+
+/**
+ * Sets and permanently remembers DK's primary WhatsApp channel (WhatsApp 1 or WhatsApp 2).
+ */
+export async function setPrimaryWhatsAppChannel(channel: string): Promise<{ success: boolean; message: string; channel: WhatsAppPrimaryChannel }> {
+  const norm = String(channel || "").trim().toLowerCase();
+  const clean: WhatsAppPrimaryChannel =
+    norm === "whatsapp2" || norm === "2" || norm.includes("2") || norm.includes("baileys") ? "whatsapp2"
+    : norm === "whatsapp1" || norm === "1" || norm.includes("1") || norm.includes("cloud") ? "whatsapp1"
+    : "auto";
+
+  cachedPrimaryChannel = clean;
+  isChannelLoaded = true;
+  try {
+    await channelMetaDoc().set({ primaryChannel: clean, updatedAt: Date.now() }, { merge: true });
+    console.log(`[WhatsApp] Primary WhatsApp channel updated & saved to Firestore: ${clean}`);
+  } catch (e: any) {
+    console.warn("[WhatsApp] Could not persist primary channel preference:", e);
+  }
+
+  const channelLabel =
+    clean === "whatsapp2" ? "WhatsApp 2 (Baileys Dedicated Bot)"
+    : clean === "whatsapp1" ? "WhatsApp 1 (Official Meta Cloud API)"
+    : "Auto Mode (Smart Dual Failover)";
+
+  return {
+    success: true,
+    channel: clean,
+    message: `Theek hai boss! Maine yaad rakh liya hai ki primary WhatsApp channel **${channelLabel}** hai. Aage se saare messages direct isi channel se bheje jayenge!`,
+  };
+}
+
 /**
  * Dual WhatsApp message dispatcher:
  * - WhatsApp 1: Official Meta Cloud API (ban-safe, high reliability)
  * - WhatsApp 2: Baileys Multi-Device Bot (personal/spare number, bypasses 24h Meta restriction)
+ * Automatically respects DK's remembered primary channel!
  */
 export async function sendWhatsAppUnified(
   toPhone: string,
   text: string,
   options: SendWhatsAppOptions = {}
 ): Promise<SendWhatsAppResult> {
-  const { channel = "auto" } = options;
   const isBaileysActive = typeof options.baileysEnabled === "boolean"
     ? options.baileysEnabled
     : whatsappBotService.isBaileysEnabled();
 
   const cleanPhone = toPhone.replace(/[\s\-\(\)\+]/g, "").trim();
 
+  // Resolve requested channel or fall back to remembered primary channel
+  let targetChannel = options.channel && options.channel !== "auto"
+    ? options.channel
+    : await getPrimaryWhatsAppChannel();
+
   // ── 1. DIRECT CHANNEL: WhatsApp 2 (Baileys Dedicated Bot) ─────────────────
-  if (channel === "whatsapp2") {
+  if (targetChannel === "whatsapp2") {
     const baileysStatus = whatsappBotService.getStatus();
+    if (baileysStatus.isConnected && isBaileysActive) {
+      const baileysRes = await whatsappBotService.sendMessage(cleanPhone, text);
+      if (baileysRes.success) {
+        return {
+          success: true,
+          via: "baileys",
+          channelUsed: "whatsapp2",
+          message: baileysRes.message,
+        };
+      }
+      console.warn(`[WhatsApp] Primary WhatsApp 2 send failed (${baileysRes.message}). Attempting fallback to WhatsApp 1...`);
+    } else {
+      console.warn(`[WhatsApp] WhatsApp 2 requested but not connected/enabled. Attempting fallback to WhatsApp 1...`);
+    }
+
+    // Fallback to WhatsApp 1 if WhatsApp 2 was unavailable/failed
+    const cloudStatus = whatsappCloudService.getStatus();
+    if (cloudStatus.configured) {
+      const cloudRes = await whatsappCloudService.sendMessage(cleanPhone, text);
+      if (cloudRes.success) {
+        return {
+          success: true,
+          via: "cloud_api",
+          channelUsed: "whatsapp1",
+          message: `Delivered via WhatsApp 1 (Cloud API) as WhatsApp 2 was unavailable.`,
+        };
+      }
+    }
+
     if (!baileysStatus.isConnected) {
       return {
         success: false,
         channelUsed: "whatsapp2",
-        message: "Boss, WhatsApp 2 (Baileys) abhi linked nahi hai. Kripya settings mein jakar QR scan ya Pairing code se WhatsApp 2 link karein.",
+        message: "Boss, WhatsApp 2 (Baileys) abhi linked nahi hai aur WhatsApp 1 bhi available nahi hai. Kripya WhatsApp 2 link karein.",
       };
     }
 
-    const baileysRes = await whatsappBotService.sendMessage(cleanPhone, text);
     return {
-      success: baileysRes.success,
-      via: "baileys",
+      success: false,
       channelUsed: "whatsapp2",
-      message: baileysRes.success
-        ? `Delivered via WhatsApp 2 (Baileys): ${baileysRes.message}`
-        : `WhatsApp 2 send failed: ${baileysRes.message}`,
+      message: "WhatsApp 2 aur WhatsApp 1 dono se message send nahi ho paya.",
     };
   }
 
-  // ── 2. DIRECT CHANNEL: WhatsApp 1 (Official Meta Cloud API) ───────────────
-  if (channel === "whatsapp1") {
-    const cloudStatus = whatsappCloudService.getStatus();
-    if (!cloudStatus.configured) {
-      return {
-        success: false,
-        channelUsed: "whatsapp1",
-        message: "Boss, WhatsApp 1 (Official Meta Cloud API) .env mein configured nahi hai (WHATSAPP_API_TOKEN / WHATSAPP_PHONE_ID missing).",
-      };
-    }
-
-    const cloudRes = await whatsappCloudService.sendMessage(cleanPhone, text);
-    return {
-      success: cloudRes.success,
-      via: "cloud_api",
-      channelUsed: "whatsapp1",
-      message: cloudRes.success
-        ? `Delivered via WhatsApp 1 (Official Cloud API): ${cloudRes.message}`
-        : `WhatsApp 1 failed: ${cloudRes.message}`,
-    };
-  }
-
-  // ── 3. AUTO MODE: Try WhatsApp 1 first, with Smart WhatsApp 2 Failover ───
+  // ── 2. DIRECT CHANNEL / DEFAULT: WhatsApp 1 (Official Meta Cloud API) ─────
   const cloudStatus = whatsappCloudService.getStatus();
   let cloudError: string | null = null;
 

@@ -9,7 +9,7 @@ import { toolsEngine } from "../services/toolsEngine";
 import { contactsService } from "../services/contactsService";
 import { whatsappBotService } from "../services/whatsappBotService";
 import { whatsappCloudService } from "../services/whatsappCloudService";
-import { sendWhatsAppUnified } from "../services/whatsappService";
+import { sendWhatsAppUnified, getPrimaryWhatsAppChannel, setPrimaryWhatsAppChannel } from "../services/whatsappService";
 import { dailyUpdateService, resolveRelativeDateIST } from "../services/dailyUpdateService";
 import { codeAgentService } from "../services/codeAgentService";
 import { publicApisService } from "../services/publicApisService";
@@ -915,6 +915,26 @@ export function createApiRouter(context: ApiRoutesContext): Router {
 
   app.get("/api/whatsapp/baileys/status", (_req, res) => {
     res.json({ baileysEnabled });
+  });
+
+  // ── Primary WhatsApp Channel endpoints ───────────────────────────────────
+  app.get("/api/whatsapp/primary-channel", async (_req, res) => {
+    try {
+      const channel = await getPrimaryWhatsAppChannel();
+      res.json({ ok: true, channel });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "failed_to_get_primary_channel" });
+    }
+  });
+
+  app.post("/api/whatsapp/primary-channel", async (req, res) => {
+    try {
+      const { channel } = req.body;
+      const result = await setPrimaryWhatsAppChannel(channel);
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "failed_to_set_primary_channel" });
+    }
   });
 
   // ── WhatsApp Cloud API Webhook (Meta official) ────────────────────────────

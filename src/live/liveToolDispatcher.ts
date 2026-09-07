@@ -8,7 +8,7 @@ import { toolsEngine } from "../services/toolsEngine";
 import { contactsService } from "../services/contactsService";
 import { whatsappBotService } from "../services/whatsappBotService";
 import { whatsappCloudService } from "../services/whatsappCloudService";
-import { sendWhatsAppUnified } from "../services/whatsappService";
+import { sendWhatsAppUnified, setPrimaryWhatsAppChannel, getPrimaryWhatsAppChannel } from "../services/whatsappService";
 import { dailyUpdateService, resolveRelativeDateIST } from "../services/dailyUpdateService";
 import { codeAgentService } from "../services/codeAgentService";
 import { publicApisService } from "../services/publicApisService";
@@ -170,6 +170,19 @@ export async function dispatchLiveToolCall(call: any, context: ToolDispatchConte
                     message: sendRes.message,
                   };
                   clientWs.send(JSON.stringify({ type: "whatsapp_contact_sent", ...result }));
+                } else if (call.name === "set_primary_whatsapp_channel") {
+                  const { channel } = call.args || {};
+                  const setRes = await setPrimaryWhatsAppChannel(channel);
+                  result = setRes;
+                  clientWs.send(JSON.stringify({ type: "primary_whatsapp_channel_updated", channel: setRes.channel, message: setRes.message }));
+                } else if (call.name === "get_primary_whatsapp_channel") {
+                  const currentChannel = await getPrimaryWhatsAppChannel();
+                  const channelLabel = currentChannel === "whatsapp2" ? "WhatsApp 2 (Baileys Dedicated Bot)" : currentChannel === "whatsapp1" ? "WhatsApp 1 (Official Meta Cloud API)" : "Auto (Smart Dual Failover)";
+                  result = {
+                    success: true,
+                    channel: currentChannel,
+                    message: `Boss, aapka remembered primary WhatsApp channel abhi "${channelLabel}" par set hai.`,
+                  };
                 } else if (call.name === "pair_dedicated_whatsapp_number") {
                   const { phoneNumber } = call.args || {};
                   try {
