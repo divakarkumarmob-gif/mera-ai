@@ -2169,11 +2169,97 @@ INSTRUCTIONS FOR WHEN SENDER IS SOMEONE ELSE (NOT DK):
         const isOwner = !!ownerChatId && String(chatId) === String(ownerChatId);
         const replyText = await this.generateSmartAiReply(senderName, transcribedText, isOwner);
         await this.sendHumanLikeMessage(chatId, replyText);
+
+        // Voice-to-Voice: Friday speaks back with a voice recording!
+        try {
+          await this.sendChatAction(chatId, "record_voice");
+          const voiceBuffer = await voiceBridgeService.textToSpeechBuffer(
+            replyText,
+            VoiceBridgeService.FEMALE_VOICE
+          );
+          if (voiceBuffer && voiceBuffer.length > 0) {
+            await this.sendVoice(chatId, voiceBuffer, "🎙️ Friday Audio Response");
+          }
+        } catch (ttsErr) {
+          console.warn("[TelegramBot] Failed to send voice reply:", ttsErr);
+        }
       } catch (e: any) {
         console.error("[TelegramBot] Error processing voice note:", e);
         await this.sendMessage(chatId, `❌ Voice note process karne me error: ${e?.message || e}`);
       }
       return;
+    }
+
+    // 2.55 Handle Reply-To / Swipe-Up on Voice Note / Audio Message on Telegram
+    const repliedMsg = (msg as any).reply_to_message;
+    const repliedVoice = repliedMsg?.voice || repliedMsg?.audio;
+    if (repliedVoice && text) {
+      const cleanReplyText = text.toLowerCase().trim();
+      const isVoiceDecodeIntent =
+        /(?:kya\s*bol\s*raha|kya\s*keh\s*raha|decode|kya\s*hai|transcript|transcribe|sun\s*ke|sunao|summary|meaning|translate|batao|kya\s*bola)/i.test(cleanReplyText);
+
+      if (isVoiceDecodeIntent) {
+        try {
+          await this.sendChatAction(chatId, "typing");
+          await this.sendMessage(chatId, "🎙️ *Quoted Voice Note / Audio decode & transcribe ho raha hai...* ⚡");
+
+          const { buffer } = await this.downloadFile(repliedVoice.file_id);
+          const transcribed = await voiceBridgeService.transcribeAudio(
+            buffer,
+            repliedVoice.mime_type || "audio/ogg",
+            repliedVoice.file_name || "voice.ogg"
+          );
+
+          if (!transcribed || !transcribed.trim()) {
+            await this.sendMessage(chatId, "⚠️ Is voice note / audio me aawaz saaf sunai nahi de rahi.");
+            return;
+          }
+
+          // Detect target language requested
+          const targetLangMatch = cleanReplyText.match(/\b(?:in|to|me|mein)?\s*(hindi|english|bengali|bangla|marathi|gujarati|punjabi|urdu|tamil|telugu|kannada|malayalam|french|spanish|german|japanese|russian|arabic|chinese)\b/i);
+          const targetLanguage = targetLangMatch ? targetLangMatch[1].trim() : null;
+
+          const key = process.env.GEMINI_API_KEY;
+          if (key) {
+            const ai = new GoogleGenAI({ apiKey: key });
+            const prompt = `You are Friday AI, DK's ultra-intelligent audio decoder and voice summarizer.
+The user replied to an audio recording asking: "${text}".
+
+ORIGINAL SPOKEN AUDIO TRANSCRIPT:
+"""
+${transcribed}
+"""
+
+TARGET LANGUAGE REQUESTED (if any): ${targetLanguage || "None"}
+
+INSTRUCTIONS:
+1. Provide a clean, executive, beautifully structured Telegram response in natural Hinglish:
+   - 🎙️ *Spoken Audio Transcription (Original):* (Show the exact transcribed speech)
+   ${targetLanguage ? `- 🌐 *Translation in ${targetLanguage}:* (Accurate translation into ${targetLanguage})` : ""}
+   - 💡 *Audio Decode & Summary (Kya bol raha hai):* (Explain clearly what the speaker is saying, their tone, intent, and context)
+   - 📌 *Key Action Items / Highlights:* (Mention names, dates, amounts, decisions, or requests if present)
+2. Use clean markdown formatting (*bold*, bullet points, emojis).`;
+
+            let resultReply: string | null = null;
+            for (const model of TelegramBotService.MODEL_FALLBACK_CHAIN) {
+              try {
+                const resp = await ai.models.generateContent({ model, contents: prompt });
+                if (resp.text && resp.text.trim()) {
+                  resultReply = resp.text.trim();
+                  break;
+                }
+              } catch {}
+            }
+
+            await this.sendHumanLikeMessage(chatId, resultReply || `🎙️ *Voice Note Transcription:*\n_"${transcribed}"_`);
+            return;
+          }
+        } catch (e: any) {
+          console.error("[TelegramBot] Error decoding replied voice note:", e);
+          await this.sendMessage(chatId, `❌ Voice note decode karne me error: ${e?.message || e}`);
+          return;
+        }
+      }
     }
 
     // 2.6 Active Bridge Check for Text Messages (1-on-1 Bridge)

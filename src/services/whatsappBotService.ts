@@ -1036,8 +1036,8 @@ class WhatsAppBotService {
                           console.log(`[WhatsAppBot] Boss Voice Transcribed: "${transcribed}"`);
                           await this.sendHumanLikeMessage(replyJid, `🎙️ *Aapki Aawaz (Transcription):*\n_"${transcribed}"_`, "", msg.key);
                           
-                          // Execute Boss AI and generate spoken voice response
-                          await this.handleOwnerWhatsAppMessage(senderName, senderPhone, transcribed, replyJid, msg.key, quotedMessage);
+                          // Execute Boss AI and generate spoken voice response (Voice-to-Voice)
+                          await this.handleOwnerWhatsAppMessage(senderName, senderPhone, transcribed, replyJid, msg.key, quotedMessage, true);
                           continue;
                         }
                       } catch (sttErr) {
@@ -1295,9 +1295,14 @@ class WhatsAppBotService {
       const downloadFn = baileys.downloadMediaMessage || baileys.default?.downloadMediaMessage;
       if (downloadFn) {
         try {
-          const actionText = (isSummaryIntent && !visionMemoryService.isMediaQuestionIntent(rawText))
-            ? `📑 *Quoted ${quotedMessage.mediaType.toUpperCase()} analyze & summarize ho raha hai...* ⚡`
-            : `🔍 *Quoted ${quotedMessage.mediaType.toUpperCase()} me se dhoondh kar jawab de rahi hoon...* ⚡`;
+          const rawQ = quotedMessage.rawQuotedMessage;
+          const isAudioMedia = quotedMessage.mediaType === "audio" || !!rawQ.audioMessage;
+
+          const actionText = isAudioMedia
+            ? `🎙️ *Quoted Audio / Voice Note decode & transcribe ho raha hai...* ⚡`
+            : (isSummaryIntent && !visionMemoryService.isMediaQuestionIntent(rawText))
+              ? `📑 *Quoted ${quotedMessage.mediaType.toUpperCase()} analyze & summarize ho raha hai...* ⚡`
+              : `🔍 *Quoted ${quotedMessage.mediaType.toUpperCase()} me se dhoondh kar jawab de rahi hoon...* ⚡`;
 
           await this.sendHumanLikeMessage(replyJid, actionText, rawText, messageKey);
 
@@ -1305,14 +1310,69 @@ class WhatsAppBotService {
           const buffer: Buffer = await downloadFn(qMsgWrapper, "buffer", {}, { reuploadRequest: this.sock?.updateMediaMessage });
 
           if (buffer && buffer.length > 0) {
-            const rawQ = quotedMessage.rawQuotedMessage;
             const mimeType =
               rawQ.imageMessage?.mimetype ||
               rawQ.documentMessage?.mimetype ||
               rawQ.videoMessage?.mimetype ||
               rawQ.audioMessage?.mimetype ||
-              (quotedMessage.mediaType === "photo" ? "image/jpeg" : quotedMessage.mediaType === "document" ? "application/pdf" : "video/mp4");
+              (quotedMessage.mediaType === "photo" ? "image/jpeg" : quotedMessage.mediaType === "document" ? "application/pdf" : isAudioMedia ? "audio/ogg" : "video/mp4");
             const fileName = rawQ.documentMessage?.fileName || quotedMessage.fileName;
+
+            // ── Quoted Voice Note / Audio Decoder Engine ──
+            if (isAudioMedia) {
+              const { voiceBridgeService } = await import("./voiceBridgeService");
+              const transcribed = await voiceBridgeService.transcribeAudio(buffer, mimeType, "quoted_voice.ogg");
+
+              if (!transcribed || !transcribed.trim()) {
+                await this.sendHumanLikeMessage(replyJid, "⚠️ Is voice note / audio me aawaz saaf sunai nahi de rahi ya audio empty hai.", rawText, messageKey);
+                return true;
+              }
+
+              // Detect target language requested (e.g. Hindi, English, French, Spanish, Bengali, Marathi, etc.)
+              const targetLangMatch = cleanText.match(/\b(?:in|to|me|mein)?\s*(hindi|english|bengali|bangla|marathi|gujarati|punjabi|urdu|tamil|telugu|kannada|malayalam|french|spanish|german|japanese|russian|arabic|chinese)\b/i);
+              const targetLanguage = targetLangMatch ? targetLangMatch[1].trim() : null;
+
+              const apiKey = process.env.GEMINI_API_KEY;
+              if (apiKey) {
+                const ai = new GoogleGenAI({ apiKey });
+                const prompt = `You are Friday AI, DK's ultra-intelligent audio decoder and voice note summarizer.
+The user swiped-up / replied to an audio recording and asked: "${rawText}".
+
+ORIGINAL SPOKEN AUDIO TRANSCRIPT:
+"""
+${transcribed}
+"""
+
+TARGET LANGUAGE REQUESTED (if any): ${targetLanguage || "None"}
+
+INSTRUCTIONS:
+1. Provide a clean, executive, beautifully structured WhatsApp response in natural Hinglish:
+   - 🎙️ *Spoken Audio Transcription (Original):* (Show the exact transcribed speech)
+   ${targetLanguage ? `- 🌐 *Translation in ${targetLanguage}:* (Accurate, natural translation of what was spoken into ${targetLanguage})` : ""}
+   - 💡 *Audio Decode & Summary (Kya bol raha hai):* (Explain clearly what the speaker is saying, their tone, intent, and context)
+   - 📌 *Key Action Items / Highlights:* (Mention names, dates, amounts, decisions, or requests in the audio if present)
+2. Use clean WhatsApp formatting (*bold*, bullet points, emojis).`;
+
+                for (const model of ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-2.5-flash", "gemini-2.5-flash-lite"]) {
+                  try {
+                    const resp = await ai.models.generateContent({ model, contents: prompt });
+                    const reply = resp.text?.trim();
+                    if (reply) {
+                      await this.sendHumanLikeMessage(replyJid, reply, rawText, messageKey);
+                      return true;
+                    }
+                  } catch {}
+                }
+              }
+
+              await this.sendHumanLikeMessage(
+                replyJid,
+                `🎙️ *Voice Note Transcription:*\n_"${transcribed}"_\n\n💡 *Summary:* Spoken message successfully transcribed.`,
+                rawText,
+                messageKey
+              );
+              return true;
+            }
 
             if (isSummaryIntent && !visionMemoryService.isMediaQuestionIntent(rawText)) {
               const summaryRes = await visionMemoryService.generateMediaSummary(buffer, mimeType, rawText, fileName, replyJid);
@@ -1394,7 +1454,8 @@ class WhatsAppBotService {
     text: string,
     replyJid: string,
     messageKey: any,
-    quotedMessage?: QuotedMessageContext | null
+    quotedMessage?: QuotedMessageContext | null,
+    isVoiceInput: boolean = false
   ): Promise<void> {
     const rawText = (text || "").trim();
     if (!rawText) return;
@@ -2218,6 +2279,19 @@ class WhatsAppBotService {
     try {
       const reply = await this.executeBossChatAI(senderName, rawText, quotedMessage, replyJid, messageKey);
       await this.sendHumanLikeMessage(replyJid, reply, rawText, messageKey);
+
+      // Voice-to-Voice: If Boss sent a voice note, Friday speaks back and sends a real Voice Note (PTT)!
+      if (isVoiceInput) {
+        try {
+          const { voiceBridgeService, VoiceBridgeService } = await import("./voiceBridgeService");
+          const voiceBuf = await voiceBridgeService.textToSpeechBuffer(reply, VoiceBridgeService.FEMALE_VOICE);
+          if (voiceBuf && voiceBuf.length > 0) {
+            await this.sendVoiceMessage(replyJid, voiceBuf, messageKey);
+          }
+        } catch (vErr) {
+          console.warn("[WhatsAppBot] Voice response TTS generation error:", vErr);
+        }
+      }
     } catch (aiErr: any) {
       console.error("[WhatsAppBot] Error in executeBossChatAI:", aiErr);
       await this.sendHumanLikeMessage(replyJid, `Boss, main sun rahi hoon! Par kuch technical issue aaya: ${aiErr?.message || aiErr}`, rawText, messageKey);
