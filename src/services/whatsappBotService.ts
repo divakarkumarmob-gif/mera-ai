@@ -471,9 +471,46 @@ class WhatsAppBotService {
     }
   }
 
+  /**
+   * Cleans an IncomingMessage (or nested object) so it can be safely written to Firestore.
+   * Firestore rejects JavaScript objects with custom prototypes (e.g. Baileys Proto Message instances),
+   * Buffers, functions, symbols, or undefined properties.
+   */
+  private sanitizeForFirestore(data: any): any {
+    if (data === null || data === undefined) return null;
+    if (typeof data !== "object") return data;
+    if (data instanceof Date) return data;
+    if (Array.isArray(data)) {
+      return data
+        .map((item) => this.sanitizeForFirestore(item))
+        .filter((item) => item !== undefined);
+    }
+    const clean: Record<string, any> = {};
+    for (const [key, val] of Object.entries(data)) {
+      // Exclude Baileys raw proto / internal binary / buffers / functions / symbols
+      if (key === "rawQuotedMessage" || key === "rawMessage" || key === "message") {
+        continue;
+      }
+      if (val === undefined || typeof val === "function" || typeof val === "symbol") {
+        continue;
+      }
+      if (Buffer.isBuffer(val) || (typeof Uint8Array !== "undefined" && val instanceof Uint8Array)) {
+        continue;
+      }
+      if (val !== null && typeof val === "object") {
+        clean[key] = this.sanitizeForFirestore(val);
+      } else {
+        clean[key] = val;
+      }
+    }
+    return clean;
+  }
+
   private async saveToFirestore(msg: IncomingMessage): Promise<void> {
     try {
-      await inboxCol().doc(msg.id).set(msg);
+      if (!msg || !msg.id) return;
+      const cleanDoc = this.sanitizeForFirestore(msg);
+      await inboxCol().doc(msg.id).set(cleanDoc);
     } catch (e) {
       console.error("[WhatsAppBot] Failed to save message to Firestore:", e);
     }
