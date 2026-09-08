@@ -141,13 +141,14 @@ ${caption ? `User caption: "${caption}"` : ""}`;
               : (lowerMime.includes("png") ? "image/png" : lowerMime.includes("webp") ? "image/webp" : "image/jpeg");
 
         const VISION_FALLBACK_MODELS = [
+          "gemini-3.1-flash-lite",
+          "gemini-3.5-flash-lite",
+          "gemini-2.5-flash-lite",
           "gemini-3.6-flash",
           "gemini-3.5-flash",
-          "gemini-3.1-flash-lite",
           "gemini-2.5-flash",
-          "gemini-2.5-flash-lite",
-          "gemini-1.5-pro",
           "gemini-1.5-flash",
+          "gemini-1.5-pro",
         ];
 
         for (const model of VISION_FALLBACK_MODELS) {
@@ -326,13 +327,15 @@ STRUCTURE YOUR RESPONSE IN CLEAN WHATSAPP FORMAT:
 Use WhatsApp markdown (*bold*, _italic_, bullet points). Keep it clean, accurate, and easy to read.`;
 
     const VISION_FALLBACK_MODELS = [
-      "gemini-3.6-flash",
-      "gemini-3.5-flash",
-      "gemini-3.1-flash-lite",
-      "gemini-2.5-flash",
-      "gemini-2.5-flash-lite",
-      "gemini-1.5-pro",
-    ];
+          "gemini-3.1-flash-lite",
+          "gemini-3.5-flash-lite",
+          "gemini-2.5-flash-lite",
+          "gemini-3.6-flash",
+          "gemini-3.5-flash",
+          "gemini-2.5-flash",
+          "gemini-1.5-flash",
+          "gemini-1.5-pro",
+        ];
 
     for (const model of VISION_FALLBACK_MODELS) {
       try {
@@ -425,14 +428,15 @@ Use WhatsApp markdown (*bold*, _italic_, bullet points). Keep it clean, accurate
           : (lowerMime.includes("png") ? "image/png" : lowerMime.includes("webp") ? "image/webp" : "image/jpeg");
 
     const VISION_FALLBACK_MODELS = [
-      "gemini-3.6-flash",
-      "gemini-3.5-flash",
-      "gemini-3.1-flash-lite",
-      "gemini-2.5-flash",
-      "gemini-2.5-flash-lite",
-      "gemini-1.5-pro",
-      "gemini-1.5-flash",
-    ];
+          "gemini-3.1-flash-lite",
+          "gemini-3.5-flash-lite",
+          "gemini-2.5-flash-lite",
+          "gemini-3.6-flash",
+          "gemini-3.5-flash",
+          "gemini-2.5-flash",
+          "gemini-1.5-flash",
+          "gemini-1.5-pro",
+        ];
 
     // Case 1: We have media buffer -> multimodal vision query
     if (buffer && buffer.length > 0) {
@@ -500,11 +504,13 @@ INSTRUCTIONS:
 4. If not found in the summary, state clearly what the summary contains.`;
 
       const TEXT_MODELS = [
+        "gemini-3.1-flash-lite",
+        "gemini-3.5-flash-lite",
+        "gemini-2.5-flash-lite",
         "gemini-3.6-flash",
         "gemini-3.5-flash",
-        "gemini-3.1-flash-lite",
         "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
+        "gemini-1.5-flash",
         "gemini-1.5-pro",
       ];
 
@@ -553,25 +559,31 @@ Extract:
 2. Distinctive physical traits that remain identifiable over months/years.
 3. Summary of this person's visual fingerprint.`;
 
-        const response = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
-          contents: [
-            {
-              role: "user",
-              parts: [
-                { text: prompt },
+        for (const model of ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-2.5-flash-lite", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash", "gemini-1.5-flash"]) {
+          try {
+            const response = await ai.models.generateContent({
+              model,
+              contents: [
                 {
-                  inlineData: {
-                    mimeType: targetMime,
-                    data: targetBuffer.toString("base64"),
-                  },
+                  role: "user",
+                  parts: [
+                    { text: prompt },
+                    {
+                      inlineData: {
+                        mimeType: targetMime,
+                        data: targetBuffer.toString("base64"),
+                      },
+                    },
+                  ],
                 },
               ],
-            },
-          ],
-        });
-
-        visualSummary = response.text || visualSummary;
+            });
+            if (response.text) {
+              visualSummary = response.text;
+              break;
+            }
+          } catch {}
+        }
       } catch (e) {
         console.error("[VisionMemoryService] Error extracting visual profile:", e);
       }
@@ -683,23 +695,29 @@ TASK:
   "explanation": "Friendly 2-sentence conversational response in Hindi/Hinglish addressing Boss (DK) stating who this is and why you recognize them."
 }`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [
-          {
-            role: "user",
-            parts: [
-              { text: prompt },
+      let response: any = null;
+      for (const model of ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-2.5-flash-lite", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash", "gemini-1.5-flash"]) {
+        try {
+          response = await ai.models.generateContent({
+            model,
+            contents: [
               {
-                inlineData: {
-                  mimeType: targetMime,
-                  data: targetBuffer.toString("base64"),
-                },
+                role: "user",
+                parts: [
+                  { text: prompt },
+                  {
+                    inlineData: {
+                      mimeType: targetMime,
+                      data: targetBuffer.toString("base64"),
+                    },
+                  },
+                ],
               },
             ],
-          },
-        ],
-      });
+          });
+          if (response?.text) break;
+        } catch {}
+      }
 
       const rawText = response.text || "{}";
       let parsed: any = {};

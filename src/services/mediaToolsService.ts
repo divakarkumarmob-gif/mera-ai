@@ -356,10 +356,16 @@ export class MediaToolsService {
       }
     }
 
-    // ── Strategy 6: Universal Multi-Engine Gateways (VKRDown / Imput / FastDL) ──
+    // ── Strategy 6: Universal Multi-Engine Gateways (TiklyDown / VKRDown / Imput / FastDL / RyzendeSu) ──
     const fallbackGateways = [
+      `https://api.tiklydown.eu.org/api/download/v2?url=${encodeURIComponent(cleanUrl)}`,
+      `https://api.tiklydown.eu.org/api/download?url=${encodeURIComponent(cleanUrl)}`,
       `https://api.vkrdown.com/api/index.php?url=${encodeURIComponent(cleanUrl)}`,
       `https://tools.imput.net/api/video?url=${encodeURIComponent(cleanUrl)}`,
+      `https://api.ryzendesu.vip/api/downloader/igdl?url=${encodeURIComponent(cleanUrl)}`,
+      `https://api.ryzendesu.vip/api/downloader/ytmp4?url=${encodeURIComponent(cleanUrl)}`,
+      `https://api.guruapi.tech/ytdl/ytmp4?url=${encodeURIComponent(cleanUrl)}`,
+      `https://api.siputzx.my.id/api/d/igdl?url=${encodeURIComponent(cleanUrl)}`,
     ];
 
     for (const gateway of fallbackGateways) {
@@ -369,13 +375,22 @@ export class MediaToolsService {
           const data: any = await res.json();
           const downloadUrl =
             data?.data?.downloadUrl ||
-            data?.downloadUrl ||
+            data?.data?.video ||
+            data?.data?.url ||
+            data?.result?.url ||
+            data?.result?.video ||
             data?.url ||
+            data?.downloadUrl ||
             data?.video ||
+            (Array.isArray(data?.result) && data.result[0]?.url) ||
+            (Array.isArray(data?.data) && data.data[0]?.url) ||
             (data?.data?.formats && data?.data?.formats[0]?.url);
 
           if (downloadUrl) {
-            const vidRes = await fetch(downloadUrl, { signal: AbortSignal.timeout(30000) });
+            const vidRes = await fetch(downloadUrl, {
+              headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+              signal: AbortSignal.timeout(35000),
+            });
             if (vidRes.ok) {
               const buffer = Buffer.from(await vidRes.arrayBuffer());
               if (buffer.length > 5000) {
@@ -383,7 +398,7 @@ export class MediaToolsService {
                   success: true,
                   buffer,
                   filename: `Video_${Date.now()}.mp4`,
-                  title: data.title || "Video",
+                  title: data.title || data?.data?.title || data?.result?.title || "Social Video",
                 };
               }
             }

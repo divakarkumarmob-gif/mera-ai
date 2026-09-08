@@ -1080,13 +1080,14 @@ class WhatsAppBotService {
                               const fuseRes = await imageGenerationService.fuseTwoImagesWithAI(quotedBuffer, buffer, cap, qMime, mimeType);
                               if (fuseRes.success && fuseRes.buffer && this.sock) {
                                 this.recordChatPhoto(replyJid, fuseRes.buffer, fuseRes.mimeType || "image/jpeg");
-                                await this.sock.sendMessage(
+                                await this.sendSafeMediaMessage(
                                   replyJid,
                                   {
                                     image: fuseRes.buffer,
                                     mimetype: fuseRes.mimeType || "image/jpeg",
                                   },
-                                  { quoted: msg.key }
+                                  msg.key,
+                                  cap || "Face Swap & Style Fusion"
                                 );
                                 await this.sendHumanLikeMessage(
                                   replyJid,
@@ -1117,13 +1118,14 @@ class WhatsAppBotService {
                             const editRes = await imageGenerationService.editImageWithAI(buffer, editInstruction, mimeType);
                             if (editRes.success && editRes.buffer && this.sock) {
                               this.recordChatPhoto(replyJid, editRes.buffer, editRes.mimeType || "image/jpeg");
-                              await this.sock.sendMessage(
+                              await this.sendSafeMediaMessage(
                                 replyJid,
                                 {
                                   image: editRes.buffer,
                                   mimetype: editRes.mimeType || "image/jpeg",
                                 },
-                                { quoted: msg.key }
+                                msg.key,
+                                editInstruction
                               );
                               await this.sendHumanLikeMessage(
                                 replyJid,
@@ -1154,13 +1156,14 @@ class WhatsAppBotService {
                             const bgRes = await mediaToolsService.removeBackground(buffer, mimeType);
                             const finalBuf = bgRes.buffer || buffer;
                             if (this.sock) {
-                              await this.sock.sendMessage(
+                              await this.sendSafeMediaMessage(
                                 replyJid,
                                 {
                                   sticker: finalBuf,
                                   mimetype: "image/webp",
                                 },
-                                { quoted: msg.key }
+                                msg.key,
+                                "Sticker"
                               );
                               await this.sendHumanLikeMessage(replyJid, `✨ *AI WhatsApp Sticker Ready!* 🚀`, "", msg.key);
                               continue;
@@ -1180,14 +1183,15 @@ class WhatsAppBotService {
                             const { mediaToolsService } = await import("./mediaToolsService");
                             const excelRes = await mediaToolsService.convertImageToExcel(buffer, mimeType, cap);
                             if (excelRes.success && excelRes.buffer && this.sock) {
-                              await this.sock.sendMessage(
+                              await this.sendSafeMediaMessage(
                                 replyJid,
                                 {
                                   document: excelRes.buffer,
                                   mimetype: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                   fileName: excelRes.filename || "Friday_Extracted_Report.xlsx",
                                 },
-                                { quoted: msg.key }
+                                msg.key,
+                                "Excel Document"
                               );
                               await this.sendHumanLikeMessage(replyJid, excelRes.summary || "📊 *Excel File ready hai!*", "", msg.key);
                               continue;
@@ -1208,13 +1212,14 @@ class WhatsAppBotService {
                             const { mediaToolsService } = await import("./mediaToolsService");
                             const animRes = await mediaToolsService.generateAiVideo(cap || "Cinematic natural camera motion, ultra-realistic", buffer, mimeType);
                             if (animRes.success && animRes.buffer && this.sock) {
-                              await this.sock.sendMessage(
+                              await this.sendSafeMediaMessage(
                                 replyJid,
                                 {
                                   video: animRes.buffer,
                                   mimetype: "video/mp4",
                                 },
-                                { quoted: msg.key }
+                                msg.key,
+                                "Animation Video"
                               );
                               await this.sendHumanLikeMessage(replyJid, `🎬 *AI Motion Animation via ${animRes.model || "Friday AI"}* 🚀`, "", msg.key);
                               continue;
@@ -1622,13 +1627,14 @@ CRITICAL INSTRUCTIONS:
                 const editRes = await imageGenerationService.editImageWithAI(buffer, editInstruction, mimeType);
                 if (editRes.success && editRes.buffer && this.sock) {
                   this.recordChatPhoto(replyJid, editRes.buffer, editRes.mimeType || "image/jpeg");
-                  await this.sock.sendMessage(
+                  await this.sendSafeMediaMessage(
                     replyJid,
                     {
                       image: editRes.buffer,
                       mimetype: editRes.mimeType || "image/jpeg",
                     },
-                    { quoted: messageKey }
+                    messageKey,
+                    editInstruction
                   );
                   await this.sendHumanLikeMessage(
                     replyJid,
@@ -1660,13 +1666,14 @@ CRITICAL INSTRUCTIONS:
                 const bgRes = await mediaToolsService.removeBackground(buffer, mimeType);
                 const finalBuf = bgRes.buffer || buffer;
                 if (this.sock) {
-                  await this.sock.sendMessage(
+                  await this.sendSafeMediaMessage(
                     replyJid,
                     {
                       sticker: finalBuf,
                       mimetype: "image/webp",
                     },
-                    { quoted: messageKey }
+                    messageKey,
+                    "Sticker"
                   );
                   await this.sendHumanLikeMessage(replyJid, `✨ *AI WhatsApp Sticker Ready!* 🚀`, rawText, messageKey);
                   return true;
@@ -1687,14 +1694,15 @@ CRITICAL INSTRUCTIONS:
                 const { mediaToolsService } = await import("./mediaToolsService");
                 const excelRes = await mediaToolsService.convertImageToExcel(buffer, mimeType, rawText);
                 if (excelRes.success && excelRes.buffer && this.sock) {
-                  await this.sock.sendMessage(
+                  await this.sendSafeMediaMessage(
                     replyJid,
                     {
                       document: excelRes.buffer,
                       mimetype: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                       fileName: excelRes.filename || "Friday_Extracted_Report.xlsx",
                     },
-                    { quoted: messageKey }
+                    messageKey,
+                    "Excel Document"
                   );
                   await this.sendHumanLikeMessage(replyJid, excelRes.summary || "📊 *Excel File ready hai!*", rawText, messageKey);
                   return true;
@@ -1717,13 +1725,14 @@ CRITICAL INSTRUCTIONS:
                 const { mediaToolsService } = await import("./mediaToolsService");
                 const animRes = await mediaToolsService.generateAiVideo(rawText || "Cinematic camera motion, ultra-realistic", buffer, mimeType);
                 if (animRes.success && animRes.buffer && this.sock) {
-                  await this.sock.sendMessage(
+                  await this.sendSafeMediaMessage(
                     replyJid,
                     {
                       video: animRes.buffer,
                       mimetype: "video/mp4",
                     },
-                    { quoted: messageKey }
+                    messageKey,
+                    "Animation Video"
                   );
                   await this.sendHumanLikeMessage(replyJid, `🎬 *AI Motion Animation via ${animRes.model || "Friday AI"}* 🚀`, rawText, messageKey);
                   return true;
@@ -1784,13 +1793,14 @@ CRITICAL INSTRUCTIONS:
             const editRes = await imageGenerationService.editImageWithAI(cached.buffer, editInstruction, cached.mimeType || "image/jpeg");
             if (editRes.success && editRes.buffer && this.sock) {
               this.recordChatPhoto(replyJid, editRes.buffer, editRes.mimeType || "image/jpeg");
-              await this.sock.sendMessage(
+              await this.sendSafeMediaMessage(
                 replyJid,
                 {
                   image: editRes.buffer,
                   mimetype: editRes.mimeType || "image/jpeg",
                 },
-                { quoted: messageKey }
+                messageKey,
+                editInstruction
               );
               await this.sendHumanLikeMessage(
                 replyJid,
@@ -1916,8 +1926,12 @@ CRITICAL LANGUAGE & TONE MANDATE:
 
     // 0. Quoted Swipe-to-Reply Media / Document / Photo Summary Engine
     if (quotedMessage && quotedMessage.isReply) {
-      const handledQuoted = await this.handleQuotedMediaSummary(replyJid, rawText, quotedMessage, messageKey);
-      if (handledQuoted) return;
+      try {
+        const handledQuoted = await this.handleQuotedMediaSummary(replyJid, rawText, quotedMessage, messageKey);
+        if (handledQuoted) return;
+      } catch (recentMediaErr) {
+        console.warn("[WhatsAppBot] Direct recent media Q&A notice:", recentMediaErr);
+      }
     }
 
     // 0.05 Recent Media Follow-Up Q&A (User asking question about recent photo/PDF/file without quote)
@@ -1962,13 +1976,14 @@ CRITICAL LANGUAGE & TONE MANDATE:
           const { mediaToolsService } = await import("./mediaToolsService");
           const dlRes = await mediaToolsService.downloadSocialVideo(pendingLink.url);
           if (dlRes.success && dlRes.buffer && this.sock) {
-            await this.sock.sendMessage(
+            await this.sendSafeMediaMessage(
               replyJid,
               {
                 video: dlRes.buffer,
                 mimetype: "video/mp4",
               },
-              { quoted: messageKey }
+              messageKey,
+              dlRes.title || "Video"
             );
             await this.sendHumanLikeMessage(
               replyJid,
@@ -2264,13 +2279,14 @@ CRITICAL LANGUAGE & TONE MANDATE:
         const { mediaToolsService } = await import("./mediaToolsService");
         const vidRes = await mediaToolsService.generateAiVideo(vidPrompt);
         if (vidRes.success && vidRes.buffer && this.sock) {
-          await this.sock.sendMessage(
+          await this.sendSafeMediaMessage(
             replyJid,
             {
               video: vidRes.buffer,
               mimetype: "video/mp4",
             },
-            { quoted: messageKey }
+            messageKey,
+            vidPrompt
           );
           await this.sendHumanLikeMessage(
             replyJid,
@@ -2338,13 +2354,14 @@ CRITICAL LANGUAGE & TONE MANDATE:
           await this.sendHumanLikeMessage(replyJid, `📥 *${platform} Video download ho rahi hai...* ⚡\n🔗 _${detectedUrl}_`, rawText, messageKey);
           const dlRes = await mediaToolsService.downloadSocialVideo(detectedUrl);
           if (dlRes.success && dlRes.buffer && this.sock) {
-            await this.sock.sendMessage(
+            await this.sendSafeMediaMessage(
               replyJid,
               {
                 video: dlRes.buffer,
                 mimetype: "video/mp4",
               },
-              { quoted: messageKey }
+              messageKey,
+              dlRes.title || "Video"
             );
             await this.sendHumanLikeMessage(
               replyJid,
@@ -4641,12 +4658,13 @@ RULES FOR GROUP REPLIES:
    * Handles: identity ("who made you / who are you"), privacy guard for DK's data, normal chat.
    */
   private static readonly AUTO_REPLY_MODEL_CHAIN = [
-    "gemini-3.6-flash",
-    "gemini-3.5-flash",
     "gemini-3.1-flash-lite",
     "gemini-3.5-flash-lite",
-    "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-2.5-flash",
+    "gemini-1.5-flash",
   ];
 
   private async generateSmartAutoReply(
@@ -5022,6 +5040,46 @@ TONE & STYLE:
       }
     }
     return result;
+  }
+
+  /**
+   * Safely dispatches media (image, video, sticker, document) with sanitization of quoted context
+   * and automatic retry fallback if Baileys encounters malformed quoted keys.
+   */
+  public async sendSafeMediaMessage(
+    jid: string,
+    content: any,
+    messageKey?: any,
+    fallbackText?: string
+  ): Promise<any> {
+    if (!this.sock || !this.isConnected) return null;
+
+    const sendOptions: any = {};
+    if (messageKey) {
+      if (messageKey.key && messageKey.message) {
+        sendOptions.quoted = messageKey;
+      } else {
+        const cleanKey = messageKey.key || messageKey;
+        if (cleanKey && typeof cleanKey === "object" && (cleanKey.id || cleanKey.remoteJid)) {
+          sendOptions.quoted = {
+            key: {
+              remoteJid: cleanKey.remoteJid || jid,
+              fromMe: Boolean(cleanKey.fromMe),
+              id: cleanKey.id || "",
+              participant: cleanKey.participant || undefined,
+            },
+            message: { conversation: fallbackText || "..." },
+          };
+        }
+      }
+    }
+
+    try {
+      return await this.sock.sendMessage(jid, content, sendOptions);
+    } catch (quotedErr) {
+      console.warn("[WhatsAppBot] Media send with quoted option failed, retrying without quote:", (quotedErr as any)?.message || quotedErr);
+      return await this.sock.sendMessage(jid, content);
+    }
   }
 
   /**

@@ -412,7 +412,17 @@ Analyze this image in detail:
 3. Keep the original character/subject consistent while applying all user requested edits (e.g. background changes, accessories, lighting, style transforms).
 4. Output ONLY the raw descriptive prompt text without introductory remarks or quotes.`;
 
-        for (const model of ["gemini-2.5-flash", "gemini-3.5-flash", "gemini-2.5-flash-lite"]) {
+        const VISION_EDIT_MODELS = [
+          "gemini-3.1-flash-lite",
+          "gemini-3.5-flash-lite",
+          "gemini-2.5-flash-lite",
+          "gemini-3.6-flash",
+          "gemini-3.5-flash",
+          "gemini-2.5-flash",
+          "gemini-1.5-flash",
+        ];
+
+        for (const model of VISION_EDIT_MODELS) {
           try {
             const resp = await ai.models.generateContent({
               model,
@@ -500,7 +510,17 @@ TASK:
 Generate a single, comprehensive, hyper-realistic diffusion prompt for Flux.1/SDXL that will generate the exact fused output.
 Output ONLY the raw descriptive prompt string.`;
 
-        for (const model of ["gemini-2.5-flash", "gemini-3.5-flash", "gemini-2.5-flash-lite"]) {
+        const FUSION_MODELS = [
+          "gemini-3.1-flash-lite",
+          "gemini-3.5-flash-lite",
+          "gemini-2.5-flash-lite",
+          "gemini-3.6-flash",
+          "gemini-3.5-flash",
+          "gemini-2.5-flash",
+          "gemini-1.5-flash",
+        ];
+
+        for (const model of FUSION_MODELS) {
           try {
             const resp = await ai.models.generateContent({
               model,
