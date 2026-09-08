@@ -2190,8 +2190,8 @@ INSTRUCTIONS:
       const textToSpeak = speakMatch[1].trim();
       try {
         const { voiceBridgeService } = await import("./voiceBridgeService");
-        const audioBuf = await voiceBridgeService.textToSpeechBuffer(textToSpeak);
-        await this.sendVoiceMessage(replyJid, audioBuf, messageKey);
+        const speechRes = await voiceBridgeService.generateSpeech(textToSpeak);
+        await this.sendVoiceMessage(replyJid, speechRes.buffer, messageKey, speechRes.mimeType);
         return;
       } catch (voiceErr) {
         console.warn("[WhatsAppBot] @speak TTS error:", voiceErr);
@@ -2207,9 +2207,9 @@ INSTRUCTIONS:
       if (isVoiceInput) {
         try {
           const { voiceBridgeService, VoiceBridgeService } = await import("./voiceBridgeService");
-          const voiceBuf = await voiceBridgeService.textToSpeechBuffer(reply, VoiceBridgeService.FEMALE_VOICE);
-          if (voiceBuf && voiceBuf.length > 0) {
-            await this.sendVoiceMessage(replyJid, voiceBuf, messageKey);
+          const speechRes = await voiceBridgeService.generateSpeech(reply, VoiceBridgeService.FEMALE_VOICE);
+          if (speechRes && speechRes.buffer.length > 0) {
+            await this.sendVoiceMessage(replyJid, speechRes.buffer, messageKey, speechRes.mimeType);
           }
         } catch (vErr) {
           console.warn("[WhatsAppBot] Voice response TTS generation error:", vErr);
@@ -4365,7 +4365,8 @@ TONE & STYLE:
   public async sendVoiceMessage(
     target: string,
     audioBuffer: Buffer,
-    messageKey?: any
+    messageKey?: any,
+    mimetype: string = "audio/mpeg"
   ): Promise<{ success: boolean; message: string }> {
     if (!this.isConnected || !this.sock) {
       return { success: false, message: "WhatsApp bot is not connected." };
@@ -4405,7 +4406,7 @@ TONE & STYLE:
           jid,
           {
             audio: audioBuffer,
-            mimetype: "audio/mp4",
+            mimetype,
             ptt: true,
           },
           sendOptions
@@ -4413,7 +4414,7 @@ TONE & STYLE:
       } catch (quotedErr) {
         sendRes = await this.sock.sendMessage(jid, {
           audio: audioBuffer,
-          mimetype: "audio/mp4",
+          mimetype,
           ptt: true,
         });
       }

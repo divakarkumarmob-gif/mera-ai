@@ -58,7 +58,100 @@ export class VoiceBridgeService {
   }
 
   /**
-   * 1. Text-to-Speech (TTS) using Microsoft Edge Neural Engine (100% Free, High Quality)
+   * Gemini Multimodal Native Audio Output / TTS
+   */
+  public async geminiTTS(
+    text: string,
+    model: string = "gemini-2.5-flash",
+    voiceName: string = "Aoede"
+  ): Promise<{ buffer: Buffer; mimeType: string } | null> {
+    const geminiKey = process.env.GEMINI_API_KEY?.trim();
+    if (!geminiKey) return null;
+
+    try {
+      const ai = new GoogleGenAI({ apiKey: geminiKey });
+      const response = await ai.models.generateContent({
+        model,
+        contents: [
+          {
+            role: "user",
+            parts: [
+              {
+                text: `Read the following text aloud with natural emotion, clear pronunciation, and friendly conversational tone in Hindi/Hinglish/English:\n\n${text}`,
+              },
+            ],
+          },
+        ],
+        config: {
+          responseModalities: ["AUDIO"],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: {
+                voiceName,
+              },
+            },
+          },
+        } as any,
+      });
+
+      const parts = response.candidates?.[0]?.content?.parts;
+      if (parts && parts.length > 0) {
+        for (const part of parts) {
+          if ((part as any).inlineData?.data) {
+            const dataBase64 = (part as any).inlineData.data;
+            const mimeType = (part as any).inlineData.mimeType || "audio/wav";
+            return {
+              buffer: Buffer.from(dataBase64, "base64"),
+              mimeType,
+            };
+          }
+        }
+      }
+    } catch (e: any) {
+      console.warn(`[VoiceBridge] Gemini TTS notice on ${model}:`, e?.message || e);
+    }
+    return null;
+  }
+
+  /**
+   * 1. Multi-Tier High-Fidelity Text-to-Speech (TTS)
+   * Tier 1: Gemini 2.5 Flash TTS
+   * Tier 2: Gemini 3.1 Flash TTS
+   * Tier 3 (Fallback): Microsoft Edge Neural Engine (100% Free, High Quality)
+   */
+  public async generateSpeech(
+    text: string,
+    voice: string = VoiceBridgeService.DEFAULT_VOICE
+  ): Promise<{ buffer: Buffer; mimeType: string }> {
+    const cleanText = text.trim();
+    if (!cleanText) throw new Error("Text is empty for TTS");
+
+    // Tier 1: Gemini 2.5 Flash TTS
+    try {
+      const g25 = await this.geminiTTS(cleanText, "gemini-2.5-flash", "Aoede");
+      if (g25 && g25.buffer.length > 0) {
+        console.log("[VoiceBridge] Generated voice via Gemini 2.5 Flash TTS");
+        return g25;
+      }
+    } catch {}
+
+    // Tier 2: Gemini 3.1 Flash TTS
+    try {
+      const g31 = await this.geminiTTS(cleanText, "gemini-3.1-flash", "Aoede");
+      if (g31 && g31.buffer.length > 0) {
+        console.log("[VoiceBridge] Generated voice via Gemini 3.1 Flash TTS");
+        return g31;
+      }
+    } catch {}
+
+    // Tier 3 Fallback: Microsoft Edge Neural Engine
+    console.log("[VoiceBridge] Using Microsoft Edge Neural TTS fallback");
+    const msBuf = await this.textToSpeechBuffer(cleanText, voice);
+    return { buffer: msBuf, mimeType: "audio/mpeg" };
+  }
+
+  /**
+   * Text-to-Speech (TTS) using Microsoft Edge Neural Engine (100% Free, High Quality)
    */
   public async textToSpeechBuffer(
     text: string,

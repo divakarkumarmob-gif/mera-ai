@@ -2111,8 +2111,8 @@ ${
       if (speechText) {
         try {
           await this.sendChatAction(chatId, "record_voice");
-          const audioBuf = await voiceBridgeService.textToSpeechBuffer(speechText);
-          await this.sendVoice(chatId, audioBuf, `🔊 "${speechText}"`);
+          const speechRes = await voiceBridgeService.generateSpeech(speechText);
+          await this.sendVoice(chatId, speechRes.buffer, `🔊 "${speechText}"`);
         } catch (e: any) {
           await this.sendMessage(chatId, `❌ Voice generate karne me error: ${e?.message || e}`);
         }
@@ -2180,12 +2180,12 @@ ${
         // Voice-to-Voice: Friday speaks back with a voice recording!
         try {
           await this.sendChatAction(chatId, "record_voice");
-          const voiceBuffer = await voiceBridgeService.textToSpeechBuffer(
+          const speechRes = await voiceBridgeService.generateSpeech(
             replyText,
             VoiceBridgeService.FEMALE_VOICE
           );
-          if (voiceBuffer && voiceBuffer.length > 0) {
-            await this.sendVoice(chatId, voiceBuffer, "🎙️ Friday Audio Response");
+          if (speechRes?.buffer && speechRes.buffer.length > 0) {
+            await this.sendVoice(chatId, speechRes.buffer, "🎙️ Friday Audio Response");
           }
         } catch (ttsErr) {
           console.warn("[TelegramBot] Failed to send voice reply:", ttsErr);
@@ -2274,7 +2274,7 @@ INSTRUCTIONS:
     if (activeSession && chatId === activeSession.userA_chatId && text && !text.startsWith("/")) {
       try {
         await this.sendChatAction(chatId, "record_voice");
-        const voiceBuffer = await voiceBridgeService.textToSpeechBuffer(
+        const speechRes = await voiceBridgeService.generateSpeech(
           text,
           activeSession.preferredVoice || VoiceBridgeService.DEFAULT_VOICE
         );
@@ -2282,7 +2282,7 @@ INSTRUCTIONS:
         // Send real voice note directly to User B
         await this.sendVoice(
           activeSession.userB_chatId,
-          voiceBuffer,
+          speechRes.buffer,
           `🔊 Voice from ${senderName}`
         );
 
@@ -2311,14 +2311,14 @@ INSTRUCTIONS:
       if (isUserA) {
         try {
           await this.sendChatAction(chatId, "record_voice");
-          const voiceBuffer = await voiceBridgeService.textToSpeechBuffer(
+          const speechRes = await voiceBridgeService.generateSpeech(
             text,
             activeGrpSession.preferredVoice || VoiceBridgeService.DEFAULT_VOICE
           );
 
           await this.sendVoice(
             chatId,
-            voiceBuffer,
+            speechRes.buffer,
             `🔊 [Voice from ${activeGrpSession.userA_name} to ${activeGrpSession.userB_name || "Group"}]`
           );
           return;

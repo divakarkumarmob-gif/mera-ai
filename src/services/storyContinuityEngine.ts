@@ -71,15 +71,15 @@ export class StoryContinuityEngine {
         const snap = await db
           .collection("openStoryLoops")
           .where("status", "==", "open")
-          .orderBy("lastDiscussedAt", "desc")
-          .limit(limit)
           .get();
 
         if (!snap.empty) {
-          return snap.docs.map((doc) => ({
+          const loops = snap.docs.map((doc) => ({
             id: doc.id,
             ...(doc.data() as OpenStoryLoop),
           }));
+          loops.sort((a, b) => (b.lastDiscussedAt || 0) - (a.lastDiscussedAt || 0));
+          return loops.slice(0, limit);
         }
       }
     } catch (err) {
