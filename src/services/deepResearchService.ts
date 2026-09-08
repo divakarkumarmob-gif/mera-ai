@@ -171,7 +171,7 @@ Return a valid JSON object matching this structure EXACTLY:
 }
 Return ONLY valid JSON. Do not include markdown code fences or conversational greetings.`;
 
-        const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.0-flash-lite"];
+        const models = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash"];
         for (const model of models) {
           try {
             const resp = await ai.models.generateContent({

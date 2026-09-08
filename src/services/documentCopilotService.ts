@@ -73,7 +73,7 @@ Return a valid JSON object matching this schema EXACTLY:
 }
 Return ONLY valid JSON. No markdown code fences.`;
 
-        const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.0-flash-lite"];
+        const models = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash"];
         for (const model of models) {
           try {
             const resp = await ai.models.generateContent({ model, contents: prompt });
@@ -156,7 +156,7 @@ QUESTION: "${q}"
 
 Provide a clear, accurate, and concise answer in Friday's natural Hinglish voice based strictly on the facts in the document. Quote relevant snippets where helpful. If the document does not contain the answer, say "Boss, is document me is baare me koi direct information nahi mili."`;
 
-        const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.0-flash-lite"];
+        const models = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash"];
         for (const model of models) {
           try {
             const resp = await ai.models.generateContent({ model, contents: prompt });

@@ -3096,7 +3096,7 @@ ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` 
 3. Directly execute Boss's command in the context of the quoted message!)`;
     }
 
-    for (const model of ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.0-flash-lite"]) {
+    for (const model of ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"]) {
       try {
         const chat = ai.chats.create({
           model,
@@ -3849,10 +3849,12 @@ RULES FOR GROUP REPLIES:
    * Handles: identity ("who made you / who are you"), privacy guard for DK's data, normal chat.
    */
   private static readonly AUTO_REPLY_MODEL_CHAIN = [
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-3.5-flash-lite",
     "gemini-2.5-flash",
     "gemini-2.0-flash",
-    "gemini-1.5-flash",
-    "gemini-2.0-flash-lite",
   ];
 
   private async generateSmartAutoReply(
