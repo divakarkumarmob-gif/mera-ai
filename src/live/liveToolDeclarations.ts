@@ -3663,6 +3663,56 @@ const rawFunctionDeclarations: any[] = [
       },
       "required": []
     }
+  },
+  {
+    "name": "create_automated_cron_task",
+    "description": "Create or schedule a recurring daily or custom-day task for Boss (e.g. 'subah 6 bje weather update', '6:10 me top 10 news bhejna', 'har monday 8 AM briefing'). Friday will automatically execute and send to Boss on WhatsApp at the exact time.",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {
+        "title": { "type": "STRING", "description": "Title of task, e.g. 'Morning Weather Update', 'Top 10 News Briefing'" },
+        "timeString": { "type": "STRING", "description": "Target time, e.g. '06:00 AM', '6:10 am', '6:00', '18:00'" },
+        "frequency": { "type": "STRING", "description": "Frequency, e.g. 'daily' (default), 'weekdays', 'weekends', 'monday', 'tuesday,friday'" },
+        "actionType": { "type": "STRING", "description": "Type of action: 'weather_update', 'news_briefing', or 'custom_prompt'" },
+        "city": { "type": "STRING", "description": "Optional city for weather update (default: 'Patna')" },
+        "messageBody": { "type": "STRING", "description": "Optional custom prompt or text to deliver" }
+      },
+      "required": ["title", "timeString", "actionType"]
+    }
+  },
+  {
+    "name": "schedule_contact_message",
+    "description": "Schedule a WhatsApp message to be sent to a contact or phone number at a specific time (e.g. '5 bje ram ko msg karna, chlo ghumne', 'tomorrow 10 AM send msg to Rahul'). Friday will dispatch it via WhatsApp 2 at the exact time and confirm to Boss.",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {
+        "contactNameOrPhone": { "type": "STRING", "description": "Name of contact (e.g. 'Ram', 'Rahul', 'Mummy') or phone number" },
+        "messageBody": { "type": "STRING", "description": "The message body to deliver (e.g. 'chlo ghumne', 'aaj school aana hai')" },
+        "timeString": { "type": "STRING", "description": "When to deliver, e.g. '5:00 PM', '17:00', '5 bje', 'tomorrow 9:00 AM', 'in 15 mins'" },
+        "frequency": { "type": "STRING", "description": "Optional frequency ('once' default, or 'daily')" }
+      },
+      "required": ["contactNameOrPhone", "messageBody", "timeString"]
+    }
+  },
+  {
+    "name": "list_scheduled_automations",
+    "description": "List all active recurring cron routines, morning briefings, and pending contact messages.",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "cancel_scheduled_automation",
+    "description": "Cancel or remove an active scheduled cron routine or scheduled contact message by ID or title query.",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {
+        "idOrQuery": { "type": "STRING", "description": "ID or search keyword of the task to cancel (e.g. 'weather', 'news', 'Ram')" }
+      },
+      "required": ["idOrQuery"]
+    }
   }
 ];
 

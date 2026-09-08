@@ -23,6 +23,7 @@ import { backgroundTasksService } from "./src/services/backgroundTasksService";
 import { appSecurityService } from "./src/services/appSecurityService";
 import { telegramSecurityBotService } from "./src/services/telegramSecurityBotService";
 import { serverFirewallService } from "./src/services/serverFirewallService";
+import { scheduledAutomationService } from "./src/services/scheduledAutomationService";
 
 // Clean modular live AI & route subsystems
 import { fridayFunctionDeclarations } from "./src/live/liveToolDeclarations";
@@ -158,6 +159,7 @@ async function startServer() {
   });
 
   dailyUpdateReminderScheduler.start();
+  scheduledAutomationService.start();
 
   backgroundTasksService.onTaskChange((task) => {
     const payload = JSON.stringify({ type: "background_task_event", task });

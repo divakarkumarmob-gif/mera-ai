@@ -1,4 +1,4 @@
-se bakaro mtlb, import { whatsappCloudService } from "./whatsappCloudService";
+import { whatsappCloudService } from "./whatsappCloudService";
 import { whatsappBotService } from "./whatsappBotService";
 import { db } from "./firebaseAdmin";
 

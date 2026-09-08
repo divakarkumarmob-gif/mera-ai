@@ -862,8 +862,9 @@ class WhatsAppBotService {
             try {
               const downloadFn = baileys.downloadMediaMessage || baileys.default?.downloadMediaMessage;
               if (downloadFn) {
-                downloadFn(msg, "buffer", {}, { reuploadRequest: this.sock?.updateMediaMessage })
-                  .then(async (buffer: Buffer) => {
+                try {
+                  const buffer: Buffer = await downloadFn(msg, "buffer", {}, { reuploadRequest: this.sock?.updateMediaMessage });
+                  if (buffer && buffer.length > 0) {
                     const isVoice = !!msg.message?.audioMessage;
                     const isPhoto = !!msg.message?.imageMessage;
                     const isDoc = !!msg.message?.documentMessage;
@@ -893,7 +894,7 @@ class WhatsAppBotService {
                           
                           // Execute Boss AI and generate spoken voice response
                           await this.handleOwnerWhatsAppMessage(senderName, senderPhone, transcribed, replyJid, msg.key, quotedMessage);
-                          return;
+                          continue;
                         }
                       } catch (sttErr) {
                         console.error("[WhatsAppBot] STT error on Boss voice note:", sttErr);
@@ -921,7 +922,7 @@ class WhatsAppBotService {
                             const summaryRes = await visionMemoryService.generateMediaSummary(buffer, "image/jpeg", cap, undefined, replyJid);
                             await this.sendHumanLikeMessage(replyJid, summaryRes, "", msg.key);
                           }
-                          return;
+                          continue;
                         }
 
                         // B. Face / Person Memory Saving (Boss only)
@@ -930,7 +931,7 @@ class WhatsAppBotService {
                           const personName = nameMatch ? nameMatch[1].trim() : "Contact";
                           const saveRes = await visionMemoryService.savePersonMemory(personName, "Friend / Contact", cap, buffer);
                           await this.sendHumanLikeMessage(replyJid, saveRes.summary, "", msg.key);
-                          return;
+                          continue;
                         }
 
                         // C. Boss provided info/description about the photo to remember permanently
@@ -956,7 +957,7 @@ class WhatsAppBotService {
                             cap,
                             msg.key
                           );
-                          return;
+                          continue;
                         }
 
                         // D. Uncaptioned Photo without "analysis" from Boss -> Simple acknowledgement
@@ -977,7 +978,7 @@ class WhatsAppBotService {
                             "",
                             msg.key
                           );
-                          return;
+                          continue;
                         }
                       } catch (photoErr) {
                         console.error("[WhatsAppBot] Photo processing error:", photoErr);
@@ -993,7 +994,7 @@ class WhatsAppBotService {
                           await this.sendHumanLikeMessage(replyJid, `📄 *Document / PDF (${fileName || "file"}) analyze & summarize ho raha hai...* ⚡`, "", msg.key);
                           const summaryRes = await visionMemoryService.generateMediaSummary(buffer, mimeType, cap, fileName, replyJid);
                           await this.sendHumanLikeMessage(replyJid, summaryRes, "", msg.key);
-                          return;
+                          continue;
                         }
                       } catch (docErr) {
                         console.error("[WhatsAppBot] Document processing error:", docErr);
@@ -1006,7 +1007,7 @@ class WhatsAppBotService {
                         await this.sendHumanLikeMessage(replyJid, "🎬 *Video analyze & summarize ho rahi hai...* ⚡", "", msg.key);
                         const summaryRes = await visionMemoryService.generateMediaSummary(buffer, "video/mp4", caption, fileName, replyJid);
                         await this.sendHumanLikeMessage(replyJid, summaryRes, "", msg.key);
-                        return;
+                        continue;
                       } catch (videoErr) {
                         console.error("[WhatsAppBot] Video processing error for Boss:", videoErr);
                       }
@@ -1025,12 +1026,16 @@ class WhatsAppBotService {
                       incoming.text = `${incoming.text} | AI Summary: ${analyzed.shortSummary}`;
                       this.saveToFirestore(incoming).catch(() => {});
                     }
-                  })
-                  .catch((err: any) => console.warn("[WhatsAppBot] Media download error:", err));
+                  }
+                } catch (downloadErr) {
+                  console.warn("[WhatsAppBot] Media download error:", downloadErr);
+                }
               }
             } catch (mediaErr) {
               console.warn("[WhatsAppBot] Failed to initiate media download:", mediaErr);
             }
+            // If it had media, do not proceed to normal text AI processing with placeholder tokens like "[Document]"
+            continue;
           }
 
           let consumedByDailyUpdate = false;
@@ -2131,6 +2136,56 @@ class WhatsAppBotService {
         },
       },
       {
+        name: "create_automated_cron_task",
+        description: "Create or schedule a recurring daily or custom-day task for Boss (e.g. 'subah 6 bje weather update', '6:10 me top 10 news bhejna', 'har monday 8 AM briefing'). Friday will automatically execute and send to Boss on WhatsApp at the exact time.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            title: { type: "STRING", description: "Title of task, e.g. 'Morning Weather Update', 'Top 10 News Briefing'" },
+            timeString: { type: "STRING", description: "Target time, e.g. '06:00 AM', '6:10 am', '6:00', '18:00'" },
+            frequency: { type: "STRING", description: "Frequency, e.g. 'daily' (default), 'weekdays', 'weekends', 'monday', 'tuesday,friday'" },
+            actionType: { type: "STRING", enum: ["weather_update", "news_briefing", "custom_prompt"], description: "Type of action to perform" },
+            city: { type: "STRING", description: "Optional city for weather update (default: 'Patna')" },
+            messageBody: { type: "STRING", description: "Optional custom prompt or text to deliver" }
+          },
+          required: ["title", "timeString", "actionType"]
+        }
+      },
+      {
+        name: "schedule_contact_message",
+        description: "Schedule a WhatsApp message to be sent to a contact or phone number at a specific time (e.g. '5 bje ram ko msg karna, chlo ghumne', 'tomorrow 10 AM send msg to Rahul'). Friday will dispatch it via WhatsApp 2 at the exact time and confirm to Boss.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            contactNameOrPhone: { type: "STRING", description: "Name of contact (e.g. 'Ram', 'Rahul', 'Mummy') or phone number" },
+            messageBody: { type: "STRING", description: "The message body to deliver (e.g. 'chlo ghumne', 'aaj school aana hai')" },
+            timeString: { type: "STRING", description: "When to deliver, e.g. '5:00 PM', '17:00', '5 bje', 'tomorrow 9:00 AM', 'in 15 mins'" },
+            frequency: { type: "STRING", description: "Optional frequency ('once' default, or 'daily')" }
+          },
+          required: ["contactNameOrPhone", "messageBody", "timeString"]
+        }
+      },
+      {
+        name: "list_scheduled_automations",
+        description: "List all active recurring cron routines, morning briefings, and pending contact messages.",
+        parameters: {
+          type: "OBJECT",
+          properties: {},
+          required: []
+        }
+      },
+      {
+        name: "cancel_scheduled_automation",
+        description: "Cancel or remove an active scheduled cron routine or scheduled contact message by ID or title query.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            idOrQuery: { type: "STRING", description: "ID or search keyword of the task to cancel (e.g. 'weather', 'news', 'Ram')" }
+          },
+          required: ["idOrQuery"]
+        }
+      },
+      {
         name: "schedule_whatsapp_message",
         description: "Schedule a WhatsApp message to be sent automatically at a future time or relative duration (e.g., 'in 15 mins', 'at 8 PM', 'tomorrow at 10 AM').",
         parameters: {
@@ -2561,12 +2616,45 @@ COMMUNICATION STYLE:
           const res = await sendWhatsAppUnified(phone, args.messageText, { channel: channelToUse });
           return res;
         }
+        if (toolName === "create_automated_cron_task") {
+          const { scheduledAutomationService } = await import("./scheduledAutomationService");
+          const cronRes = await scheduledAutomationService.createCronTask({
+            title: args.title,
+            timeString: args.timeString,
+            frequency: args.frequency,
+            actionType: args.actionType,
+            city: args.city,
+            messageBody: args.messageBody,
+          });
+          return cronRes;
+        }
+        if (toolName === "schedule_contact_message") {
+          const { scheduledAutomationService } = await import("./scheduledAutomationService");
+          const schedRes = await scheduledAutomationService.scheduleContactMessage({
+            contactNameOrPhone: args.contactNameOrPhone,
+            messageBody: args.messageBody,
+            timeString: args.timeString,
+            frequency: args.frequency,
+          });
+          return schedRes;
+        }
+        if (toolName === "list_scheduled_automations") {
+          const { scheduledAutomationService } = await import("./scheduledAutomationService");
+          const list = await scheduledAutomationService.listAutomations();
+          return { activeAutomationsCount: list.length, automations: list };
+        }
+        if (toolName === "cancel_scheduled_automation") {
+          const { scheduledAutomationService } = await import("./scheduledAutomationService");
+          const cancelRes = await scheduledAutomationService.cancelAutomation(args.idOrQuery);
+          return cancelRes;
+        }
         if (toolName === "schedule_whatsapp_message") {
-          const schedRes = await whatsappFeatureEngine.scheduleMessage(
-            args.recipientContactOrPhone,
-            args.messageText,
-            args.timeInstruction
-          );
+          const { scheduledAutomationService } = await import("./scheduledAutomationService");
+          const schedRes = await scheduledAutomationService.scheduleContactMessage({
+            contactNameOrPhone: args.recipientContactOrPhone,
+            messageBody: args.messageText,
+            timeString: args.timeInstruction,
+          });
           return schedRes;
         }
         if (toolName === "get_messages_digest") {

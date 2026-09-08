@@ -2751,6 +2751,47 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                   } catch (e: any) {
                     result = { success: false, error: e?.message };
                   }
+                } else if (call.name === "create_automated_cron_task") {
+                  try {
+                    const { scheduledAutomationService } = await import("../services/scheduledAutomationService");
+                    result = await scheduledAutomationService.createCronTask({
+                      title: call.args?.title,
+                      timeString: call.args?.timeString,
+                      frequency: call.args?.frequency,
+                      actionType: call.args?.actionType,
+                      city: call.args?.city,
+                      messageBody: call.args?.messageBody,
+                    });
+                  } catch (e: any) {
+                    result = { success: false, error: e?.message };
+                  }
+                } else if (call.name === "schedule_contact_message") {
+                  try {
+                    const { scheduledAutomationService } = await import("../services/scheduledAutomationService");
+                    result = await scheduledAutomationService.scheduleContactMessage({
+                      contactNameOrPhone: call.args?.contactNameOrPhone,
+                      messageBody: call.args?.messageBody,
+                      timeString: call.args?.timeString,
+                      frequency: call.args?.frequency,
+                    });
+                  } catch (e: any) {
+                    result = { success: false, error: e?.message };
+                  }
+                } else if (call.name === "list_scheduled_automations") {
+                  try {
+                    const { scheduledAutomationService } = await import("../services/scheduledAutomationService");
+                    const list = await scheduledAutomationService.listAutomations();
+                    result = { count: list.length, automations: list };
+                  } catch (e: any) {
+                    result = { success: false, error: e?.message };
+                  }
+                } else if (call.name === "cancel_scheduled_automation") {
+                  try {
+                    const { scheduledAutomationService } = await import("../services/scheduledAutomationService");
+                    result = await scheduledAutomationService.cancelAutomation(call.args?.idOrQuery || "");
+                  } catch (e: any) {
+                    result = { success: false, error: e?.message };
+                  }
                 }
 
   } catch (err: any) {
