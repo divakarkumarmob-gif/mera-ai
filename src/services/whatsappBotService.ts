@@ -46,6 +46,18 @@ class WhatsAppBotService {
   private autoReplyEnabled = true;
   private baileysEnabled = true;
   private botSentMessageIds: Set<string> = new Set();
+  private pendingVoiceDebounce: Map<
+    string,
+    {
+      timer: NodeJS.Timeout;
+      senderName: string;
+      senderPhone: string;
+      transcribed: string;
+      replyJid: string;
+      messageKey: any;
+      quotedMessage?: QuotedMessageContext | null;
+    }
+  > = new Map();
 
   constructor() {
     this.restorePhoneFromFirestore().then(() => {
@@ -547,8 +559,45 @@ class WhatsAppBotService {
                       const { voiceBridgeService } = await import("./voiceBridgeService");
                       const transcribed = await voiceBridgeService.transcribeAudio(buffer, mimeType, fileName || "voice.ogg");
                       if (transcribed && transcribed.trim()) {
-                        await this.sendHumanLikeMessage(replyJid, `🎙️ *Aapki Aawaz (Transcription):*\n_"${transcribed}"_`, "", msg.key);
-                        await this.handleOwnerWhatsAppMessage(senderName, senderPhone, transcribed, replyJid, msg.key, quotedMessage, true);
+                        // Check if an existing voice debounce timer is running for this chat
+                        const existingPending = this.pendingVoiceDebounce.get(replyJid);
+                        let finalTranscribed = transcribed;
+                        if (existingPending) {
+                          clearTimeout(existingPending.timer);
+                          finalTranscribed = `${existingPending.transcribed} ${transcribed}`;
+                        }
+
+                        // 5-second buffer: wait 5s to see if user sends follow-up text or requests transcription
+                        const timer = setTimeout(async () => {
+                          const pending = this.pendingVoiceDebounce.get(replyJid);
+                          this.pendingVoiceDebounce.delete(replyJid);
+                          if (!pending) return;
+
+                          const wantsTranscriptNotice = /\b(transcript|transcribe|likh\s*ke|text|text\s*bhi|likho|transcript\s*\+\s*voice|voice\s*\+\s*transcript|dono)\b/i.test(pending.transcribed);
+                          if (wantsTranscriptNotice) {
+                            await this.sendHumanLikeMessage(pending.replyJid, `🎙️ *Aapki Aawaz (Transcription):*\n_"${pending.transcribed}"_`, "", pending.messageKey);
+                          }
+
+                          await this.handleOwnerWhatsAppMessage(
+                            pending.senderName,
+                            pending.senderPhone,
+                            pending.transcribed,
+                            pending.replyJid,
+                            pending.messageKey,
+                            pending.quotedMessage,
+                            true
+                          );
+                        }, 5000);
+
+                        this.pendingVoiceDebounce.set(replyJid, {
+                          timer,
+                          senderName,
+                          senderPhone,
+                          transcribed: finalTranscribed,
+                          replyJid,
+                          messageKey: msg.key,
+                          quotedMessage,
+                        });
                         continue;
                       }
                     } catch (sttErr) {
@@ -614,6 +663,32 @@ class WhatsAppBotService {
 
           let consumedByDailyUpdate = false;
           if (isFromOwner) {
+            // Check if there is a pending voice note waiting in the 5-sec debounce buffer
+            const pendingVoice = this.pendingVoiceDebounce.get(replyJid);
+            if (pendingVoice) {
+              clearTimeout(pendingVoice.timer);
+              this.pendingVoiceDebounce.delete(replyJid);
+
+              const isFollowUpRequestingVoice = /\b(voice|audio|speak|bolo|sunao|bol\s*kar|bol\s*ke|aawaz|voice\s*note)\b/i.test(text);
+              const isFollowUpRequestingTranscript = /\b(transcript|transcribe|likh\s*ke|text|text\s*bhi|likho|dono|both|transcript\s*\+\s*voice|voice\s*\+\s*transcript|write)\b/i.test(text);
+
+              if (isFollowUpRequestingTranscript) {
+                await this.sendHumanLikeMessage(replyJid, `🎙️ *Aapki Aawaz (Transcription):*\n_"${pendingVoice.transcribed}"_`, "", pendingVoice.messageKey);
+              }
+
+              const combinedText = `${pendingVoice.transcribed} [User follow-up: ${text}]`;
+              this.handleOwnerWhatsAppMessage(
+                senderName,
+                senderPhone,
+                combinedText,
+                replyJid,
+                msg.key,
+                quotedMessage || pendingVoice.quotedMessage,
+                !isFollowUpRequestingTranscript || isFollowUpRequestingVoice
+              ).catch((e) => console.error("[WhatsAppBot] Follow-up voice handling error:", e));
+              continue;
+            }
+
             // 1. Voice PIN
             try {
               const { voiceBiometricsService } = await import("./voiceBiometricsService");
@@ -838,18 +913,26 @@ class WhatsAppBotService {
         messageKey,
         (j, img, cap, k) => this.sendPhotoMessage(j, img, cap, k)
       );
-      await this.sendHumanLikeMessage(replyJid, reply, rawText, messageKey);
+      const wantsVoice = isVoiceInput || /\b(voice|audio|speak|bolo|sunao|bol\s*kar|bol\s*ke|aawaz|voice\s*note)\b/i.test(rawText);
+      const wantsTranscript = !isVoiceInput || /\b(transcript|text|likh\s*ke|likho|dono|both|transcript\s*\+\s*voice|voice\s*\+\s*transcript|write)\b/i.test(rawText);
 
-      if (isVoiceInput) {
+      let voiceSent = false;
+      if (wantsVoice) {
         try {
           const { voiceBridgeService, VoiceBridgeService } = await import("./voiceBridgeService");
           const speechRes = await voiceBridgeService.generateSpeech(reply, VoiceBridgeService.FEMALE_VOICE);
           if (speechRes && speechRes.buffer.length > 0) {
             await this.sendVoiceMessage(replyJid, speechRes.buffer, messageKey, speechRes.mimeType);
+            voiceSent = true;
           }
         } catch (vErr) {
           console.warn("[WhatsAppBot] Voice response TTS generation error:", vErr);
         }
+      }
+
+      // Send text if user asked for transcript, if not a voice input, or as fallback if voice sending failed
+      if (wantsTranscript || !voiceSent) {
+        await this.sendHumanLikeMessage(replyJid, reply, rawText, messageKey);
       }
     } catch (aiErr: any) {
       console.error("[WhatsAppBot] Error in executeBossChatAI:", aiErr);
