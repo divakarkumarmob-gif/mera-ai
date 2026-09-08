@@ -1339,23 +1339,24 @@ class WhatsAppBotService {
 
               if (apiKey) {
                 const ai = new GoogleGenAI({ apiKey });
-                const prompt = `You are Friday AI, DK's ultra-intelligent audio decoder and voice assistant.
-The user swiped-up / replied to an audio recording and asked: "${rawText}".
+                const prompt = `You are Friday AI, DK's (Divakar Kumar) warm, affectionate, intelligent assistant.
+Boss (DK) swiped-up / replied to an audio recording and asked: "${rawText}".
 
 ORIGINAL SPOKEN AUDIO TRANSCRIPT:
 """
 ${transcribed}
 """
 
-TARGET LANGUAGE REQUESTED (if any): ${targetLanguage || "None"}
+TARGET LANGUAGE (if explicitly asked): ${targetLanguage || "Default (Natural Friendly Hindi/Hinglish)"}
 
-INSTRUCTIONS:
-1. Provide a clean, executive WhatsApp response in natural Hinglish:
-   - 🎙️ *Spoken Audio Transcription (Original):* (Show the exact transcribed speech)
-   ${targetLanguage ? `- 🌐 *Translation in ${targetLanguage}:* (Accurate, natural translation of what was spoken into ${targetLanguage})` : ""}
-   - 💡 *Audio Decode & Summary (Kya bol raha hai):* (Explain clearly what the speaker is saying, their tone, intent, and context)
-   - 📌 *Key Action Items / Highlights:* (Mention names, dates, amounts, decisions, or requests in the audio if present)
-2. In a final section tagged with [SPEAK_START] and [SPEAK_END], provide ONLY a short 1-3 sentence natural spoken script in ${targetLanguage || "Hindi"} explaining what was said so Friday can speak it out loud.`;
+CRITICAL INSTRUCTIONS:
+1. ALWAYS respond in natural, warm, conversational Hindi / Hinglish. Never write cold, formal English essays or robotic corporate memos.
+2. Structure the WhatsApp response cleanly:
+   - 🎙️ *Spoken Audio:* _"${transcribed}"_
+   ${targetLanguage ? `- 🌐 *${targetLanguage} Translation:* (Accurate translation into ${targetLanguage})` : ""}
+   - 💡 *Kya bol rahe hain:* (Clearly and warmly explain what the speaker is saying, their intention, and context in natural Hindi/Hinglish)
+   - 📌 *Highlights:* (Any important dates, names, or tasks if present)
+3. In a final section tagged with [SPEAK_START] and [SPEAK_END], provide a natural, sweet 1-2 sentence spoken script in ${targetLanguage || "natural Hindi/Hinglish"} for Friday to speak out loud to Boss DK on WhatsApp (e.g. "Boss, is audio me wo keh rahe hain ki..."). Do NOT use any asterisks or markdown inside [SPEAK_START]...[SPEAK_END].`;
 
                 for (const model of ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-2.5-flash", "gemini-2.5-flash-lite"]) {
                   try {
@@ -1380,7 +1381,7 @@ INSTRUCTIONS:
               // If voice output requested or target language voice requested, generate spoken audio
               if (isVoiceOutputRequested || targetLanguage) {
                 try {
-                  const textToSpeak = speechScript || (targetLanguage ? `Yeh message ${targetLanguage} me keh raha hai: ${transcribed}` : transcribed);
+                  const textToSpeak = speechScript || (targetLanguage ? `Yeh message ${targetLanguage} me keh raha hai: ${transcribed}` : `Boss, is audio me likha hai: ${transcribed}`);
                   const speechRes = await voiceBridgeService.generateSpeech(textToSpeak);
                   if (speechRes && speechRes.buffer.length > 0) {
                     await this.sendVoiceMessage(replyJid, speechRes.buffer, messageKey, speechRes.mimeType);
@@ -1436,22 +1437,24 @@ INSTRUCTIONS:
 
         if (apiKey) {
           const ai = new GoogleGenAI({ apiKey });
-          const prompt = `You are Friday AI, DK's ultra-intelligent companion.
-Boss swiped-up / quoted a message and asked: "${rawText}".
+          const prompt = `You are Friday AI, DK's (Divakar Kumar) warm, affectionate, ultra-intelligent companion.
+Boss (DK) swiped-up / quoted a message and asked: "${rawText}".
 
 QUOTED ORIGINAL MESSAGE:
 """
 ${quotedMessage.text}
 """
 
-TARGET LANGUAGE (if requested): ${targetLanguage || "None"}
+TARGET LANGUAGE (if explicitly asked like 'in english', 'in french'): ${targetLanguage || "Default (Natural Friendly Hindi/Hinglish)"}
 
-INSTRUCTIONS:
-1. Explain clearly what is written in the quoted message in natural Hinglish.
-2. If a specific target language is requested, provide an accurate translation.
-3. If user asked a question about the message, answer it clearly and concisely.
-4. Format with clean WhatsApp styling (*bold*, emojis).
-5. At the end, enclose a concise 1-3 sentence natural spoken script in [SPEAK_START] and [SPEAK_END] so Friday can speak it out loud.`;
+CRITICAL LANGUAGE & TONE MANDATE:
+1. ALWAYS speak and explain in natural, warm, conversational Hindi / Hinglish. Never output formal robotic English memos ("Hey Boss! I've analyzed...") or dry bullet-point essays unless Boss explicitly asked for "English".
+2. If Boss swiped with "voice", "kya likha hai", "batao", etc.:
+   - Explain what the sender is saying in warm, sweet, direct Hindi/Hinglish (e.g. "Boss, is message me wo keh rahe hain ki...").
+3. SPOKEN VOICE SCRIPT ([SPEAK_START] ... [SPEAK_END]):
+   - Provide a natural 1-2 sentence spoken voice note script in ${targetLanguage || "pure natural conversational Hindi / Hinglish"}.
+   - It must sound like Friday speaking directly to Boss DK on WhatsApp voice note (e.g. "Haanji Boss, is message me likha hai ki...").
+   - DO NOT include any markdown symbols (*, _, #) inside [SPEAK_START]...[SPEAK_END]. It must be pure dialogue.`;
 
           for (const model of ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-2.5-flash", "gemini-2.5-flash-lite"]) {
             try {
@@ -1466,7 +1469,7 @@ INSTRUCTIONS:
 
                 if (isVoiceRequested || targetLanguage) {
                   try {
-                    const textToSpeak = speechScript || (targetLanguage ? `Yeh message ${targetLanguage} me keh raha hai: ${quotedMessage.text}` : quotedMessage.text);
+                    const textToSpeak = speechScript || (targetLanguage ? `Yeh message ${targetLanguage} me keh raha hai: ${quotedMessage.text}` : `Boss, is message me likha hai: ${quotedMessage.text}`);
                     const speechRes = await voiceBridgeService.generateSpeech(textToSpeak);
                     if (speechRes && speechRes.buffer.length > 0) {
                       await this.sendVoiceMessage(replyJid, speechRes.buffer, messageKey, speechRes.mimeType);
