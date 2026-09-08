@@ -96,14 +96,18 @@ class WhatsAppBotService {
     this.keepAliveTimer = setInterval(async () => {
       if (!this.sock || !this.isConnected) return;
       try {
-        await this.sock.sendPresenceUpdate("unavailable");
+        if (whatsappGirlfriendEngine.hasActiveGirlfriendOnline()) {
+          await this.sock.sendPresenceUpdate("available");
+        } else {
+          await this.sock.sendPresenceUpdate("unavailable");
+        }
       } catch (e) {
         console.warn("[WhatsAppBot] Keep-alive ping failed, triggering reconnect:", (e as any)?.message);
         this.isConnected = false;
         this.scheduleReconnect(3000);
       }
     }, 4 * 60 * 1000);
-    console.log("[WhatsAppBot] Keep-alive timer started (Offline background mode).");
+    console.log("[WhatsAppBot] Keep-alive timer started (Offline background / Girlfriend dynamic mode).");
   }
 
   private stopKeepAlive() {
@@ -196,14 +200,23 @@ class WhatsAppBotService {
   }
 
   public async startGirlfriendMode(jid: string, rawText: string, messageKey: any, senderName: string): Promise<void> {
-    return whatsappGirlfriendEngine.startGirlfriendMode(jid, rawText, messageKey, senderName, (j, t, inT, k) =>
-      this.sendHumanLikeMessage(j, t, inT, k)
+    return whatsappGirlfriendEngine.startGirlfriendMode(
+      jid,
+      rawText,
+      messageKey,
+      senderName,
+      (j, t, inT, k) => this.sendHumanLikeMessage(j, t, inT, k),
+      this.sock
     );
   }
 
   public async stopGirlfriendMode(jid: string, messageKey: any, isManual: boolean = true): Promise<void> {
-    return whatsappGirlfriendEngine.stopGirlfriendMode(jid, messageKey, isManual, (j, t, inT, k) =>
-      this.sendHumanLikeMessage(j, t, inT, k)
+    return whatsappGirlfriendEngine.stopGirlfriendMode(
+      jid,
+      messageKey,
+      isManual,
+      (j, t, inT, k) => this.sendHumanLikeMessage(j, t, inT, k),
+      this.sock
     );
   }
 
@@ -219,7 +232,8 @@ class WhatsAppBotService {
       messageKey,
       isVoiceInput,
       (j, t, inT, k) => this.sendHumanLikeMessage(j, t, inT, k),
-      (j, b, k, m) => this.sendVoiceMessage(j, b, k, m)
+      (j, b, k, m) => this.sendVoiceMessage(j, b, k, m),
+      this.sock
     );
   }
 
