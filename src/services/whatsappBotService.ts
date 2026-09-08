@@ -1611,7 +1611,7 @@ INSTRUCTIONS:
         }
 
         let nameCandidate = rawText
-          .replace(/(?:ye\s*(?:no|number)\s*save\s*karo|save\s*contact|save\s*number|save\s*no|number\s*save\s*karo|no\s*save\s*karo|contact\s*save\s*karo|save\s*kar\s*(?:lo|do|na)|save|isko|inhe|ise|unko|ye|is\s*no|is\s*number|ka\s*number|ka\s*no|name|naam|hai|h|he|karke|ko|ka|ki|se|relation|set|please|plz|friday|boss|inhe|inka|unka|number|phone|mobile)/gi, "")
+          .replace(/\b(?:ye\s*no\s*save\s*karo|ye\s*number\s*save\s*karo|save\s*contact|save\s*number|save\s*no|number\s*save\s*karo|no\s*save\s*karo|contact\s*save\s*karo|save\s*kar\s*(?:lo|do|na)|save|isko|inhe|ise|unko|ye|is\s*no|is\s*number|ka\s*number|ka\s*no|name|naam|hai|please|plz|friday|boss)\b/gi, "")
           .replace(/[:=,\-]/g, "")
           .trim();
 
@@ -1880,9 +1880,9 @@ INSTRUCTIONS:
       } catch {}
     }
 
-    // 5. Music Finder
-    if (/(gana chalao|song|music|spotify)/i.test(rawText)) {
-      const songQuery = rawText.replace(/(gana chalao|gana sunao|song|play|music)/gi, "").trim();
+    // 5. Music Finder (Explicit commands only)
+    if (/^(?:@music|\/music|gana\s*chalao|gana\s*sunao|play\s*song|spotify)\b/i.test(rawText)) {
+      const songQuery = rawText.replace(/^(?:@music|\/music|gana\s*chalao|gana\s*sunao|play\s*song|play|spotify)\s*/gi, "").trim();
       if (songQuery) {
         try {
           const { publicApisService } = await import("./publicApisService");
@@ -2163,7 +2163,7 @@ INSTRUCTIONS:
 
     // O. Smart Memory Recall ("@recall ...", "kahan rakha tha", "mujhe yaad dilao", "kab hai")
     const recallMatch = rawText.match(/^(?:@recall|\/recall|friday\s*mujhe\s*yaad\s*dilao|kahan\s*rakha\s*tha|kab\s*hai|yaad\s*dilao)\s*[:=-]?\s*(.*)/i) ||
-      (rawText.includes("kahan") && (rawText.includes("rakha") || rawText.includes("hai")));
+      (rawText.toLowerCase().includes("kahan") && rawText.toLowerCase().includes("rakha"));
     if (recallMatch) {
       const recallRes = await whatsappFeatureEngine.recallSmartMemory(rawText);
       await this.sendHumanLikeMessage(replyJid, recallRes, rawText, messageKey);
