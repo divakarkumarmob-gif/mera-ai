@@ -104,13 +104,22 @@ class TelegramBotService {
   private groupProfileCache: Map<number, TelegramGroupProfile> = new Map();
   private customBusyReply: string | null = null;
 
-  // Multi-tier model fallback chain
+  // Multi-tier model fallback chain (aligned with WhatsApp)
   private static readonly MODEL_FALLBACK_CHAIN = [
     "gemini-3.6-flash",
     "gemini-3.5-flash",
     "gemini-3.1-flash-lite",
     "gemini-3.5-flash-lite",
     "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+  ];
+
+  // Chat & Group Summaries model fallback chain: Primary Gemini 3 Flash -> 2.5 Flash -> 2.5 Flash Lite
+  private static readonly SUMMARY_MODEL_CHAIN = [
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
   ];
 
   constructor() {
@@ -870,12 +879,20 @@ ${messages.map((m) => `[${m.timeStr}] ${m.sender}: ${m.text}`).join("\n")}
 
 Provide a clear 2-3 sentence executive summary of what was discussed, any decisions, questions asked, or action items:`;
 
-      const resp = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: prompt,
-      });
+      let summary: string | undefined;
+      for (const model of TelegramBotService.SUMMARY_MODEL_CHAIN) {
+        try {
+          const resp = await Promise.race([
+            ai.models.generateContent({ model, contents: prompt }),
+            new Promise<any>((_, reject) => setTimeout(() => reject(new Error("Timeout")), 8000)),
+          ]);
+          summary = resp.text?.trim();
+          if (summary) break;
+        } catch (e) {
+          // Try next model in chain
+        }
+      }
 
-      const summary = resp.text?.trim();
       if (summary) {
         const user = this.userProfileCache.get(userId);
         if (user) {
@@ -910,12 +927,20 @@ ${messages.map((m) => `[${m.timeStr}] ${m.sender}: ${m.text}`).join("\n")}
 
 Provide a 2-4 sentence executive digest of main topics, project updates, member discussions, and decisions in this group:`;
 
-      const resp = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: prompt,
-      });
+      let summary: string | undefined;
+      for (const model of TelegramBotService.SUMMARY_MODEL_CHAIN) {
+        try {
+          const resp = await Promise.race([
+            ai.models.generateContent({ model, contents: prompt }),
+            new Promise<any>((_, reject) => setTimeout(() => reject(new Error("Timeout")), 8000)),
+          ]);
+          summary = resp.text?.trim();
+          if (summary) break;
+        } catch (e) {
+          // Try next model in chain
+        }
+      }
 
-      const summary = resp.text?.trim();
       if (summary) {
         const grp = this.groupProfileCache.get(groupId);
         if (grp) {

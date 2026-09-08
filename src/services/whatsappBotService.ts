@@ -3071,7 +3071,7 @@ ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` 
 3. Directly execute Boss's command in the context of the quoted message!)`;
     }
 
-    for (const model of ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"]) {
+    for (const model of ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-flash-lite"]) {
       try {
         const chat = ai.chats.create({
           model,
@@ -3829,7 +3829,7 @@ RULES FOR GROUP REPLIES:
     "gemini-3.1-flash-lite",
     "gemini-3.5-flash-lite",
     "gemini-2.5-flash",
-    "gemini-2.0-flash",
+    "gemini-2.5-flash-lite",
   ];
 
   private async generateSmartAutoReply(
