@@ -117,7 +117,7 @@ _Hamara sweet time complete ho gaya aur privacy ke liye saari temporary chats cl
       const timeout = setTimeout(() => controller.abort(), 18000);
 
       // FIX 1: Correct Endpoint Added
-      const response = await fetch("https://openrouter.ai", {
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${apiKey}`,
