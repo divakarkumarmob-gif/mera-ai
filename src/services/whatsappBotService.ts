@@ -492,7 +492,7 @@ class WhatsAppBotService {
   }
 
   public parseGirlfriendDuration(text: string): number {
-    const match = text.match(/@girlfriend\s*(?:mode)?\s*(.*)/i);
+    const match = text.match(/(?:@girlfriend|\/girlfriend|@gf|\/gf|girlfriend\s*mode|gf\s*mode|virtual\s*girlfriend|girlfriend)\s*(?:mode)?\s*(.*)/i);
     if (!match) return 20;
     const rest = (match[1] || "").trim().toLowerCase();
     if (!rest) return 20;
@@ -2228,6 +2228,28 @@ CRITICAL LANGUAGE & TONE MANDATE:
   ): Promise<void> {
     const rawText = (text || "").trim();
     if (!rawText) return;
+
+    // ── VIRTUAL GIRLFRIEND MODE ROUTING (Ephemeral Private Session) ──
+    const isGfActivationIntent =
+      /^(?:@girlfriend|\/girlfriend|@gf|\/gf|girlfriend\s*mode|gf\s*mode|virtual\s*girlfriend|girlfriend)\b/i.test(rawText);
+
+    const isGfStopIntent =
+      /^(?:@normal|\/normal|normal\s*mode|normal|@stop\s*gf|@stop\s*girlfriend|stop\s*girlfriend|stop\s*gf|exit\s*girlfriend|exit\s*gf)$/i.test(rawText);
+
+    if (isGfActivationIntent) {
+      await this.startGirlfriendMode(replyJid, rawText, messageKey, senderName);
+      return;
+    }
+
+    if (isGfStopIntent) {
+      await this.stopGirlfriendMode(replyJid, messageKey, true);
+      return;
+    }
+
+    if (this.isGirlfriendModeActive(replyJid)) {
+      await this.handleGirlfriendChatMessage(replyJid, rawText, messageKey, isVoiceInput);
+      return;
+    }
 
     // Combined context text for link/train detection
     const fullSearchContext = quotedMessage?.text ? `${quotedMessage.text}\n${rawText}` : rawText;
@@ -4811,6 +4833,28 @@ RULES FOR GROUP REPLIES:
     this.lastReplyAt.set(senderKey, now);
     try {
       if (this.sock && this.isConnected) {
+        // ── Virtual Girlfriend Mode Intercept ──
+        const isGfActivationIntent =
+          /^(?:@girlfriend|\/girlfriend|@gf|\/gf|girlfriend\s*mode|gf\s*mode|virtual\s*girlfriend|girlfriend)\b/i.test(text);
+
+        const isGfStopIntent =
+          /^(?:@normal|\/normal|normal\s*mode|normal|@stop\s*gf|@stop\s*girlfriend|stop\s*girlfriend|stop\s*gf|exit\s*girlfriend|exit\s*gf)$/i.test(text);
+
+        if (isGfActivationIntent) {
+          await this.startGirlfriendMode(replyJid, text, messageKey, senderName);
+          return;
+        }
+
+        if (isGfStopIntent) {
+          await this.stopGirlfriendMode(replyJid, messageKey, true);
+          return;
+        }
+
+        if (this.isGirlfriendModeActive(replyJid)) {
+          await this.handleGirlfriendChatMessage(replyJid, text, messageKey, false);
+          return;
+        }
+
         let contactRelation = "";
         try {
           const contact = await contactsService.findContact(senderPhone);
@@ -5684,6 +5728,10 @@ TONE & STYLE:
 • \`@split <amount> between <names>\` ➔ Group bill split & instant UPI split.
 • \`@code <code>\` / \`@debug <code>\` ➔ Programming code explain & error debug.
 • \`@call\` ➔ 1-Click live real incoming voice call on phone app.
+
+💖 *7. VIRTUAL GIRLFRIEND & PERSONA:*
+• \`@girlfriend <time>\` (e.g. \`@girlfriend 30 mins\`) ➔ 100% Private RAM-only girlfriend chat mode activate karein.
+• \`@normal\` ➔ Wapas normal Friday AI Assistant mode me switch karein.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 💡 *Tip:* Aap natural bhasha me bhi bol sakte hain (e.g. _"Ram ko msg kar do"_, _"is bill ka excel bana do"_, _"photo ko sticker bana do"_). Friday automatically execute karegi! 👍`;
