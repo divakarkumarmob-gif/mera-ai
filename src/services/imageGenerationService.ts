@@ -390,14 +390,17 @@ class ImageGenerationService {
       };
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey =
+      process.env.GEMINI_API_KEY?.trim() ||
+      process.env.GOOGLE_API_KEY?.trim() ||
+      process.env.VITE_GEMINI_API_KEY?.trim();
     let enhancedPrompt = rawInstruction;
 
-    if (apiKey && imageBuffer && imageBuffer.length > 0) {
+    if (apiKey && imageBuffer && Buffer.isBuffer(imageBuffer) && imageBuffer.length > 0) {
       try {
         const ai = new GoogleGenAI({ apiKey });
         const base64Data = imageBuffer.toString("base64");
-        const cleanMime = mimeType.split(";")[0].trim() || "image/jpeg";
+        const cleanMime = (mimeType || "image/jpeg").split(";")[0].trim() || "image/jpeg";
 
         const visionPrompt = `You are a world-class AI Image Transformation & Inpainting Prompt Specialist.
 The user wants to EDIT/MODIFY this provided image according to these user instructions:
@@ -459,16 +462,27 @@ Analyze this image in detail:
     mimeType2 = "image/jpeg"
   ): Promise<GeneratedImageResult> {
     const rawInstruction = (userInstruction || "Seamlessly blend the two photos").trim();
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey =
+      process.env.GEMINI_API_KEY?.trim() ||
+      process.env.GOOGLE_API_KEY?.trim() ||
+      process.env.VITE_GEMINI_API_KEY?.trim();
     let enhancedPrompt = rawInstruction;
 
-    if (apiKey && image1Buffer?.length > 0 && image2Buffer?.length > 0) {
+    if (
+      apiKey &&
+      image1Buffer &&
+      image2Buffer &&
+      Buffer.isBuffer(image1Buffer) &&
+      Buffer.isBuffer(image2Buffer) &&
+      image1Buffer.length > 0 &&
+      image2Buffer.length > 0
+    ) {
       try {
         const ai = new GoogleGenAI({ apiKey });
         const b64_1 = image1Buffer.toString("base64");
         const b64_2 = image2Buffer.toString("base64");
-        const cleanMime1 = mimeType1.split(";")[0].trim() || "image/jpeg";
-        const cleanMime2 = mimeType2.split(";")[0].trim() || "image/jpeg";
+        const cleanMime1 = (mimeType1 || "image/jpeg").split(";")[0].trim() || "image/jpeg";
+        const cleanMime2 = (mimeType2 || "image/jpeg").split(";")[0].trim() || "image/jpeg";
 
         const fusionPrompt = `You are a world-class AI Photo Fusion & Style Transfer Prompt Engineer.
 You have been given TWO images:

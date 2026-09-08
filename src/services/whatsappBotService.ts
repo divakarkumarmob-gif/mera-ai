@@ -112,6 +112,8 @@ class WhatsAppBotService {
   private botSentMessageIds: Set<string> = new Set();
   // RAM buffer cache for last 3 photos per chat (used for 2-photo Face Swap & Style Fusion)
   private chatRecentPhotos: Map<string, Array<{ buffer: Buffer; mimeType: string; timestamp: number }>> = new Map();
+  // RAM cache for pending interactive link choices (URL -> choice "1" Download vs "2" Summary)
+  private chatPendingLinks: Map<string, { url: string; platform: string; ytVideoId?: string | null; timestamp: number }> = new Map();
 
   private recordChatPhoto(jid: string, buffer: Buffer, mimeType: string) {
     const list = this.chatRecentPhotos.get(jid) || [];
@@ -1141,6 +1143,87 @@ class WhatsAppBotService {
                           }
                         }
 
+                        // 🪄 1. AI WhatsApp Sticker & Background Removal Intent
+                        const isStickerIntent =
+                          /^(?:@sticker|\/sticker|sticker|make\s*sticker|sticker\s*banao|@bgremove|bgremove|remove\s*bg|bg\s*remove)\b/i.test(cap) ||
+                          cap.match(/(?:sticker\s*bana|bg\s*hata|background\s*hata)/i);
+                        if (isStickerIntent) {
+                          await this.sendHumanLikeMessage(replyJid, `🪄 *WhatsApp Sticker generate ho raha hai...* ⚡`, "", msg.key);
+                          try {
+                            const { mediaToolsService } = await import("./mediaToolsService");
+                            const bgRes = await mediaToolsService.removeBackground(buffer, mimeType);
+                            const finalBuf = bgRes.buffer || buffer;
+                            if (this.sock) {
+                              await this.sock.sendMessage(
+                                replyJid,
+                                {
+                                  sticker: finalBuf,
+                                  mimetype: "image/webp",
+                                },
+                                { quoted: msg.key }
+                              );
+                              await this.sendHumanLikeMessage(replyJid, `✨ *AI WhatsApp Sticker Ready!* 🚀`, "", msg.key);
+                              continue;
+                            }
+                          } catch (sErr: any) {
+                            console.error("[WhatsAppBot] Sticker generation error:", sErr);
+                          }
+                        }
+
+                        // 📊 2. AI Receipt / Bill / Table to Excel (.xlsx) Converter
+                        const isExcelIntent =
+                          /^(?:@excel|\/excel|@sheet|\/sheet|excel|spreadsheet|table\s*extract|bill\s*to\s*excel)\b/i.test(cap) ||
+                          cap.match(/(?:excel\s*me|sheet\s*me|excel\s*banao|table\s*banao|bill\s*extract|bill\s*to\s*excel)/i);
+                        if (isExcelIntent) {
+                          await this.sendHumanLikeMessage(replyJid, `📊 *Receipt/Table analyze karke Excel Sheet banayi ja rahi hai...* ⚡`, "", msg.key);
+                          try {
+                            const { mediaToolsService } = await import("./mediaToolsService");
+                            const excelRes = await mediaToolsService.convertImageToExcel(buffer, mimeType, cap);
+                            if (excelRes.success && excelRes.buffer && this.sock) {
+                              await this.sock.sendMessage(
+                                replyJid,
+                                {
+                                  document: excelRes.buffer,
+                                  mimetype: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                  fileName: excelRes.filename || "Friday_Extracted_Report.xlsx",
+                                },
+                                { quoted: msg.key }
+                              );
+                              await this.sendHumanLikeMessage(replyJid, excelRes.summary || "📊 *Excel File ready hai!*", "", msg.key);
+                              continue;
+                            } else {
+                              await this.sendHumanLikeMessage(replyJid, `❌ Excel generate nahi ho paya: ${excelRes.error || "Please try again."}`, "", msg.key);
+                              continue;
+                            }
+                          } catch (xErr: any) {
+                            console.error("[WhatsAppBot] Excel extraction error:", xErr);
+                          }
+                        }
+
+                        // 🎬 3. AI Photo to Motion / Video Animation (@animate)
+                        const isAnimateIntent = /^(?:@animate|\/animate|animate|motion|video\s*banao|animate\s*photo)\b/i.test(cap);
+                        if (isAnimateIntent) {
+                          await this.sendHumanLikeMessage(replyJid, `🎬 *Photo ko AI Motion Video me convert kiya ja raha hai...* ⚡`, "", msg.key);
+                          try {
+                            const { mediaToolsService } = await import("./mediaToolsService");
+                            const animRes = await mediaToolsService.generateAiVideo(cap || "Cinematic natural camera motion, ultra-realistic", buffer, mimeType);
+                            if (animRes.success && animRes.buffer && this.sock) {
+                              await this.sock.sendMessage(
+                                replyJid,
+                                {
+                                  video: animRes.buffer,
+                                  mimetype: "video/mp4",
+                                },
+                                { quoted: msg.key }
+                              );
+                              await this.sendHumanLikeMessage(replyJid, `🎬 *AI Motion Animation via ${animRes.model || "Friday AI"}* 🚀`, "", msg.key);
+                              continue;
+                            }
+                          } catch (aErr: any) {
+                            console.error("[WhatsAppBot] Animate error:", aErr);
+                          }
+                        }
+
                         const isSummaryRequested =
                           /\b(summary|summarize|summarise|friday\s*summary|analysis|analyze|analyse|photo\s*analyze|ocr|dekho|check|batao|kya\s*hai|padho|scan|explain)\b/i.test(cap) ||
                           cap.startsWith("@summary") ||
@@ -1389,17 +1472,61 @@ class WhatsAppBotService {
         try {
           const rawQ = quotedMessage.rawQuotedMessage;
           const isAudioMedia = quotedMessage.mediaType === "audio" || !!rawQ.audioMessage;
+          const isPhotoEditIntent =
+            quotedMessage.mediaType === "photo" &&
+            (/^(?:@image\s*edit|@edit|\/edit|edit\s*photo|photo\s*edit|edit\s*karo|image\s*edit|edit\s*image|edit)\b/i.test(rawText.trim()) ||
+              rawText.match(/(?:is\s*photo|iss\s*photo|isme|is\s*image)\s*(?:me|ko|par|mein)?\s*(?:edit|change|badal|add|laga|remove|hata)/i));
 
-          const actionText = isAudioMedia
-            ? `🎙️ *Quoted Audio / Voice Note decode & transcribe ho raha hai...* ⚡`
-            : (isSummaryIntent && !visionMemoryService.isMediaQuestionIntent(rawText))
-              ? `📑 *Quoted ${quotedMessage.mediaType.toUpperCase()} analyze & summarize ho raha hai...* ⚡`
-              : `🔍 *Quoted ${quotedMessage.mediaType.toUpperCase()} me se dhoondh kar jawab de rahi hoon...* ⚡`;
+          const isQuotedSticker =
+            quotedMessage.mediaType === "photo" &&
+            (/^(?:@sticker|\/sticker|sticker|make\s*sticker|sticker\s*banao|@bgremove|bgremove|remove\s*bg|bg\s*remove)\b/i.test(rawText.trim()) ||
+              rawText.match(/(?:sticker\s*bana|bg\s*hata|background\s*hata)/i));
 
-          await this.sendHumanLikeMessage(replyJid, actionText, rawText, messageKey);
+          const isQuotedExcel =
+            (quotedMessage.mediaType === "photo" || quotedMessage.mediaType === "document") &&
+            (/^(?:@excel|\/excel|@sheet|\/sheet|excel|spreadsheet|table\s*extract|bill\s*to\s*excel)\b/i.test(rawText.trim()) ||
+              rawText.match(/(?:excel\s*me|sheet\s*me|excel\s*banao|table\s*banao|bill\s*extract|bill\s*to\s*excel)/i));
 
-          const qMsgWrapper = { message: quotedMessage.rawQuotedMessage };
-          const buffer: Buffer = await downloadFn(qMsgWrapper, "buffer", {}, { reuploadRequest: this.sock?.updateMediaMessage });
+          const isQuotedAnimate =
+            quotedMessage.mediaType === "photo" &&
+            /^(?:@animate|\/animate|animate|motion|video\s*banao|animate\s*photo)\b/i.test(rawText.trim());
+
+          // Send intent-specific acknowledgment
+          if (isPhotoEditIntent) {
+            const editInstruction = rawText
+              .replace(/^(?:@image\s*edit|@edit|\/edit|edit\s*photo|photo\s*edit|edit\s*karo|image\s*edit|edit\s*image|edit)\s*[:=-]?\s*/i, "")
+              .trim() || rawText.trim();
+            await this.sendHumanLikeMessage(replyJid, `🎨 *AI Photo edit ho rahi hai...* ⚡\n📝 _"${editInstruction}"_`, rawText, messageKey);
+          } else if (isQuotedSticker) {
+            await this.sendHumanLikeMessage(replyJid, `🪄 *Quoted photo se WhatsApp Sticker generate ho raha hai...* ⚡`, rawText, messageKey);
+          } else if (isQuotedExcel) {
+            await this.sendHumanLikeMessage(replyJid, `📊 *Quoted document/bill analyze karke Excel Sheet banayi ja rahi hai...* ⚡`, rawText, messageKey);
+          } else if (isQuotedAnimate) {
+            await this.sendHumanLikeMessage(replyJid, `🎬 *Quoted photo ko AI Motion Video me convert kiya ja raha hai...* ⚡`, rawText, messageKey);
+          } else if (isAudioMedia) {
+            await this.sendHumanLikeMessage(replyJid, `🎙️ *Quoted Audio / Voice Note decode & transcribe ho raha hai...* ⚡`, rawText, messageKey);
+          } else if (isSummaryIntent && !visionMemoryService.isMediaQuestionIntent(rawText)) {
+            await this.sendHumanLikeMessage(replyJid, `📑 *Quoted ${quotedMessage.mediaType.toUpperCase()} analyze & summarize ho raha hai...* ⚡`, rawText, messageKey);
+          } else {
+            await this.sendHumanLikeMessage(replyJid, `🔍 *Quoted ${quotedMessage.mediaType.toUpperCase()} me se dhoondh kar jawab de rahi hoon...* ⚡`, rawText, messageKey);
+          }
+
+          let buffer: Buffer | null = null;
+          try {
+            const qMsgWrapper = { message: quotedMessage.rawQuotedMessage };
+            buffer = await downloadFn(qMsgWrapper, "buffer", {}, { reuploadRequest: this.sock?.updateMediaMessage });
+          } catch (dlErr) {
+            console.warn("[WhatsAppBot] Direct download on quoted media failed:", dlErr);
+          }
+
+          // Fallback to recent chat photos if quoted download is empty (common for bot-sent or cached media)
+          if ((!buffer || buffer.length === 0) && quotedMessage.mediaType === "photo") {
+            const cached = this.chatRecentPhotos.get(replyJid)?.[0];
+            if (cached?.buffer && cached.buffer.length > 0) {
+              buffer = cached.buffer;
+              console.log("[WhatsAppBot] Using cached recent photo buffer for quoted action");
+            }
+          }
 
           if (buffer && buffer.length > 0) {
             const mimeType =
@@ -1486,11 +1613,6 @@ CRITICAL INSTRUCTIONS:
             }
 
             // ── Quoted Photo Editing Engine ("@image edit ...", "@edit ...", "is photo me ...") ──
-            const isPhotoEditIntent =
-              quotedMessage.mediaType === "photo" &&
-              (/^(?:@image\s*edit|@edit|\/edit|edit\s*photo|photo\s*edit|edit\s*karo|image\s*edit|edit\s*image|edit)\b/i.test(rawText.trim()) ||
-                rawText.match(/(?:is\s*photo|iss\s*photo|isme|is\s*image)\s*(?:me|ko|par|mein)?\s*(?:edit|change|badal|add|laga|remove|hata)/i));
-
             if (isPhotoEditIntent) {
               const editInstruction = rawText
                 .replace(/^(?:@image\s*edit|@edit|\/edit|edit\s*photo|photo\s*edit|edit\s*karo|image\s*edit|edit\s*image|edit)\s*[:=-]?\s*/i, "")
@@ -1523,6 +1645,91 @@ CRITICAL INSTRUCTIONS:
                 console.error("[WhatsAppBot] Quoted photo edit error:", eErr);
                 await this.sendHumanLikeMessage(replyJid, `❌ Photo edit error: ${eErr?.message || eErr}`, rawText, messageKey);
                 return true;
+              }
+            }
+
+            // ── Quoted Photo to Sticker (@sticker, @bgremove) ──
+            const isQuotedSticker =
+              quotedMessage.mediaType === "photo" &&
+              (/^(?:@sticker|\/sticker|sticker|make\s*sticker|sticker\s*banao|@bgremove|bgremove|remove\s*bg|bg\s*remove)\b/i.test(rawText.trim()) ||
+                rawText.match(/(?:sticker\s*bana|bg\s*hata|background\s*hata)/i));
+            if (isQuotedSticker) {
+              await this.sendHumanLikeMessage(replyJid, `🪄 *Quoted photo se WhatsApp Sticker generate ho raha hai...* ⚡`, rawText, messageKey);
+              try {
+                const { mediaToolsService } = await import("./mediaToolsService");
+                const bgRes = await mediaToolsService.removeBackground(buffer, mimeType);
+                const finalBuf = bgRes.buffer || buffer;
+                if (this.sock) {
+                  await this.sock.sendMessage(
+                    replyJid,
+                    {
+                      sticker: finalBuf,
+                      mimetype: "image/webp",
+                    },
+                    { quoted: messageKey }
+                  );
+                  await this.sendHumanLikeMessage(replyJid, `✨ *AI WhatsApp Sticker Ready!* 🚀`, rawText, messageKey);
+                  return true;
+                }
+              } catch (sErr: any) {
+                console.error("[WhatsAppBot] Quoted sticker error:", sErr);
+              }
+            }
+
+            // ── Quoted Photo/Document to Excel Spreadsheet (@excel, @sheet) ──
+            const isQuotedExcel =
+              (quotedMessage.mediaType === "photo" || quotedMessage.mediaType === "document") &&
+              (/^(?:@excel|\/excel|@sheet|\/sheet|excel|spreadsheet|table\s*extract|bill\s*to\s*excel)\b/i.test(rawText.trim()) ||
+                rawText.match(/(?:excel\s*me|sheet\s*me|excel\s*banao|table\s*banao|bill\s*extract|bill\s*to\s*excel)/i));
+            if (isQuotedExcel) {
+              await this.sendHumanLikeMessage(replyJid, `📊 *Quoted document/bill analyze karke Excel Sheet banayi ja rahi hai...* ⚡`, rawText, messageKey);
+              try {
+                const { mediaToolsService } = await import("./mediaToolsService");
+                const excelRes = await mediaToolsService.convertImageToExcel(buffer, mimeType, rawText);
+                if (excelRes.success && excelRes.buffer && this.sock) {
+                  await this.sock.sendMessage(
+                    replyJid,
+                    {
+                      document: excelRes.buffer,
+                      mimetype: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                      fileName: excelRes.filename || "Friday_Extracted_Report.xlsx",
+                    },
+                    { quoted: messageKey }
+                  );
+                  await this.sendHumanLikeMessage(replyJid, excelRes.summary || "📊 *Excel File ready hai!*", rawText, messageKey);
+                  return true;
+                } else {
+                  await this.sendHumanLikeMessage(replyJid, `❌ Excel generate nahi ho paya: ${excelRes.error || "Please try again."}`, rawText, messageKey);
+                  return true;
+                }
+              } catch (xErr: any) {
+                console.error("[WhatsAppBot] Quoted Excel extraction error:", xErr);
+              }
+            }
+
+            // ── Quoted Photo Animation to Video (@animate) ──
+            const isQuotedAnimate =
+              quotedMessage.mediaType === "photo" &&
+              /^(?:@animate|\/animate|animate|motion|video\s*banao|animate\s*photo)\b/i.test(rawText.trim());
+            if (isQuotedAnimate) {
+              await this.sendHumanLikeMessage(replyJid, `🎬 *Quoted photo ko AI Motion Video me convert kiya ja raha hai...* ⚡`, rawText, messageKey);
+              try {
+                const { mediaToolsService } = await import("./mediaToolsService");
+                const animRes = await mediaToolsService.generateAiVideo(rawText || "Cinematic camera motion, ultra-realistic", buffer, mimeType);
+                if (animRes.success && animRes.buffer && this.sock) {
+                  await this.sock.sendMessage(
+                    replyJid,
+                    {
+                      video: animRes.buffer,
+                      mimetype: "video/mp4",
+                    },
+                    { quoted: messageKey }
+                  );
+                  await this.sendHumanLikeMessage(replyJid, `🎬 *AI Motion Animation via ${animRes.model || "Friday AI"}* 🚀`, rawText, messageKey);
+                  return true;
+                }
+              } catch (aErr: any) {
+                console.error("[WhatsAppBot] Quoted animate error:", aErr);
               }
             }
 
@@ -1730,6 +1937,78 @@ CRITICAL LANGUAGE & TONE MANDATE:
       }
     } catch (recentMediaErr) {
       console.warn("[WhatsAppBot] Direct recent media Q&A notice:", recentMediaErr);
+    }
+
+    // 0.07 Pending Video Link Interactive Choice Responder ("1", "download", "2", "summary")
+    const pendingLink = this.chatPendingLinks.get(replyJid);
+    if (pendingLink && Date.now() - pendingLink.timestamp < 15 * 60 * 1000) {
+      const lower = rawText.trim().toLowerCase();
+      const isDownloadChoice =
+        /^(?:1|download|down|video|video\s*bhejo|download\s*karo|download\s*video|bhejo|mp4|1\b)/i.test(lower) ||
+        lower === "1" ||
+        lower.startsWith("1 ") ||
+        lower.startsWith("download");
+      const isSummaryChoice =
+        /^(?:2|summary|sum|summarize|analysis|analyze|kya\s*hai|padho|batao|explain|2\b)/i.test(lower) ||
+        lower === "2" ||
+        lower.startsWith("2 ") ||
+        lower.startsWith("summary") ||
+        lower.startsWith("analyze");
+
+      if (isDownloadChoice) {
+        this.chatPendingLinks.delete(replyJid);
+        await this.sendHumanLikeMessage(replyJid, `📥 *${pendingLink.platform} Video download ho rahi hai...* ⚡\n🔗 _${pendingLink.url}_`, rawText, messageKey);
+        try {
+          const { mediaToolsService } = await import("./mediaToolsService");
+          const dlRes = await mediaToolsService.downloadSocialVideo(pendingLink.url);
+          if (dlRes.success && dlRes.buffer && this.sock) {
+            await this.sock.sendMessage(
+              replyJid,
+              {
+                video: dlRes.buffer,
+                mimetype: "video/mp4",
+              },
+              { quoted: messageKey }
+            );
+            await this.sendHumanLikeMessage(
+              replyJid,
+              `✅ *${pendingLink.platform} Video Downloaded!* 🎬\n\n📌 *Title:* _${dlRes.title || "Social Video"}_\n⚡ *Downloaded via Friday AI*`,
+              "",
+              messageKey
+            );
+            return;
+          } else {
+            await this.sendHumanLikeMessage(replyJid, `⚠️ Video download nahi ho payi: ${dlRes.error || "Please try another link."}`, rawText, messageKey);
+            return;
+          }
+        } catch (e: any) {
+          await this.sendHumanLikeMessage(replyJid, `⚠️ Download error: ${e?.message || e}`, rawText, messageKey);
+          return;
+        }
+      } else if (isSummaryChoice) {
+        this.chatPendingLinks.delete(replyJid);
+        if (pendingLink.ytVideoId) {
+          await this.sendHumanLikeMessage(replyJid, "🎬 *YouTube Video analyze ho raha hai... (Transcripts & Timestamps)* ⚡", rawText, messageKey);
+          const { youtubeService } = await import("./youtubeService");
+          const analysis = await youtubeService.analyzeVideo(pendingLink.ytVideoId);
+          let card = `🎬 *YouTube Video Intelligence:* **${analysis.title}**\n`;
+          card += `• 👤 Channel: *${analysis.channelName}*\n`;
+          card += `• 📝 Subtitles: *${analysis.hasTranscript ? `✅ ${analysis.totalCues} timed cues` : "⚠️ Auto estimated"}*\n\n`;
+          card += `📌 *Executive Summary:*\n${analysis.summary}\n\n`;
+          if (analysis.keyTakeaways && analysis.keyTakeaways.length > 0) {
+            card += `💡 *Key Takeaways:*\n`;
+            analysis.keyTakeaways.forEach((t) => (card += `• ${t}\n`));
+          }
+          await this.sendHumanLikeMessage(replyJid, card, rawText, messageKey);
+          return;
+        } else {
+          await this.sendHumanLikeMessage(replyJid, `🌐 *Analyzing video link...* ⚡\n🔗 _${pendingLink.url}_`, rawText, messageKey);
+          const { whatsappFeatureEngine } = await import("./whatsappFeatureEngine");
+          const webSummary = await whatsappFeatureEngine.summarizeWebUrl(pendingLink.url, rawText);
+          await this.sendHumanLikeMessage(replyJid, webSummary, rawText, messageKey);
+          return;
+        }
+      }
     }
 
     // 0.08 Direct Auto-Ring Calling Engine ("call me", "friday call me", "call karo", "mujhe call karo", "@call", "/call", "live call", "voice call")
@@ -1974,37 +2253,143 @@ CRITICAL LANGUAGE & TONE MANDATE:
       }
     }
 
-    // 1. YouTube Video Intelligence ("https://youtube.com/..." / "https://youtu.be/...")
-    try {
-      const { youtubeService } = await import("./youtubeService");
-      const ytVideoId = youtubeService.extractVideoId(rawText) || (quotedMessage?.text ? youtubeService.extractVideoId(quotedMessage.text) : null);
-      if (ytVideoId && !/^(media\s*search|vault\s*search)/i.test(rawText)) {
-        await this.sendHumanLikeMessage(replyJid, "🎬 *YouTube Video analyze ho raha hai... (Transcripts & Timestamps)* ⚡", rawText, messageKey);
-        const analysis = await youtubeService.analyzeVideo(ytVideoId);
-        let card = `🎬 *YouTube Video Intelligence:* **${analysis.title}**\n`;
-        card += `• 👤 Channel: *${analysis.channelName}*\n`;
-        card += `• 📝 Subtitles: *${analysis.hasTranscript ? `✅ ${analysis.totalCues} timed cues` : "⚠️ Auto estimated"}*\n\n`;
-        card += `📌 *Executive Summary:*\n${analysis.summary}\n\n`;
-        if (analysis.keyTakeaways && analysis.keyTakeaways.length > 0) {
-          card += `💡 *Key Takeaways:*\n`;
-          analysis.keyTakeaways.forEach((t) => (card += `• ${t}\n`));
-          card += `\n`;
+    // 0.2 AI Short Video Generator ("@video <prompt>", "/video <prompt>", "video banao <prompt>")
+    const videoGenMatch =
+      rawText.match(/^(?:@video|\/video|video\s*banao|generate\s*video|ai\s*video)\s*[:=-]?\s*(.+)/i) ||
+      (rawText.startsWith("@video ") ? rawText.match(/^@video\s+(.+)/i) : null);
+    if (videoGenMatch && videoGenMatch[1]?.trim()) {
+      const vidPrompt = videoGenMatch[1].trim();
+      try {
+        await this.sendHumanLikeMessage(replyJid, `🎬 *AI Video generate ho rahi hai Boss...* ⚡\n\n📌 *Prompt:* _"${vidPrompt}"_`, rawText, messageKey);
+        const { mediaToolsService } = await import("./mediaToolsService");
+        const vidRes = await mediaToolsService.generateAiVideo(vidPrompt);
+        if (vidRes.success && vidRes.buffer && this.sock) {
+          await this.sock.sendMessage(
+            replyJid,
+            {
+              video: vidRes.buffer,
+              mimetype: "video/mp4",
+            },
+            { quoted: messageKey }
+          );
+          await this.sendHumanLikeMessage(
+            replyJid,
+            `🎬 *Friday AI Video* 🚀\n\n✨ *Engine:* ${vidRes.model || "Flux/CogVideoX"}\n📝 *Prompt:* _${vidPrompt}_`,
+            "",
+            messageKey
+          );
+          return;
+        } else {
+          await this.sendHumanLikeMessage(replyJid, `⚠️ Video generate nahi ho payi: ${vidRes.error || "Please try again"}`, rawText, messageKey);
+          return;
         }
-        if (analysis.chapters && analysis.chapters.length > 0) {
-          card += `⏱️ *Timeline & Chapters (Clickable Timestamps):*\n`;
-          analysis.chapters.slice(0, 8).forEach((ch) => {
-            card += `• [⏱️ ${ch.startFormatted}](${ch.timestampUrl}) — *${ch.title}*\n  _${ch.summary}_\n`;
-          });
-          card += `\n`;
-        }
-        card += `👉 _Kisi topic ke baare me poochhein: \`yt ask ${ytVideoId} <sawal>\`_`;
-        await this.sendHumanLikeMessage(replyJid, card, rawText, messageKey);
+      } catch (vErr: any) {
+        console.error("[WhatsAppBot] AI Video generation error:", vErr);
+        await this.sendHumanLikeMessage(replyJid, `⚠️ Video generation failed: ${vErr?.message || vErr}`, rawText, messageKey);
         return;
       }
+    }
 
-      // YouTube Specific Q&A ("yt ask <url/id> <question>")
+    // 0.3 Social Media & Video Link Intelligence / Downloader (Instagram, YouTube, TikTok, Twitter/X)
+    try {
+      const { mediaToolsService } = await import("./mediaToolsService");
+      const { youtubeService } = await import("./youtubeService");
+      const socialInfo = mediaToolsService.extractSocialMediaUrl(rawText);
+      const ytVideoId = youtubeService.extractVideoId(rawText) || (quotedMessage?.text ? youtubeService.extractVideoId(quotedMessage.text) : null);
+
+      if ((socialInfo && socialInfo.isSocialUrl) || ytVideoId) {
+        const detectedUrl = socialInfo?.url || (rawText.match(/(https?:\/\/[^\s]+)/i)?.[1] || `https://youtube.com/watch?v=${ytVideoId}`);
+        const platform = socialInfo?.platform || "YouTube";
+
+        const lower = rawText.trim().toLowerCase();
+        const hasExplicitDownload =
+          /^(?:@download|\/download|download|down|video\s*bhejo|save\s*video|download\s*karo|mp4)\b/i.test(lower) ||
+          lower.includes("download") ||
+          lower.includes("video bhejo") ||
+          lower.includes("mp4");
+
+        const hasExplicitSummary =
+          /^(?:@summary|\/summary|summary|analyze|analysis|kya\s*hai|padho|explain|summarize|transcript)\b/i.test(lower) ||
+          lower.includes("summary") ||
+          lower.includes("analyze") ||
+          lower.includes("transcripts") ||
+          lower.includes("yt ask");
+
+        // Case A: User simply shared/pasted the URL without command -> Ask Download vs Summary
+        if (!hasExplicitDownload && !hasExplicitSummary && !/^(?:media\s*search|vault\s*search)/i.test(rawText)) {
+          this.chatPendingLinks.set(replyJid, {
+            url: detectedUrl,
+            platform,
+            ytVideoId: ytVideoId || null,
+            timestamp: Date.now(),
+          });
+
+          await this.sendHumanLikeMessage(
+            replyJid,
+            `🎬 *${platform} Link Received!* ⚡\n🔗 _${detectedUrl}_\n\nBoss, is video ke sath kya karna hai?\n\n1️⃣ *Download Video* (Direct MP4 chat me bhejun)\n2️⃣ *AI Summary* (Iska Executive Summary & Takeaways nikalun)\n\n👉 _Bas reply me *1* (download) ya *2* (summary) likh kar bhejein!_`,
+            rawText,
+            messageKey
+          );
+          return;
+        }
+
+        // Case B: Explicit Download requested
+        if (hasExplicitDownload) {
+          await this.sendHumanLikeMessage(replyJid, `📥 *${platform} Video download ho rahi hai...* ⚡\n🔗 _${detectedUrl}_`, rawText, messageKey);
+          const dlRes = await mediaToolsService.downloadSocialVideo(detectedUrl);
+          if (dlRes.success && dlRes.buffer && this.sock) {
+            await this.sock.sendMessage(
+              replyJid,
+              {
+                video: dlRes.buffer,
+                mimetype: "video/mp4",
+              },
+              { quoted: messageKey }
+            );
+            await this.sendHumanLikeMessage(
+              replyJid,
+              `✅ *${platform} Video Downloaded!* 🎬\n\n📌 *Title:* _${dlRes.title || "Video"}_\n⚡ *Downloaded via Friday AI*`,
+              "",
+              messageKey
+            );
+            return;
+          } else {
+            await this.sendHumanLikeMessage(replyJid, `⚠️ Video download nahi ho payi: ${dlRes.error || "Post might be private or link expired."}`, rawText, messageKey);
+            return;
+          }
+        }
+
+        // Case C: Explicit Summary requested (YouTube Video or Social Webpage)
+        if (hasExplicitSummary && ytVideoId) {
+          await this.sendHumanLikeMessage(replyJid, "🎬 *YouTube Video analyze ho raha hai... (Transcripts & Timestamps)* ⚡", rawText, messageKey);
+          const analysis = await youtubeService.analyzeVideo(ytVideoId);
+          let card = `🎬 *YouTube Video Intelligence:* **${analysis.title}**\n`;
+          card += `• 👤 Channel: *${analysis.channelName}*\n`;
+          card += `• 📝 Subtitles: *${analysis.hasTranscript ? `✅ ${analysis.totalCues} timed cues` : "⚠️ Auto estimated"}*\n\n`;
+          card += `📌 *Executive Summary:*\n${analysis.summary}\n\n`;
+          if (analysis.keyTakeaways && analysis.keyTakeaways.length > 0) {
+            card += `💡 *Key Takeaways:*\n`;
+            analysis.keyTakeaways.forEach((t) => (card += `• ${t}\n`));
+          }
+          if (analysis.chapters && analysis.chapters.length > 0) {
+            card += `\n⏱️ *Timeline & Chapters:*\n`;
+            analysis.chapters.slice(0, 8).forEach((ch) => {
+              card += `• [⏱️ ${ch.startFormatted}](${ch.timestampUrl}) — *${ch.title}*\n`;
+            });
+          }
+          await this.sendHumanLikeMessage(replyJid, card, rawText, messageKey);
+          return;
+        }
+      }
+    } catch (sErr) {
+      console.warn("[WhatsAppBot] Social video/link notice:", sErr);
+    }
+
+    // 0.35 YouTube Specific Q&A ("yt ask <url/id> <question>")
+    try {
       const ytAskMatch = rawText.match(/^(?:yt\s*ask|youtube\s*ask|ask\s*yt)\s+(\S+)\s+(.+)/i);
       if (ytAskMatch) {
+        const { youtubeService } = await import("./youtubeService");
         const targetUrlOrId = ytAskMatch[1];
         const question = ytAskMatch[2];
         const queryRes = await youtubeService.queryVideoTimestamp(targetUrlOrId, question);
@@ -2017,7 +2402,7 @@ CRITICAL LANGUAGE & TONE MANDATE:
         return;
       }
     } catch (ytErr) {
-      console.warn("[WhatsAppBot] YouTube processing notice:", ytErr);
+      console.warn("[WhatsAppBot] YouTube QnA notice:", ytErr);
     }
 
     // 2. RailRadar Live Railways (Train status, PNR, Fares, Seats, Station board)
@@ -4898,30 +5283,34 @@ TONE & STYLE:
     return `⚡ *FRIDAY AI — ALL @ COMMANDS DIRECTORY* 🚀
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-🎙️ *1. VOICE & MULTI-LANGUAGE TRANSLATION:*
-• \`@speak <text>\` ➔ Friday real voice me bol kar sunati hai.
+🎙️ *1. VOICE & MULTI-LANGUAGE:*
+• \`@voice <text>\` / \`@speak <text>\` ➔ Friday human audio voice note (PTT) me bol kar sunati hai.
 • \`@translate <lang>: <text>\` ➔ 20+ bhashaon me translate karein (e.g. \`@translate english: kaise ho\`).
-• 💬 *Swipe-to-Reply Voice:* Kisi bhi text/photo/voice note par swipe karke \`voice\`, \`kya likha h\`, ya \`hindi/english me bolo\` likhein!
+• 💬 *Voice-to-Voice:* Agar aap Voice Note bhejenge, Friday naturally audio me bol kar hi answer degi!
 
-🎨 *2. CREATIVE & MEDIA:*
-• \`@image <prompt>\` ➔ Instant 4K AI Image generation (e.g. \`@image futuristic sports car\`).
-• \`@image edit <instruction>\` / \`@edit <instruction>\` ➔ Photo par swipe karke ya photo ke caption me likhein (e.g. \`@edit add sunglasses and cyberpunk background\`).
-• \`@music <song name>\` ➔ Song details, live lyrics & singer info.
-• 📸 *Photo / Document Analysis:* Photo/PDF bhejkar niche \`summary\` ya \`analysis\` likhein.
+🎬 *2. AI VIDEO & SOCIAL MEDIA DOWNLOADER:*
+• \`@video <prompt>\` ➔ Instant 3-5 sec AI short video clip generation.
+• \`@animate\` ➔ Kisi bhi photo par likhein, use dynamic moving video me convert kar dega.
+• 📥 *Social Downloader:* Koi bhi Instagram Reel, YouTube Shorts, TikTok ya Twitter link bhejein, direct MP4 video mil jayegi!
 
-📊 *3. CHAT SUMMARY & DIGEST:*
+🎨 *3. CREATIVE PHOTO & STICKER STUDIO:*
+• \`@image <prompt>\` ➔ Instant Ultra-HD 4K AI Image generation (FLUX.1 Engine).
+• \`@edit <instruction>\` ➔ Photo par swipe karke ya caption me likhein (e.g. \`@edit add sunglasses and cyberpunk background\`).
+• \`@sticker\` / \`@bgremove\` ➔ Background remove karke direct WhatsApp Sticker banayein.
+• \`@faceswap\` / \`@combine\` ➔ 2 photos ka Face Swap aur Style Fusion karein.
+
+📊 *4. EXCEL, SUMMARY & PRODUCTIVITY:*
+• \`@excel\` / \`@sheet\` ➔ Kisi bhi bill, receipt, ya table ki photo se instant Excel (.xlsx) file download karein!
 • \`@summary\` / \`@catchup\` ➔ Current chat ya group ki complete summary.
-• \`@digest\` ➔ Kiska kiska message aaya hai uska personal catchup digest.
+• \`@digest\` ➔ Personal catchup digest.
 • \`@web <url>\` ➔ Kisi bhi website/link ka instant executive summary.
+• \`@music <song name>\` ➔ Song details, live lyrics & singer info.
 
-⏱️ *4. PRODUCTIVITY & AUTOMATION:*
-• \`@schedule <Name> in <time>: <msg>\` ➔ WhatsApp message schedule karein (e.g. \`@schedule Rahul in 10 mins: meeting link\`).
-• \`@remind me in <time>: <task>\` ➔ Auto WhatsApp reminder ping (e.g. \`@remind me in 30 mins: gym jana hai\`).
+⏱️ *5. AUTOMATION & VAULT:*
+• \`@schedule <Name> in <time>: <msg>\` ➔ WhatsApp message schedule karein.
+• \`@remind me in <time>: <task>\` ➔ Auto WhatsApp reminder ping.
 • \`@meet with <person> <time>\` ➔ Google Calendar meeting schedule karein.
-
-🧠 *5. MEMORY VAULT:*
-• \`@remember <fact>\` ➔ Permanent memory me save karein (e.g. \`@remember passport drawer me rakha hai\`).
-• \`@recall <query>\` ➔ Memory vault se dhoondhein (e.g. \`@recall passport\`).
+• \`@remember <fact>\` ➔ Permanent memory vault me save karein.
 
 👥 *6. GROUPS & UTILITIES:*
 • \`@poll <question>\` ➔ Interactive WhatsApp poll create karein.
@@ -4929,10 +5318,9 @@ TONE & STYLE:
 • \`@split <amount> between <names>\` ➔ Group bill split & instant UPI split.
 • \`@code <code>\` / \`@debug <code>\` ➔ Programming code explain & error debug.
 • \`@call\` ➔ 1-Click live real incoming voice call on phone app.
-• \`@nearby <place>\` / \`@route to <place>\` ➔ Maps & traffic navigation.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
-💡 *Tip:* Aap natural bhasha me bhi bol sakte hain (e.g. _"Ram ko msg kar do"_, _"kal subah 8 baje utha dena"_). Friday automatically execute karegi! 👍`;
+💡 *Tip:* Aap natural bhasha me bhi bol sakte hain (e.g. _"Ram ko msg kar do"_, _"is bill ka excel bana do"_, _"photo ko sticker bana do"_). Friday automatically execute karegi! 👍`;
   }
 
   public getStatus() {
