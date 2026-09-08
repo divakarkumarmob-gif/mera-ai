@@ -201,6 +201,18 @@ export class WhatsAppGirlfriendEngine {
     return 20;
   }
 
+  public parseGirlfriendMood(text: string): "romantic" | "sassy" | "caring" | "naughty" | "cute" | "mix" {
+    return this.parseExplicitMoodSelection(text) || this.detectAutomaticMood(text, "romantic") || "romantic";
+  }
+
+  public determineDynamicMood(
+    text: string,
+    currentMood: "romantic" | "sassy" | "caring" | "naughty" | "cute" | "mix" = "romantic"
+  ): "romantic" | "sassy" | "caring" | "naughty" | "cute" {
+    const fallback = currentMood === "mix" ? "romantic" : currentMood;
+    return this.detectAutomaticMood(text, fallback);
+  }
+
   public async startGirlfriendMode(
     jid: string,
     rawText: string,
