@@ -1631,98 +1631,18 @@ INSTRUCTIONS:
       }
     }
 
-    // 0.088 Comprehensive Contact & Relationship Parser (Phone + Name + Relation / Phone + Relation / Name + Relation)
-    // Examples: "Priya 9876543210 meri girlfriend hai", "9876543210 meri girlfriend hai", "Priya meri gf hai", "Rahul 9876543210 bestfriend"
-    const relKeywordMatch = rawText.match(/\b(girlfriend|gf|crush|wife|partner|jaan|bestfriend|best\s*friend|bff|dost|close\s*friend|friend|brother|bhai|sister|behan|mummy|papa|family)\b/i);
-    const phoneMatch = rawText.match(/(?:\+?91[\s\-]?)?([6-9]\d{9})\b/) || rawText.match(/(\+?\d[\d\s\-]{8,15}\d)/);
+    // 0.09 Boss Explicit Contact Save Command ("save contact Ram 9876543210", "ye number save karo Ram 9876543210")
+    const isExplicitSaveIntent =
+      /^(?:save\s*contact|save\s*number|ye\s*number\s*save\s*karo|ye\s*no\s*save\s*karo|contact\s*save\s*karo|number\s*save\s*karo)\b/i.test(rawText) ||
+      /\b(?:save\s*kar\s*(?:lo|do|na)|save\s*karo)\b/i.test(rawText);
 
-    const isRelationIntent =
-      !!relKeywordMatch &&
-      (/(?:meri|mera|my|relation|save|hai|h|he|ko|ka|ki)/i.test(rawText) || !!phoneMatch);
-
-    if (isRelationIntent && relKeywordMatch) {
-      const rawRel = relKeywordMatch[1].trim().toLowerCase();
-      const normalizedRel =
-        rawRel === "gf" || rawRel === "girlfriend" || rawRel === "crush" || rawRel === "wife" || rawRel === "jaan" || rawRel === "partner"
-          ? "girlfriend"
-          : rawRel.includes("best") || rawRel === "bff"
-          ? "bestfriend"
-          : rawRel === "bhai" || rawRel === "brother"
-          ? "brother"
-          : rawRel === "behan" || rawRel === "sister"
-          ? "sister"
-          : rawRel === "mummy" || rawRel === "papa" || rawRel === "family"
-          ? "family"
-          : "friend";
-
-      const rawPhone = phoneMatch ? phoneMatch[1].replace(/\D/g, "") : "";
-
-      // Extract Name Candidate by stripping phone and keywords
-      let nameCandidate = rawText;
-      if (phoneMatch) nameCandidate = nameCandidate.replace(phoneMatch[0], "");
-      nameCandidate = nameCandidate
-        .replace(new RegExp(`\\b${relKeywordMatch[0]}\\b`, "gi"), "")
-        .replace(/(?:ye\s*(?:no|number)\s*save\s*karo|save\s*contact|save\s*number|save\s*no|number\s*save\s*karo|no\s*save\s*karo|contact\s*save\s*karo|save\s*kar\s*(?:lo|do|na)|save|meri|mera|my|hai|h|he|karke|ko|ka|ki|se|relation|set|please|plz|friday|boss|inhe|inka|unka|number|phone|mobile)/gi, "")
-        .replace(/[:=,\-]/g, "")
-        .trim();
-
-      // Case A: Phone number is provided (with or without name)
-      if (rawPhone && rawPhone.length >= 10) {
-        const finalName =
-          nameCandidate && nameCandidate.length >= 2
-            ? nameCandidate
-            : (normalizedRel === "girlfriend" ? "Girlfriend" : normalizedRel === "bestfriend" ? "Best Friend" : "Contact");
-
-        const saved = await contactsService.saveContact(finalName, rawPhone, normalizedRel);
-        const emoji = normalizedRel === "girlfriend" ? "💖" : normalizedRel === "bestfriend" ? "🔥" : "👥";
-        await this.sendHumanLikeMessage(
-          replyJid,
-          `✨ *Contact & Relationship Saved to Firestore!* ${emoji}\n\n👤 *Name:* ${saved.name}\n📱 *Phone:* \`+${saved.phone}\`\n🏷️ *Relation:* *${normalizedRel.toUpperCase()}*\n📅 *Saved on:* ${saved.dateAdded}\n\n_Boss, maine number aur relationship dono Firestore me permanently save kar liye hain! Ab jab bhi ${saved.name} WhatsApp par message karengi/karenge, main unse unke relation ke hisab se bilkul ghul-mil ke aur sweet andaaz me baat karungi!_ 👍`,
-          rawText,
-          messageKey
-        );
-        return;
-      }
-
-      // Case B: Name + Relationship without phone (e.g. "Priya meri girlfriend hai", "Rahul mera bestfriend hai")
-      if (nameCandidate && nameCandidate.length >= 2) {
-        const updated = await contactsService.setContactRelation(nameCandidate, normalizedRel);
-        if (updated) {
-          const emoji = normalizedRel === "girlfriend" ? "💖" : normalizedRel === "bestfriend" ? "🔥" : "👥";
-          await this.sendHumanLikeMessage(
-            replyJid,
-            `✨ *Relationship Updated in Firestore!* ${emoji}\n\n👤 *Name:* ${updated.name}\n📱 *Phone:* \`+${updated.phone}\`\n🏷️ *Relation:* *${normalizedRel.toUpperCase()}*\n\n_Boss, maine ${updated.name} ka relationship Firestore me permanently **${normalizedRel.toUpperCase()}** update kar diya hai!_ 👍`,
-            rawText,
-            messageKey
-          );
-          return;
-        } else {
-          const saved = await contactsService.saveContact(nameCandidate, "", normalizedRel);
-          const emoji = normalizedRel === "girlfriend" ? "💖" : normalizedRel === "bestfriend" ? "🔥" : "👥";
-          await this.sendHumanLikeMessage(
-            replyJid,
-            `✨ *Relationship Recorded in Firestore!* ${emoji}\n\n👤 *Name:* ${saved.name}\n🏷️ *Relation:* *${normalizedRel.toUpperCase()}*\n\n_Boss, maine ${saved.name} ko **${normalizedRel.toUpperCase()}** ke roop me Firestore me note kar liya hai. Jaise hi aap unka number bhejenge (e.g. "${saved.name} ka number 98765..."), wo automatically link ho jayega!_ 👍`,
-            rawText,
-            messageKey
-          );
-          return;
-        }
-      }
-    }
-
-    // 0.09 Boss Quick Contact Save Command ("ye no save karo Ram 98765...", "Ram ka number 98765... save karo", "save contact Ram 98765...")
-    const isSaveContactIntent =
-      /(?:ye\s*(?:no|number)\s*save\s*karo|save\s*contact|save\s*number|save\s*no|number\s*save\s*karo|no\s*save\s*karo|contact\s*save\s*karo|save\s*kar\s*(?:lo|do|na))/i.test(rawText) ||
-      /\b\d{10,12}\b.*(?:save|yaad|rakho)/i.test(rawText) ||
-      /(?:ka\s*(?:number|no|phone|mobile)).*(?:save)/i.test(rawText);
-
-    if (isSaveContactIntent) {
+    if (isExplicitSaveIntent) {
       const phoneMatch = rawText.match(/(?:\+?91[\s\-]?)?([6-9]\d{9})\b/) || rawText.match(/(\+?\d[\d\s\-]{8,15}\d)/);
       if (phoneMatch) {
         const rawPhone = phoneMatch[1].replace(/\D/g, "");
         let nameCandidate = rawText
           .replace(phoneMatch[0], "")
-          .replace(/(?:ye\s*(?:no|number)\s*save\s*karo|save\s*contact|save\s*number|save\s*no|number\s*save\s*karo|no\s*save\s*karo|contact\s*save\s*karo|save\s*kar\s*(?:lo|do|na)|ka\s*number|ka\s*no|ka\s*phone|ka\s*mobile|name|naam|hai|karke|ko|se|please|plz|friday|boss|ko\s*bhi|bhi|inhe)/gi, "")
+          .replace(/\b(?:ye\s*number\s*save\s*karo|ye\s*no\s*save\s*karo|save\s*contact|save\s*number|save\s*no|number\s*save\s*karo|no\s*save\s*karo|contact\s*save\s*karo|save\s*kar\s*(?:lo|do|na)|save\s*karo|ka\s*number|ka\s*no|ka\s*phone|ka\s*mobile|name|naam|hai|please|plz|friday|boss)\b/gi, "")
           .replace(/[:=,\-]/g, "")
           .trim();
 
@@ -1730,10 +1650,13 @@ INSTRUCTIONS:
           nameCandidate = "Contact";
         }
 
-        const saved = await contactsService.saveContact(nameCandidate, rawPhone);
+        const relKeywordMatch = rawText.match(/\b(girlfriend|gf|wife|crush|bestfriend|best\s*friend|bff|brother|bhai|sister|behan|family|friend)\b/i);
+        const rel = relKeywordMatch ? (relKeywordMatch[1].toLowerCase().includes("gf") || relKeywordMatch[1].toLowerCase().includes("girl") ? "girlfriend" : relKeywordMatch[1].toLowerCase().includes("best") ? "bestfriend" : relKeywordMatch[1].toLowerCase()) : "";
+
+        const saved = await contactsService.saveContact(nameCandidate, rawPhone, rel);
         await this.sendHumanLikeMessage(
           replyJid,
-          `📇 *Contact Successfully Saved!* ✅\n\n👤 *Name:* ${saved.name}\n📱 *Phone:* \`+${saved.phone}\`\n📅 *Saved on:* ${saved.dateAdded}\n\n_Boss, ye number contacts book me save ho gaya hai! Ab aap direct bol sakte hain: "${saved.name} ko msg kar do...", aur main by-default **WhatsApp 2** se message bhej dungi!_ 👍`,
+          `📇 *Contact Successfully Saved!* ✅\n\n👤 *Name:* ${saved.name}\n📱 *Phone:* \`+${saved.phone}\`${saved.relation ? `\n🏷️ *Relation:* *${saved.relation.toUpperCase()}*` : ""}\n📅 *Saved on:* ${saved.dateAdded}\n\n_Boss, ye contact Firestore me permanently save ho gaya hai!_ 👍`,
           rawText,
           messageKey
         );

@@ -245,6 +245,37 @@ class ContactsService {
     return contacts.map((c) => `- ${c.name}${c.relation ? ` (${c.relation})` : ""}: +${c.phone}`).join("\n");
   }
 
+  constructor() {
+    this.purgeCorruptedContacts().catch(() => {});
+  }
+
+  /**
+   * Cleans up any corrupted contact records created by legacy regex mangling.
+   */
+  public async purgeCorruptedContacts(): Promise<number> {
+    const contacts = await this.getAllContacts();
+    let purgedCount = 0;
+    for (const c of contacts) {
+      if (!c.id || c.id === "owner_default" || c.id === "temp") continue;
+      const lower = (c.name || "").toLowerCase();
+      const isCorrupted =
+        lower.startsWith("ansi to us acce") ||
+        lower.startsWith("ansi no tumare") ||
+        lower.includes("to us acce") ||
+        lower.includes("no tumare pass") ||
+        (c.name.split(/\s+/).length > 4 && !c.phone);
+      if (isCorrupted) {
+        this.inMemoryContacts.delete(c.id);
+        await contactsCollection().doc(c.id).delete().catch(() => {});
+        purgedCount++;
+      }
+    }
+    if (purgedCount > 0) {
+      console.log(`[Contacts] Purged ${purgedCount} corrupted contact entries.`);
+    }
+    return purgedCount;
+  }
+
   private stripInternal(data: FirebaseFirestore.DocumentData): ContactEntry {
     const { nameLower, ...rest } = data;
     return rest as ContactEntry;
