@@ -58,66 +58,107 @@ export class VoiceBridgeService {
   }
 
   /**
-   * Gemini Multimodal Native Audio Output / TTS
+   * 1. ElevenLabs High-Fidelity Neural TTS (Ultra-Realistic Human Voice)
+   * Env: ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID (optional)
    */
-  public async geminiTTS(
+  public async elevenLabsTTS(
     text: string,
-    model: string = "gemini-2.5-flash",
-    voiceName: string = "Aoede"
+    voiceId: string = process.env.ELEVENLABS_VOICE_ID || "21m00Tcm4TlvDq8ikWAM"
   ): Promise<{ buffer: Buffer; mimeType: string } | null> {
-    const geminiKey = process.env.GEMINI_API_KEY?.trim();
-    if (!geminiKey) return null;
+    const apiKey = process.env.ELEVENLABS_API_KEY?.trim();
+    if (!apiKey) return null;
 
     try {
-      const ai = new GoogleGenAI({ apiKey: geminiKey });
-      const response = await ai.models.generateContent({
-        model,
-        contents: [
-          {
-            role: "user",
-            parts: [
-              {
-                text: `Read the following text aloud with natural emotion, clear pronunciation, and friendly conversational tone in Hindi/Hinglish/English:\n\n${text}`,
-              },
-            ],
+      const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+        method: "POST",
+        headers: {
+          "xi-api-key": apiKey,
+          "Content-Type": "application/json",
+          Accept: "audio/mpeg",
+        },
+        body: JSON.stringify({
+          text: text.trim(),
+          model_id: "eleven_multilingual_v2",
+          voice_settings: {
+            stability: 0.5,
+            similarity_boost: 0.75,
+            style: 0.0,
+            use_speaker_boost: true,
           },
-        ],
-        config: {
-          responseModalities: ["AUDIO"],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: {
-                voiceName,
-              },
-            },
-          },
-        } as any,
+        }),
       });
 
-      const parts = response.candidates?.[0]?.content?.parts;
-      if (parts && parts.length > 0) {
-        for (const part of parts) {
-          if ((part as any).inlineData?.data) {
-            const dataBase64 = (part as any).inlineData.data;
-            const mimeType = (part as any).inlineData.mimeType || "audio/wav";
-            return {
-              buffer: Buffer.from(dataBase64, "base64"),
-              mimeType,
-            };
-          }
-        }
+      if (!res.ok) {
+        const errText = await res.text();
+        console.warn("[VoiceBridge] ElevenLabs TTS notice:", errText);
+        return null;
+      }
+
+      const arrayBuf = await res.arrayBuffer();
+      const buffer = Buffer.from(arrayBuf);
+      if (buffer && buffer.length > 0) {
+        return { buffer, mimeType: "audio/mpeg" };
       }
     } catch (e: any) {
-      console.warn(`[VoiceBridge] Gemini TTS notice on ${model}:`, e?.message || e);
+      console.warn("[VoiceBridge] ElevenLabs fetch failed:", e?.message || e);
     }
     return null;
   }
 
   /**
-   * Simple Sequential Text-to-Speech (TTS):
-   * 1. gemini-2.5-flash-tts
-   * 2. gemini-3.1-flash-tts
-   * 3. Microsoft Edge Neural TTS (Fallback)
+   * 2. Sarvam AI Dedicated Indian Languages TTS (Hindi & 22 Indian Languages)
+   * Env: SARVAM_API_KEY (or SARVAM_AI_API_KEY)
+   */
+  public async sarvamTTS(
+    text: string,
+    targetLanguageCode: string = "hi-IN",
+    speaker: string = "meera"
+  ): Promise<{ buffer: Buffer; mimeType: string } | null> {
+    const apiKey = (process.env.SARVAM_API_KEY || process.env.SARVAM_AI_API_KEY)?.trim();
+    if (!apiKey) return null;
+
+    try {
+      const res = await fetch("https://api.sarvam.ai/text-to-speech", {
+        method: "POST",
+        headers: {
+          "api-subscription-key": apiKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          inputs: [text.trim()],
+          target_language_code: targetLanguageCode,
+          speaker: speaker,
+          pitch: 0,
+          pace: 1.0,
+          loudness: 1.5,
+          speech_sample_rate: 22050,
+          enable_preprocessing: true,
+          model: "bulbul:v1",
+        }),
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        console.warn("[VoiceBridge] Sarvam AI TTS notice:", errText);
+        return null;
+      }
+
+      const data = await res.json();
+      if (data?.audios && Array.isArray(data.audios) && data.audios[0]) {
+        const buffer = Buffer.from(data.audios[0], "base64");
+        return { buffer, mimeType: "audio/wav" };
+      }
+    } catch (e: any) {
+      console.warn("[VoiceBridge] Sarvam AI fetch failed:", e?.message || e);
+    }
+    return null;
+  }
+
+  /**
+   * Universal Smart Text-to-Speech (TTS) Pipeline:
+   * 1. ElevenLabs TTS (Primary - If ELEVENLABS_API_KEY present)
+   * 2. Sarvam AI TTS (Secondary - If SARVAM_API_KEY present)
+   * 3. Microsoft Edge Neural Engine (Fallback - 100% Free & Unlimited)
    */
   public async generateSpeech(
     text: string,
@@ -126,25 +167,25 @@ export class VoiceBridgeService {
     const cleanText = text.trim();
     if (!cleanText) throw new Error("Text is empty for TTS");
 
-    // 1. gemini-2.5-flash-tts
+    // 1. ElevenLabs TTS (Super realistic human voice)
     try {
-      const g25 = await this.geminiTTS(cleanText, "gemini-2.5-flash-tts", "Aoede");
-      if (g25 && g25.buffer.length > 0) {
-        console.log("[VoiceBridge] Generated voice via gemini-2.5-flash-tts");
-        return g25;
+      const elevenRes = await this.elevenLabsTTS(cleanText);
+      if (elevenRes && elevenRes.buffer.length > 0) {
+        console.log("[VoiceBridge] Generated voice via ElevenLabs TTS");
+        return elevenRes;
       }
     } catch {}
 
-    // 2. gemini-3.1-flash-tts
+    // 2. Sarvam AI TTS (Specialized Indian Hindi & Regional Languages)
     try {
-      const g31 = await this.geminiTTS(cleanText, "gemini-3.1-flash-tts", "Aoede");
-      if (g31 && g31.buffer.length > 0) {
-        console.log("[VoiceBridge] Generated voice via gemini-3.1-flash-tts");
-        return g31;
+      const sarvamRes = await this.sarvamTTS(cleanText, "hi-IN", "meera");
+      if (sarvamRes && sarvamRes.buffer.length > 0) {
+        console.log("[VoiceBridge] Generated voice via Sarvam AI TTS");
+        return sarvamRes;
       }
     } catch {}
 
-    // 3. Microsoft Edge Neural TTS (Fallback)
+    // 3. Microsoft Edge Neural Engine (100% Free & Unlimited Fallback)
     console.log("[VoiceBridge] Using Microsoft Edge Neural TTS fallback");
     const msBuf = await this.textToSpeechBuffer(cleanText, voice);
     return { buffer: msBuf, mimeType: "audio/mpeg" };
