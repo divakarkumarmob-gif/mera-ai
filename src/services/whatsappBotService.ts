@@ -417,6 +417,55 @@ class WhatsAppBotService {
    * 2. Matches Contacts book relation ("owner", "boss", "self") or name ("DK (Boss)", "Boss", "Divakar")
    * 3. Matches push name / display name if marked Boss/DK
    */
+  /**
+   * Intelligently classifies if a caption or reply on a photo is asking to EDIT/MODIFY/TRANSFORM the photo,
+   * make a transparent sticker, or perform normal analysis/chat.
+   */
+  public detectPhotoEditIntent(text: string): { isEdit: boolean; isSticker: boolean; instruction: string } {
+    if (!text || !text.trim()) return { isEdit: false, isSticker: false, instruction: "" };
+    const raw = text.trim();
+    const lower = raw.toLowerCase();
+
+    // 1. Pure Sticker / BG removal only (when user specifically wants transparent sticker or cutout)
+    const isPureSticker =
+      /^(?:@sticker|\/sticker|sticker|make\s*sticker|sticker\s*banao|sticker\s*bana\s*do|@bgremove|bgremove|remove\s*bg|bg\s*remove|bg\s*hatao|background\s*hatao|background\s*hata\s*do|bg\s*hata\s*do|bg\s*remove\s*karo|background\s*remove\s*karo)\s*$/i.test(lower);
+
+    if (isPureSticker) {
+      return { isEdit: false, isSticker: true, instruction: raw };
+    }
+
+    // 2. Explicit prefix (@edit, /edit, edit photo, etc.)
+    const isExplicitPrefix =
+      /^(?:@image\s*edit|@edit|\/edit|edit\s*photo|photo\s*edit|edit\s*karo|image\s*edit|edit\s*image|edit|@modify|\/modify|modify)\b/i.test(lower);
+
+    // 3. Photo target indicators
+    const hasPhotoTarget =
+      /(?:is\s*photo|iss\s*photo|isme|is\s*image|is\s*pic|photo|image|pic|tasveer|tasvir|picture)\b/i.test(lower);
+
+    // 4. Action verbs
+    const hasActionVerb =
+      /\b(change|badal|badlo|badalna|badal\s*do|change\s*karo|change\s*kardo|lagao|laga\s*do|pehna|pehnao|pehna\s*do|phenoo|hatao|hata\s*do|remove|add|daalo|daal\s*do|karo|kardo|kar\s*do|banao|bana\s*do|convert|edit|modify|retouch|recolor|replace|karona|kijiye)\b/i.test(lower);
+
+    // 5. Subject features / visual attributes
+    const hasVisualAttribute =
+      /\b(sunglass|sunglasses|chashma|chasma|spectacles|goggles|glass|glasses|color|colour|rang|blue|red|green|yellow|white|black|pink|purple|orange|gold|golden|silver|grey|gray|dark|light|shirt|tshirt|t-shirt|pant|jeans|dress|cloth|clothes|kapde|kapda|suit|coat|blazer|jacket|hoodie|tie|hat|cap|pagdi|turban|watch|chain|shoes|sneakers|hair|hairstyle|haircut|baal|blonde|brown|beard|daadhi|mustache|mooch|smile|smiling|face|skin|chehra|gora|dusk|glow|background|bg|piche|piche\s*ka|behind|beach|mountain|paris|tokyo|office|studio|room|night|sunset|lighting|light|filter|retouch|enhance|upscale|cinematic|vintage|black\s*and\s*white|b&w|cyberpunk|anime|cartoon|3d|avatar|shadow|hdr|bokeh|blur|wings|crown|neon)\b/i.test(lower);
+
+    const isEdit =
+      isExplicitPrefix ||
+      (hasPhotoTarget && (hasActionVerb || hasVisualAttribute)) ||
+      (hasActionVerb && hasVisualAttribute) ||
+      /\b(sunglass|chasma|chashma|spectacles|goggles|suit|jacket|hat|cap|watch)\b/i.test(lower) ||
+      /\b(colour\s*change|color\s*change|bg\s*change|background\s*change)\b/i.test(lower);
+
+    const cleanInstruction = raw
+      .replace(/^(?:@image\s*edit|@edit|\/edit|edit\s*photo|photo\s*edit|edit\s*karo|image\s*edit|edit\s*image|edit|@modify|\/modify|modify)\s*[:=-]?\s*/i, "")
+      .replace(/^(?:is\s*photo|iss\s*photo|isme|is\s*image|is\s*pic)\s*(?:me|mein|ko|par|ka|ki|ke)?\s*/i, "")
+      .replace(/^[,.\s-]+/, "")
+      .trim() || raw;
+
+    return { isEdit, isSticker: false, instruction: cleanInstruction };
+  }
+
   public isOwnerSender(
     senderPhone: string,
     senderDisplayName = "",

@@ -396,21 +396,28 @@ class ImageGenerationService {
       process.env.VITE_GEMINI_API_KEY?.trim();
     let enhancedPrompt = rawInstruction;
 
-    if (apiKey && imageBuffer && Buffer.isBuffer(imageBuffer) && imageBuffer.length > 0) {
+    const hasValidImage = imageBuffer && Buffer.isBuffer(imageBuffer) && imageBuffer.length > 0;
+
+    if (apiKey && hasValidImage) {
       try {
         const ai = new GoogleGenAI({ apiKey });
         const base64Data = imageBuffer.toString("base64");
         const cleanMime = (mimeType || "image/jpeg").split(";")[0].trim() || "image/jpeg";
 
-        const visionPrompt = `You are a world-class AI Image Transformation & Inpainting Prompt Specialist.
-The user wants to EDIT/MODIFY this provided image according to these user instructions:
+        const visionPrompt = `You are a world-class AI Biometric Portrait & Photo Editing Specialist.
+The user wants to EDIT/MODIFY the provided image according to this instruction:
 "${rawInstruction}"
 
-Analyze this image in detail:
-1. Identify key subjects, characters, environment, colors, art style, lighting, and composition.
-2. Formulate a single, highly detailed, photorealistic prompt for modern diffusion models (Flux.1 / SDXL) that creates the edited version.
-3. Keep the original character/subject consistent while applying all user requested edits (e.g. background changes, accessories, lighting, style transforms).
-4. Output ONLY the raw descriptive prompt text without introductory remarks or quotes.`;
+YOUR CRITICAL MISSION:
+Preserve the EXACT identity, face structure, bone geometry, and ethnicity of the individual in the photo while seamlessly applying the requested edits.
+
+Analyze the image with extreme precision and write a detailed prompt:
+1. EXACT FACIAL BIOMETRICS: Describe the exact face shape (round, oval, square, heart), cheek fullness, jawline, chin curvature, exact skin tone and undertone (e.g. warm dusky South Asian / Indian complexion), eye shape, eyebrow thickness and arch, nose bridge and nostril shape, lip fullness, hair texture, hairline, haircut, parting, and facial hair (stubble, mustache, clean).
+2. EXACT CLOTHING & LIGHTING: Describe the current shirt/outfit, collar, colors, lighting angle (key light, rim light), and studio backdrop.
+3. USER'S REQUESTED MODIFICATIONS: Seamlessly integrate "${rawInstruction}" (e.g. stylish modern dark sunglasses resting naturally on the nose bridge over the eyes) without altering the person's real face, head shape, or identity.
+4. STRICT CONSTRAINT: Do NOT substitute the person for a generic fashion model, European, or celebrity. The person MUST remain the exact same specific individual from the photo.
+
+Output ONLY the raw descriptive prompt text.`;
 
         const VISION_EDIT_MODELS = [
           "gemini-3.1-flash-lite",
@@ -444,7 +451,7 @@ Analyze this image in detail:
             const text = resp.text?.trim();
             if (text && text.length > 10) {
               enhancedPrompt = text;
-              console.log(`[ImageGen] Vision Edit Prompt formulated (${model}): "${enhancedPrompt.slice(0, 80)}..."`);
+              console.log(`[ImageGen] Biometric Edit Prompt formulated (${model}): "${enhancedPrompt.slice(0, 80)}..."`);
               break;
             }
           } catch (modelErr: any) {
@@ -456,6 +463,76 @@ Analyze this image in detail:
       }
     }
 
+    // ── Tier 1: True Image-to-Image / Inpainting on Cloudflare Workers AI ────
+    const cfToken = (
+      process.env.CLOUDFLARE_API_TOKEN ||
+      process.env.CLOUDFLARE_API_KEY ||
+      process.env.CF_API_TOKEN ||
+      process.env.CF_TOKEN ||
+      ""
+    ).trim();
+
+    const cfAccountId = (
+      process.env.CLOUDFLARE_ACCOUNT_ID ||
+      process.env.CF_ACCOUNT_ID ||
+      process.env.CLOUDFLARE_ACCOUNT ||
+      ""
+    ).trim();
+
+    if (cfToken && cfAccountId && hasValidImage) {
+      const img2imgModels = [
+        { model: "@cf/stabilityai/stable-diffusion-xl-base-1.0", strength: 0.48 },
+        { model: "@cf/runwayml/stable-diffusion-v1-5-inpainting", strength: 0.55 },
+      ];
+
+      for (const { model: cfModel, strength } of img2imgModels) {
+        try {
+          console.log(`[ImageGen] Trying True Image-to-Image via Cloudflare (${cfModel}, strength: ${strength})...`);
+          const cfUrl = `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/ai/run/${cfModel}`;
+          
+          const imageArray = Array.from(imageBuffer);
+          const resp = await Promise.race([
+            fetch(cfUrl, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${cfToken}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                prompt: enhancedPrompt,
+                image: imageArray,
+                strength,
+              }),
+            }),
+            new Promise<Response>((_, reject) =>
+              setTimeout(() => reject(new Error("Cloudflare Image-to-Image timeout")), 30000)
+            ),
+          ]);
+
+          if (resp.ok) {
+            const arrayBuf = await resp.arrayBuffer();
+            const rawBuf = Buffer.from(arrayBuf);
+            const validated = extractValidImageBuffer(rawBuf);
+            if (validated && validated.buffer.length > 2000) {
+              console.log(
+                `[ImageGen] Successfully edited image via Cloudflare Img2Img (${cfModel}) [${validated.buffer.length} bytes, ${validated.mimeType}]`
+              );
+              return {
+                success: true,
+                buffer: validated.buffer,
+                mimeType: validated.mimeType,
+                model: `Cloudflare Img2Img (${cfModel.split("/").pop()})`,
+                prompt: enhancedPrompt,
+              };
+            }
+          }
+        } catch (cfErr: any) {
+          console.warn(`[ImageGen] Cloudflare Img2Img (${cfModel}) failed (${cfErr?.message || cfErr}), trying next...`);
+        }
+      }
+    }
+
+    // ── Tier 2: Multi-Tier Diffusion Fallback with Identity-Locked Prompt ────
     return this.generateImage(enhancedPrompt);
   }
 
@@ -494,21 +571,21 @@ Analyze this image in detail:
         const cleanMime1 = (mimeType1 || "image/jpeg").split(";")[0].trim() || "image/jpeg";
         const cleanMime2 = (mimeType2 || "image/jpeg").split(";")[0].trim() || "image/jpeg";
 
-        const fusionPrompt = `You are a world-class AI Photo Fusion & Style Transfer Prompt Engineer.
+        const fusionPrompt = `You are a world-class AI Biometric Photo Fusion & Style Transfer Prompt Specialist.
 You have been given TWO images:
-• IMAGE 1 (First image): Source Subject / Face / Person 1.
-• IMAGE 2 (Second image): Reference Style / Body / Background / Color Palette / Lighting.
+• IMAGE 1 (First image): Source Subject / Face / Identity reference.
+• IMAGE 2 (Second image): Reference Style / Body / Pose / Clothing / Environment / Lighting.
 
-USER GOAL / INSTRUCTIONS:
+USER INSTRUCTIONS:
 "${rawInstruction}"
 
-TASK:
-1. If the user wants Face Swap: Take the exact facial identity, features, and hair of Image 1 and map it onto the body, pose, clothing, and environment of Image 2.
-2. If the user wants Color/Style Transfer: Take the subject/content from Image 1 and apply the cinematic color grading, tone curve, lighting mood, and visual aesthetics of Image 2.
-3. If the user wants Combination/Fusion: Harmoniously combine both subjects/scenes into a coherent 8k photorealistic photo.
+CRITICAL REQUIREMENTS:
+1. FACE & IDENTITY PRESERVATION: Keep the EXACT facial structure, bone geometry, eyes, nose, lips, hair, and ethnic skin tone of the person in IMAGE 1. Do NOT generate a generic model or alter their facial identity.
+2. BODY / STYLE TRANSFER: Map that exact face and expression from IMAGE 1 onto the body, pose, outfit, and background environment of IMAGE 2.
+3. HARMONIOUS INTEGRATION: Match the lighting direction, color temperature, and depth of field seamlessly.
 
-Generate a single, comprehensive, hyper-realistic diffusion prompt for Flux.1/SDXL that will generate the exact fused output.
-Output ONLY the raw descriptive prompt string.`;
+Generate a single, comprehensive, hyper-realistic diffusion prompt for Flux.1/SDXL that will generate this exact fused photo.
+Output ONLY the raw descriptive prompt string without quotes.`;
 
         const FUSION_MODELS = [
           "gemini-3.1-flash-lite",
