@@ -296,6 +296,42 @@ export async function dispatchLiveToolCall(call: any, context: ToolDispatchConte
                   } catch (e: any) {
                     result = { success: false, message: `Could not fetch messages: ${e?.message || e}` };
                   }
+                } else if (call.name === "get_contact_conversation_history") {
+                  const { contactNameOrPhone, daysBack, limit } = call.args || {};
+                  try {
+                    const convRes = await whatsappBotService.getConversationSummaryAndHistory(
+                      String(contactNameOrPhone || ""),
+                      Number(limit || 30),
+                      Number(daysBack || 7)
+                    );
+                    result = {
+                      success: convRes.success,
+                      count: convRes.count,
+                      summary: convRes.summary,
+                      instruction: "Read the conversation breakdown naturally to Boss. Detail who sent what message, what Friday auto-replied, and what Boss replied."
+                    };
+                    clientWs.send(JSON.stringify({ type: "whatsapp_conversation_history_fetched", contact: contactNameOrPhone, count: convRes.count }));
+                  } catch (e: any) {
+                    result = { success: false, message: `Could not fetch conversation history: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_unknown_senders_digest") {
+                  const { daysBack, limit } = call.args || {};
+                  try {
+                    const unkRes = await whatsappBotService.getConversationSummaryAndHistory(
+                      "unknown",
+                      Number(limit || 30),
+                      Number(daysBack || 7)
+                    );
+                    result = {
+                      success: unkRes.success,
+                      count: unkRes.count,
+                      summary: unkRes.summary,
+                      instruction: "Inform Boss about any unknown numbers/strangers that messaged, what they asked, and what Friday replied."
+                    };
+                    clientWs.send(JSON.stringify({ type: "whatsapp_unknown_senders_fetched", count: unkRes.count }));
+                  } catch (e: any) {
+                    result = { success: false, message: `Could not fetch unknown senders digest: ${e?.message || e}` };
+                  }
                 } else if (call.name === "set_whatsapp_reply_limit") {
                   const { contactNameOrPhone, newLimit } = call.args || {};
                   try {

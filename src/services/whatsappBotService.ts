@@ -48,6 +48,8 @@ export interface IncomingMessage {
   isRead: boolean;
   // Swipe-to-reply: context of the original message that was replied to
   quotedMessage?: QuotedMessageContext | null;
+  // What Friday AI auto-replied or answered to this incoming message
+  botReply?: string;
   // Only set on messages from DK's own paired number: true if this message
   // was already consumed as an answer to a forwarded daily-update question,
   // so other owner-reply listeners (e.g. coding-agent approval) should skip it.
@@ -646,6 +648,148 @@ class WhatsAppBotService {
         summary: `WhatsApp history search karte waqt error: ${err?.message || err}`,
       };
     }
+  }
+
+  /**
+   * Retrieves full dialogue history (Sender message + Bot reply + Boss reply) for a contact,
+   * unknown senders, or all chats, formatted cleanly with complete back-and-forth dialogue.
+   */
+  public async getConversationSummaryAndHistory(
+    targetQuery?: string,
+    limit = 30,
+    daysBack = 7
+  ): Promise<{ success: boolean; summary: string; count: number; unreadCount?: number }> {
+    const rawQ = (targetQuery || "").toLowerCase().trim();
+    const startTs = Date.now() - daysBack * 86400000;
+
+    let docs: IncomingMessage[] = [];
+    try {
+      const snap = await inboxCol().where("timestamp", ">=", startTs).orderBy("timestamp", "desc").limit(200).get();
+      docs = snap.docs.map((d) => d.data() as IncomingMessage);
+    } catch {
+      docs = this.messageCache.filter((m) => m.timestamp >= startTs);
+    }
+
+    if (docs.length === 0 && this.messageCache.length > 0) {
+      docs = this.messageCache.filter((m) => m.timestamp >= startTs);
+    }
+
+    if (docs.length === 0) {
+      return {
+        success: true,
+        count: 0,
+        summary: `Boss, pichle ${daysBack} dino me WhatsApp par koi incoming/outgoing message nahi mila.`,
+      };
+    }
+
+    const isUnknownSearch =
+      rawQ.includes("unknown") ||
+      rawQ.includes("anpadh") ||
+      rawQ.includes("stranger") ||
+      rawQ.includes("naye number") ||
+      rawQ.includes("anjaan");
+
+    let targetContactPhone = "";
+    let targetContactName = "";
+
+    // Extract potential contact name from queries like "Ram ne msg kiya kya", "Ram se kya baat hui"
+    const nameMatch = rawQ.match(/(?:kya\s+)?([a-zA-Z0-9\u0900-\u097F]+?)\s*(?:ne\s*msg|ne\s*message|se\s*kya|ka\s*msg|ka\s*message|se\s*baat|ne\s*kya)/i);
+    const candidateName = nameMatch ? nameMatch[1].trim() : rawQ;
+
+    if (!isUnknownSearch && candidateName && candidateName !== "all" && candidateName !== "sab" && candidateName !== "kisi" && !candidateName.includes("kisi ne")) {
+      const { contactsService } = await import("./contactsService");
+      const contact = await contactsService.findContact(candidateName);
+      if (contact && contact.id !== "owner_default" && contact.id !== "temp") {
+        targetContactPhone = contact.phone;
+        targetContactName = contact.name;
+      } else if (candidateName.length >= 2 && !["kisi", "kya", "msg", "message", "whatsapp", "batao", "bheja", "hua"].includes(candidateName)) {
+        targetContactName = candidateName;
+      }
+    }
+
+    let filtered = docs.filter((m) => !m.isGroup);
+
+    if (isUnknownSearch) {
+      filtered = filtered.filter((m) => m.isUnknownContact || (m.senderPhone !== "me" && !m.senderName.includes("DK")));
+    } else if (targetContactPhone || targetContactName) {
+      const nameL = targetContactName.toLowerCase();
+      filtered = filtered.filter(
+        (m) =>
+          (targetContactPhone && (m.senderPhone.includes(targetContactPhone) || m.replyJid.includes(targetContactPhone))) ||
+          (nameL && m.senderName.toLowerCase().includes(nameL)) ||
+          (nameL && m.senderDisplayName.toLowerCase().includes(nameL)) ||
+          (nameL && m.text.toLowerCase().includes(nameL))
+      );
+    }
+
+    if (filtered.length === 0) {
+      if (isUnknownSearch) {
+        return {
+          success: true,
+          count: 0,
+          summary: `Boss, pichle ${daysBack} dino me kisi bhi unknown number ne message nahi kiya hai! Sab clean hai. ✅`,
+        };
+      }
+      return {
+        success: true,
+        count: 0,
+        summary: `Boss, "${targetContactName || targetQuery || "contact"}" se pichle ${daysBack} dino me koi message nahi aaya hai.`,
+      };
+    }
+
+    // Group by sender phone / person
+    const grouped = new Map<string, IncomingMessage[]>();
+    for (const msg of filtered) {
+      const key = msg.senderPhone === "me" ? msg.replyJid : msg.senderPhone || msg.senderName;
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key)!.push(msg);
+    }
+
+    let card = `📱 *WhatsApp Conversation Breakdown (Pichle ${daysBack} din, ${filtered.length} messages found):*\n\n`;
+
+    for (const [key, msgs] of grouped.entries()) {
+      const sorted = msgs.sort((a, b) => a.timestamp - b.timestamp);
+      const top = sorted[0];
+      const displayName = top.senderPhone === "me" ? "Direct Chat" : top.senderName;
+      const displayPhone = top.senderPhone === "me" ? "" : `(+${top.senderPhone})`;
+      const statusTag = top.isUnknownContact ? " [⚠️ UNKNOWN NUMBER]" : " [👤 SAVED CONTACT]";
+
+      card += `━━━━━━━━━━━━━━━━━━━━━\n`;
+      card += `👤 *${displayName}* ${displayPhone}${statusTag}\n`;
+      card += `📅 _Last Active: ${sorted[sorted.length - 1].dateStr}_\n\n`;
+
+      sorted.slice(-6).forEach((m) => {
+        if (m.senderPhone === "me") {
+          card += `  👤 *Aap (DK):* _"${m.text}"_\n`;
+        } else {
+          card += `  📩 *${m.senderName}:* _"${m.text}"_\n`;
+          if (m.botReply) {
+            card += `  🤖 *Friday (Auto-Reply):* _"${m.botReply}"_\n`;
+          }
+        }
+      });
+      card += `\n`;
+    }
+
+    // Check if there are any pending questions awaiting Boss's input
+    try {
+      const { dailyUpdateService } = await import("./dailyUpdateService");
+      const pendingQuestions = await dailyUpdateService.getQuestionsAwaitingDK();
+      if (pendingQuestions.length > 0) {
+        card += `━━━━━━━━━━━━━━━━━━━━━\n`;
+        card += `❓ *Pending Questions Awaiting Your Reply (${pendingQuestions.length}):*\n`;
+        pendingQuestions.forEach((q, idx) => {
+          card += `  ${idx + 1}. *${q.senderName}* (+${q.senderPhone}): _"${q.question}"_\n`;
+        });
+        card += `\n_(Boss, aap inka jawab 'Name- <reply>' karke de sakte hain, main forward kar dungi!)_\n`;
+      }
+    } catch {}
+
+    return {
+      success: true,
+      count: filtered.length,
+      summary: card.trim(),
+    };
   }
 
   /** Wire up the Baileys messages.upsert listener — called inside initSocket(). */
@@ -1307,6 +1451,19 @@ class WhatsAppBotService {
       return;
     }
 
+    // 0.082 WHATSAPP CHAT & CONVERSATION INQUIRY FAST ENGINE
+    // When Boss asks: "kisi ne msg kiya kya", "unknown number ne msg kiya kya", "Ram ne msg kiya kya", "Ram se kya baat hui", "kya kya baat hui batao", "usne kya bola tumne kya reply diya"
+    const isChatInquiryIntent =
+      !quotedMessage?.isReply &&
+      (/(?:kisi\s*ne|unknown|kisi\s*unknown|kisne|kya\s*kisi\s*ne|koi\s*msg|kisi\s*ka\s*msg|kisi\s*ka\s*message|messages?|chat|baat)\s*(?:aaya|aaye|kiya|hua|aayi|bheja|status|check|batao|pucho|padho|summary|digest)/i.test(rawText) ||
+        /(?:se\s*kya\s*baat\s*hui|ne\s*kya\s*msg\s*kiya|ne\s*kya\s*bheja|kya\s*baat\s*hui|kya\s*msg\s*kiya|kya\s*reply\s*diya|tumne\s*kya\s*bola|usne\s*kya\s*bola|kya\s*kya\s*baat\s*hui|kya\s*baat\s*hua)/i.test(rawText));
+
+    if (isChatInquiryIntent) {
+      const searchRes = await this.getConversationSummaryAndHistory(rawText);
+      await this.sendHumanLikeMessage(replyJid, searchRes.summary, rawText, messageKey);
+      return;
+    }
+
     // 0.085 SWIPE-TO-REPLY (QUOTED MESSAGE) FAST ACTION ENGINE
     // When Boss quotes a message containing a phone number or contact card and says:
     // "isko msg karo ki aaj school aana h", "isko bolo ki...", "inhe message kar do ki...", "isko save karo Ram", etc.
@@ -1834,6 +1991,20 @@ class WhatsAppBotService {
       return;
     }
 
+    // 9.2 Complete WhatsApp Conversation History & Unknown Sender Digest Shortcut
+    // e.g. "Ram ne msg kiya kya", "kisi ne message kiya kya", "unknown number ne msg kiya kya",
+    // "kya kya baat hui batao", "kya usne msg kiya tumne kya reply diya", "kiske message aaye hain"
+    const conversationQueryMatch =
+      rawText.match(/(?:kya\s+)?([a-zA-Z0-9\u0900-\u097F]+?)\s*(?:ne\s*msg|ne\s*message|ne\s*kuch\s*bheja|se\s*kya\s*baat|ka\s*msg|ka\s*message)/i) ||
+      rawText.match(/(?:unknown|naye|anjaan)\s*(?:no|number|contact|sender)?\s*(?:ne\s*msg|ne\s*message|se\s*msg|ka\s*msg|check)/i) ||
+      rawText.match(/(?:kya\s*kya\s*baat\s*hui|kya\s*baat\s*hui|usne\s*kya\s*bola|tumne\s*kya\s*reply|kya\s*reply\s*diya|kya\s*reply\s*gaya)/i) ||
+      rawText.match(/(?:kisi\s*ne\s*msg|kisi\s*ne\s*message|kiske\s*kiske\s*msg|kiska\s*message\s*aaya)/i);
+    if (conversationQueryMatch) {
+      const convRes = await this.getConversationSummaryAndHistory(rawText, 30, 7);
+      await this.sendHumanLikeMessage(replyJid, convRes.summary, rawText, messageKey);
+      return;
+    }
+
     // 10. ADVANCED FEATURE SUITE SHORTCUTS FOR BOSS:
 
     // A. Personal Catch-Up Digest ("@digest", "kiska msg aaya", "who messaged me")
@@ -2175,6 +2346,30 @@ class WhatsAppBotService {
         }
       },
       {
+        name: "get_contact_conversation_history",
+        description: "Retrieve full dialogue transcript & conversation history (what they sent, what Friday replied, and what Boss sent) for a specific contact (e.g. 'Ram', 'Rahul'), an unknown number, or all recent chats.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            contactNameOrPhone: { type: "STRING", description: "Name of contact (e.g. 'Ram', 'Rahul', 'Mummy'), 'unknown' for strangers, or 'all' for all recent chats" },
+            daysBack: { type: "NUMBER", description: "How many days back to inspect (default: 7)" },
+            limit: { type: "NUMBER", description: "Max messages to retrieve (default: 30)" }
+          },
+          required: ["contactNameOrPhone"]
+        }
+      },
+      {
+        name: "get_unknown_senders_digest",
+        description: "Specifically search and list all messages from unknown/unsaved numbers, what questions they asked, what Friday auto-replied, and any pending questions awaiting Boss's input.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            daysBack: { type: "NUMBER", description: "How many days back to check (default: 7)" }
+          },
+          required: []
+        }
+      },
+      {
         name: "cancel_scheduled_automation",
         description: "Cancel or remove an active scheduled cron routine or scheduled contact message by ID or title query.",
         parameters: {
@@ -2492,6 +2687,31 @@ class WhatsAppBotService {
           required: [],
         },
       },
+      {
+        name: "get_contact_conversation_history",
+        description: "Fetch complete two-way dialogue history and conversation breakdown for any contact (e.g. 'Ram ne msg kiya kya', 'Rahul se kya baat hui', 'Priya ne kya bola tumne kya reply diya'). Shows incoming messages, Friday's auto-replies, and DK's replies.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            contactNameOrPhone: { type: "STRING", description: "Name of the person (e.g. 'Ram', 'Rahul') or phone number" },
+            daysBack: { type: "NUMBER", description: "How many days back to search (default: 7)" },
+            limit: { type: "NUMBER", description: "Max messages to return (default: 30)" }
+          },
+          required: ["contactNameOrPhone"]
+        }
+      },
+      {
+        name: "get_unknown_senders_digest",
+        description: "Check if any unknown numbers, strangers, or unsaved contacts sent messages on WhatsApp, including what they asked and what Friday replied.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            daysBack: { type: "NUMBER", description: "Days back to check (default: 7)" },
+            limit: { type: "NUMBER", description: "Max messages to return (default: 30)" }
+          },
+          required: []
+        }
+      },
     ];
 
     const systemInstruction = `YOU ARE FRIDAY: DK's (Divakar Kumar) ultra-intelligent, loyal, warm, witty, and deeply caring AI companion and chief executive assistant.
@@ -2792,6 +3012,22 @@ COMMUNICATION STYLE:
           const { telegramBotService } = await import("./telegramBotService");
           const updates = await telegramBotService.getRecentTelegramMessages(args.limit || 10);
           return { count: updates.length, updates };
+        }
+        if (toolName === "get_contact_conversation_history") {
+          const res = await this.getConversationSummaryAndHistory(
+            args.contactNameOrPhone || args.query,
+            args.limit || 30,
+            args.daysBack || 7
+          );
+          return res;
+        }
+        if (toolName === "get_unknown_senders_digest") {
+          const res = await this.getConversationSummaryAndHistory(
+            "unknown",
+            args.limit || 30,
+            args.daysBack || 7
+          );
+          return res;
         }
         if (toolName === "generate_ai_image") {
           const { imageGenerationService } = await import("./imageGenerationService");
@@ -3467,6 +3703,13 @@ RULES FOR GROUP REPLIES:
         const aiReply = await this.generateSmartAutoReply(senderName, senderPhone, text, isUnknownContact, contactRelation, quotedMessage);
         await this.sendHumanLikeMessage(replyJid, aiReply, text, messageKey);
         console.log(`[WhatsAppBot] Smart AI Reply sent to ${senderName} (+${senderPhone}): "${aiReply}"`);
+
+        // Record Friday's reply in RAM cache & Firestore for full dialogue recall
+        const cached = this.messageCache.find((m) => (m.replyJid === replyJid || m.senderPhone === senderPhone) && !m.isGroup);
+        if (cached) {
+          cached.botReply = aiReply;
+          inboxCol().doc(cached.id).update({ botReply: aiReply }).catch(() => {});
+        }
       }
     } catch (replyErr) {
       console.error(`[WhatsAppBot] Failed to send AI auto-reply to ${senderPhone}:`, replyErr);

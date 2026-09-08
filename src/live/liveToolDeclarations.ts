@@ -325,6 +325,48 @@ const rawFunctionDeclarations: any[] = [
     }
   },
   {
+    "name": "get_contact_conversation_history",
+    "description": "Fetch complete two-way dialogue history and conversation breakdown for any contact (e.g. 'Ram ne msg kiya kya', 'Rahul se kya baat hui', 'Priya ne kya bola tumne kya reply diya', 'kya kya baat hui batao'). Shows incoming messages, Friday's auto-replies, and DK's replies in detail.",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {
+        "contactNameOrPhone": {
+          "type": "STRING",
+          "description": "Name of the person (e.g. 'Ram', 'Rahul', 'Priya') or their phone number"
+        },
+        "daysBack": {
+          "type": "NUMBER",
+          "description": "How many days back to search (default: 7)"
+        },
+        "limit": {
+          "type": "NUMBER",
+          "description": "Max messages to return (default: 30)"
+        }
+      },
+      "required": [
+        "contactNameOrPhone"
+      ]
+    }
+  },
+  {
+    "name": "get_unknown_senders_digest",
+    "description": "Check if any unknown numbers, strangers, or unsaved contacts sent messages on WhatsApp. Use when DK asks 'kisi unknown number ne msg kiya kya?', 'anjaan number ka msg aaya kya?', 'kisi naye number ne msg bheja hai kya?'.",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {
+        "daysBack": {
+          "type": "NUMBER",
+          "description": "Days back to check (default: 7)"
+        },
+        "limit": {
+          "type": "NUMBER",
+          "description": "Max messages to return (default: 30)"
+        }
+      },
+      "required": []
+    }
+  },
+  {
     "name": "get_whatsapp_latest_media",
     "description": "Inspect and describe what is inside the latest photo, PDF, document, video, or voice message received on WhatsApp. Use whenever DK asks 'photo me kya hai?', 'PDF/document me kya likha hai?', 'video me kya tha?', 'latest WhatsApp media check karo'.",
     "parameters": {
