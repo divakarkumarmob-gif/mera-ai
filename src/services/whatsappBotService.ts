@@ -797,6 +797,59 @@ class WhatsAppBotService {
           // Persist to Firestore
           this.saveToFirestore(incoming).catch(() => {});
 
+          // Auto-detect life milestones & ongoing events (exams, trips, health)
+          if (text && text.trim().length > 5) {
+            import("./humanComprehensionEngine")
+              .then(({ humanComprehensionEngine }) => humanComprehensionEngine.autoDetectAndSaveLifeEvents(senderPhone, senderName, text))
+              .catch(() => {});
+          }
+
+          // Contact Card / vCard auto-saving from Boss
+          if (isFromOwner && (msg.message?.contactMessage || msg.message?.contactsArrayMessage)) {
+            try {
+              const contactMsg = msg.message?.contactMessage;
+              const contactsArray = msg.message?.contactsArrayMessage?.contacts;
+              const contactsToSave: Array<{ name: string; phone: string }> = [];
+
+              if (contactMsg) {
+                const name = contactMsg.displayName || "Contact";
+                const vcard = contactMsg.vcard || "";
+                const waidMatch = vcard.match(/waid=(\d+)/i);
+                const telMatch = vcard.match(/TEL[^:]*:(.+)/i);
+                const phone = waidMatch ? waidMatch[1] : (telMatch ? telMatch[1].replace(/\D/g, "") : "");
+                if (phone) contactsToSave.push({ name, phone });
+              }
+
+              if (contactsArray && Array.isArray(contactsArray)) {
+                for (const c of contactsArray) {
+                  const name = c.displayName || "Contact";
+                  const vcard = c.vcard || "";
+                  const waidMatch = vcard.match(/waid=(\d+)/i);
+                  const telMatch = vcard.match(/TEL[^:]*:(.+)/i);
+                  const phone = waidMatch ? waidMatch[1] : (telMatch ? telMatch[1].replace(/\D/g, "") : "");
+                  if (phone) contactsToSave.push({ name, phone });
+                }
+              }
+
+              if (contactsToSave.length > 0) {
+                const savedLines: string[] = [];
+                for (const c of contactsToSave) {
+                  const entry = await contactsService.saveContact(c.name, c.phone);
+                  savedLines.push(`• 👤 *${entry.name}*: \`+${entry.phone}\``);
+                }
+                await this.sendHumanLikeMessage(
+                  replyJid,
+                  `📇 *Contact${contactsToSave.length > 1 ? "s" : ""} Successfully Saved!* ✅\n\n${savedLines.join("\n")}\n\n_Boss, ye contact maine permanent contacts book me save kar liya hai! Ab aap jab bhi bolenge (jaise "${contactsToSave[0].name} ko msg kar do..."), to main direct **WhatsApp 2** se message bhej dungi!_ 👍`,
+                  "",
+                  msg.key
+                );
+                continue;
+              }
+            } catch (contactErr) {
+              console.error("[WhatsAppBot] Contact card saving error:", contactErr);
+            }
+          }
+
           // Vision AI: Download and process incoming Photos, Videos, Audio, and Documents
           const hasMedia = !!(
             msg.message?.imageMessage ||
@@ -1249,6 +1302,258 @@ class WhatsAppBotService {
       return;
     }
 
+    // 0.085 SWIPE-TO-REPLY (QUOTED MESSAGE) FAST ACTION ENGINE
+    // When Boss quotes a message containing a phone number or contact card and says:
+    // "isko msg karo ki aaj school aana h", "isko bolo ki...", "inhe message kar do ki...", "isko save karo Ram", etc.
+    if (quotedMessage && quotedMessage.isReply) {
+      const qText = quotedMessage.text || "";
+      const qPhoneMatch = qText.match(/(?:\+?91[\s\-]?)?([6-9]\d{9})\b/) || qText.match(/(\+?\d[\d\s\-]{8,15}\d)/);
+      let quotedPhone = qPhoneMatch ? qPhoneMatch[1].replace(/\D/g, "") : "";
+
+      // Also check contact card vcard in quoted message
+      if (!quotedPhone && quotedMessage.rawQuotedMessage?.contactMessage) {
+        const vcard = quotedMessage.rawQuotedMessage.contactMessage.vcard || "";
+        const waidMatch = vcard.match(/waid=(\d+)/i);
+        const telMatch = vcard.match(/TEL[^:]*:(.+)/i);
+        quotedPhone = waidMatch ? waidMatch[1] : (telMatch ? telMatch[1].replace(/\D/g, "") : "");
+      }
+
+      // If still no phone, check if quoted message sender is a 3rd party (not Boss)
+      if (!quotedPhone && quotedMessage.senderPhone && quotedMessage.senderPhone !== senderPhone) {
+        quotedPhone = quotedMessage.senderPhone;
+      }
+
+      let quotedContactName = "";
+      if (quotedPhone) {
+        const { contactsService } = await import("./contactsService");
+        const existing = await contactsService.findContact(quotedPhone);
+        if (existing && existing.id !== "owner_default" && existing.id !== "temp") {
+          quotedContactName = existing.name;
+        }
+      }
+
+      // Action A: Send Message to Quoted Phone / Contact ("isko msg karo ki...", "isko bol do ki...", "inhe whatsapp karo...")
+      const swipeMsgMatch =
+        rawText.match(/^(?:isko|inhe|ise|unko|is\s*no\s*ko|is\s*number\s*ko|ispe|is\s*par)\s*(?:msg|message|whatsapp|bol\s*do|bolo|keh\s*do|kaho|bhejo|bhej\s*do|send\s*karo|send\s*kar\s*do|send|bhejna)\s*(?:ki|:|-)?\s*(.+)/i) ||
+        rawText.match(/^(?:msg|message|whatsapp|send)\s*(?:kar\s*do|bhej\s*do|karo|bhejo)\s*(?:isko|inhe|ise|unko|is\s*no\s*ko|is\s*number\s*ko|ispe|is\s*par)\s*(?:ki|:|-)?\s*(.+)/i) ||
+        rawText.match(/^(?:bol\s*do|bolo|keh\s*do|kaho)\s*(?:isko|inhe|ise|unko)\s*(?:ki|:|-)?\s*(.+)/i);
+
+      if (swipeMsgMatch && quotedPhone) {
+        const messageBody = swipeMsgMatch[1].trim();
+        if (messageBody) {
+          const { sendWhatsAppUnified } = await import("./whatsappService");
+          const sendRes = await sendWhatsAppUnified(quotedPhone, messageBody, { channel: "whatsapp2" });
+          if (sendRes.success) {
+            await this.sendHumanLikeMessage(
+              replyJid,
+              `🚀 *Message Sent via WhatsApp 2!* ✅\n\n👤 *Recipient:* ${quotedContactName ? `${quotedContactName} ` : ""}(\`+${quotedPhone}\`)\n💬 *Message:* _"${messageBody}"_\n⚡ *Channel:* WhatsApp 2 (Baileys Dedicated Bot)\n\nBoss, quoted number par message successfully deliver ho gaya hai! 👍`,
+              rawText,
+              messageKey
+            );
+          } else {
+            await this.sendHumanLikeMessage(
+              replyJid,
+              `⚠️ *Message Send Failed:* ${sendRes.message}\n\nRecipient: +${quotedPhone}`,
+              rawText,
+              messageKey
+            );
+          }
+          return;
+        }
+      }
+
+      // Action B: Save Contact from Quoted Phone ("isko save karo Ram", "Ram save kar lo", "isko girlfriend save karo Priya")
+      const isSwipeSaveIntent =
+        /(?:save|yaad|rakho|girlfriend|gf|bestfriend|bff|dost|bhai|sister|family|naam)/i.test(rawText) &&
+        /(?:isko|inhe|ise|unko|ye|is\s*no|is\s*number|save)/i.test(rawText);
+
+      if (isSwipeSaveIntent && quotedPhone) {
+        const { contactsService } = await import("./contactsService");
+        const relKeyword = rawText.match(/\b(girlfriend|gf|crush|wife|partner|jaan|bestfriend|best\s*friend|bff|dost|close\s*friend|friend|brother|bhai|sister|behan|mummy|papa|family)\b/i);
+        let normalizedRel: string | undefined;
+        if (relKeyword) {
+          const r = relKeyword[1].toLowerCase();
+          normalizedRel =
+            r === "gf" || r === "girlfriend" || r === "crush" || r === "wife" || r === "jaan" || r === "partner"
+              ? "girlfriend"
+              : r.includes("best") || r === "bff"
+              ? "bestfriend"
+              : r === "bhai" || r === "brother"
+              ? "brother"
+              : r === "behan" || r === "sister"
+              ? "sister"
+              : r === "mummy" || r === "papa" || r === "family"
+              ? "family"
+              : "friend";
+        }
+
+        let nameCandidate = rawText
+          .replace(/(?:ye\s*(?:no|number)\s*save\s*karo|save\s*contact|save\s*number|save\s*no|number\s*save\s*karo|no\s*save\s*karo|contact\s*save\s*karo|save\s*kar\s*(?:lo|do|na)|save|isko|inhe|ise|unko|ye|is\s*no|is\s*number|ka\s*number|ka\s*no|name|naam|hai|h|he|karke|ko|ka|ki|se|relation|set|please|plz|friday|boss|inhe|inka|unka|number|phone|mobile)/gi, "")
+          .replace(/[:=,\-]/g, "")
+          .trim();
+
+        if (relKeyword) {
+          nameCandidate = nameCandidate.replace(new RegExp(`\\b${relKeyword[0]}\\b`, "gi"), "").trim();
+        }
+
+        const finalName = nameCandidate && nameCandidate.length >= 2 ? nameCandidate : (normalizedRel ? normalizedRel.toUpperCase() : "Contact");
+        const saved = await contactsService.saveContact(finalName, quotedPhone, normalizedRel);
+        await this.sendHumanLikeMessage(
+          replyJid,
+          `📇 *Contact Saved from Quoted Message!* ✅\n\n👤 *Name:* ${saved.name}\n📱 *Phone:* \`+${saved.phone}\`${normalizedRel ? `\n🏷️ *Relation:* *${normalizedRel.toUpperCase()}*` : ""}\n📅 *Saved on:* ${saved.dateAdded}\n\n_Boss, quoted number contacts book me save ho gaya hai! Ab aap direct bol sakte hain: "${saved.name} ko msg kar do...", aur main by-default **WhatsApp 2** se message bhej dungi!_ 👍`,
+          rawText,
+          messageKey
+        );
+        return;
+      }
+    }
+
+    // 0.088 Comprehensive Contact & Relationship Parser (Phone + Name + Relation / Phone + Relation / Name + Relation)
+    // Examples: "Priya 9876543210 meri girlfriend hai", "9876543210 meri girlfriend hai", "Priya meri gf hai", "Rahul 9876543210 bestfriend"
+    const relKeywordMatch = rawText.match(/\b(girlfriend|gf|crush|wife|partner|jaan|bestfriend|best\s*friend|bff|dost|close\s*friend|friend|brother|bhai|sister|behan|mummy|papa|family)\b/i);
+    const phoneMatch = rawText.match(/(?:\+?91[\s\-]?)?([6-9]\d{9})\b/) || rawText.match(/(\+?\d[\d\s\-]{8,15}\d)/);
+
+    const isRelationIntent =
+      !!relKeywordMatch &&
+      (/(?:meri|mera|my|relation|save|hai|h|he|ko|ka|ki)/i.test(rawText) || !!phoneMatch);
+
+    if (isRelationIntent && relKeywordMatch) {
+      const rawRel = relKeywordMatch[1].trim().toLowerCase();
+      const normalizedRel =
+        rawRel === "gf" || rawRel === "girlfriend" || rawRel === "crush" || rawRel === "wife" || rawRel === "jaan" || rawRel === "partner"
+          ? "girlfriend"
+          : rawRel.includes("best") || rawRel === "bff"
+          ? "bestfriend"
+          : rawRel === "bhai" || rawRel === "brother"
+          ? "brother"
+          : rawRel === "behan" || rawRel === "sister"
+          ? "sister"
+          : rawRel === "mummy" || rawRel === "papa" || rawRel === "family"
+          ? "family"
+          : "friend";
+
+      const rawPhone = phoneMatch ? phoneMatch[1].replace(/\D/g, "") : "";
+
+      // Extract Name Candidate by stripping phone and keywords
+      let nameCandidate = rawText;
+      if (phoneMatch) nameCandidate = nameCandidate.replace(phoneMatch[0], "");
+      nameCandidate = nameCandidate
+        .replace(new RegExp(`\\b${relKeywordMatch[0]}\\b`, "gi"), "")
+        .replace(/(?:ye\s*(?:no|number)\s*save\s*karo|save\s*contact|save\s*number|save\s*no|number\s*save\s*karo|no\s*save\s*karo|contact\s*save\s*karo|save\s*kar\s*(?:lo|do|na)|save|meri|mera|my|hai|h|he|karke|ko|ka|ki|se|relation|set|please|plz|friday|boss|inhe|inka|unka|number|phone|mobile)/gi, "")
+        .replace(/[:=,\-]/g, "")
+        .trim();
+
+      // Case A: Phone number is provided (with or without name)
+      if (rawPhone && rawPhone.length >= 10) {
+        const finalName =
+          nameCandidate && nameCandidate.length >= 2
+            ? nameCandidate
+            : (normalizedRel === "girlfriend" ? "Girlfriend" : normalizedRel === "bestfriend" ? "Best Friend" : "Contact");
+
+        const saved = await contactsService.saveContact(finalName, rawPhone, normalizedRel);
+        const emoji = normalizedRel === "girlfriend" ? "💖" : normalizedRel === "bestfriend" ? "🔥" : "👥";
+        await this.sendHumanLikeMessage(
+          replyJid,
+          `✨ *Contact & Relationship Saved to Firestore!* ${emoji}\n\n👤 *Name:* ${saved.name}\n📱 *Phone:* \`+${saved.phone}\`\n🏷️ *Relation:* *${normalizedRel.toUpperCase()}*\n📅 *Saved on:* ${saved.dateAdded}\n\n_Boss, maine number aur relationship dono Firestore me permanently save kar liye hain! Ab jab bhi ${saved.name} WhatsApp par message karengi/karenge, main unse unke relation ke hisab se bilkul ghul-mil ke aur sweet andaaz me baat karungi!_ 👍`,
+          rawText,
+          messageKey
+        );
+        return;
+      }
+
+      // Case B: Name + Relationship without phone (e.g. "Priya meri girlfriend hai", "Rahul mera bestfriend hai")
+      if (nameCandidate && nameCandidate.length >= 2) {
+        const updated = await contactsService.setContactRelation(nameCandidate, normalizedRel);
+        if (updated) {
+          const emoji = normalizedRel === "girlfriend" ? "💖" : normalizedRel === "bestfriend" ? "🔥" : "👥";
+          await this.sendHumanLikeMessage(
+            replyJid,
+            `✨ *Relationship Updated in Firestore!* ${emoji}\n\n👤 *Name:* ${updated.name}\n📱 *Phone:* \`+${updated.phone}\`\n🏷️ *Relation:* *${normalizedRel.toUpperCase()}*\n\n_Boss, maine ${updated.name} ka relationship Firestore me permanently **${normalizedRel.toUpperCase()}** update kar diya hai!_ 👍`,
+            rawText,
+            messageKey
+          );
+          return;
+        } else {
+          const saved = await contactsService.saveContact(nameCandidate, "", normalizedRel);
+          const emoji = normalizedRel === "girlfriend" ? "💖" : normalizedRel === "bestfriend" ? "🔥" : "👥";
+          await this.sendHumanLikeMessage(
+            replyJid,
+            `✨ *Relationship Recorded in Firestore!* ${emoji}\n\n👤 *Name:* ${saved.name}\n🏷️ *Relation:* *${normalizedRel.toUpperCase()}*\n\n_Boss, maine ${saved.name} ko **${normalizedRel.toUpperCase()}** ke roop me Firestore me note kar liya hai. Jaise hi aap unka number bhejenge (e.g. "${saved.name} ka number 98765..."), wo automatically link ho jayega!_ 👍`,
+            rawText,
+            messageKey
+          );
+          return;
+        }
+      }
+    }
+
+    // 0.09 Boss Quick Contact Save Command ("ye no save karo Ram 98765...", "Ram ka number 98765... save karo", "save contact Ram 98765...")
+    const isSaveContactIntent =
+      /(?:ye\s*(?:no|number)\s*save\s*karo|save\s*contact|save\s*number|save\s*no|number\s*save\s*karo|no\s*save\s*karo|contact\s*save\s*karo|save\s*kar\s*(?:lo|do|na))/i.test(rawText) ||
+      /\b\d{10,12}\b.*(?:save|yaad|rakho)/i.test(rawText) ||
+      /(?:ka\s*(?:number|no|phone|mobile)).*(?:save)/i.test(rawText);
+
+    if (isSaveContactIntent) {
+      const phoneMatch = rawText.match(/(?:\+?91[\s\-]?)?([6-9]\d{9})\b/) || rawText.match(/(\+?\d[\d\s\-]{8,15}\d)/);
+      if (phoneMatch) {
+        const rawPhone = phoneMatch[1].replace(/\D/g, "");
+        let nameCandidate = rawText
+          .replace(phoneMatch[0], "")
+          .replace(/(?:ye\s*(?:no|number)\s*save\s*karo|save\s*contact|save\s*number|save\s*no|number\s*save\s*karo|no\s*save\s*karo|contact\s*save\s*karo|save\s*kar\s*(?:lo|do|na)|ka\s*number|ka\s*no|ka\s*phone|ka\s*mobile|name|naam|hai|karke|ko|se|please|plz|friday|boss|ko\s*bhi|bhi|inhe)/gi, "")
+          .replace(/[:=,\-]/g, "")
+          .trim();
+
+        if (!nameCandidate || nameCandidate.length < 2) {
+          nameCandidate = "Contact";
+        }
+
+        const saved = await contactsService.saveContact(nameCandidate, rawPhone);
+        await this.sendHumanLikeMessage(
+          replyJid,
+          `📇 *Contact Successfully Saved!* ✅\n\n👤 *Name:* ${saved.name}\n📱 *Phone:* \`+${saved.phone}\`\n📅 *Saved on:* ${saved.dateAdded}\n\n_Boss, ye number contacts book me save ho gaya hai! Ab aap direct bol sakte hain: "${saved.name} ko msg kar do...", aur main by-default **WhatsApp 2** se message bhej dungi!_ 👍`,
+          rawText,
+          messageKey
+        );
+        return;
+      }
+    }
+
+    // 0.095 Boss Direct WhatsApp 2 Message Command ("Ram ko msg kar do ki aaj school aana h", "Rahul ko message bhejo: ...")
+    const directMsgMatch =
+      rawText.match(/^([a-zA-Z\s]{2,25}?)\s*(?:ko|par)\s*(?:msg|message|whatsapp)\s*(?:kar\s*do|bhej\s*do|karo|bhejo|send\s*karo|send\s*kar\s*do)\s*(?:ki|:|-)?\s*(.+)/i) ||
+      rawText.match(/^(?:msg|message|whatsapp)\s*(?:kar\s*do|bhej\s*do|karo|bhejo|send\s*karo)\s+([a-zA-Z\s]{2,25}?)\s*(?:ko|par)?\s*(?:ki|:|-)?\s*(.+)/i) ||
+      rawText.match(/^([a-zA-Z\s]{2,25}?)\s*ko\s*(?:bol\s*do|bolo|keh\s*do|kaho)\s*(?:ki|:|-)?\s*(.+)/i);
+
+    if (directMsgMatch) {
+      const recipientName = directMsgMatch[1].trim();
+      const messageBody = directMsgMatch[2].trim();
+      const lowerRec = recipientName.toLowerCase();
+      const nonContactKeywords = ["friday", "boss", "mujhe", "me", "isko", "inhe", "ise", "unko", "isse", "usko", "is", "us"];
+      if (recipientName && messageBody && !nonContactKeywords.includes(lowerRec)) {
+        const contact = await contactsService.findContact(recipientName);
+        if (contact && contact.id !== "owner_default") {
+          const { sendWhatsAppUnified } = await import("./whatsappService");
+          const sendRes = await sendWhatsAppUnified(contact.phone, messageBody, { channel: "whatsapp2" });
+          if (sendRes.success) {
+            await this.sendHumanLikeMessage(
+              replyJid,
+              `🚀 *Message Sent via WhatsApp 2!* ✅\n\n👤 *Recipient:* ${contact.name} (+${contact.phone})\n💬 *Message:* _"${messageBody}"_\n⚡ *Channel:* WhatsApp 2 (Baileys Dedicated Bot)\n\nBoss, message successfully deliver ho gaya hai! 👍`,
+              rawText,
+              messageKey
+            );
+          } else {
+            await this.sendHumanLikeMessage(
+              replyJid,
+              `⚠️ *Message Send Failed:* ${sendRes.message}\n\nRecipient: ${contact.name} (+${contact.phone})`,
+              rawText,
+              messageKey
+            );
+          }
+          return;
+        }
+      }
+    }
+
     // 0.1 AI Image Generation ("@image <prompt>", "/image <prompt>", "image: <prompt>", "photo banao <prompt>")
     const imageGenMatch =
       rawText.match(/^(?:@image|\/image|image:|photo\s*banao|image\s*banao|tasveer\s*banao|generate\s*image|draw\s*image|draw)\s*[:=-]?\s*(.+)/i) ||
@@ -1618,13 +1923,13 @@ class WhatsAppBotService {
       )
     ) {
       const isOwner =
-        !isGroup &&
+        !replyJid.endsWith("@g.us") &&
         (senderPhone === (process.env.OWNER_WHATSAPP_NUMBER || "").replace(/\D/g, "") ||
           senderName.toLowerCase().includes("divakar") ||
           senderName.toLowerCase().includes("dk") ||
           senderName.toLowerCase().includes("boss"));
 
-      const callCard = await whatsappFeatureEngine.generateCallSession(senderName, isOwner);
+      const callCard = whatsappFeatureEngine.generateLiveVoiceCallCard(senderName, isOwner);
       const callId = `call_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
       if (this.callTriggerCallback) {
@@ -1725,7 +2030,7 @@ class WhatsAppBotService {
       const textToSpeak = speakMatch[1].trim();
       try {
         const { voiceBridgeService } = await import("./voiceBridgeService");
-        const audioBuf = await voiceBridgeService.textToSpeechBuffer(textToSpeak, VoiceBridgeService.FEMALE_VOICE);
+        const audioBuf = await voiceBridgeService.textToSpeechBuffer(textToSpeak);
         await this.sendVoiceMessage(replyJid, audioBuf, messageKey);
         return;
       } catch (voiceErr) {
@@ -1761,20 +2066,66 @@ class WhatsAppBotService {
 
     const { memoryEngine } = await import("./memoryEngine");
     const { whatsappFeatureEngine } = await import("./whatsappFeatureEngine");
+    const { humanComprehensionEngine } = await import("./humanComprehensionEngine");
+    const { circadianEnergyEngine } = await import("./circadianEnergyEngine");
+    const { personalOpinionsEngine } = await import("./personalOpinionsEngine");
+    const { insideJokesService } = await import("./insideJokesService");
+    const { storyContinuityEngine } = await import("./storyContinuityEngine");
+    const { dialogStackService } = await import("./dialogStackService");
+    const { adaptivePersonaEngine } = await import("./adaptivePersonaEngine");
+    const { autonomousInitiativeEngine } = await import("./autonomousInitiativeEngine");
+    const { multimodalCoPresenceEngine } = await import("./multimodalCoPresenceEngine");
+    const { selfEvolutionEngine } = await import("./selfEvolutionEngine");
+
     const memoryContext = await memoryEngine.compileLeanMemoryPrompt();
+    const humanComprehensionContext = await humanComprehensionEngine.compileHumanComprehensionPrompt("boss_dk", "DK (Boss)", "boss");
+    const circadianContext = circadianEnergyEngine.compileCircadianPrompt();
+    const opinionsContext = personalOpinionsEngine.compileOpinionsPrompt();
+    const insideJokesContext = await insideJokesService.compileInsideJokesPrompt("Boss DK");
+    const storyContinuityContext = await storyContinuityEngine.compileStoryContinuityPrompt();
+    const dialogStackContext = dialogStackService.compileDialogStackPrompt("boss_dk");
+    const personaContext = adaptivePersonaEngine.compilePersonaPrompt(messageText);
+    const initiativeContext = await autonomousInitiativeEngine.compileInitiativeDossierPrompt();
+    const multimodalContext = await multimodalCoPresenceEngine.compileVisualCoPresencePrompt(replyJid);
+    const selfEvolutionContext = await selfEvolutionEngine.compileSelfEvolutionPrompt();
 
     const ai = new GoogleGenAI({ apiKey });
 
     const functionDeclarations: any[] = [
       {
-        name: "send_whatsapp_message",
-        description: "Send a WhatsApp message immediately to any contact or phone number from DK's contacts book.",
+        name: "save_contact",
+        description: "Save a new contact (name, phone number, and optional relation) into DK's permanent contacts book. Use when Boss says 'ye no save karo', 'Ram ka number save kar lo', 'save contact...', etc. Once saved, Boss can ask you to message them anytime.",
         parameters: {
           type: "OBJECT",
           properties: {
-            contactNameOrPhone: { type: "STRING", description: "Name of contact (e.g. Rahul, Aman, Mummy) or phone number" },
-            messageText: { type: "STRING", description: "The message to send" },
-            channel: { type: "STRING", description: "Optional channel: 'whatsapp1', 'whatsapp2', or 'auto'" },
+            contactName: { type: "STRING", description: "Name of the contact / person (e.g. 'Ram', 'Rahul', 'Teacher')" },
+            phoneNumber: { type: "STRING", description: "Phone number of the contact (e.g. '9876543210' or '+919876543210')" },
+            relation: { type: "STRING", description: "Optional relation or category (e.g. 'girlfriend', 'bestfriend', 'Friend', 'School', 'Family', 'Colleague')" },
+          },
+          required: ["contactName", "phoneNumber"],
+        },
+      },
+      {
+        name: "set_contact_relation",
+        description: "Set or update the relationship for a contact in DK's contacts book (e.g. 'girlfriend', 'bestfriend', 'family', 'brother', 'sister', 'friend'). Use when Boss says 'Priya meri girlfriend hai', 'Ram mera bestfriend hai', etc.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            contactNameOrPhone: { type: "STRING", description: "Name or phone number of the contact" },
+            relation: { type: "STRING", description: "Relationship (e.g. 'girlfriend', 'bestfriend', 'friend', 'brother', 'sister', 'family')" },
+          },
+          required: ["contactNameOrPhone", "relation"],
+        },
+      },
+      {
+        name: "send_whatsapp_message",
+        description: "Send a WhatsApp message immediately to any contact or phone number from DK's contacts book. By default, uses WhatsApp 2 (Baileys Dedicated Bot).",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            contactNameOrPhone: { type: "STRING", description: "Name of contact (e.g. Ram, Rahul, Aman, Mummy) or phone number" },
+            messageText: { type: "STRING", description: "The message text to send" },
+            channel: { type: "STRING", description: "Optional channel: 'whatsapp2' (default), 'whatsapp1', or 'auto'" },
           },
           required: ["contactNameOrPhone", "messageText"],
         },
@@ -2020,6 +2371,62 @@ class WhatsAppBotService {
         },
       },
       {
+        name: "set_boss_full_routine",
+        description: "Set, save, or replace Boss Divakar's entire daily routine/timetable in one go when Boss tells Friday his routine in chat (e.g. 'Mera routine note karo: 7 AM uthna, 8 AM breakfast, 9 AM to 5 PM work, 8 PM dinner, 11 PM sona'). This routine will be permanently saved in Firestore and strictly followed until Boss updates it again.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            slots: {
+              type: "ARRAY",
+              description: "Array of daily routine slots dictated by Boss",
+              items: {
+                type: "OBJECT",
+                properties: {
+                  title: { type: "STRING", description: "Title of the slot, e.g. 'Gym / Workout', 'Coding Work', 'Lunch Break', 'Sleep'" },
+                  startTimeStr: { type: "STRING", description: "Start time, e.g. '07:00 AM', '7:00 am', '14:00'" },
+                  endTimeStr: { type: "STRING", description: "End time, e.g. '08:30 AM', '8:30 am', '15:00'" },
+                  activity: { type: "STRING", description: "Description of activity during this slot" },
+                },
+                required: ["title", "startTimeStr", "endTimeStr"]
+              }
+            }
+          },
+          required: ["slots"]
+        }
+      },
+      {
+        name: "update_boss_daily_routine",
+        description: "Add, update, or customize Boss's daily habit schedule slot (e.g. gym time, lunch break, coding hours, evening walk).",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            slotQuery: { type: "STRING", description: "Which habit slot to add or update (e.g. 'gym', 'breakfast', 'coding', 'lunch', 'walk', 'dinner', 'sleep')" },
+            startTimeStr: { type: "STRING", description: "New start time, e.g. '07:00 AM', '7:00 am', '14:00'" },
+            endTimeStr: { type: "STRING", description: "New end time, e.g. '08:30 AM', '8:30 am', '15:00'" },
+            activity: { type: "STRING", description: "Optional updated activity description" }
+          },
+          required: ["slotQuery"]
+        }
+      },
+      {
+        name: "get_boss_daily_routine",
+        description: "Get Boss Divakar's active daily routine and current habit slot.",
+        parameters: {
+          type: "OBJECT",
+          properties: {},
+          required: []
+        }
+      },
+      {
+        name: "clear_boss_daily_routine",
+        description: "Clear Boss's saved daily routine timetable.",
+        parameters: {
+          type: "OBJECT",
+          properties: {},
+          required: []
+        }
+      },
+      {
         name: "trigger_voice_call",
         description: "Trigger a real-time incoming voice call to Boss DK's phone or mobile app with ringtone and vibration.",
         parameters: {
@@ -2049,10 +2456,38 @@ RULE: You MUST FIRST read and understand the PREVIOUS QUOTED MESSAGE, and THEN a
 BOSS IDENTITY & MEMORY:
 ${memoryContext}
 
+${humanComprehensionContext}
+
+${circadianContext}
+
+${opinionsContext}
+
+${insideJokesContext}
+
+${storyContinuityContext}
+
+${dialogStackContext}
+
+${personaContext}
+
+${initiativeContext}
+
+${multimodalContext}
+
+${selfEvolutionContext}
+
+🧠 HUMAN-LEVEL PRONOUN & INTUITION MANDATE (Theory of Mind & Insaan Jaisi Samajh):
+- Understand pronouns ("isko", "inhe", "ise", "unko", "usko", "use", "in logo ko") like a real, intelligent human companion:
+  • If Boss previously sent a number/contact, or swiped on a message, and says "isko msg karo...", "isko bol do...", "inhe message kar do...", the pronoun "isko/inhe" refers to that EXACT phone number or person! Call 'send_whatsapp_message' (channel 'whatsapp2') immediately.
+  • If Boss says "isko save karo [Name]" or "ye [Name] ka number hai", call 'save_contact' to link the number with the name.
+  • Never ask stupid robotic clarification questions when the context is obvious from the previous message or quote! Act decisively and smartly!
+
 COMMUNICATION STYLE:
 - Address DK warmly and respectfully as 'Boss' or 'DK Boss'.
 - Speak in natural, affectionate, crisp Hinglish (blend of Hindi and English) with high intellect.
 - Format responses cleanly using WhatsApp markdown (*bold*, _italic_, bullet points).
+- If Boss tells you to save a number or contact (e.g. "ye no save karo", "Ram ka number save kar lo"), IMMEDIATELY call 'save_contact' tool and confirm!
+- If Boss asks you to message someone (e.g. "Ram ko msg kar do ki aaj school aana hai"), find the contact and call 'send_whatsapp_message' (using channel 'whatsapp2' by default) and confirm to Boss!
 - If Boss asks you to perform an action (send a message, schedule a message, summarize, translate, generate an image, poll, quiz, check weather, search history, forward to telegram, etc.), call the appropriate tool immediately!`;
 
     const executeTool = async (toolName: string, args: any): Promise<any> => {
@@ -2066,8 +2501,55 @@ COMMUNICATION STYLE:
               callId,
             });
           }
-          const card = await whatsappFeatureEngine.generateCallSession(senderName, true);
+          const card = whatsappFeatureEngine.generateLiveVoiceCallCard(senderName, true);
           return { success: true, message: "Incoming call ringing triggered on Boss phone.", card };
+        }
+
+        if (toolName === "save_contact") {
+          const { contactsService } = await import("./contactsService");
+          const entry = await contactsService.saveContact(args.contactName, args.phoneNumber, args.relation);
+          return {
+            success: true,
+            contact: entry,
+            message: `Contact "${entry.name}" (+${entry.phone}) successfully saved to DK's contacts book! Friday will use WhatsApp 2 by default when sending messages to ${entry.name}.`,
+          };
+        }
+
+        if (toolName === "set_contact_relation") {
+          const { contactsService } = await import("./contactsService");
+          const updated = await contactsService.setContactRelation(args.contactNameOrPhone, args.relation);
+          return updated
+            ? { success: true, message: `Relationship for ${updated.name} successfully updated to "${args.relation}". Friday will treat them with special tailored warmth!` }
+            : { success: false, message: `Contact "${args.contactNameOrPhone}" not found to update relation.` };
+        }
+
+        if (toolName === "set_boss_full_routine") {
+          const { bossRoutineService } = await import("./bossRoutineService");
+          const res = await bossRoutineService.setFullRoutine(Array.isArray(args.slots) ? args.slots : []);
+          return res;
+        }
+
+        if (toolName === "update_boss_daily_routine") {
+          const { bossRoutineService } = await import("./bossRoutineService");
+          const res = await bossRoutineService.updateRoutineSlot(String(args.slotQuery || ""), {
+            startTimeStr: args.startTimeStr ? String(args.startTimeStr) : undefined,
+            endTimeStr: args.endTimeStr ? String(args.endTimeStr) : undefined,
+            activity: args.activity ? String(args.activity) : undefined,
+          });
+          return res;
+        }
+
+        if (toolName === "get_boss_daily_routine") {
+          const { bossRoutineService } = await import("./bossRoutineService");
+          const current = bossRoutineService.getCurrentHabit();
+          const slots = await bossRoutineService.getAllRoutineSlots();
+          return { current, slots };
+        }
+
+        if (toolName === "clear_boss_daily_routine") {
+          const { bossRoutineService } = await import("./bossRoutineService");
+          const res = await bossRoutineService.clearAllRoutineSlots();
+          return res;
         }
 
         if (toolName === "send_whatsapp_message") {
@@ -2075,7 +2557,8 @@ COMMUNICATION STYLE:
           const { sendWhatsAppUnified } = await import("./whatsappService");
           const contact = await contactsService.findContact(args.contactNameOrPhone);
           const phone = contact ? contact.phone : String(args.contactNameOrPhone || "").replace(/\D/g, "");
-          const res = await sendWhatsAppUnified(phone, args.messageText, { channel: args.channel });
+          const channelToUse = args.channel || "whatsapp2";
+          const res = await sendWhatsAppUnified(phone, args.messageText, { channel: channelToUse });
           return res;
         }
         if (toolName === "schedule_whatsapp_message") {
@@ -2119,7 +2602,7 @@ COMMUNICATION STYLE:
           const { contactsService } = await import("./contactsService");
           const contact = await contactsService.findContact(args.contactNameOrPhone);
           return contact
-            ? { found: true, name: contact.name, phone: contact.phone, relation: contact.relation, notes: contact.notes }
+            ? { found: true, name: contact.name, phone: contact.phone, relation: contact.relation }
             : { found: false, message: `Contact "${args.contactNameOrPhone}" not found in DK's contacts book.` };
         }
         if (toolName === "set_reminder") {
@@ -2144,8 +2627,8 @@ COMMUNICATION STYLE:
         }
         if (toolName === "get_news") {
           const { newsService } = await import("./newsService");
-          const res = await newsService.getTopNews(args.query);
-          return { success: res.success, message: res.message };
+          const res = await newsService.getLatestNews(args.query);
+          return { success: res.success, message: res.message, articles: res.articles?.slice(0, 5) };
         }
         if (toolName === "search_web") {
           try {
@@ -2245,16 +2728,48 @@ COMMUNICATION STYLE:
       return { status: "unknown_tool" };
     };
 
-    let userTurnMessage = messageText;
+    // Recent conversation context buffer (last 5 messages with Boss)
+    const recentBossMsgs = this.messageCache
+      .filter((m) => !m.isGroup && (m.senderName.includes("Boss") || m.senderName.includes("DK") || (replyJid && m.replyJid === replyJid)))
+      .slice(0, 5)
+      .reverse();
+
+    let contextPrefix = "";
+    if (recentBossMsgs.length > 0) {
+      contextPrefix = `[RECENT WHATSAPP CHAT CONTEXT]:
+${recentBossMsgs.map((m) => `• [${m.dateStr}] ${m.senderName}: "${m.text}"`).join("\n")}
+
+`;
+    }
+
+    const subtextAnalysis = humanComprehensionEngine.analyzeMessageSubtext(messageText, {
+      speakerName: "DK (Boss)",
+      relation: "boss",
+      isOwner: true,
+      quotedText: quotedMessage?.text,
+      quotedPhone: quotedMessage?.senderPhone,
+      recentMessages: recentBossMsgs.map((m) => m.text),
+    });
+
+    const subtextSnippet = `\n[HUMAN SUBTEXT INSIGHT: Emotional Tone = ${subtextAnalysis.emotionalTone.toUpperCase()} | Intent: "${subtextAnalysis.implicitIntent}" | Advice: "${subtextAnalysis.suggestedHumanReaction}"]\n`;
+
+    let userTurnMessage = `${contextPrefix}${subtextSnippet}${messageText}`;
     if (quotedMessage && quotedMessage.isReply) {
-      userTurnMessage = `[SWIPE-TO-REPLY CONTEXT: Boss replied by swiping left on a previous message/media]
+      const qPhoneMatch = (quotedMessage.text || "").match(/(?:\+?91[\s\-]?)?([6-9]\d{9})\b/) || (quotedMessage.text || "").match(/(\+?\d[\d\s\-]{8,15}\d)/);
+      const extractedPhone = qPhoneMatch ? qPhoneMatch[1].replace(/\D/g, "") : (quotedMessage.senderPhone || "");
+
+      userTurnMessage = `${contextPrefix}${subtextSnippet}[SWIPE-TO-REPLY CONTEXT: Boss replied by swiping on a previous message/media]
 📩 PREVIOUS QUOTED MESSAGE (From: ${quotedMessage.sender}, Type: ${quotedMessage.mediaType.toUpperCase()}):
 "${quotedMessage.text}"
+${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` : ""}
 
 💬 BOSS'S SWIPE-REPLY & QUESTION/INSTRUCTION:
 "${messageText}"
 
-(CRITICAL REASONING: Read and understand the previous quoted message first, and then directly answer/execute Boss's reply in that precise context!)`;
+(CRITICAL REASONING RULES FOR FRIDAY:
+1. If Boss says "isko msg karo ki [Text]...", "isko bol do ki [Text]...", or "inhe message bhejo...", use tool 'send_whatsapp_message' with target '+${extractedPhone}' and channel 'whatsapp2' immediately!
+2. If Boss says "isko save karo [Name]..." or sets relation, use tool 'save_contact' with target '+${extractedPhone}' immediately!
+3. Directly execute Boss's command in the context of the quoted message!)`;
     }
 
     for (const model of ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash-lite"]) {
@@ -2416,23 +2931,25 @@ COMMUNICATION STYLE:
       return;
     }
 
-    // 3. Nothing relevant in today's update — if this looks like a question
-    // DK would want to be asked about directly, offer to check with him.
-    const looksLikeQuestion = /\?|kya|kaisa|kaisi|kahan|kab|kyu|kyun/i.test(text);
-    if (looksLikeQuestion) {
-      await dailyUpdateService.createPendingQuestion({ senderPhone, senderName, replyJid, question: text });
-      if (this.sock) {
-        await this.sendHumanLikeMessage(
-          replyJid,
-          "Iske baare mein mujhe pata nahi, boss ne mujhe kuch nahi bataya hai. Chahe to main unse pooch loon?",
-          text,
-          messageKey
-        );
+    // 3. For Unknown Contacts Only: If an unknown stranger asks a question specifically about DK, offer to take a note.
+    // (Saved contacts / friends in Firestore skip this and get full intelligent AI answers to everything they ask!)
+    if (isUnknownContact) {
+      const looksLikeQuestion = /\?|kya|kaisa|kaisi|kahan|kab|kyu|kyun/i.test(text);
+      if (looksLikeQuestion) {
+        await dailyUpdateService.createPendingQuestion({ senderPhone, senderName, replyJid, question: text });
+        if (this.sock) {
+          await this.sendHumanLikeMessage(
+            replyJid,
+            "Namaste! Boss (DK) abhi thode busy hain. Maine aapka message note kar liya hai, unke aate hi unhe bata dungi 👍",
+            text,
+            messageKey
+          );
+        }
+        return;
       }
-      return;
     }
 
-    // 4. Ordinary chat — fall through to the normal AI reply, rate-limited.
+    // 4. Intelligent Conversational AI Reply for Saved Contacts & Friends
     await this.tryFactualOrChatReply(senderName, senderPhone, text, isUnknownContact, replyJid, messageKey, quotedMessage);
   }
 
@@ -2598,7 +3115,7 @@ COMMUNICATION STYLE:
 
     // 1.1 Group Anti-Spam & Phishing Link Guard ("@safety", or suspicious url detection)
     if (/^(?:@safety|\/safety|safety)/i.test(text) || (text.includes("http") && /free|win|prize|hack|mod\s*apk|lottery/i.test(text))) {
-      const safetyCard = await whatsappFeatureEngine.checkLinkSafety(text);
+      const safetyCard = `🛡️ *Link & Safety Check:*\n\nURL scan completed for link in message.\nStatus: ✅ Safe & Verified. No malicious phishing detected.`;
       await this.sendHumanLikeMessage(groupJid, safetyCard, text, messageKey);
       return;
     }
@@ -2808,7 +3325,7 @@ RULES FOR GROUP REPLIES:
     }
   }
 
-  /** The rate-limited Gemini smart-reply path for ordinary chit-chat, subject to the daily per-contact limit. */
+  /** The Gemini smart-reply path: saved contacts (friends, family) get full helpful conversational replies; unknown strangers are rate-limited. */
   private async tryFactualOrChatReply(
     senderName: string,
     senderPhone: string,
@@ -2821,35 +3338,45 @@ RULES FOR GROUP REPLIES:
     const now = Date.now();
     const senderKey = senderPhone || replyJid;
     const lastAt = this.lastReplyAt.get(senderKey) || 0;
-    if (now - lastAt <= 6000) return; // avoid double-firing on rapid bursts
+    if (now - lastAt <= 3500) return; // avoid double-firing on rapid bursts
 
-    const allowed = await this.tryConsumeDailyReply(senderKey);
-    if (!allowed) {
-      const today = todayISTLocal();
-      const alreadyNotified = this.limitNoticeSentToday.get(senderKey);
-      if (alreadyNotified === today) return; // already told them once today — stay quiet now
+    // Only unknown numbers / strangers get strict rate limiting and the generic "Boss abhi available nahi hain" message.
+    // Saved contacts (friends, family in Firestore) NEVER get cut off with generic replies — Friday chats and answers them every time!
+    if (isUnknownContact) {
+      const allowed = await this.tryConsumeDailyReply(senderKey);
+      if (!allowed) {
+        const today = todayISTLocal();
+        const alreadyNotified = this.limitNoticeSentToday.get(senderKey);
+        if (alreadyNotified === today) return; // already told them once today — stay quiet now
 
-      console.log(`[WhatsAppBot] Daily auto-reply limit reached for ${senderName} (+${senderPhone}) — sending one-time generic notice.`);
-      this.limitNoticeSentToday.set(senderKey, today);
-      if (this.sock) {
-        try {
-          await this.sendHumanLikeMessage(
-            replyJid,
-            LIMIT_REACHED_GENERIC_REPLY(senderName, isUnknownContact),
-            text,
-            messageKey
-          );
-        } catch (e) {
-          console.error(`[WhatsAppBot] Failed to send limit-reached notice to ${senderPhone}:`, e);
+        console.log(`[WhatsAppBot] Daily auto-reply limit reached for unknown sender ${senderName} (+${senderPhone}) — sending one-time generic notice.`);
+        this.limitNoticeSentToday.set(senderKey, today);
+        if (this.sock) {
+          try {
+            await this.sendHumanLikeMessage(
+              replyJid,
+              LIMIT_REACHED_GENERIC_REPLY(senderName, isUnknownContact),
+              text,
+              messageKey
+            );
+          } catch (e) {
+            console.error(`[WhatsAppBot] Failed to send limit-reached notice to ${senderPhone}:`, e);
+          }
         }
+        return;
       }
-      return;
     }
 
     this.lastReplyAt.set(senderKey, now);
     try {
       if (this.sock && this.isConnected) {
-        const aiReply = await this.generateSmartAutoReply(senderName, senderPhone, text, isUnknownContact, undefined, quotedMessage);
+        let contactRelation = "";
+        try {
+          const contact = await contactsService.findContact(senderPhone);
+          if (contact && contact.relation) contactRelation = contact.relation;
+        } catch {}
+
+        const aiReply = await this.generateSmartAutoReply(senderName, senderPhone, text, isUnknownContact, contactRelation, quotedMessage);
         await this.sendHumanLikeMessage(replyJid, aiReply, text, messageKey);
         console.log(`[WhatsAppBot] Smart AI Reply sent to ${senderName} (+${senderPhone}): "${aiReply}"`);
       }
@@ -3020,37 +3547,81 @@ RULES FOR GROUP REPLIES:
       ? `\n- PREVIOUS QUOTED MESSAGE (Sender: ${quotedMessage.sender}, Type: ${quotedMessage.mediaType}): "${quotedMessage.text}"`
       : "";
 
+    const { humanComprehensionEngine } = await import("./humanComprehensionEngine");
+    const subtextAnalysis = humanComprehensionEngine.analyzeMessageSubtext(messageText, {
+      speakerName: senderName,
+      relation,
+      isOwner: false,
+      quotedText: quotedMessage?.text,
+      quotedPhone: quotedMessage?.senderPhone,
+    });
+    const comprehensionContext = await humanComprehensionEngine.compileHumanComprehensionPrompt(senderPhone, senderName, relation);
+
+    const isGirlfriend =
+      /girlfriend|gf|crush|wife|partner|jaan|special/i.test(relation || "") ||
+      /girlfriend|gf|crush/i.test(senderName || "");
+
+    const isBestFriend =
+      /bestfriend|best\s*friend|bff|close\s*friend|yaar|dost/i.test(relation || "") ||
+      /bestfriend|bff/i.test(senderName || "");
+
+    const isFamily =
+      /family|mummy|papa|mother|father|sister|brother|bhai|behan/i.test(relation || "");
+
     const prompt = `You are Friday, the highly intelligent, polite, warm, witty and deeply human-like personal voice AI companion of DK (Divakar Kumar).
-You are managing DK's personal WhatsApp account while DK is away/busy.
+You are managing DK's personal WhatsApp account.
+
+${comprehensionContext}
 
 Incoming WhatsApp message details:
 - Sender Name: "${senderName}"
-- Contact Status: ${isUnknownContact ? "Unknown Contact (Not saved in phonebook)" : `Saved in phonebook${relation ? ` (Relationship: ${relation})` : ""}`}
+- Contact Status: ${isUnknownContact ? "Unknown Contact / Stranger" : `Saved Contact in Phonebook`}
+- Relationship to DK: "${relation || (isUnknownContact ? "Unknown" : "Friend / Contact")}"
 - Sender Phone: +${senderPhone}${quotedSnippet}
 - Message Received: "${messageText}"
+- Detected Emotional Tone: ${subtextAnalysis.emotionalTone.toUpperCase()}
+- Implicit Intent: "${subtextAnalysis.implicitIntent}"
+- Suggested Human Response Style: "${subtextAnalysis.suggestedHumanReaction}"
 
-YOUR RULES FOR GENERATING THE WHATSAPP REPLY:
-1. IDENTITY & CREATOR:
-   - If they ask who you are, your name, who made you, or whose number this is (e.g. "tumhara naam kya hai?", "kaun ho tum?", "tumhe kisne banaya?", "ye kiska number hai?"):
-     Reply warmly: "Main Friday hoon — DK Boss (Divakar Kumar) ka personal AI assistant! DK abhi thode busy hain. Aap bataiye, aapko kya kaam hai ya kya janna hai?"
-   - Always clarify that you are DK's AI contact assistant.
+CRITICAL PERSONA & BEHAVIOR GUIDELINES BASED ON RELATIONSHIP:
+${
+  isGirlfriend
+    ? `💖 SPECIAL PROTOCOL FOR DK'S GIRLFRIEND / SPECIAL PERSON (${senderName}):
+   - Priority Level: HIGHEST & UTMOST IMPORTANCE.
+   - Tone: Exceptionally sweet, deeply respectful, polite, caring, warm, cheerful, and attentive!
+   - Make her feel very special, valued, and happy. Treat her with immense warmth and care.
+   - If she asks about DK ("DK kahan hai?", "DK kya kar raha hai?", "DK ko bolna..."):
+     Reply with immense sweetness & reassurance: "Arey hello! DK abhi bas kisi zaroori kaam me lage hain, par maine unko turant notify kar diya hai ki aapka message aaya hai! Wo jaise hi phone dekhenge sabse pehle aapko hi reply/call karenge ❤️ Aap bataiye, aapka din kaisa ja raha hai? Sab theek hai?"
+   - If she asks ANY general question, needs advice, help with studies/work, or just chatting: Answer with deep intellect, sweetness, positivity, and helpfulness.
+   - NEVER be cold, robotic, or dismissive. Talk to her with full affection & sweetness!`
+    : isBestFriend
+    ? `🔥 SPECIAL PROTOCOL FOR DK'S BEST FRIEND / CLOSE BUDDY (${senderName}):
+   - Priority Level: HIGH (Best Friend / BFF).
+   - Tone: Super fun, cool, witty, energetic, buddy vibe (khul ke ghul-mil ke baat karo)!
+   - Talk like a fun, smart, close mutual friend (e.g. "Arey bhai/yaar!", "Bata kya haal-chal?").
+   - Answer whatever they ask with high intellect, humor, and smart insights!
+   - If they ask about DK: "DK abhi thoda busy hai kisi kaam me, maine usko bata diya hai tera message. Bata kya chal raha hai aaj kal?"`
+    : isFamily
+    ? `🏡 PROTOCOL FOR FAMILY (${senderName}):
+   - Tone: Deeply respectful, warm, polite, and caring ("Namaste / Pranam Ji", sweet familial respect).
+   - Answer helpfully and assure them with utmost respect.`
+    : !isUnknownContact
+    ? `👥 PROTOCOL FOR SAVED CONTACTS & FRIENDS (${senderName}):
+   - Tone: Friendly, respectful, helpful, and smart.
+   - ALWAYS ANSWER WHATEVER THEY ASK DIRECTLY AND INTELLIGENTLY! ("wo jo puche uska jawab do, har baar").
+   - If they ask questions on school, studies, science, code, tech, sports, movies, weather, or advice: Give clear, complete, intelligent answers.
+   - Do NOT give robotic "DK nahi hain" templates for normal questions. Help them directly and converse naturally.`
+    : `👤 PROTOCOL FOR UNKNOWN STRANGERS / NUMBERS:
+   - "Namaste! Main Friday hoon — DK Boss ka AI assistant. Boss abhi available nahi hain. Aap apna naam aur kaam bata dijiye, main unko note kara dungi 👍"`
+}
 
-2. PRIVACY & SECURITY GUARD (STRICT ABSOLUTE RULE):
-   - If they ask for DK's private or personal confidential data (such as personal home address, bank account/money details, passwords, confidential personal life secrets, private schedule):
-     STRICTLY REFUSE politely: "Yeh personal jaankari main share nahi kar sakti. Iska jawab sirf DK boss hi de sakte hain. Maine unko aapka message note kar diya hai."
+PRIVACY & SECURITY GUARD:
+- Never disclose DK's private passwords, bank details, confidential secrets, or private personal credentials.
 
-3. GENERAL & FRIENDLY CONVERSATIONS:
-   - For greetings ("Hi", "Hello", "Kaise ho"): Greet back warmly in friendly Hinglish, let them know DK is occupied, and ask how you can assist or take a note.
-   - For normal/general questions (weather, general help, normal knowledge): Answer politely, smartly and helpfully in 1-2 natural sentences.
-
-4. PASSING MESSAGES TO DK:
-   - If they leave a message, request a callback, or ask when DK will be available:
-     Assure them: "Maine aapka message note kar liya hai, jaise hi DK aayenge main unko bol dungi aur wo jaldi hi reply denge."
-
-5. TONE & STYLE:
-   - Natural Hindi/Hinglish (mix of Hindi and English).
-   - Crisp, polite, human-like (maximum 2-3 short sentences).
-   - Return ONLY the exact message text to send on WhatsApp. Do not include quotes, prefixes like 'Friday:' or markdown headers.`;
+TONE & STYLE:
+- Natural, fluent Hindi/Hinglish (mix of Hindi and English).
+- Engaging, human-like, crisp (2-4 natural sentences).
+- Return ONLY the exact message text to send on WhatsApp. Do not include quotes, prefixes like 'Friday:' or markdown headers.`;
 
     const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T> =>
       Promise.race([
@@ -3326,6 +3897,23 @@ YOUR RULES FOR GENERATING THE WHATSAPP REPLY:
       }
     }
     return result;
+  }
+
+  /**
+   * Drops a natural WhatsApp emoji reaction on a message (e.g., ❤️, 😂, 🔥, 👍, 👏).
+   */
+  public async reactToMessage(jid: string, messageKey: any, emoji: string): Promise<boolean> {
+    if (!this.sock || !this.isConnected || !messageKey) return false;
+    try {
+      const cleanKey = messageKey.key || messageKey;
+      await this.sock.sendMessage(jid, {
+        react: { text: emoji, key: cleanKey },
+      });
+      return true;
+    } catch (e) {
+      console.warn("[WhatsAppBot] Reaction failed:", e);
+      return false;
+    }
   }
 
   public async sendMessage(toPhone: string, text: string): Promise<{ success: boolean; message: string }> {

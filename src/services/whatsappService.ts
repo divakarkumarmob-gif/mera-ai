@@ -1,4 +1,4 @@
-import { whatsappCloudService } from "./whatsappCloudService";
+se bakaro mtlb, import { whatsappCloudService } from "./whatsappCloudService";
 import { whatsappBotService } from "./whatsappBotService";
 import { db } from "./firebaseAdmin";
 
@@ -25,12 +25,13 @@ export interface SendWhatsAppResult {
 
 const channelMetaDoc = () => db.collection("whatsapp_auth").doc("session").collection("meta").doc("channel_meta");
 
-let cachedPrimaryChannel: WhatsAppPrimaryChannel = "whatsapp1";
+let cachedPrimaryChannel: WhatsAppPrimaryChannel = "whatsapp2";
 let isChannelLoaded = false;
 
 /**
  * Gets the current remembered primary WhatsApp channel preference.
  * Persisted in Firestore so it survives server restarts.
+ * Defaults to WhatsApp 2 (Baileys Multi-Device Bot).
  */
 export async function getPrimaryWhatsAppChannel(): Promise<WhatsAppPrimaryChannel> {
   if (isChannelLoaded) return cachedPrimaryChannel;
@@ -38,10 +39,13 @@ export async function getPrimaryWhatsAppChannel(): Promise<WhatsAppPrimaryChanne
     const snap = await channelMetaDoc().get();
     if (snap.exists && snap.data()?.primaryChannel) {
       cachedPrimaryChannel = snap.data()!.primaryChannel as WhatsAppPrimaryChannel;
+    } else {
+      cachedPrimaryChannel = "whatsapp2";
     }
     isChannelLoaded = true;
   } catch (e) {
     console.warn("[WhatsApp] Could not load primary WhatsApp channel preference:", e);
+    cachedPrimaryChannel = "whatsapp2";
   }
   return cachedPrimaryChannel;
 }
@@ -53,8 +57,8 @@ export async function setPrimaryWhatsAppChannel(channel: string): Promise<{ succ
   const norm = String(channel || "").trim().toLowerCase();
   const clean: WhatsAppPrimaryChannel =
     norm === "whatsapp2" || norm === "2" || norm.includes("2") || norm.includes("baileys") ? "whatsapp2"
-    : norm === "whatsapp1" || norm === "1" || norm.includes("1") || norm.includes("cloud") ? "whatsapp1"
-    : "auto";
+      : norm === "whatsapp1" || norm === "1" || norm.includes("1") || norm.includes("cloud") ? "whatsapp1"
+        : "auto";
 
   cachedPrimaryChannel = clean;
   isChannelLoaded = true;
@@ -67,8 +71,8 @@ export async function setPrimaryWhatsAppChannel(channel: string): Promise<{ succ
 
   const channelLabel =
     clean === "whatsapp2" ? "WhatsApp 2 (Baileys Dedicated Bot)"
-    : clean === "whatsapp1" ? "WhatsApp 1 (Official Meta Cloud API)"
-    : "Auto Mode (Smart Dual Failover)";
+      : clean === "whatsapp1" ? "WhatsApp 1 (Official Meta Cloud API)"
+        : "Auto Mode (Smart Dual Failover)";
 
   return {
     success: true,

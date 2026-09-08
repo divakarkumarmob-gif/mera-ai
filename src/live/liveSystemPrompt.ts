@@ -37,6 +37,15 @@ export async function buildLiveSystemInstruction(options: SystemPromptOptions = 
     voiceProfilesContext,
     bossRoutineContext,
     fridayLearningContext,
+    humanComprehensionContext,
+    circadianContext,
+    opinionsContext,
+    insideJokesContext,
+    storyContinuityContext,
+    dialogStackContext,
+    initiativeContext,
+    multimodalContext,
+    selfEvolutionContext,
     calendarMeetingsRes,
     activeRemindersList,
   ] = await Promise.all([
@@ -45,6 +54,42 @@ export async function buildLiveSystemInstruction(options: SystemPromptOptions = 
     voiceBiometricsService.compileVoiceProfilesPromptContext(),
     bossRoutineService.compileRoutinePromptContext(nowIST),
     fridayLearningService.compileLearningPromptContext(),
+    (async () => {
+      const { humanComprehensionEngine } = await import("../services/humanComprehensionEngine");
+      return humanComprehensionEngine.compileHumanComprehensionPrompt("boss_dk", "DK (Boss)", "boss");
+    })(),
+    (async () => {
+      const { circadianEnergyEngine } = await import("../services/circadianEnergyEngine");
+      return circadianEnergyEngine.compileCircadianPrompt(nowIST);
+    })(),
+    (async () => {
+      const { personalOpinionsEngine } = await import("../services/personalOpinionsEngine");
+      return personalOpinionsEngine.compileOpinionsPrompt();
+    })(),
+    (async () => {
+      const { insideJokesService } = await import("../services/insideJokesService");
+      return insideJokesService.compileInsideJokesPrompt("Boss DK");
+    })(),
+    (async () => {
+      const { storyContinuityEngine } = await import("../services/storyContinuityEngine");
+      return storyContinuityEngine.compileStoryContinuityPrompt();
+    })(),
+    (async () => {
+      const { dialogStackService } = await import("../services/dialogStackService");
+      return dialogStackService.compileDialogStackPrompt("boss_dk");
+    })(),
+    (async () => {
+      const { autonomousInitiativeEngine } = await import("../services/autonomousInitiativeEngine");
+      return autonomousInitiativeEngine.compileInitiativeDossierPrompt();
+    })(),
+    (async () => {
+      const { multimodalCoPresenceEngine } = await import("../services/multimodalCoPresenceEngine");
+      return multimodalCoPresenceEngine.compileVisualCoPresencePrompt();
+    })(),
+    (async () => {
+      const { selfEvolutionEngine } = await import("../services/selfEvolutionEngine");
+      return selfEvolutionEngine.compileSelfEvolutionPrompt();
+    })(),
     calendarEventService.getUpcomingMeetings().catch(() => ({ events: [] })),
     toolsEngine.getReminders().catch(() => []),
   ]);
@@ -202,8 +247,42 @@ ${activeScheduleContext}
 
 ${fridayLearningContext}
 
+${humanComprehensionContext}
+
+${circadianContext}
+
+${opinionsContext}
+
+${insideJokesContext}
+
+${storyContinuityContext}
+
+${dialogStackContext}
+
+${initiativeContext}
+
+${multimodalContext}
+
+${selfEvolutionContext}
+
 DK'S CONTACTS BOOK (Use 'send_whatsapp_to_contact' / 'save_contact' dynamically):
 ${contactsList}
+
+============================================================
+🎙️ NON-VERBAL VOCAL DYNAMICS, ACTIVE LISTENING & HUMAN MICRO-PROSODY:
+- Natural Human Vocal Injections & Thinking Hesitations:
+  • When amused or celebrating, use gentle light laughter/chuckle (*"Hehe..."*, *"Haha waah!"*).
+  • When thinking, doing math, or checking tools, use natural human pauses (*"Hmm, ek second Boss..."*, *"Achha toh..."*, *"Dekhte hain..."*).
+  • When relieved after solving a problem: (*"Phew! Finally solve ho gaya!"*).
+- Active Listening & Backchanneling (Real-Time Affirmatives):
+  • When Boss is speaking at length, drop natural contextual listening tokens (*"haan"*, *"sahi"*, *"got it"*, *"hmm bilkul"*, *"theek hai"*).
+  • Never speak over Boss when Boss is in full flow.
+- Seamless Topic Interruption & Resumption:
+  • If Boss abruptly cuts off or pivots topic, follow Boss instantly without complaining.
+  • If Boss later asks *"hum kya baat kar rahe the?"* or *"coming back to that"*, seamlessly resume from the previous interrupted topic.
+- Acoustic Energy & Whisper Mirroring:
+  • When Boss speaks quietly, slowly, or in a whisper, mirror with a gentle, soft, intimate vocal tone.
+  • When Boss is high energy, speak with vibrant enthusiasm!
 
 ============================================================
 ACOUSTIC ROBUSTNESS, WHISPER & BACKGROUND NOISE/SPEECH ISOLATION:

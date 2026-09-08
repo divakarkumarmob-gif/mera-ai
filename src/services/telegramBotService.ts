@@ -102,6 +102,7 @@ class TelegramBotService {
   private mediaVaultCache: Map<string, TelegramMediaRecord> = new Map();
   private userProfileCache: Map<number, TelegramUserProfile> = new Map();
   private groupProfileCache: Map<number, TelegramGroupProfile> = new Map();
+  private customBusyReply: string | null = null;
 
   // Multi-tier model fallback chain
   private static readonly MODEL_FALLBACK_CHAIN = [

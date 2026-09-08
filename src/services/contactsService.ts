@@ -26,26 +26,50 @@ class ContactsService {
     // Normalize robustly using the last 10 digits — handles leading 0,
     // '91' country code, spaces mid-number, or any other stray formatting
     const last10 = cleanPhone.replace(/\D/g, "").slice(-10);
-    const normalizedPhone = last10.length === 10 ? `91${last10}` : cleanPhone;
-    const cleanName = (name || "Contact").trim();
+    let normalizedPhone = last10.length === 10 ? `91${last10}` : cleanPhone;
+    let cleanName = (name || "Contact").trim();
+    let cleanRelation = relation?.trim() || "";
 
     let id = Math.random().toString(36).substring(2, 9);
 
-    // Try finding existing contact in Firestore or memory
+    // Try finding existing contact in Firestore or memory by name OR by phone
     try {
-      const existingSnap = await contactsCollection()
-        .where("nameLower", "==", cleanName.toLowerCase())
-        .limit(1)
-        .get();
+      if (cleanName && cleanName.toLowerCase() !== "contact") {
+        const existingSnap = await contactsCollection()
+          .where("nameLower", "==", cleanName.toLowerCase())
+          .limit(1)
+          .get();
 
-      if (!existingSnap.empty) {
-        id = existingSnap.docs[0].id;
+        if (!existingSnap.empty) {
+          id = existingSnap.docs[0].id;
+          const oldData = existingSnap.docs[0].data() as ContactEntry;
+          if (!normalizedPhone && oldData.phone) normalizedPhone = oldData.phone;
+          if (!cleanRelation && oldData.relation) cleanRelation = oldData.relation;
+        }
+      }
+
+      if (last10.length === 10) {
+        const existingPhoneSnap = await contactsCollection()
+          .where("phoneLast10", "==", last10)
+          .limit(1)
+          .get();
+
+        if (!existingPhoneSnap.empty) {
+          id = existingPhoneSnap.docs[0].id;
+          const oldData = existingPhoneSnap.docs[0].data() as ContactEntry;
+          if (cleanName === "Contact" && oldData.name) cleanName = oldData.name;
+          if (!cleanRelation && oldData.relation) cleanRelation = oldData.relation;
+        }
       }
     } catch {
       // Memory fallback lookup
       for (const [memId, c] of this.inMemoryContacts.entries()) {
-        if (c.name.toLowerCase() === cleanName.toLowerCase()) {
+        const cPhone10 = (c.phone || "").replace(/\D/g, "").slice(-10);
+        if ((cleanName && c.name.toLowerCase() === cleanName.toLowerCase()) || (last10.length === 10 && cPhone10 === last10)) {
           id = memId;
+          if (!normalizedPhone && c.phone) normalizedPhone = c.phone;
+          if (cleanName === "Contact" && c.name) cleanName = c.name;
+          if (!cleanRelation && c.relation) cleanRelation = c.relation;
           break;
         }
       }
@@ -55,7 +79,7 @@ class ContactsService {
       id,
       name: cleanName,
       phone: normalizedPhone,
-      relation: relation?.trim() || "",
+      relation: cleanRelation,
       dateAdded: new Date(now).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
       timestamp: now,
     };
@@ -73,6 +97,24 @@ class ContactsService {
     }
 
     return entry;
+  }
+
+  /**
+   * Sets or updates the relationship for a contact (e.g., 'girlfriend', 'bestfriend', 'family', 'brother').
+   */
+  public async setContactRelation(contactNameOrPhone: string, relation: string): Promise<ContactEntry | null> {
+    const contact = await this.findContact(contactNameOrPhone);
+    if (!contact || contact.id === "owner_default" || contact.id === "temp") {
+      return null;
+    }
+    contact.relation = relation.trim();
+    this.inMemoryContacts.set(contact.id, contact);
+    try {
+      await contactsCollection().doc(contact.id).set({ relation: relation.trim() }, { merge: true });
+    } catch (e: any) {
+      console.warn("[Contacts] Firestore relation update warning:", e?.message || e);
+    }
+    return contact;
   }
 
   /**

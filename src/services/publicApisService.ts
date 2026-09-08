@@ -2991,6 +2991,23 @@ class PublicApisService {
     "shreyas iyer": { ig: "shreyas41", x: "ShreyasIyer15", name: "Shreyas Iyer" },
   };
 
+  private static readonly PREVERIFIED_X_PROFILES: Record<string, { handle: string; name: string; bio?: string; followers?: number; isVerified?: boolean }> = {
+    "elonmusk": { handle: "elonmusk", name: "Elon Musk", bio: "X & Tesla & SpaceX", followers: 200000000, isVerified: true },
+    "narendramodi": { handle: "narendramodi", name: "Narendra Modi", bio: "Prime Minister of India", followers: 100000000, isVerified: true },
+    "imvkohli": { handle: "imVkohli", name: "Virat Kohli", bio: "Indian Cricketer", followers: 60000000, isVerified: true },
+    "cristiano": { handle: "Cristiano", name: "Cristiano Ronaldo", bio: "Footballer", followers: 110000000, isVerified: true },
+    "iamsrk": { handle: "iamsrk", name: "Shah Rukh Khan", bio: "Actor", followers: 44000000, isVerified: true },
+  };
+
+  private resolveSocialHandle(input: string, platform: "ig" | "x"): string {
+    const clean = input.replace(/^@/, "").trim().toLowerCase();
+    const entry = PublicApisService.FAMOUS_SOCIAL_HANDLES[clean];
+    if (entry) {
+      return platform === "ig" ? entry.ig : entry.x;
+    }
+    return input.replace(/^@/, "").replace(/^https?:\/\/(www\.)?(instagram\.com|x\.com|twitter\.com)\//, "").replace(/\/$/, "").trim();
+  }
+
   // 47. Instagram Profile Lookup (Followers, Following, Total Posts, Bio, Verified Status)
   public async getInstagramUserInfo(usernameOrQuery: string): Promise<any> {
     return instagramBotService.getUserInfoLive(usernameOrQuery);

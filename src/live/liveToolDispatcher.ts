@@ -352,6 +352,13 @@ export async function dispatchLiveToolCall(call: any, context: ToolDispatchConte
                   } catch (e: any) {
                     result = { success: false, message: `Could not fetch routine: ${e?.message || e}` };
                   }
+                } else if (call.name === "set_boss_full_routine") {
+                  const { slots } = call.args || {};
+                  try {
+                    result = await bossRoutineService.setFullRoutine(Array.isArray(slots) ? slots : []);
+                  } catch (e: any) {
+                    result = { success: false, message: `Could not save routine: ${e?.message || e}` };
+                  }
                 } else if (call.name === "update_boss_daily_routine") {
                   const { slotQuery, startTimeStr, endTimeStr, activity, title } = call.args || {};
                   try {
@@ -363,6 +370,12 @@ export async function dispatchLiveToolCall(call: any, context: ToolDispatchConte
                     });
                   } catch (e: any) {
                     result = { success: false, message: `Could not update routine: ${e?.message || e}` };
+                  }
+                } else if (call.name === "clear_boss_daily_routine") {
+                  try {
+                    result = await bossRoutineService.clearAllRoutineSlots();
+                  } catch (e: any) {
+                    result = { success: false, message: `Could not clear routine: ${e?.message || e}` };
                   }
                 } else if (call.name === "record_ai_self_correction") {
                   const { whatFridayDidWrong, whatBossTaught, goldenRule, triggerContext } = call.args || {};

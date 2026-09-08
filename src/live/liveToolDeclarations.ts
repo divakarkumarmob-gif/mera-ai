@@ -399,14 +399,39 @@ const rawFunctionDeclarations: any[] = [
     }
   },
   {
+    "name": "set_boss_full_routine",
+    "description": "Set, save, or replace Boss Divakar's entire daily routine/timetable in one go when Boss tells Friday his routine in conversation (e.g. 'Mera routine note karo: 7 AM uthna, 8 AM breakfast, 9 AM to 5 PM work, 8 PM dinner, 11 PM sona'). This routine will be permanently saved in Firestore and strictly followed until Boss updates it again.",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {
+        "slots": {
+          "type": "ARRAY",
+          "description": "Array of daily routine slots dictated by Boss",
+          "items": {
+            "type": "OBJECT",
+            "properties": {
+              "title": { "type": "STRING", "description": "Title of the slot, e.g. 'Gym / Workout', 'Coding Work', 'Lunch Break', 'Sleep'" },
+              "startTimeStr": { "type": "STRING", "description": "Start time, e.g. '07:00 AM', '7:00 am', '14:00'" },
+              "endTimeStr": { "type": "STRING", "description": "End time, e.g. '08:30 AM', '8:30 am', '15:00'" },
+              "activity": { "type": "STRING", "description": "Description of activity during this slot" },
+              "hintForFriday": { "type": "STRING", "description": "Hint on what Friday should remember about this slot" }
+            },
+            "required": ["title", "startTimeStr", "endTimeStr"]
+          }
+        }
+      },
+      "required": ["slots"]
+    }
+  },
+  {
     "name": "update_boss_daily_routine",
-    "description": "Update or customize Boss's daily habit schedule slot (e.g. gym time, lunch break, coding hours, evening walk). Use when DK says 'Mera gym ka time subah 7 baje kar do', 'Mera lunch 2 baje hota hai', 'Routine me dinner time change karo'.",
+    "description": "Add, update, or customize Boss's daily habit schedule slot (e.g. gym time, lunch break, coding hours, evening walk). Use when DK says 'Mera gym ka time subah 7 baje kar do', 'Mera lunch 2 baje hota hai', 'Routine me dinner time change karo'.",
     "parameters": {
       "type": "OBJECT",
       "properties": {
         "slotQuery": {
           "type": "STRING",
-          "description": "Which habit slot to update: 'gym', 'breakfast', 'coding', 'lunch', 'walk', 'dinner', or 'sleep'"
+          "description": "Which habit slot to add or update (e.g. 'gym', 'breakfast', 'coding', 'lunch', 'walk', 'dinner', 'sleep', or new slot title)"
         },
         "startTimeStr": {
           "type": "STRING",
@@ -424,6 +449,15 @@ const rawFunctionDeclarations: any[] = [
       "required": [
         "slotQuery"
       ]
+    }
+  },
+  {
+    "name": "clear_boss_daily_routine",
+    "description": "Clear or reset Boss's saved daily routine timetable when Boss says 'Mera routine clear kar do', 'Timetable hata do', 'Abhi koi routine follow mat karo'.",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {},
+      "required": []
     }
   },
   {
