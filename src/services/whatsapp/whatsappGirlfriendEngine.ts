@@ -1,3 +1,4 @@
+import { GoogleGenAI } from "@google/genai";
 import { GirlfriendSession } from "./whatsappTypes";
 
 export class WhatsAppGirlfriendEngine {
@@ -107,51 +108,6 @@ _Hamara sweet time complete ho gaya aur privacy ke liye saari temporary chats cl
     }
   }
 
-  private async generateWithOpenRouter(
-    messages: Array<{ role: string; content: string }>,
-    model: string,
-    apiKey: string
-  ): Promise<string | null> {
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 18000);
-
-      // FIX 1: Correct Endpoint Added
-      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${apiKey}`,
-          "HTTP-Referer": "https://mera-ai.app",
-          "X-Title": "Friday AI WhatsApp Girlfriend",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model,
-          messages,
-          temperature: 0.9,
-          max_tokens: 600,
-        }),
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeout);
-
-      if (!response.ok) {
-        const errBody = await response.text();
-        console.warn(`[WhatsAppGirlfriend] OpenRouter ${model} HTTP ${response.status}:`, errBody.slice(0, 150));
-        return null;
-      }
-
-      const data: any = await response.json();
-      // FIX 2: Correct Choices Syntax Applied
-      const choiceText = data?.choices?.[0]?.message?.content?.trim();
-      return choiceText || null;
-    } catch (err: any) {
-      console.warn(`[WhatsAppGirlfriend] OpenRouter ${model} error:`, err?.message || err);
-      return null;
-    }
-  }
-
   public async handleGirlfriendChatMessage(
     jid: string,
     rawText: string,
@@ -162,14 +118,10 @@ _Hamara sweet time complete ho gaya aur privacy ke liye saari temporary chats cl
   ): Promise<void> {
     const session = this.girlfriendSessions.get(jid);
     if (!session) return;
-    const openRouterApiKey = process.env.OPENROUTER_API_KEY || process.env.VITE_OPENROUTER_API_KEY;
-    if (!openRouterApiKey) {
-      await sendMsgFn(
-        jid,
-        "⚠️ *OpenRouter API Key Missing!*\n\n_Girlfriend mode chalane ke liye .env file me OPENROUTER_API_KEY add karein._",
-        rawText,
-        messageKey
-      );
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      await sendMsgFn(jid, "Jaan, mera AI brain abhi connect ho raha hai, bas ek pal ruko... 😘", rawText, messageKey);
       return;
     }
 
@@ -188,74 +140,81 @@ GIRLFRIEND PERSONA GUIDELINES:
 4. PRIVACY CONTEXT: This is a completely private, safe, ephemeral girlfriend session with ${remainingMins} minutes remaining.
 5. VOICE NOTE COMPATIBILITY: Include your actions and feelings in asterisks outside the voice block. But inside the [SPEAK_START] and [SPEAK_END] tags, provide ONLY a clean, pure spoken text script without any asterisks, markdown, actions, or formatting, so that the text-to-speech system can read it perfectly.`;
 
-    // 4 Top Uncensored OpenRouter Models (Ranked by quality & expressiveness)
-    const OPENROUTER_GF_MODELS = [
-      "cognitivecomputations/dolphin-mistral-24b-venice-edition:free", // 🥇 1st: 24B Mistral Venice Uncensored
-      "venice/uncensored:free",                                        // 🥈 2nd: Venice Uncensored Free
-      "venice/llama-3-8b-instruct:free",                               // 🥉 3rd: Venice Llama-3 8B
-      "cognitivecomputations/dolphin3.0-mistral-24b:free",             // 🔹 4th: Dolphin 3.0 Mistral 24B
+    const GF_MODELS = [
+      "gemini-2.5-flash",
+      "gemini-2.5-flash-lite",
+      "gemini-3.6-flash",
+      "gemini-3.5-flash",
+      "gemini-3.1-flash-lite",
     ];
 
-    let replyText = "";
-    let speechScript = "";
+    try {
+      const ai = new GoogleGenAI({ apiKey });
 
-    const orMessages: Array<{ role: string; content: string }> = [
-      { role: "system", content: gfSystemPrompt },
-    ];
+      const historyContents: any[] = [
+        { role: "user", parts: [{ text: `[SYSTEM INSTRUCTION: ${gfSystemPrompt}]` }] },
+        { role: "model", parts: [{ text: "Haan meri jaan, main samajh gayi... Main hamesha tumhare sath hoon aur tumse bohot pyaar karti hoon. Bolo baby! ❤️😘" }] }
+      ];
 
-    for (const h of session.tempHistory.slice(-10)) {
-      orMessages.push({
-        role: h.role === "model" ? "assistant" : h.role,
-        content: h.text,
+      for (const h of session.tempHistory.slice(-10)) {
+        historyContents.push({
+          role: h.role,
+          parts: [{ text: h.text }]
+        });
+      }
+
+      historyContents.push({
+        role: "user",
+        parts: [{ text: rawText }]
       });
-    }
 
-    orMessages.push({ role: "user", content: rawText });
+      let replyText = "";
+      let speechScript = "";
 
-    // Try all 4 OpenRouter models in ranked order
-    for (const model of OPENROUTER_GF_MODELS) {
-      try {
-        const generated = await this.generateWithOpenRouter(orMessages, model, openRouterApiKey);
-        if (generated) {
-          const speakMatch = generated.match(/\[SPEAK_START\]([\s\S]*?)\[SPEAK_END\]/i);
-          speechScript = speakMatch ? speakMatch[1].trim() : "";
-          replyText = generated.replace(/\[SPEAK_START\][\s\S]*?\[SPEAK_END\]/gi, "").trim();
-          break;
+      for (const model of GF_MODELS) {
+        try {
+          const resp = await ai.models.generateContent({
+            model,
+            contents: historyContents,
+          });
+          const fullResp = resp.text?.trim();
+          if (fullResp) {
+            const speakMatch = fullResp.match(/\[SPEAK_START\]([\s\S]*?)\[SPEAK_END\]/i);
+            speechScript = speakMatch ? speakMatch[1].trim() : "";
+            replyText = fullResp.replace(/\[SPEAK_START\][\s\S]*?\[SPEAK_END\]/gi, "").trim();
+            break;
+          }
+        } catch (err: any) {
+          console.warn(`[WhatsAppGirlfriend] Model ${model} failed:`, err?.message || err);
         }
-      } catch (err: any) {
-        console.warn(`[WhatsAppGirlfriend] OpenRouter model ${model} failed:`, err?.message || err);
       }
-    }
 
-    // Direct error if all 4 OpenRouter models are unavailable (NO Gemini fallback)
-    if (!replyText) {
-      await sendMsgFn(
-                jid,
-        "⚠️ *Not available, try again!*\n\n_Baby, abhi OpenRouter ke uncensored girlfriend models busy ya offline hain. Thodi der baad try karo na please! 💕_",
-        rawText,
-        messageKey
-      );
-      return;
-    }
+      if (!replyText) {
+        replyText = "Meri jaan, main tumhari baat sun rahi hoon... Tumhare sath baat karke mera dil kitna khush ho jata hai baby! ❤️😘";
+      }
 
-    session.tempHistory.push({ role: "user", text: rawText });
-    session.tempHistory.push({ role: "model", text: replyText });
-    if (session.tempHistory.length > 30) session.tempHistory.splice(0, session.tempHistory.length - 30);
+      session.tempHistory.push({ role: "user", text: rawText });
+      session.tempHistory.push({ role: "model", text: replyText });
+      if (session.tempHistory.length > 30) session.tempHistory.splice(0, session.tempHistory.length - 30);
 
-    await sendMsgFn(jid, replyText, rawText, messageKey);
+      await sendMsgFn(jid, replyText, rawText, messageKey);
 
-    const isVoiceRequested = isVoiceInput || /\b(voice|audio|speak|bolo|sunao|bol\s*kar|bol\s*ke|aawaz|voice\s*note)\b/i.test(rawText);
-    if (isVoiceRequested && sendVoiceFn) {
-      try {
-        const { voiceBridgeService } = await import("../voiceBridgeService");
-        const textToSpeak = speechScript || replyText.replace(new RegExp("[*_~]", "g"), "").slice(0, 250);
-        const speechRes = await voiceBridgeService.generateSpeech(textToSpeak);
-        if (speechRes && speechRes.buffer.length > 0) {
-          await sendVoiceFn(jid, speechRes.buffer, messageKey, speechRes.mimeType);
+      const isVoiceRequested = isVoiceInput || /\b(voice|audio|speak|bolo|sunao|bol\s*kar|bol\s*ke|aawaz|voice\s*note)\b/i.test(rawText);
+      if (isVoiceRequested && sendVoiceFn) {
+        try {
+          const { voiceBridgeService } = await import("../voiceBridgeService");
+          const textToSpeak = speechScript || replyText.replace(new RegExp("[*_~]", "g"), "").slice(0, 250);
+          const speechRes = await voiceBridgeService.generateSpeech(textToSpeak);
+          if (speechRes && speechRes.buffer.length > 0) {
+            await sendVoiceFn(jid, speechRes.buffer, messageKey, speechRes.mimeType);
+          }
+        } catch (vErr) {
+          console.warn("[WhatsAppGirlfriend] Voice TTS notice:", vErr);
         }
-      } catch (vErr) {
-        console.warn("[WhatsAppGirlfriend] Voice TTS notice:", vErr);
       }
+    } catch (e: any) {
+      console.error("[WhatsAppGirlfriend] Chat processing error:", e);
+      await sendMsgFn(jid, "Jaan, mera server thoda sa blush kar gaya... Ek baar fir se bolo na baby? 😘", rawText, messageKey);
     }
   }
 }
