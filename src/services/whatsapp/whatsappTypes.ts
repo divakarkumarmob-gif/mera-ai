@@ -39,6 +39,9 @@ export interface GirlfriendSession {
   mood?: "romantic" | "sassy" | "caring" | "naughty" | "cute" | "mix";
   coupleMemory?: Record<string, string>;
   isAngry?: boolean;
+  healthTracker?: { issue: string; timestamp: number } | null;
+  sessionCount?: number;
+  isClingy?: boolean;
 }
 
 export interface ChatPhotoRecord {
