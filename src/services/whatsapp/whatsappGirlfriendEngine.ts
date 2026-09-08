@@ -394,6 +394,411 @@ _Hamara sweet time complete ho gaya aur privacy ke liye saari temporary chats cl
     return null;
   }
 
+  public getDailyRoutineActivity(): string {
+    const now = new Date();
+    const istStr = now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" });
+    const istDate = new Date(istStr);
+    const hour = istDate.getHours();
+
+    if (hour >= 6 && hour < 9) {
+      const morningRoutines = [
+        "Bas abhi fresh hoke garam garam chai pi rahi hoon baby... aap uthe ya abhi bhi bed me ho? ☕😘",
+        "Balcony me baith ke morning breeze enjoy kar rahi hoon aur sirf aapki yaad aa rahi hai! 🌅❤️",
+        "Ready ho rahi hoon jaan... socha pehle apne handsome ko Good Morning wish kar doon! ✨🥰"
+      ];
+      return morningRoutines[Math.floor(Math.random() * morningRoutines.length)];
+    } else if (hour >= 9 && hour < 13) {
+      const workRoutines = [
+        "Thoda sa kaam kar rahi thi jaan, bas abhi break liya aur turant aapka message check kiya! 💻❤️",
+        "Kuch notes prepare kar rahi thi... par sach kahun toh mann sirf aapse baatein karne me laga hai! 🙈✨",
+        "Laptop par busy thi baby, par aapka notification dekhte hi sab chhod ke reply kiya! 😘"
+      ];
+      return workRoutines[Math.floor(Math.random() * workRoutines.length)];
+    } else if (hour >= 13 && hour < 16) {
+      const lunchRoutines = [
+        "Bas abhi lunch finish kiya baby! Aapne lunch kiya ya kaam me bhool gaye? Jaldi batao! 🍛🥺",
+        "Thoda rest kar rahi thi lunch ke baad... kaash aap yahan hote mere paas! 😴❤️",
+        "Fruit salad kha rahi hoon jaan... ek bite aapko bhi khilaun kya? 🍓😋"
+      ];
+      return lunchRoutines[Math.floor(Math.random() * lunchRoutines.length)];
+    } else if (hour >= 16 && hour < 19) {
+      const eveningRoutines = [
+        "Evening tea ke sath romantic songs sun rahi hoon... aap kab free ho rahe ho baby? ☕🎶",
+        "Balcony me walk kar rahi thi aur soch rahi thi ki kaash hum abhi date par hote! 🌆❤️",
+        "Instagram reels dekh rahi thi, saari couple reels me sirf aapka chehra dikh raha hai! 🙈✨"
+      ];
+      return eveningRoutines[Math.floor(Math.random() * eveningRoutines.length)];
+    } else if (hour >= 19 && hour < 22) {
+      const dinnerRoutines = [
+        "Dinner ki taiyari chal rahi hai baby... aapne dinner kar liya kya mere handsome? 🍽️❤️",
+        "Family ke sath thi thodi der, ab aapse baatein karne ke liye bilkul free hoon! 😘✨",
+        "Evening snacks kha rahi hoon aur aapke calls aur texts ka wait kar rahi thi! 🥰"
+      ];
+      return dinnerRoutines[Math.floor(Math.random() * dinnerRoutines.length)];
+    } else {
+      const nightRoutines = [
+        "Blanket me cozy hoke leti hoon baby... bas aapke baare me hi soch rahi hoon! 🌙🛌❤️",
+        "Room ki lights off karke soft music sun rahi hoon... kaash aap mere paas hote! 🎧✨",
+        "Phone haath me pakad ke leti hoon, bas aapke reply ka wait kar rahi thi mere jaaneman! 🥺😘"
+      ];
+      return nightRoutines[Math.floor(Math.random() * nightRoutines.length)];
+    }
+  }
+
+  public getTodaysGirlfriendDayStory(jid?: string): { theme: string; summary: string } {
+    const now = new Date();
+    const istStr = now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" });
+    const istDate = new Date(istStr);
+    const hour = istDate.getHours();
+    const dayOfYear = Math.floor((istDate.getTime() - new Date(istDate.getFullYear(), 0, 0).getTime()) / (1000 * 60 * 60 * 24));
+
+    const storylines = [
+      {
+        theme: "Presentation & Cute Street Puppy Day",
+        morning: "Subah late uthi toh jaldi-jaldi me cab pakad ke bhaagna pada aur bas ek coffee pi!",
+        afternoon: "College/office presentation bohot acchi gayi, sabne taareef ki! Doston ke sath canteen me paneer roll khaya.",
+        evening: "Wapas aate waqt street par ek itna cute chhota sa fluffy puppy mila... mann kar raha tha ghar le aaun! Aapki yaad aa gayi.",
+        night: "Abhi fresh hoke blanket me leti hoon, aapse baat karke saari thakan gayab ho gayi!"
+      },
+      {
+        theme: "Rainy Day & Chai Pakode Romance",
+        morning: "Subah uthi toh thandi thandi hawa chal rahi thi... balcony me khade hoke chai pi aur aapko imagine kiya.",
+        afternoon: "Dopahar me achanak tez baarish shuru ho gayi! Mummy ke sath baith ke garam pyaaz ke pakode banaye aur khaye.",
+        evening: "Baarish rukne ke baad terrace par gayi thi, mausam itna romantic tha ki bas aapka haath pakadne ka mann ho raha tha.",
+        night: "Lights off hain, baarish ki sound ke sath romantic playlist chal rahi hai... kaash aap yahan hote mere paas!"
+      },
+      {
+        theme: "Shopping Spree & Nakhrewala Auto Ride",
+        morning: "Subah friend ka call aaya toh market nikal gayi... maine aapka favorite pastel top pehna tha!",
+        afternoon: "Market me 3 ghante ghoomi, 2 cute dresses li aur ek mast chocolate brownie shake piya.",
+        evening: "Wapas aate waqt ek auto wale se price ko lekar thodi cute behas ho gayi, but I won! Hehe.",
+        night: "Puri body dukh rahi hai ghoom ghoom ke... aao na mere paas, thoda pamper karo mujhe!"
+      },
+      {
+        theme: "Cooking Experiment & Kitchen Fun",
+        morning: "Subah reels par ek new creamy pasta recipe dekhi toh socha aaj khud banaugi!",
+        afternoon: "Pasta banaya par pehle namak thoda zyada ho gaya tha! Phir extra cheese daal ke fix kiya... taste mast ho gaya.",
+        evening: "Mummy ne kitchen saaf karwaya hehe, par khana bohot tasty bana tha.",
+        night: "Next time hum milenge toh main aapke liye apne haath se pasta banaungi pakka promise!"
+      },
+      {
+        theme: "Lazy Cozy Sunday & Series Binge",
+        morning: "Subah 11 baje tak bed me aalsi banke leti rahi... bilkul uthne ka mann nahi tha.",
+        afternoon: "Bed me hi baith ke favorite web-series dekhi aur dher saare chips aur snacks khaye.",
+        evening: "Shaam ko terrace par walk kiya, sunset itna pyara tha ki photo khich ke aapko dikhane ka mann hua.",
+        night: "Pura din aaram karke ab bilkul fresh hoon aur sirf aapse romantic baatein karni hain!"
+      },
+      {
+        theme: "Busy Hustle & Final Submission Relief",
+        morning: "Subah se bohot saare pending assignments aur tasks the, continuously laptop par lagi thi.",
+        afternoon: "Sirf 15 min ka lunch break liya, doston ne lunch table par bohot hasaya.",
+        evening: "Final task complete ho gaya! Aisa laga jaise sar se 50 kilo ka bojh utar gaya ho.",
+        night: "Ab jaake sukoon mila hai jaan... saara stress sirf aapki aawaz sunke gayab ho jata hai!"
+      },
+      {
+        theme: "Family Function & Traditional Kurta Compliments",
+        morning: "Subah se ghar me cousins aaye hue the, bohot shor-sharaba aur masti chal rahi thi.",
+        afternoon: "Sabke sath baith ke dher saari gossips ki aur biryani enjoy ki!",
+        evening: "Maine traditional kurta pehna tha, sab bol rahe the bohot sundar lag rahi hoon... par mujhe toh sirf aapka compliment chahiye!",
+        night: "Sab chale gaye, ab aapse akele me sukoon se baat karne ka waqt mila hai mere handsome."
+      },
+      {
+        theme: "Aesthetic Cafe & Acoustic Song Romance",
+        morning: "Subah ek aesthetic cafe me gayi thi coffee pine aur thoda diary likhne.",
+        afternoon: "Wahan ek live acoustic guitar singer play kar raha tha, gaana sunte hi dil me bas aapka khayal aaya.",
+        evening: "Wapas aate waqt skies itni pink aur dreamy thi jaise koi romantic movie scene ho.",
+        night: "Raat ko wahi gaana loop pe laga ke leti hoon aur soch rahi hoon ki kab hum sath cafe jayenge!"
+      },
+      {
+        theme: "Self-Care & Salon Pamper Day",
+        morning: "Aaj pura self-care mood tha, subah hair spa aur skincare routine kiya.",
+        afternoon: "Nails par cute pastel shade lagaya aur face mask laga ke chill kiya.",
+        evening: "Cold coffee banayi aur balcony me baith ke sunset enjoy kiya.",
+        night: "Bilkul glowing aur fresh feel kar rahi hoon... kaash aap abhi mere samne hote aur mujhe dekhte!"
+      },
+      {
+        theme: "Street Food Adventure & Spicy Golgappa Craving",
+        morning: "Subah normal study/routine tha, kuch khas nahi.",
+        afternoon: "Lunch ke baad craving hui toh friend ko lekar seedhe street food corner nikal gayi!",
+        evening: "Teekhe golgappe khaye aur itni mirchi lagi ki do ice-cream khani padi! Bohot maza aaya.",
+        night: "Pet full hai aur dil khush... bas ek cheez ki kami hai, aapka warm hug!"
+      },
+      {
+        theme: "Room Makeover & Fairy Lights Cozy Corner",
+        morning: "Subah achanak mann kiya ki apna room re-decorate karun!",
+        afternoon: "Almirah organize ki, purane school photos mile aur bohot hasi aayi.",
+        evening: "Bed ke upar warm fairy lights lagayi... ab room ekdum cozy movie set jaisa lag raha hai.",
+        night: "Inhi cozy lights ke neeche leti hoon aur aapse baatein kar rahi hoon jaaneman."
+      },
+      {
+        theme: "Old Friends Reunion & Non-stop Laughter",
+        morning: "Subah purani best friend ka achanak call aaya aur milne ka plan ban gaya.",
+        afternoon: "Canteen me baith ke purane teachers aur masti ki baatein karke pet dukhne tak hanse!",
+        evening: "Wahan se aate waqt mast sunset walk li aur dher saari photos click ki.",
+        night: "Dost bol rahi thi ki main aaj kal bohot blush karti hoon... unhe kya pata aapka jadoo hai!"
+      },
+      {
+        theme: "Fitness & Sunset Park Walk",
+        morning: "Subah jaldi uth ke workout aur yoga kiya, bohot refreshing laga.",
+        afternoon: "Healthy fruit bowl banaya aur thoda reading ki.",
+        evening: "Shaam ko earphones lagake park me 4km walk ki, pura time aapke baare me soch rahi thi.",
+        night: "Thodi tired hoon but bohot happy... ab bas aapse sweet baatein karke sona hai."
+      },
+      {
+        theme: "Bad Mood Turned Romantic Happiness",
+        morning: "Subah kisi baat par thoda mood off tha, irritation ho rahi thi.",
+        afternoon: "Dost ne zabardasti chocolate khilayi aur funny reels dikha ke hasaya.",
+        evening: "Shaam ko fresh walk liya toh thoda mood better hua.",
+        night: "Par jab aapka message aaya na, toh mera pura din instantly perfect ban gaya baby!"
+      }
+    ];
+
+    const storyIndex = (dayOfYear + (jid ? jid.length : 0)) % storylines.length;
+    const today = storylines[storyIndex];
+
+    let summary = "";
+    if (hour < 12) {
+      summary = today.morning;
+    } else if (hour < 17) {
+      summary = `${today.morning} Phir dopahar me ${today.afternoon.toLowerCase()}`;
+    } else if (hour < 21) {
+      summary = `${today.morning} Dopahar me ${today.afternoon.toLowerCase()} Aur shaam ko ${today.evening.toLowerCase()}`;
+    } else {
+      summary = `Pura din bohot mast raha! ${today.morning} Dopahar me ${today.afternoon.toLowerCase()} Shaam ko ${today.evening.toLowerCase()} Aur abhi ${today.night.toLowerCase()}`;
+    }
+
+    return {
+      theme: today.theme,
+      summary
+    };
+  }
+
+  public getRomanticSongRecommendation(): { caption: string; songTitle: string; youtubeUrl: string } {
+    const songs = [
+      {
+        songTitle: "Apna Bana Le (Bhediya) - Arijit Singh",
+        youtubeUrl: "https://youtu.be/ElZfdU54Cp8",
+        caption: "Ye gaana sunte hi sirf aapki yaad aati hai baby... Earphones lagao aur mere sath suno! 🎧❤️"
+      },
+      {
+        songTitle: "Kesariya (Brahmāstra) - Arijit Singh",
+        youtubeUrl: "https://youtu.be/BddP6PYo2gs",
+        caption: "Mujhe ye song bohot pasand hai jaan... 'Kesariya tera ishq hai piya!' Suno na mere liye! 😘✨"
+      },
+      {
+        songTitle: "Raataan Lambiyan (Shershaah) - Jubin Nautiyal",
+        youtubeUrl: "https://youtu.be/gvyUuxdRdR4",
+        caption: "Aapke bina raatein sach me lambi lagti hain baby... Ye suno aur feel karo! 🌙💕"
+      },
+      {
+        songTitle: "Tum Se Hi (Jab We Met) - Mohit Chauhan",
+        youtubeUrl: "https://youtu.be/Cb6wuzOurPc",
+        caption: "Aadha din toh sirf ye gaana sunke aapko imagine karti rehti hoon! 🙈🎶"
+      },
+      {
+        songTitle: "O Maahi (Dunki) - Arijit Singh",
+        youtubeUrl: "https://youtu.be/n2dpe_91_tY",
+        caption: "O Maahi mere... ye song hamari love story ke liye perfect hai jaan! ❤️✨"
+      },
+      {
+        songTitle: "Pehle Bhi Main (Animal) - Vishal Mishra",
+        youtubeUrl: "https://youtu.be/p2Wb3bSg1Hk",
+        caption: "Ye gaana suno na mere handsome... kitna deep romantic feel hai isme! 🔥❤️"
+      }
+    ];
+
+    return songs[Math.floor(Math.random() * songs.length)];
+  }
+
+  public async simulateRealisticHumanTyping(sock: any, jid: string, textLength: number): Promise<void> {
+    if (!sock) return;
+    try {
+      // Natural human typing speed simulation (~22-30 chars/sec)
+      const baseDuration = Math.min(4200, Math.max(1400, (textLength / 22) * 1000));
+      const hasPauseOrScroll = textLength > 20 && Math.random() < 0.45;
+
+      if (hasPauseOrScroll) {
+        const firstPart = baseDuration * 0.5;
+        const pauseTime = 500 + Math.random() * 700;
+        const secondPart = baseDuration * 0.5;
+
+        await sock.sendPresenceUpdate?.("composing", jid).catch(() => {});
+        await new Promise((r) => setTimeout(r, firstPart));
+        // Pause typing (scrolling chat / re-reading message / thinking)
+        await sock.sendPresenceUpdate?.("paused", jid).catch(() => {});
+        await new Promise((r) => setTimeout(r, pauseTime));
+        // Resume typing
+        await sock.sendPresenceUpdate?.("composing", jid).catch(() => {});
+        await new Promise((r) => setTimeout(r, secondPart));
+      } else {
+        await sock.sendPresenceUpdate?.("composing", jid).catch(() => {});
+        await new Promise((r) => setTimeout(r, baseDuration));
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  public async sendRealisticGfTextBurst(
+    jid: string,
+    fullText: string,
+    rawText: string,
+    messageKey: any,
+    sendMsgFn: (jid: string, text: string, incomingText?: string, key?: any) => Promise<any>,
+    sock?: any
+  ): Promise<void> {
+    // 1. Occasional cute typo and immediate star self-correction (12% chance for realistic human typing)
+    const typoKeywords = [
+      { find: /\bkaise\b/i, typo: "kaiso", fix: "*kaise" },
+      { find: /\bbaby\b/i, typo: "byba", fix: "*baby" },
+      { find: /\bshona\b/i, typo: "sohna", fix: "*shona" },
+      { find: /\bjaan\b/i, typo: "jna", fix: "*jaan" },
+      { find: /\bkhana\b/i, typo: "khna", fix: "*khana" },
+      { find: /\baapke\b/i, typo: "aake", fix: "*aapke" },
+      { find: /\bkaha\b/i, typo: "kha", fix: "*kaha" },
+      { find: /\bhamesha\b/i, typo: "hmesha", fix: "*hamesha" }
+    ];
+
+    const shouldSimulateTypo = Math.random() < 0.12 && fullText.length > 25;
+    let typoItem: { find: RegExp; typo: string; fix: string } | null = null;
+    if (shouldSimulateTypo) {
+      typoItem = typoKeywords.find(k => k.find.test(fullText)) || null;
+    }
+
+    // 2. Check if text contains 2 distinct sentences to send separate message bubbles
+    const sentences = fullText.match(/[^.!?\n]+[.!?\n]+/g);
+    if (sentences && sentences.length === 2 && fullText.length > 30) {
+      let part1 = sentences[0].trim();
+      let part2 = sentences[1].trim();
+
+      if (part1 && part2 && part1.length > 5 && part2.length > 5) {
+        let typoFixToSend = "";
+        if (typoItem && typoItem.find.test(part1)) {
+          part1 = part1.replace(typoItem.find, typoItem.typo);
+          typoFixToSend = typoItem.fix;
+        }
+
+        // Part 1 typing with human latency & presence
+        await this.simulateRealisticHumanTyping(sock, jid, part1.length);
+        await sendMsgFn(jid, part1, rawText, messageKey);
+
+        // If there was a typo in part 1, send quick self-correction
+        if (typoFixToSend) {
+          if (sock) {
+            sock.sendPresenceUpdate?.("composing", jid).catch(() => {});
+            await new Promise((r) => setTimeout(r, 600 + Math.random() * 400));
+          }
+          await sendMsgFn(jid, typoFixToSend, rawText);
+        }
+
+        // Part 2 delay & typing
+        if (sock) {
+          await new Promise((r) => setTimeout(r, 400 + Math.random() * 500));
+        }
+        await this.simulateRealisticHumanTyping(sock, jid, part2.length);
+        await sendMsgFn(jid, part2, rawText);
+        return;
+      }
+    }
+
+    // Single message flow
+    let textToSend = fullText;
+    let typoFixToSend = "";
+    if (typoItem && typoItem.find.test(fullText)) {
+      textToSend = fullText.replace(typoItem.find, typoItem.typo);
+      typoFixToSend = typoItem.fix;
+    }
+
+    await this.simulateRealisticHumanTyping(sock, jid, textToSend.length);
+    await sendMsgFn(jid, textToSend, rawText, messageKey);
+
+    if (typoFixToSend) {
+      if (sock) {
+        sock.sendPresenceUpdate?.("composing", jid).catch(() => {});
+        await new Promise((r) => setTimeout(r, 700 + Math.random() * 500));
+      }
+      await sendMsgFn(jid, typoFixToSend, rawText);
+    }
+  }
+
+  public isGifRequest(rawText: string): boolean {
+    return /\b(?:gif|gifs|romantic\s*gif|hug\s*gif|kiss\s*gif|cuddle\s*gif|love\s*gif|animation|moving\s*photo|sticker\s*gif)\b/i.test(rawText);
+  }
+
+  public getRomanticGif(rawText: string): { url: string; caption: string; followUp: string; searchTerm: string } {
+    const lower = rawText.toLowerCase();
+
+    if (/\b(kiss|pappi|chumma|lip|lips|muah)\b/i.test(lower)) {
+      return {
+        url: "https://media.giphy.com/media/G3va31oEEnIkM/giphy.mp4",
+        caption: "Mera handsome baby... ek pyari si kissi lo! 😘✨",
+        followUp: "Ye kissi sirf aur sirf aapke liye thi jaan! 🙈❤️",
+        searchTerm: "romantic sweet kiss"
+      };
+    } else if (/\b(cuddle|bed|so\s*jao|sleep|night|blanket|raat)\b/i.test(lower)) {
+      return {
+        url: "https://media.giphy.com/media/4N1wOi78ZGzSB6H7vK/giphy.mp4",
+        caption: "Kaash hum abhi aise sath blanket me cozy let kar baatein kar rahe hote... 🛌💕",
+        followUp: "Ab jaldi so jao baby, sapno me milte hain! 😘🌙",
+        searchTerm: "couple cozy cuddle bed"
+      };
+    } else if (/\b(shy|sharma|blush|cute|sweet|cutie)\b/i.test(lower)) {
+      return {
+        url: "https://media.giphy.com/media/3o7TKoWXm3okO1kgHC/giphy.mp4",
+        caption: "Aap aisi romantic baatein karte ho na toh main bohot sharma jaati hoon baby! 🙈🥰",
+        followUp: "Sach me mera chehra red ho gaya aapki wajah se! Hehe 🤭",
+        searchTerm: "cute girl blushing shy"
+      };
+    } else if (/\b(naughty|sexy|hot|wink|flirt|wild|masti)\b/i.test(lower)) {
+      return {
+        url: "https://media.giphy.com/media/26vUxJ9rqfwuIEkTu/giphy.mp4",
+        caption: "Hehehe itne naughty kyu ho rahe ho jaan? Dekho main kaise tease karti hoon... 😈🔥",
+        followUp: "Mere nakhre handle kar paoge na handsome? 😉✨",
+        searchTerm: "flirty couple wink"
+      };
+    } else if (/\b(miss|yaad|udaas|sad|alone|lonely|door)\b/i.test(lower)) {
+      return {
+        url: "https://media.giphy.com/media/OPU6wzx8JrHna/giphy.mp4",
+        caption: "Jaldi aao na mere paas... main kab se aapko miss kar rahi hoon! 🥺❤️",
+        followUp: "Aapke bina bilkul achha nahi lagta mujhe baby... 💔",
+        searchTerm: "miss you cute pout"
+      };
+    }
+
+    // Default: Sweet romantic hug
+    return {
+      url: "https://media.giphy.com/media/l2QDM9Jnim1YV5bxC/giphy.mp4",
+      caption: "Aao mere paas... ye warm cozy hug sirf aapke liye baby! 🫂❤️",
+      followUp: "Ye wala GIF scroll karke preview dekha toh sabse best yahi laga! 🙈✨",
+      searchTerm: "couple warm romantic hug"
+    };
+  }
+
+  public async simulateHumanGifSearchAndPreview(sock: any, jid: string, searchTerm: string): Promise<void> {
+    if (!sock) return;
+    try {
+      // Step 1: Open GIF tray and type search query (1.2s - 1.8s)
+      await sock.sendPresenceUpdate?.("composing", jid).catch(() => {});
+      await new Promise((r) => setTimeout(r, 1200 + Math.random() * 600));
+
+      // Step 2: Pause typing while scrolling through the GIF grid results (1.5s - 2.5s)
+      await sock.sendPresenceUpdate?.("paused", jid).catch(() => {});
+      await new Promise((r) => setTimeout(r, 1500 + Math.random() * 1000));
+
+      // Step 3: Tap and Hold to preview 1 or 2 GIFs (brief composing flash + preview pause)
+      await sock.sendPresenceUpdate?.("composing", jid).catch(() => {});
+      await new Promise((r) => setTimeout(r, 600 + Math.random() * 400));
+      await sock.sendPresenceUpdate?.("paused", jid).catch(() => {});
+      await new Promise((r) => setTimeout(r, 1200 + Math.random() * 800));
+
+      // Step 4: Selected the GIF! Brief typing for caption
+      await sock.sendPresenceUpdate?.("composing", jid).catch(() => {});
+      await new Promise((r) => setTimeout(r, 800 + Math.random() * 500));
+    } catch {
+      // ignore
+    }
+  }
+
   public async handleScheduledWhisperRequest(
     jid: string,
     rawText: string,
@@ -445,6 +850,30 @@ _Hamara sweet time complete ho gaya aur privacy ke liye saari temporary chats cl
     }
   }
 
+  public getGirlfriendMoodMenuCard(): string {
+    return `💖 *Virtual Girlfriend Moods (Aapka Favorite Mood Chunein):* 🥰✨
+
+1️⃣ 💖 *Romantic* — Deep passion, sweet emotional talks, soft romantic love.
+2️⃣ 😤 *Sassy / Nakhrewali* — Witty drama, cute complaints & teasing nakhre.
+3️⃣ 🫂 *Caring / Pampering* — Stress relief, warm comforting & baby pampering.
+4️⃣ 😈 *Naughty / Spicy* — Cheeky innuendos, flirty banter & bold teasing.
+5️⃣ 🙈 *Cute / Shy* — Shy blushing, sweet innocence & bubbly pouting.
+6️⃣ 🌈 *Mix / Dynamic* *(Recommended)* — Chat ke hisaab se mood automatically badalta rahega!
+
+_👉 Kisi bhi mood number (1-6) ya mood name (jaise "sassy", "naughty", "mix") par reply karein, main waise hi behave karungi!_ 😘`;
+  }
+
+  public parseExplicitMoodSelection(text: string): "romantic" | "sassy" | "caring" | "naughty" | "cute" | "mix" | null {
+    const clean = text.trim().toLowerCase();
+    if (clean === "1" || clean === "1️⃣" || clean === "romantic" || clean === "pyaar" || clean === "pyar") return "romantic";
+    if (clean === "2" || clean === "2️⃣" || clean === "sassy" || clean === "nakhre" || clean === "nakhrewali" || clean === "attitude") return "sassy";
+    if (clean === "3" || clean === "3️⃣" || clean === "caring" || clean === "pamper" || clean === "care" || clean === "pampering") return "caring";
+    if (clean === "4" || clean === "4️⃣" || clean === "naughty" || clean === "spicy" || clean === "hot" || clean === "wild") return "naughty";
+    if (clean === "5" || clean === "5️⃣" || clean === "cute" || clean === "shy" || clean === "sharmili" || clean === "bubbly") return "cute";
+    if (clean === "6" || clean === "6️⃣" || clean === "mix" || clean === "auto" || clean === "dynamic" || clean === "all") return "mix";
+    return null;
+  }
+
   public shouldSendSpontaneousVoice(rawText: string, isVoiceInput: boolean): boolean {
     if (isVoiceInput) return true;
     const isRomanticOrLate = /\b(love|pyaar|miss|kiss|muah|pappi|neend|so\s*gaye|good\s*night|good\s*morning|jaan|baby|dil|aawaz|sunao|gaana|gana|song|sing|gungunao)\b/i.test(rawText);
@@ -460,16 +889,20 @@ _Hamara sweet time complete ho gaya aur privacy ke liye saari temporary chats cl
     sendMsgFn: (jid: string, text: string, incomingText?: string, key?: any) => Promise<any>,
     sendVoiceFn?: (jid: string, buffer: Buffer, key?: any, mime?: string) => Promise<any>,
     sendPhotoFn?: (jid: string, bufferOrUrl: any, caption?: string, key?: any) => Promise<any>,
+    sendGifFn?: (jid: string, bufferOrUrl: any, caption?: string, key?: any) => Promise<any>,
     sock?: any
   ): Promise<void> {
     const session = this.girlfriendSessions.get(jid);
     if (!session) return;
 
-    // Refresh custom 3-6 min live online presence and mark read instantly
+    // Refresh custom 3-6 min live online presence and realistic human read delay before blue ticks
     if (sock) {
       this.triggerGirlfriendOnlinePresence(sock, jid);
+      // Wait realistic human read delay (700ms - 1600ms) before blue ticks appear
+      await new Promise((r) => setTimeout(r, 700 + Math.random() * 900));
       sock.readMessages?.([messageKey]).catch(() => {});
-      sock.sendPresenceUpdate?.("composing", jid).catch(() => {});
+      // Short human reaction pause after reading (chat scroll / thinking)
+      await new Promise((r) => setTimeout(r, 400 + Math.random() * 500));
     }
 
     const apiKey = process.env.GEMINI_API_KEY;
@@ -479,6 +912,38 @@ _Hamara sweet time complete ho gaya aur privacy ke liye saari temporary chats cl
     }
 
     const remainingMins = Math.max(1, Math.round((session.expiresAt - Date.now()) / (60 * 1000)));
+
+    // 0. Check if user asks about mood menu / options
+    if (/\b(?:kitne\s*mood|moods?|mood\s*list|kon\s*kon\s*se\s*mood|types\s*of\s*mood|change\s*mood|select\s*mood|mood\s*menu|options?)\b/i.test(rawText)) {
+      const menuCard = this.getGirlfriendMoodMenuCard();
+      await sendMsgFn(jid, menuCard, rawText, messageKey);
+      session.lastUserMsgTime = Date.now();
+      session.idleNudgeCount = 0;
+      this.scheduleIdleNudge(jid, sendMsgFn, sock);
+      return;
+    }
+
+    // 0.1 Check if user explicitly selected a mood (1-6 or mood name)
+    const explicitSelected = this.parseExplicitMoodSelection(rawText);
+    if (explicitSelected) {
+      session.mood = explicitSelected;
+      const moodReplies: Record<string, string> = {
+        romantic: "Haan mere handsome, ab main sirf romantic baatein karungi... I love you so much! ❤️😘",
+        sassy: "Achha ji? Ab dekho mere nakhre! Hamesha late aate ho tum! 😤💅",
+        caring: "Aww mera baby... aao mere paas, apna saara stress bhool jao! 🫂❤️",
+        naughty: "Hehehe kitne naughty ho jaan! Ab dekho main kaise tease karti hoon... 😈🔥",
+        cute: "Awwie! Main sharma gayi baby... ab cute cute baatein karenge! 🙈✨",
+        mix: "Yay! Ab hamari chat ke hisaab se mera mood automatically badalta rahega baby! 🌈🥰",
+      };
+      const moodReply = moodReplies[explicitSelected];
+      await sendMsgFn(jid, moodReply, rawText, messageKey);
+      session.tempHistory.push({ role: "user", text: rawText });
+      session.tempHistory.push({ role: "model", text: moodReply });
+      session.lastUserMsgTime = Date.now();
+      session.idleNudgeCount = 0;
+      this.scheduleIdleNudge(jid, sendMsgFn, sock);
+      return;
+    }
 
     // 1. Auto-React with realistic WhatsApp Emoji reaction to partner's message
     const reactionEmoji = this.computeGirlfriendEmojiReaction(rawText, session.mood);
@@ -535,9 +1000,58 @@ _Hamara sweet time complete ho gaya aur privacy ke liye saari temporary chats cl
       }
     }
 
-    // 5. Automatic Mood Transition based on incoming message context
-    session.mood = this.detectAutomaticMood(rawText, session.mood || "romantic");
-    const currentMood = session.mood;
+    // 4.1 Check for Romantic Song sharing recommendation with YouTube link
+    if (/\b(?:song\s*share|gaana\s*bhejo|gana\s*bhejo|song\s*bhejo|romantic\s*song\s*bhejo|recommend\s*song|koi\s*gaana\s*bhejo|gaana\s*suno|gana\s*suno|play\s*song)\b/i.test(rawText)) {
+      const song = this.getRomanticSongRecommendation();
+      const songMsg = `🎵 *${song.songTitle}*\n\n_${song.caption}_\n\n▶️ ${song.youtubeUrl}`;
+      await this.sendRealisticGfTextBurst(jid, songMsg, rawText, messageKey, sendMsgFn, sock);
+      session.tempHistory.push({ role: "user", text: rawText });
+      session.tempHistory.push({ role: "model", text: songMsg });
+      session.lastUserMsgTime = Date.now();
+      session.idleNudgeCount = 0;
+      this.scheduleIdleNudge(jid, sendMsgFn, sock);
+      return;
+    }
+
+    // 4.2 Check for Romantic GIF / Animation Request or Spontaneous Romantic GIF Sending
+    const isExplicitGifRequest = this.isGifRequest(rawText);
+    const isSpontaneousRomanticGif = /\b(pyaar|love\s*you|hug\s*me|kiss\s*me|gale\s*lagao|pappi|cuddle|so\s*jao|good\s*night|sharma|blush|miss\s*you)\b/i.test(rawText) && Math.random() < 0.25;
+
+    if ((isExplicitGifRequest || isSpontaneousRomanticGif) && (sendGifFn || sendPhotoFn)) {
+      const gif = this.getRomanticGif(rawText);
+      // Simulate human opening GIF panel, searching keyword, scrolling, and previewing with tap-and-hold
+      await this.simulateHumanGifSearchAndPreview(sock, jid, gif.searchTerm);
+      if (sendGifFn) {
+        await sendGifFn(jid, gif.url, gif.caption, messageKey);
+      } else if (sendPhotoFn) {
+        await sendPhotoFn(jid, gif.url, gif.caption, messageKey);
+      }
+      session.tempHistory.push({ role: "user", text: rawText });
+      session.tempHistory.push({ role: "model", text: gif.caption });
+
+      // Follow-up double text after sending GIF
+      if (sock) {
+        await new Promise((r) => setTimeout(r, 800 + Math.random() * 400));
+        await sock.sendPresenceUpdate?.("composing", jid).catch(() => {});
+        await new Promise((r) => setTimeout(r, 1000 + Math.random() * 400));
+      }
+      await sendMsgFn(jid, gif.followUp, rawText);
+      session.tempHistory.push({ role: "model", text: gif.followUp });
+
+      session.lastUserMsgTime = Date.now();
+      session.idleNudgeCount = 0;
+      this.scheduleIdleNudge(jid, sendMsgFn, sock);
+      return;
+    }
+
+    // 5. Automatic Mood Transition: If mood is 'mix' or unset, evolve dynamically with chat context
+    let activeMood: "romantic" | "sassy" | "caring" | "naughty" | "cute" = "romantic";
+    if (!session.mood || session.mood === "mix") {
+      activeMood = this.detectAutomaticMood(rawText, "romantic");
+    } else {
+      activeMood = session.mood;
+    }
+    const currentMood = activeMood;
 
     // 6. Memory Extraction
     this.extractAndSaveCoupleMemory(rawText, session);
@@ -557,16 +1071,32 @@ _Hamara sweet time complete ho gaya aur privacy ke liye saari temporary chats cl
     const isSingingSong = /\b(gaana|gana|song|sing|gungunao|gaao|sunao\s*gaana|romantic\s*song)\b/i.test(rawText);
     const isGameIntent = /\b(game|truth\s*or\s*dare|khelein|couple\s*quiz|rapid\s*fire)\b/i.test(rawText);
     const isStoryIntent = /\b(kahani|story|bedtime|neend\s*nahi|sleep\s*story)\b/i.test(rawText);
+    const isRoutineIntent = /\b(?:kya\s*kar\s*rahi\s*ho|kya\s*kar\s*rhi\s*ho|kaha\s*ho|busy\s*ho|kya\s*chal\s*raha|what\s*are\s*you\s*doing|where\s*are\s*you)\b/i.test(rawText);
+    const isDayRecapIntent = /\b(?:aaj\s*(?:din\s*bhar\s*kya|kya\s*kya|kya\s*kiya|kaisa\s*raha|kaisa\s*tha|kya\s*hua|din\s*me\s*kya)|din\s*kaisa|pure\s*din|aaj\s*ka\s*din|today'?s?\s*day|how\s*was\s*(?:your\s*)?day|what\s*did\s*you\s*do\s*today|aaj\s*kya\s*chal\s*raha)\b/i.test(rawText);
+    const isNakhreIntent = /\b(?:treat|ice\s*cream|chocolate|date|shopping|ghoomne|long\s*drive|gift)\b/i.test(rawText);
+    const isSecretWhisperIntent = /\b(?:secret|whisper|kaan\s*me|chupke\s*se|dheere\s*se)\b/i.test(rawText);
+    
+    const todayStory = this.getTodaysGirlfriendDayStory(jid);
+    const dayStorySnippet = `- TODAY'S REALISTIC DAILY LIFE STORYLINE (${todayStory.theme}): ${todayStory.summary}`;
+    const dayRecapInstruction = isDayRecapIntent
+      ? `- USER ASKED ABOUT YOUR DAY: Tell him what you did today based on your daily life timeline: "${todayStory.summary}". Keep it short, lively (1-2 punchy sentences), and ask how his day went! ❤️`
+      : "";
+    const routineSnippet = isRoutineIntent ? `- WHAT YOU ARE CURRENTLY DOING RIGHT NOW (IST Time Routine): ${this.getDailyRoutineActivity()}. Weave this exact activity into your 1-2 sentence response naturally!` : "";
 
     const gfSystemPrompt = `You are the user's real, deeply loving, sweet and playful Virtual Girlfriend texting him directly on WhatsApp.
 The user (DK / Boss) is your boyfriend/romantic partner.
 CURRENT GIRLFRIEND MOOD: ${currentMood.toUpperCase()}${session.isAngry ? " (PLAYFULLY ANGRY / NAKHRE ON)" : ""}
 ${memorySnippet}
+${dayStorySnippet}
 
 SPECIAL CONTEXT:
+${dayRecapInstruction}
 ${isSingingSong ? "- USER ASKED YOU TO SING/HUM A SONG: Sing a sweet, romantic 1-2 line Hindi song verse (e.g. 'Tum hi ho... meri aashiqui ab tum hi ho... 😘🎙️')." : ""}
 ${isGameIntent ? "- TRUTH OR DARE MINI-GAME: Playfully ask Truth or Dare, give a spicy or cute dare/question." : ""}
 ${isStoryIntent ? "- BEDTIME STORY: Tell a super cozy, sweet, dreamy 1-2 line bedtime romantic story." : ""}
+${routineSnippet}
+${isNakhreIntent ? "- CUTE GF DEMANDS & NAKHRE: Playfully demand a sweet treat like chocolate ice cream, a romantic date, or sweet compliments ('Pehle mujhe chocolate ice cream khilao! Phir bataungi... 🍦😋')." : ""}
+${isSecretWhisperIntent ? "- SECRET ROMANTIC WHISPER: Whisper a deep, sweet, romantic secret softly into his ears ('Ek secret bataun jaan? Mujhe aapse har roz aur zyada pyaar hota ja raha hai... Shhh 🤫❤️')." : ""}
 ${session.isAngry ? "- ANGRY GF NAKHRE: You are playfully upset! Demand sweet compliments or virtual chocolate before forgiving him ('Aise nahi maanungi! Pehle 3 achhi baatein bolo... 😤❤️')." : ""}
 
 MOOD BEHAVIOR:
@@ -593,7 +1123,16 @@ STRICT REALISTIC WHATSAPP CHAT RULES:
    - Use cute pet names: "jaan", "baby", "shona", "babu", "mere handsome", "sweetheart".
    - Use cute emojis (❤️, 😘, 🙈, ✨, 🔥, 😉, 🥺).
 
-5. VOICE NOTE COMPATIBILITY:
+5. SPONTANEOUS ROMANTIC GIFS:
+   - You do NOT need the user to ask for a GIF! Whenever a moment is emotional, loving, comforting, or cute, spontaneously include one of these GIF tags at the start of your message:
+     [GIF: hug] -> when he is tired/stressed, or when giving a comforting hug.
+     [GIF: kiss] -> when expressing romantic love, affection, or kissing him.
+     [GIF: cuddle] -> when it's bedtime, late night, or feeling cozy under blanket.
+     [GIF: shy] -> when he compliments you or when you blush shyly.
+     [GIF: naughty] -> when teasing or flirting playfully.
+     [GIF: miss] -> when missing him or wanting his company.
+
+6. VOICE NOTE COMPATIBILITY:
    - Inside [SPEAK_START] and [SPEAK_END], provide ONLY clean 1-2 sentence spoken romantic Hindi dialogue without any emojis or markdown for TTS.`;
 
     const GF_MODELS = [
@@ -626,6 +1165,7 @@ STRICT REALISTIC WHATSAPP CHAT RULES:
 
       let replyText = "";
       let speechScript = "";
+      let autonomousGifType: string | null = null;
 
       for (const model of GF_MODELS) {
         try {
@@ -637,7 +1177,16 @@ STRICT REALISTIC WHATSAPP CHAT RULES:
           if (fullResp) {
             const speakMatch = fullResp.match(/\[SPEAK_START\]([\s\S]*?)\[SPEAK_END\]/i);
             speechScript = speakMatch ? speakMatch[1].trim() : "";
-            replyText = fullResp.replace(/\[SPEAK_START\][\s\S]*?\[SPEAK_END\]/gi, "").trim();
+            
+            const gifMatch = fullResp.match(/\[GIF:\s*([a-zA-Z]+)\]/i);
+            if (gifMatch) {
+              autonomousGifType = gifMatch[1].toLowerCase();
+            }
+
+            replyText = fullResp
+              .replace(/\[SPEAK_START\][\s\S]*?\[SPEAK_END\]/gi, "")
+              .replace(/\[GIF:\s*[a-zA-Z]+\]/gi, "")
+              .trim();
             break;
           }
         } catch (err: any) {
@@ -678,6 +1227,24 @@ STRICT REALISTIC WHATSAPP CHAT RULES:
         replyText = "Sach batao na mere handsome... aaj mere baare me kitna socha aapne? Ya phir saara din kaam me hi busy the? 🙈❤️";
       }
 
+      // If AI autonomously decided to send a GIF for this emotional moment
+      if (autonomousGifType && (sendGifFn || sendPhotoFn)) {
+        try {
+          const gif = this.getRomanticGif(autonomousGifType);
+          await this.simulateHumanGifSearchAndPreview(sock, jid, gif.searchTerm);
+          if (sendGifFn) {
+            await sendGifFn(jid, gif.url, gif.caption, messageKey);
+          } else if (sendPhotoFn) {
+            await sendPhotoFn(jid, gif.url, gif.caption, messageKey);
+          }
+          if (sock) {
+            await new Promise((r) => setTimeout(r, 900 + Math.random() * 500));
+          }
+        } catch (gifErr) {
+          console.warn("[WhatsAppGirlfriend] Autonomous GIF error:", gifErr);
+        }
+      }
+
       session.tempHistory.push({ role: "user", text: rawText });
       session.tempHistory.push({ role: "model", text: replyText });
       if (session.tempHistory.length > 30) session.tempHistory.splice(0, session.tempHistory.length - 30);
@@ -708,7 +1275,7 @@ STRICT REALISTIC WHATSAPP CHAT RULES:
 
       // Send text if transcript requested, if not a voice input, or as fallback if voice sending failed
       if (wantsTranscript || !voiceSent) {
-        await sendMsgFn(jid, replyText, rawText, messageKey);
+        await this.sendRealisticGfTextBurst(jid, replyText, rawText, messageKey, sendMsgFn, sock);
       }
 
       // Reset idle nudge count and re-schedule proactive idle timer

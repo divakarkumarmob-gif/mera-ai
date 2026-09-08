@@ -234,6 +234,7 @@ class WhatsAppBotService {
       (j, t, inT, k) => this.sendHumanLikeMessage(j, t, inT, k),
       (j, b, k, m) => this.sendVoiceMessage(j, b, k, m),
       (j, img, cap, k) => this.sendPhotoMessage(j, img, cap, k),
+      (j, gif, cap, k) => this.sendGifMessage(j, gif, cap, k),
       this.sock
     );
   }
@@ -1348,6 +1349,44 @@ class WhatsAppBotService {
       return { success: true, message: `Photo successfully delivered to ${jid}!` };
     } catch (e: any) {
       return { success: false, message: `Failed to send photo: ${e?.message || e}` };
+    }
+  }
+
+  public async sendGifMessage(
+    target: string,
+    gifSource: string | Buffer,
+    caption?: string,
+    messageKey?: any
+  ): Promise<{ success: boolean; message: string }> {
+    if (!this.isConnected || !this.sock) {
+      return { success: false, message: "WhatsApp bot is not connected." };
+    }
+
+    try {
+      let jid = target;
+      if (!jid.includes("@")) {
+        let cleanPhone = target.replace(/[\s\-\(\)\+]/g, "").trim();
+        if (cleanPhone.length === 10) cleanPhone = `91${cleanPhone}`;
+        jid = `${cleanPhone}@s.whatsapp.net`;
+      }
+
+      const gifPayload = typeof gifSource === "string" ? { url: gifSource } : gifSource;
+      let sendRes: any = null;
+      try {
+        sendRes = await this.sock.sendMessage(jid, { video: gifPayload, gifPlayback: true, caption: caption || "" });
+      } catch {
+        sendRes = await this.sock.sendMessage(jid, { image: gifPayload, caption: caption || "" });
+      }
+
+      if (sendRes?.key?.id) {
+        this.botSentMessageIds.add(sendRes.key.id);
+      }
+
+      const recipientKey = jid.replace(/@.*$/, "");
+      humanBotFirewallService.recordDispatchedMessage("whatsapp", recipientKey);
+      return { success: true, message: `GIF successfully delivered to ${jid}!` };
+    } catch (e: any) {
+      return { success: false, message: `Failed to send GIF: ${e?.message || e}` };
     }
   }
 
