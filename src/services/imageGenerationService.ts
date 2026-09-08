@@ -3,10 +3,11 @@
  *
  * High-performance AI Image Generation Engine for WhatsApp, Telegram, and Live Assistant.
  * Multi-Tier Engine Architecture:
- * 1. Primary: Hugging Face Inference API (FLUX.1-schnell & SDXL) - Ultra-HD Photorealistic.
- * 2. Tier 2: Google Imagen 3 (imagen-3.0-generate-002 / imagen-3.0-fast-generate-001) via @google/genai.
- * 3. Tier 3: Ultra-fast Pollinations Flux AI (Zero-downtime free fallback).
- * 4. Tier 4: Pollinations Turbo AI (Instant backup).
+ * 1. Primary (Tier 1): Cloudflare Workers AI (@cf/black-forest-labs/flux-1-schnell & SDXL Lightning) - Dedicated Edge GPUs, 0 Cold Start, 10k Neurons/day.
+ * 2. Tier 2: Hugging Face Inference API (FLUX.1-schnell & SDXL) - Ultra-HD Photorealistic.
+ * 3. Tier 3: Google Imagen 3 (imagen-3.0-generate-002 / imagen-3.0-fast-generate-001) via @google/genai.
+ * 4. Tier 4: Ultra-fast Pollinations Flux AI (Zero-downtime free fallback).
+ * 5. Tier 5: Pollinations Turbo AI (Instant backup).
  */
 
 import { GoogleGenAI } from "@google/genai";
@@ -42,7 +43,74 @@ class ImageGenerationService {
       };
     }
 
-    // ── Tier 1: Hugging Face FLUX.1 / SDXL (Primary Engine) ─────────────────
+    // ── Tier 1: Cloudflare Workers AI (Primary Engine - Ultra-Fast Edge FLUX.1) ─
+    const cfToken = (
+      process.env.CLOUDFLARE_API_TOKEN ||
+      process.env.CLOUDFLARE_API_KEY ||
+      process.env.CF_API_TOKEN ||
+      process.env.CF_TOKEN ||
+      ""
+    ).trim();
+
+    const cfAccountId = (
+      process.env.CLOUDFLARE_ACCOUNT_ID ||
+      process.env.CF_ACCOUNT_ID ||
+      process.env.CLOUDFLARE_ACCOUNT ||
+      ""
+    ).trim();
+
+    if (cfToken && cfAccountId) {
+      const cfModels = [
+        "@cf/black-forest-labs/flux-1-schnell",
+        "@cf/bytedance/stable-diffusion-xl-lightning",
+        "@cf/stabilityai/stable-diffusion-xl-base-1.0",
+      ];
+
+      for (const cfModel of cfModels) {
+        try {
+          console.log(`[ImageGen] Trying Cloudflare Workers AI (${cfModel})...`);
+          const cfUrl = `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/ai/run/${cfModel}`;
+          const resp = await Promise.race([
+            fetch(cfUrl, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${cfToken}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ prompt: rawPrompt }),
+            }),
+            new Promise<Response>((_, reject) =>
+              setTimeout(() => reject(new Error("Cloudflare Workers AI timeout")), 25000)
+            ),
+          ]);
+
+          if (resp.ok) {
+            const arrayBuf = await resp.arrayBuffer();
+            const buffer = Buffer.from(arrayBuf);
+            if (buffer.length > 2000) {
+              console.log(
+                `[ImageGen] Successfully generated image via Cloudflare (${cfModel}) [${buffer.length} bytes]`
+              );
+              return {
+                success: true,
+                buffer,
+                model: `Cloudflare (${cfModel.split("/").pop()})`,
+                prompt: rawPrompt,
+              };
+            }
+          } else {
+            const errBody = await resp.text().catch(() => "");
+            console.warn(
+              `[ImageGen] Cloudflare (${cfModel}) returned status ${resp.status}: ${errBody.slice(0, 150)}`
+            );
+          }
+        } catch (cfErr: any) {
+          console.warn(`[ImageGen] Cloudflare (${cfModel}) failed (${cfErr?.message || cfErr}), trying next...`);
+        }
+      }
+    }
+
+    // ── Tier 2: Hugging Face FLUX.1 / SDXL (Secondary Engine) ────────────────
     const hfToken = (
       process.env.HUGGINGFACE_API_KEY ||
       process.env.HF_TOKEN ||
@@ -101,13 +169,13 @@ class ImageGenerationService {
               );
             }
           } catch (hfErr: any) {
-            console.warn(`[ImageGen] Hugging Face (${modelName}) failed (${hfErr?.message || hfErr}), trying next endpoint/model...`);
+            console.warn(`[ImageGen] Hugging Face (${modelName}) failed (${hfErr?.message || hfErr}), trying next...`);
           }
         }
       }
     }
 
-    // ── Tier 2: Google Imagen 3 via @google/genai ───────────────────────────
+    // ── Tier 3: Google Imagen 3 via @google/genai ───────────────────────────
     const geminiKey = process.env.GEMINI_API_KEY;
     if (geminiKey) {
       for (const modelName of ["imagen-3.0-generate-002", "imagen-3.0-fast-generate-001"]) {
@@ -145,7 +213,7 @@ class ImageGenerationService {
       }
     }
 
-    // ── Tier 3: Ultra-Fast Pollinations Flux AI Fallback ───────────────────
+    // ── Tier 4: Ultra-Fast Pollinations Flux AI Fallback ───────────────────
     try {
       console.log(`[ImageGen] Falling back to Pollinations Flux AI for prompt: "${rawPrompt.slice(0, 60)}..."`);
       const width = options.aspectRatio === "16:9" ? 1280 : options.aspectRatio === "9:16" ? 720 : 1024;
@@ -181,7 +249,7 @@ class ImageGenerationService {
       console.error("[ImageGen] Pollinations Flux fallback failed:", pollErr?.message || pollErr);
     }
 
-    // ── Tier 4: Pollinations Turbo Model Final Fallback ───────────────────
+    // ── Tier 5: Pollinations Turbo Model Final Fallback ───────────────────
     try {
       const seed = Math.floor(Math.random() * 1000000);
       const encodedPrompt = encodeURIComponent(rawPrompt);
