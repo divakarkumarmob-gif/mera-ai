@@ -2687,32 +2687,7 @@ class WhatsAppBotService {
           required: [],
         },
       },
-      {
-        name: "get_contact_conversation_history",
-        description: "Fetch complete two-way dialogue history and conversation breakdown for any contact (e.g. 'Ram ne msg kiya kya', 'Rahul se kya baat hui', 'Priya ne kya bola tumne kya reply diya'). Shows incoming messages, Friday's auto-replies, and DK's replies.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            contactNameOrPhone: { type: "STRING", description: "Name of the person (e.g. 'Ram', 'Rahul') or phone number" },
-            daysBack: { type: "NUMBER", description: "How many days back to search (default: 7)" },
-            limit: { type: "NUMBER", description: "Max messages to return (default: 30)" }
-          },
-          required: ["contactNameOrPhone"]
-        }
-      },
-      {
-        name: "get_unknown_senders_digest",
-        description: "Check if any unknown numbers, strangers, or unsaved contacts sent messages on WhatsApp, including what they asked and what Friday replied.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            daysBack: { type: "NUMBER", description: "Days back to check (default: 7)" },
-            limit: { type: "NUMBER", description: "Max messages to return (default: 30)" }
-          },
-          required: []
-        }
-      },
-    ];
+      ];
 
     const systemInstruction = `YOU ARE FRIDAY: DK's (Divakar Kumar) ultra-intelligent, loyal, warm, witty, and deeply caring AI companion and chief executive assistant.
 Boss (DK) is chatting with you directly on WhatsApp. He is using WhatsApp chat to communicate everything with you because he cannot talk out loud right now.
