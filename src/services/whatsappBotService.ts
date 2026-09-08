@@ -1083,9 +1083,14 @@ class WhatsAppBotService {
                                   {
                                     image: fuseRes.buffer,
                                     mimetype: fuseRes.mimeType || "image/jpeg",
-                                    caption: `🎭 *Dual Photo Fusion via Friday AI* 🚀\n\n✨ *Engine:* ${fuseRes.model}\n📝 *Task:* _${cap || "Face Swap & Style Fusion"}_`,
                                   },
                                   { quoted: msg.key }
+                                );
+                                await this.sendHumanLikeMessage(
+                                  replyJid,
+                                  `🎭 *Dual Photo Fusion via Friday AI* 🚀\n\n✨ *Engine:* ${fuseRes.model}\n📝 *Task:* _${cap || "Face Swap & Style Fusion"}_`,
+                                  "",
+                                  msg.key
                                 );
                                 continue;
                               }
@@ -1115,9 +1120,14 @@ class WhatsAppBotService {
                                 {
                                   image: editRes.buffer,
                                   mimetype: editRes.mimeType || "image/jpeg",
-                                  caption: `🎨 *Photo Edited via Friday AI* 🚀\n\n✨ *Engine:* ${editRes.model}\n✏️ *Changes:* _${editInstruction}_`,
                                 },
                                 { quoted: msg.key }
+                              );
+                              await this.sendHumanLikeMessage(
+                                replyJid,
+                                `🎨 *Photo Edited via Friday AI* 🚀\n\n✨ *Engine:* ${editRes.model}\n✏️ *Changes:* _${editInstruction}_`,
+                                "",
+                                msg.key
                               );
                               continue;
                             } else {
@@ -1495,9 +1505,14 @@ CRITICAL INSTRUCTIONS:
                     {
                       image: editRes.buffer,
                       mimetype: editRes.mimeType || "image/jpeg",
-                      caption: `🎨 *Photo Edited via Friday AI* 🚀\n\n✨ *Engine:* ${editRes.model}\n✏️ *Changes:* _${editInstruction}_`,
                     },
                     { quoted: messageKey }
+                  );
+                  await this.sendHumanLikeMessage(
+                    replyJid,
+                    `🎨 *Photo Edited via Friday AI* 🚀\n\n✨ *Engine:* ${editRes.model}\n✏️ *Changes:* _${editInstruction}_`,
+                    "",
+                    messageKey
                   );
                   return true;
                 } else {
@@ -1567,9 +1582,14 @@ CRITICAL INSTRUCTIONS:
                 {
                   image: editRes.buffer,
                   mimetype: editRes.mimeType || "image/jpeg",
-                  caption: `🎨 *Photo Re-Edited via Friday AI* 🚀\n\n✨ *Engine:* ${editRes.model}\n✏️ *Changes:* _${editInstruction}_`,
                 },
                 { quoted: messageKey }
+              );
+              await this.sendHumanLikeMessage(
+                replyJid,
+                `🎨 *Photo Re-Edited via Friday AI* 🚀\n\n✨ *Engine:* ${editRes.model}\n✏️ *Changes:* _${editInstruction}_`,
+                "",
+                messageKey
               );
               return true;
             }
@@ -2368,14 +2388,20 @@ CRITICAL LANGUAGE & TONE MANDATE:
           const { imageGenerationService } = await import("./imageGenerationService");
           const fuseRes = await imageGenerationService.fuseTwoImagesWithAI(photo1.buffer, photo2.buffer, taskDesc, photo1.mimeType, photo2.mimeType);
           if (fuseRes.success && fuseRes.buffer && this.sock) {
+            this.recordChatPhoto(replyJid, fuseRes.buffer, fuseRes.mimeType || "image/jpeg");
             await this.sock.sendMessage(
               replyJid,
               {
                 image: fuseRes.buffer,
                 mimetype: fuseRes.mimeType || "image/jpeg",
-                caption: `🎭 *Dual Photo Fusion via Friday AI* 🚀\n\n✨ *Engine:* ${fuseRes.model}\n📝 *Task:* _${taskDesc}_`,
               },
               { quoted: messageKey }
+            );
+            await this.sendHumanLikeMessage(
+              replyJid,
+              `🎭 *Dual Photo Fusion via Friday AI* 🚀\n\n✨ *Engine:* ${fuseRes.model}\n📝 *Task:* _${taskDesc}_`,
+              "",
+              messageKey
             );
             return;
           }
@@ -2416,14 +2442,20 @@ CRITICAL LANGUAGE & TONE MANDATE:
         const { imageGenerationService } = await import("./imageGenerationService");
         const imgRes = await imageGenerationService.generateImage(imgPrompt);
         if (imgRes.success && imgRes.buffer && this.sock) {
+          this.recordChatPhoto(replyJid, imgRes.buffer, imgRes.mimeType || "image/jpeg");
           await this.sock.sendMessage(
             replyJid,
             {
               image: imgRes.buffer,
               mimetype: imgRes.mimeType || "image/jpeg",
-              caption: `🎨 *Friday AI Image* 🚀\n\n✨ *Engine:* ${imgRes.model}\n📝 *Prompt:* _${imgPrompt}_`,
             },
             { quoted: messageKey }
+          );
+          await this.sendHumanLikeMessage(
+            replyJid,
+            `🎨 *Friday AI Image* 🚀\n\n✨ *Engine:* ${imgRes.model}\n📝 *Prompt:* _${imgPrompt}_`,
+            "",
+            messageKey
           );
           return;
         } else {
@@ -3875,9 +3907,14 @@ ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` 
             {
               image: imgRes.buffer,
               mimetype: imgRes.mimeType || "image/jpeg",
-              caption: `🎨 *Friday AI Image for ${senderName}* 🚀\n\n✨ *Engine:* ${imgRes.model}\n📝 *Prompt:* _${imgPrompt}_`,
             },
             { quoted: messageKey }
+          );
+          await this.sendHumanLikeMessage(
+            groupJid,
+            `🎨 *Friday AI Image for ${senderName}* 🚀\n\n✨ *Engine:* ${imgRes.model}\n📝 *Prompt:* _${imgPrompt}_`,
+            text,
+            messageKey
           );
           return;
         } else {
@@ -4735,7 +4772,6 @@ TONE & STYLE:
           jid,
           {
             image: imagePayload,
-            caption: caption ? caption.trim() : undefined,
           },
           sendOptions
         );
@@ -4743,12 +4779,20 @@ TONE & STYLE:
         console.warn("[WhatsAppBot] Quoted photo send failed, retrying without quoted context:", (quotedErr as any)?.message || quotedErr);
         sendRes = await this.sock.sendMessage(jid, {
           image: imagePayload,
-          caption: caption ? caption.trim() : undefined,
         });
       }
 
       if (sendRes?.key?.id) {
         this.botSentMessageIds.add(sendRes.key.id);
+      }
+
+      // Send caption as clean separate next message instead of overlaying on the image
+      if (caption && caption.trim()) {
+        try {
+          await this.sendHumanLikeMessage(jid, caption.trim(), "", messageKey);
+        } catch (capErr) {
+          console.warn("[WhatsAppBot] Post-photo caption send notice:", capErr);
+        }
       }
 
       const recipientKey = jid.replace(/@.*$/, "");
