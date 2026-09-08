@@ -114,10 +114,10 @@ export class VoiceBridgeService {
   }
 
   /**
-   * 1. Multi-Tier High-Fidelity Text-to-Speech (TTS)
-   * Tier 1: Gemini 2.5 Flash TTS
-   * Tier 2: Gemini 3.1 Flash TTS
-   * Tier 3 (Fallback): Microsoft Edge Neural Engine (100% Free, High Quality)
+   * Simple Sequential Text-to-Speech (TTS):
+   * 1. gemini-2.5-flash-tts
+   * 2. gemini-3.1-flash-tts
+   * 3. Microsoft Edge Neural TTS (Fallback)
    */
   public async generateSpeech(
     text: string,
@@ -126,25 +126,25 @@ export class VoiceBridgeService {
     const cleanText = text.trim();
     if (!cleanText) throw new Error("Text is empty for TTS");
 
-    // Tier 1: Gemini 2.5 Flash TTS
+    // 1. gemini-2.5-flash-tts
     try {
-      const g25 = await this.geminiTTS(cleanText, "gemini-2.5-flash", "Aoede");
+      const g25 = await this.geminiTTS(cleanText, "gemini-2.5-flash-tts", "Aoede");
       if (g25 && g25.buffer.length > 0) {
-        console.log("[VoiceBridge] Generated voice via Gemini 2.5 Flash TTS");
+        console.log("[VoiceBridge] Generated voice via gemini-2.5-flash-tts");
         return g25;
       }
     } catch {}
 
-    // Tier 2: Gemini 3.1 Flash TTS
+    // 2. gemini-3.1-flash-tts
     try {
-      const g31 = await this.geminiTTS(cleanText, "gemini-3.1-flash", "Aoede");
+      const g31 = await this.geminiTTS(cleanText, "gemini-3.1-flash-tts", "Aoede");
       if (g31 && g31.buffer.length > 0) {
-        console.log("[VoiceBridge] Generated voice via Gemini 3.1 Flash TTS");
+        console.log("[VoiceBridge] Generated voice via gemini-3.1-flash-tts");
         return g31;
       }
     } catch {}
 
-    // Tier 3 Fallback: Microsoft Edge Neural Engine
+    // 3. Microsoft Edge Neural TTS (Fallback)
     console.log("[VoiceBridge] Using Microsoft Edge Neural TTS fallback");
     const msBuf = await this.textToSpeechBuffer(cleanText, voice);
     return { buffer: msBuf, mimeType: "audio/mpeg" };
