@@ -141,12 +141,10 @@ ${caption ? `User caption: "${caption}"` : ""}`;
               : (lowerMime.includes("png") ? "image/png" : lowerMime.includes("webp") ? "image/webp" : "image/jpeg");
 
         const VISION_FALLBACK_MODELS = [
-          "gemini-3.6-flash",
-          "gemini-3.5-flash",
-          "gemini-3.1-flash-lite",
+          "gemini-2.5-flash",
           "gemini-2.0-flash",
-          "gemini-1.5-pro",
           "gemini-1.5-flash",
+          "gemini-1.5-pro",
         ];
 
         for (const model of VISION_FALLBACK_MODELS) {
@@ -325,10 +323,9 @@ STRUCTURE YOUR RESPONSE IN CLEAN WHATSAPP FORMAT:
 Use WhatsApp markdown (*bold*, _italic_, bullet points). Keep it clean, accurate, and easy to read.`;
 
     const VISION_FALLBACK_MODELS = [
-      "gemini-3.6-flash",
-      "gemini-3.5-flash",
-      "gemini-3.1-flash-lite",
+      "gemini-2.5-flash",
       "gemini-2.0-flash",
+      "gemini-1.5-flash",
       "gemini-1.5-pro",
     ];
 
@@ -423,12 +420,10 @@ Use WhatsApp markdown (*bold*, _italic_, bullet points). Keep it clean, accurate
           : (lowerMime.includes("png") ? "image/png" : lowerMime.includes("webp") ? "image/webp" : "image/jpeg");
 
     const VISION_FALLBACK_MODELS = [
-      "gemini-3.6-flash",
-      "gemini-3.5-flash",
-      "gemini-3.1-flash-lite",
+      "gemini-2.5-flash",
       "gemini-2.0-flash",
-      "gemini-1.5-pro",
       "gemini-1.5-flash",
+      "gemini-1.5-pro",
     ];
 
     // Case 1: We have media buffer -> multimodal vision query
@@ -497,10 +492,9 @@ INSTRUCTIONS:
 4. If not found in the summary, state clearly what the summary contains.`;
 
       const TEXT_MODELS = [
-        "gemini-3.6-flash",
-        "gemini-3.5-flash",
-        "gemini-3.1-flash-lite",
+        "gemini-2.5-flash",
         "gemini-2.0-flash",
+        "gemini-1.5-flash",
         "gemini-1.5-pro",
       ];
 

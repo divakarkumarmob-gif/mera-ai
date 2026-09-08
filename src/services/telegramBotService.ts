@@ -106,10 +106,10 @@ class TelegramBotService {
 
   // Multi-tier model fallback chain
   private static readonly MODEL_FALLBACK_CHAIN = [
-    "gemini-3.6-flash",
-    "gemini-3.5-flash",
-    "gemini-3.1-flash-lite",
-    "gemini-3.5-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-2.0-flash-lite",
   ];
 
   constructor() {
@@ -870,7 +870,7 @@ ${messages.map((m) => `[${m.timeStr}] ${m.sender}: ${m.text}`).join("\n")}
 Provide a clear 2-3 sentence executive summary of what was discussed, any decisions, questions asked, or action items:`;
 
       const resp = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-2.5-flash",
         contents: prompt,
       });
 
@@ -910,7 +910,7 @@ ${messages.map((m) => `[${m.timeStr}] ${m.sender}: ${m.text}`).join("\n")}
 Provide a 2-4 sentence executive digest of main topics, project updates, member discussions, and decisions in this group:`;
 
       const resp = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-2.5-flash",
         contents: prompt,
       });
 

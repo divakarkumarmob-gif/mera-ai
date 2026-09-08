@@ -62,9 +62,9 @@ export interface GoogleGeocodeResult {
 class GoogleMapsService {
   // Primary Map Grounding model: Gemini 3.5 Transcribe with Google Search/Maps Grounding
   private static readonly MAP_GROUNDING_MODELS = [
-    "gemini-3.5-transcribe",
-    "gemini-3.5-flash",
     "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
   ];
 
   /**

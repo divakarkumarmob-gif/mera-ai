@@ -84,10 +84,10 @@ class DailyUpdateService {
   private inMemoryPending: Map<string, PendingQuestion> = new Map();
 
   private static readonly FAST_SUMMARY_MODELS = [
-    "gemini-3.6-flash",
-    "gemini-3.5-flash",
-    "gemini-3.5-flash-lite",
     "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-2.0-flash-lite",
   ];
 
   /**
@@ -333,7 +333,7 @@ class DailyUpdateService {
       return null;
     }
 
-    const models = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash"];
+    const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.0-flash-lite"];
     const prompt = `You are Friday, DK's WhatsApp assistant. Below is DK's own update log for TODAY only — short notes DK dictated about what he did/is doing today.
 
 TODAY'S UPDATE LOG:

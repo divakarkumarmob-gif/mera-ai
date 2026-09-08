@@ -102,7 +102,7 @@ Format rules:
 6. Keep script ready to be spoken by TTS with zero markdown clutter.`;
 
         const res = await ai.models.generateContent({
-          model: "gemini-3.6-flash",
+          model: "gemini-2.5-flash",
           contents: prompt,
         });
 

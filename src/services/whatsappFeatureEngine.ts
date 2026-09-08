@@ -44,10 +44,10 @@ class WhatsAppFeatureEngine {
   private activeCallSessions = new Map<string, LiveCallSession>();
 
   private static readonly MODEL_CHAIN = [
-    "gemini-3.6-flash",
-    "gemini-3.5-flash",
-    "gemini-3.1-flash-lite",
-    "gemini-3.5-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-2.0-flash-lite",
   ];
 
   private async callGeminiWithFallback(prompt: string, timeoutMs = 9000): Promise<string | null> {
@@ -276,10 +276,10 @@ OUTPUT RULES:
   ): Promise<number> {
     try {
       const now = Date.now();
+      // Query single field 'status' only so Firestore never requires a composite index
       const snap = await scheduledCol()
         .where("status", "==", "pending")
-        .where("scheduledForTs", "<=", now)
-        .limit(10)
+        .limit(25)
         .get();
 
       if (snap.empty) return 0;
@@ -287,6 +287,10 @@ OUTPUT RULES:
       let count = 0;
       for (const doc of snap.docs) {
         const item = doc.data() as ScheduledMessageDoc;
+        // Check if scheduled time has arrived in memory
+        if (item.scheduledForTs && item.scheduledForTs > now) {
+          continue; // Not yet time to deliver
+        }
         try {
           console.log(`[FeatureEngine] Delivering scheduled message to ${item.recipientName} (+${item.recipientPhone})...`);
           await sendFn(item.recipientPhone, item.messageText);
