@@ -1427,18 +1427,39 @@ CRITICAL INSTRUCTIONS:
     // Case 3: Quoted message is a Text message, Summary Card, or forwarded text
     if (quotedMessage.text && quotedMessage.text.trim().length > 0) {
       const isVoiceRequested = /\b(voice|audio|speak|bolo|sunao|bol\s*kar|bol\s*ke|padh\s*ke|voice\s*me)\b/i.test(cleanText);
-      const isExplanationRequested = /\b(kya\s*likha\s*hai|kya\s*likha\s*h|kya\s*hai|samjhao|explain|batao|padho|translate|translation|tarjuma|meaning|matlab)\b/i.test(cleanText);
+      const isExplicitAnalysisRequested = /\b(summary\s*voice|analysis\s*voice|voice\s*summary|voice\s*analysis|summary|analysis|kya\s*likha\s*hai|kya\s*likha\s*h|kya\s*hai|samjhao|explain|batao|tarjuma|meaning|matlab)\b/i.test(cleanText);
       const targetLangMatch = cleanText.match(/\b(?:in|to|me|mein|language)?\s*(hindi|english|bengali|bangla|marathi|gujarati|punjabi|urdu|tamil|telugu|kannada|malayalam|french|spanish|german|japanese|russian|arabic|chinese|italian|portuguese|korean)\b/i);
       const targetLanguage = targetLangMatch ? targetLangMatch[1].trim() : null;
 
-      if (isVoiceRequested || isExplanationRequested || isSummaryIntent || targetLanguage) {
+      // ── FAST TRACK: Direct Message Voice Reader ──
+      // Unless Boss explicitly asked for "summary voice" or "analysis voice", DIRECTLY read/speak the message!
+      if (isVoiceRequested && !isExplicitAnalysisRequested) {
+        const { voiceBridgeService } = await import("./voiceBridgeService");
+        try {
+          let textToRead = quotedMessage.text;
+          if (targetLanguage) {
+            const { whatsappFeatureEngine } = await import("./whatsappFeatureEngine");
+            textToRead = await whatsappFeatureEngine.translateText(quotedMessage.text, targetLanguage);
+          }
+          const speechRes = await voiceBridgeService.generateSpeech(textToRead);
+          if (speechRes && speechRes.buffer.length > 0) {
+            await this.sendVoiceMessage(replyJid, speechRes.buffer, messageKey, speechRes.mimeType);
+            return true;
+          }
+        } catch (vErr) {
+          console.warn("[WhatsAppBot] Direct voice read TTS error:", vErr);
+        }
+      }
+
+      // ── EXPLICIT ANALYSIS / SUMMARY / EXPLAIN INTENT ──
+      if (isExplicitAnalysisRequested || isSummaryIntent) {
         const { voiceBridgeService } = await import("./voiceBridgeService");
         const apiKey = process.env.GEMINI_API_KEY;
 
         if (apiKey) {
           const ai = new GoogleGenAI({ apiKey });
           const prompt = `You are Friday AI, DK's (Divakar Kumar) warm, affectionate, ultra-intelligent companion.
-Boss (DK) swiped-up / quoted a message and asked: "${rawText}".
+Boss (DK) swiped-up / quoted a message and asked for analysis/summary: "${rawText}".
 
 QUOTED ORIGINAL MESSAGE:
 """
@@ -1449,8 +1470,7 @@ TARGET LANGUAGE (if explicitly asked like 'in english', 'in french'): ${targetLa
 
 CRITICAL LANGUAGE & TONE MANDATE:
 1. ALWAYS speak and explain in natural, warm, conversational Hindi / Hinglish. Never output formal robotic English memos ("Hey Boss! I've analyzed...") or dry bullet-point essays unless Boss explicitly asked for "English".
-2. If Boss swiped with "voice", "kya likha hai", "batao", etc.:
-   - Explain what the sender is saying in warm, sweet, direct Hindi/Hinglish (e.g. "Boss, is message me wo keh rahe hain ki...").
+2. Explain what the sender is saying in warm, sweet, direct Hindi/Hinglish (e.g. "Boss, is message me wo keh rahe hain ki...").
 3. SPOKEN VOICE SCRIPT ([SPEAK_START] ... [SPEAK_END]):
    - Provide a natural 1-2 sentence spoken voice note script in ${targetLanguage || "pure natural conversational Hindi / Hinglish"}.
    - It must sound like Friday speaking directly to Boss DK on WhatsApp voice note (e.g. "Haanji Boss, is message me likha hai ki...").
