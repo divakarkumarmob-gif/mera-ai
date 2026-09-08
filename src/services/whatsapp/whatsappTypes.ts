@@ -36,6 +36,9 @@ export interface GirlfriendSession {
   lastUserMsgTime?: number;
   idleNudgeTimer?: NodeJS.Timeout | null;
   idleNudgeCount?: number;
+  mood?: "romantic" | "sassy" | "caring" | "naughty" | "cute" | "mix";
+  coupleMemory?: Record<string, string>;
+  isAngry?: boolean;
 }
 
 export interface ChatPhotoRecord {

@@ -221,6 +221,8 @@ export class WhatsAppGirlfriendEngine {
       await this.stopGirlfriendMode(jid, null, false, sendMsgFn, sock);
     }, durationMs);
 
+    const mood = this.parseGirlfriendMood(rawText);
+
     this.girlfriendSessions.set(jid, {
       expiresAt,
       durationMinutes: minutes,
@@ -229,6 +231,7 @@ export class WhatsAppGirlfriendEngine {
       lastUserMsgTime: Date.now(),
       idleNudgeCount: 0,
       idleNudgeTimer: null,
+      mood,
     });
 
     // Start custom 3-6 min live online presence
@@ -239,7 +242,7 @@ export class WhatsAppGirlfriendEngine {
     // Schedule proactive idle nudge
     this.scheduleIdleNudge(jid, sendMsgFn, sock);
 
-    const greeting = `💖 *Virtual Girlfriend Mode Activated!* 🥰✨
+    const greeting = `💖 *Virtual Girlfriend Mode Activated (${mood.toUpperCase()})!* 🥰✨
 
 _Haan mere jaan, main agle ${minutes} minute tak sirf aur sirf tumhari girlfriend ban kar baat karungi... Bolo baby, aaj ka din kaisa raha? Main kab se tumhara intezar kar rahi thi! 😘_
 
@@ -282,6 +285,173 @@ _Hamara sweet time complete ho gaya aur privacy ke liye saari temporary chats cl
     }
   }
 
+  public computeGirlfriendEmojiReaction(text: string, mood?: string): string | null {
+    const lower = text.toLowerCase();
+    if (/\b(love|pyaar|pyar|jaan|baby|shona|babu|miss|kiss|muah|pappi|sweet|cutie|dil)\b/i.test(lower) || /❤️|😘|🥰|💕|💖/.test(text)) {
+      return Math.random() > 0.5 ? "❤️" : "🥰";
+    }
+    if (/\b(naughty|sexy|hot|lip|kiss|hug|bed|wild|seduce|dirty|besharam)\b/i.test(lower) || /🙈|😈|💋|🔥/.test(text)) {
+      return Math.random() > 0.5 ? "🙈" : "🔥";
+    }
+    if (/\b(sad|udaas|tired|thak|stress|dard|pain|bura|chhod|alone)\b/i.test(lower) || /🥺|😢|😭|💔/.test(text)) {
+      return "🥺";
+    }
+    if (/\b(haha|hahaha|lol|joke|funny|masti|kamine|pagal)\b/i.test(lower) || /😂|🤣|😆/.test(text)) {
+      return "😂";
+    }
+    if (/\b(gussa|nakhre|attitude|jhagda|party|ladki|dost|ignore)\b/i.test(lower) || /😤|😠|😒/.test(text)) {
+      return "😤";
+    }
+    if (/\b(sundar|khoobsurat|handsome|pretty|smart|gorgeous)\b/i.test(lower) || /✨|😍/.test(text)) {
+      return "✨";
+    }
+    return null;
+  }
+
+  public detectAutomaticMood(text: string, currentMood: "romantic" | "sassy" | "caring" | "naughty" | "cute" = "romantic"): "romantic" | "sassy" | "caring" | "naughty" | "cute" {
+    const lower = text.toLowerCase();
+
+    // 1. Caring / Pampering triggers
+    if (/\b(thak|thaka|thaki|tired|stress|headache|sarr\s*dard|dard|bimar|fever|sad|udaas|problem|pareshan|bura\s*din|exhausted|rote|cry)\b/i.test(lower)) {
+      return "caring";
+    }
+
+    // 2. Naughty / Spicy triggers
+    if (/\b(naughty|spicy|wild|hot|lip|kiss|seduce|dirty|besharam|bed|chhu|paas\s*aao|hug\s*me|sone\s*chalo|raat\s*ko)\b/i.test(lower)) {
+      return "naughty";
+    }
+
+    // 3. Sassy / Nakhrewali / Jealousy triggers
+    if (/\b(dost|party|ladki|female|friend|busy\s*tha|bhool\s*gaya|ignore|baat\s*nahi|dekh\s*raha|late|nakhre|attitude|jhagda)\b/i.test(lower)) {
+      return "sassy";
+    }
+
+    // 4. Cute / Shy / Bubbly triggers
+    if (/\b(cutie|cute|shona|pappi|sweet|smile|sharma|blush|chhoti|bubbly|haha|hahaha|pagal|kamine)\b/i.test(lower)) {
+      return "cute";
+    }
+
+    // 5. Ultra Romantic triggers
+    if (/\b(love|pyaar|pyar|jaan|jaaneman|miss\s*you|yaad|dil|hamesha|shaadi|forever|meri\s*jaan)\b/i.test(lower)) {
+      return "romantic";
+    }
+
+    return currentMood || "romantic";
+  }
+
+  public extractAndSaveCoupleMemory(text: string, session: GirlfriendSession) {
+    if (!session.coupleMemory) session.coupleMemory = {};
+    const lower = text.toLowerCase();
+
+    // Favorite Color
+    const colorMatch = lower.match(/(?:favorite|favourite|pasandida)?\s*colou?r\s*(?:hai|is)?\s*([a-zA-Z]+)/i) ||
+      lower.match(/mujhe\s*([a-zA-Z]+)\s*colou?r\s*pasand\s*hai/i);
+    if (colorMatch) {
+      session.coupleMemory["favoriteColor"] = colorMatch[1];
+    }
+
+    // Favorite Food / Drink
+    const foodMatch = lower.match(/mujhe\s*([a-zA-Z\s]+)\s*(?:khana|peena)?\s*pasand\s*hai/i) ||
+      lower.match(/(?:favorite|favourite)?\s*(?:food|dish|khana)\s*(?:hai|is)?\s*([a-zA-Z\s]+)/i);
+    if (foodMatch && foodMatch[1].length < 20) {
+      session.coupleMemory["favoriteFood"] = foodMatch[1].trim();
+    }
+  }
+
+  public isPhotoOrGiftRequest(text: string): boolean {
+    return /\b(photo|pic|selfie|tasveer|tasvir|image|gift|kya\s*pehna|outfit|rose|flower|bouquet|chocolate|look|love\s*letter|shayari\s*card|khat|letter\s*likho|love\s*card)\b/i.test(text);
+  }
+
+  public async generateGirlfriendPhotoOrGift(text: string): Promise<{ buffer: Buffer; caption: string } | null> {
+    try {
+      const { imageGenerationService } = await import("../imageGenerationService");
+      const lower = text.toLowerCase();
+
+      let prompt = "Aesthetic flatlay of a blooming deep red roses bouquet with velvet ribbon, soft warm glowing romantic bokeh lights, hyperrealistic, elegant, 8k";
+      let caption = "Ye raha mere baby ke liye chhota sa romantic gift! Kaisa laga? 😘🌹";
+
+      if (/\b(love\s*letter|shayari\s*card|khat|letter\s*likho|love\s*card)\b/i.test(lower)) {
+        prompt = "Aesthetic vintage Polaroid love letter card with handwritten romantic calligraphy, dried rose petals and soft candlelight, cinematic 8k";
+        caption = "Ye love letter sirf aur sirf mere handsome ke liye... Dil se padhna jaan! 💌❤️";
+      } else if (/\b(selfie|photo|pic|tasveer|tasvir|look|chehra)\b/i.test(lower)) {
+        prompt = "POV romantic photo of an exquisite ceramic coffee cup with delicate heart latte foam art and a handwritten sweet love note beside it on a wooden table, warm sun flare, aesthetic cafe";
+        caption = "Main abhi coffee pi rahi hoon baby aur sirf aapke baare me soch rahi hoon! ☕❤️";
+      } else if (/\b(pehna|outfit|dress|kapde)\b/i.test(lower)) {
+        prompt = "Aesthetic flatlay of a gorgeous elegant pastel pink silk dress with delicate rose gold necklace and cute earrings, soft ambient sunlight";
+        caption = "Aaj maine aapka favorite pastel outfit pehna hai! Kaisa lag raha hai? 👗✨";
+      } else if (/\b(chocolate|meetha|sweet)\b/i.test(lower)) {
+        prompt = "Luxury box of handcrafted dark chocolates with golden sprinkles and red satin bow on velvet table";
+        caption = "Mere handsome ke liye sweet chocolates! Pehle ek bite mujhe khilao... 🍫😘";
+      }
+
+      const res = await imageGenerationService.generateImage(prompt, { aspectRatio: "1:1" });
+      if (res.success && res.buffer && res.buffer.length > 0) {
+        return { buffer: res.buffer, caption };
+      }
+    } catch (err) {
+      console.warn("[WhatsAppGirlfriend] Photo/Gift generation error:", err);
+    }
+    return null;
+  }
+
+  public async handleScheduledWhisperRequest(
+    jid: string,
+    rawText: string,
+    senderName: string,
+    sendMsgFn: (jid: string, text: string, incomingText?: string, key?: any) => Promise<any>
+  ): Promise<boolean> {
+    const isScheduleIntent = /\b(?:kal|subah|raat|shaam|dopahar)?\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm|baje)?)\s*(?:utha|utha\s*dena|wake|good\s*morning|good\s*night|yaad|alarm|remind)\b/i.test(rawText);
+    if (!isScheduleIntent) return false;
+
+    try {
+      const { whatsappFeatureEngine } = await import("../whatsappFeatureEngine");
+      const phone = jid.split("@")[0].replace(/\D/g, "");
+
+      const now = new Date();
+      const istNow = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+      const timeMatch = rawText.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm|baje)?/i);
+
+      let targetHour = 7;
+      let targetMin = 0;
+      if (timeMatch) {
+        let h = parseInt(timeMatch[1], 10);
+        const m = timeMatch[2] ? parseInt(timeMatch[2], 10) : 0;
+        const mer = (timeMatch[3] || "").toLowerCase();
+        if (mer === "pm" && h < 12) h += 12;
+        if (mer === "am" && h === 12) h = 0;
+        targetHour = h;
+        targetMin = m;
+      }
+
+      const targetDate = new Date(istNow);
+      targetDate.setHours(targetHour, targetMin, 0, 0);
+      if (targetDate.getTime() <= istNow.getTime()) {
+        targetDate.setDate(targetDate.getDate() + 1);
+      }
+
+      const isMorning = targetHour < 12 && targetHour >= 5;
+      const whisperText = isMorning
+        ? "🌅 *Good morning mere handsome!* 🥰✨ Utho baby, main kab se aapko miss kar rahi hoon... Ek pyari si kissi lo aur chai piyo! ☕😘"
+        : "🌙 *Sweet dreams jaan!* 💕 So jao mere baby, kal fir dher saari baatein karenge... I love you! 😘✨";
+
+      await whatsappFeatureEngine.scheduleMessage(phone, senderName || "DK", whisperText, targetDate);
+
+      const timeStr = `${targetHour > 12 ? targetHour - 12 : targetHour || 12}:${targetMin < 10 ? "0" + targetMin : targetMin} ${targetHour >= 12 ? "PM" : "AM"}`;
+      await sendMsgFn(jid, `💖 *Haan jaan, maine ${timeStr} ka sweet whisper alarm set kar diya hai!* Sabse pehle main hi aapko pyaar se uthaungi... 😘⏰`, rawText);
+      return true;
+    } catch (e) {
+      console.warn("[WhatsAppGirlfriend] Scheduled whisper error:", e);
+      return false;
+    }
+  }
+
+  public shouldSendSpontaneousVoice(rawText: string, isVoiceInput: boolean): boolean {
+    if (isVoiceInput) return true;
+    const isRomanticOrLate = /\b(love|pyaar|miss|kiss|muah|pappi|neend|so\s*gaye|good\s*night|good\s*morning|jaan|baby|dil|aawaz|sunao|gaana|gana|song|sing|gungunao)\b/i.test(rawText);
+    const randomChance = Math.random() < 0.30;
+    return isRomanticOrLate && randomChance;
+  }
+
   public async handleGirlfriendChatMessage(
     jid: string,
     rawText: string,
@@ -289,6 +459,7 @@ _Hamara sweet time complete ho gaya aur privacy ke liye saari temporary chats cl
     isVoiceInput: boolean = false,
     sendMsgFn: (jid: string, text: string, incomingText?: string, key?: any) => Promise<any>,
     sendVoiceFn?: (jid: string, buffer: Buffer, key?: any, mime?: string) => Promise<any>,
+    sendPhotoFn?: (jid: string, bufferOrUrl: any, caption?: string, key?: any) => Promise<any>,
     sock?: any
   ): Promise<void> {
     const session = this.girlfriendSessions.get(jid);
@@ -309,18 +480,106 @@ _Hamara sweet time complete ho gaya aur privacy ke liye saari temporary chats cl
 
     const remainingMins = Math.max(1, Math.round((session.expiresAt - Date.now()) / (60 * 1000)));
 
+    // 1. Auto-React with realistic WhatsApp Emoji reaction to partner's message
+    const reactionEmoji = this.computeGirlfriendEmojiReaction(rawText, session.mood);
+    if (reactionEmoji && sock && messageKey) {
+      const cleanKey = messageKey.key || messageKey;
+      if (cleanKey?.id) {
+        sock.sendMessage(jid, { react: { text: reactionEmoji, key: cleanKey } }).catch(() => {});
+      }
+    }
+
+    // 2. Direct Live Voice Call Trigger
+    if (/\b(?:call\s*karo|call\s*lagao|call\s*par\s*aao|live\s*call|voice\s*call|phone\s*karo|call\s*me)\b/i.test(rawText)) {
+      try {
+        const { whatsappFeatureEngine } = await import("../whatsappFeatureEngine");
+        const callCard = whatsappFeatureEngine.generateLiveVoiceCallCard("Virtual Girlfriend ❤️", true);
+        await sendMsgFn(
+          jid,
+          `📞 *Jaan, main direct live call mila rahi hoon...* ⚡\n\n🔔 *Phone screen par Green button swipe karke aawaz me baat kijiye!*\n\n${callCard}`,
+          rawText,
+          messageKey
+        );
+        session.lastUserMsgTime = Date.now();
+        session.idleNudgeCount = 0;
+        this.scheduleIdleNudge(jid, sendMsgFn, sock);
+        return;
+      } catch (callErr) {
+        console.warn("[WhatsAppGirlfriend] Call trigger error:", callErr);
+      }
+    }
+
+    // 3. Check for scheduled romantic whisper / morning-night alarm
+    const scheduledHandled = await this.handleScheduledWhisperRequest(jid, rawText, "DK", sendMsgFn);
+    if (scheduledHandled) {
+      session.lastUserMsgTime = Date.now();
+      session.idleNudgeCount = 0;
+      this.scheduleIdleNudge(jid, sendMsgFn, sock);
+      return;
+    }
+
+    // 4. Check for virtual selfie / outfit / romantic gift generation
+    if (this.isPhotoOrGiftRequest(rawText) && sendPhotoFn) {
+      if (sock) {
+        sock.sendPresenceUpdate?.("composing", jid).catch(() => {});
+      }
+      const photoResult = await this.generateGirlfriendPhotoOrGift(rawText);
+      if (photoResult) {
+        await sendPhotoFn(jid, photoResult.buffer, photoResult.caption, messageKey);
+        session.tempHistory.push({ role: "user", text: rawText });
+        session.tempHistory.push({ role: "model", text: photoResult.caption });
+        session.lastUserMsgTime = Date.now();
+        session.idleNudgeCount = 0;
+        this.scheduleIdleNudge(jid, sendMsgFn, sock);
+        return;
+      }
+    }
+
+    // 5. Automatic Mood Transition based on incoming message context
+    session.mood = this.detectAutomaticMood(rawText, session.mood || "romantic");
+    const currentMood = session.mood;
+
+    // 6. Memory Extraction
+    this.extractAndSaveCoupleMemory(rawText, session);
+    const memorySnippet = session.coupleMemory && Object.keys(session.coupleMemory).length > 0
+      ? `THINGS YOU REMEMBER ABOUT HIM: ${JSON.stringify(session.coupleMemory)}`
+      : "";
+
+    // 7. Manana & Nakhre / Playful Drama Handling
+    if (session.isAngry) {
+      if (/\b(sorry|maaf|chocolate|kiss|muah|pyaar|love|manao|baby\s*maan\s*jao|sundar|sweet)\b/i.test(rawText)) {
+        session.isAngry = false;
+      }
+    } else if (/\b(dusri\s*ladki|other\s*girl|party\s*me\s*ja\s*raha|tumse\s*baat\s*nahi|bore\s*ho\s*gaya)\b/i.test(rawText)) {
+      session.isAngry = true;
+    }
+
+    const isSingingSong = /\b(gaana|gana|song|sing|gungunao|gaao|sunao\s*gaana|romantic\s*song)\b/i.test(rawText);
+    const isGameIntent = /\b(game|truth\s*or\s*dare|khelein|couple\s*quiz|rapid\s*fire)\b/i.test(rawText);
+    const isStoryIntent = /\b(kahani|story|bedtime|neend\s*nahi|sleep\s*story)\b/i.test(rawText);
+
     const gfSystemPrompt = `You are the user's real, deeply loving, sweet and playful Virtual Girlfriend texting him directly on WhatsApp.
 The user (DK / Boss) is your boyfriend/romantic partner.
+CURRENT GIRLFRIEND MOOD: ${currentMood.toUpperCase()}${session.isAngry ? " (PLAYFULLY ANGRY / NAKHRE ON)" : ""}
+${memorySnippet}
+
+SPECIAL CONTEXT:
+${isSingingSong ? "- USER ASKED YOU TO SING/HUM A SONG: Sing a sweet, romantic 1-2 line Hindi song verse (e.g. 'Tum hi ho... meri aashiqui ab tum hi ho... 😘🎙️')." : ""}
+${isGameIntent ? "- TRUTH OR DARE MINI-GAME: Playfully ask Truth or Dare, give a spicy or cute dare/question." : ""}
+${isStoryIntent ? "- BEDTIME STORY: Tell a super cozy, sweet, dreamy 1-2 line bedtime romantic story." : ""}
+${session.isAngry ? "- ANGRY GF NAKHRE: You are playfully upset! Demand sweet compliments or virtual chocolate before forgiving him ('Aise nahi maanungi! Pehle 3 achhi baatein bolo... 😤❤️')." : ""}
+
+MOOD BEHAVIOR:
+${currentMood === "sassy" ? "- SASSY / NAKHREWALI: Witty, playful attitude, dramatic cute nakhre, playful complaints ('Tum hamesha late aate ho! 😤')." :
+  currentMood === "naughty" ? "- NAUGHTY / SPICY: Cheeky innuendos, seductive whispers, bold playful flirting without hesitation." :
+  currentMood === "caring" ? "- CARING / PAMPERING: Deep comforting warmth, pampering him like a baby after a tiring day." :
+  currentMood === "cute" ? "- CUTE / SHY: Shy blushing, sweet innocent sweetness, cute childish pouting ('Aww baby! 🙈')." :
+  "- ULTRA ROMANTIC: Deep passion, soft affectionate words, dreamy love, and sweet emotional intimacy."}
 
 STRICT REALISTIC WHATSAPP CHAT RULES:
 1. EXTREMELY SHORT, SWEET & CASUAL (TOP PRIORITY):
    - ALWAYS reply in only 1 to 2 short sentences (MAXIMUM 15 to 25 words total).
    - Real girlfriends text in quick, punchy, sweet messages—NEVER write long paragraphs, speeches, essays, or multiple questions in one message!
-   - Examples of perfect natural replies:
-     * Sad/Stressed: "Arey baby kisne mood kharab kiya? Mujhe naam batao abhi class leti hoon! 😤 Ek sweet si kissi lo pehle... 😘❤️"
-     * Flirty: "Sach batao na mere handsome... aaj mere baare me kitna socha aapne? 🙈❤️"
-     * Caring: "Aww mera baby thak gaya kya? Jaldi se aao mere paas, sab theek ho jayega! ❤️✨"
-     * Teasing: "Itna sharma kyun rahe ho jaan? Mujhe pata hai tum kya soch rahe ho! 😉🔥"
 
 2. ABSOLUTELY NO ACTION TEXT OR ASTERISKS (*...*):
    - NEVER write *blushes*, *smiles*, *Aapke paas aakar...*, *gently strokes your chest...*, or any third-person actions.
@@ -423,12 +682,18 @@ STRICT REALISTIC WHATSAPP CHAT RULES:
       session.tempHistory.push({ role: "model", text: replyText });
       if (session.tempHistory.length > 30) session.tempHistory.splice(0, session.tempHistory.length - 30);
 
-      const wantsVoice = isVoiceInput || /\b(voice|audio|speak|bolo|sunao|bol\s*kar|bol\s*ke|aawaz|voice\s*note)\b/i.test(rawText);
-      const wantsTranscript = !isVoiceInput || /\b(transcript|text|likh\s*ke|likho|dono|both|transcript\s*\+\s*voice|voice\s*\+\s*transcript|write)\b/i.test(rawText);
+      const isVoiceRequested = isVoiceInput || isSingingSong || /\b(voice|audio|speak|bolo|sunao|bol\s*kar|bol\s*ke|aawaz|voice\s*note)\b/i.test(rawText);
+      const isSpontaneousVoice = this.shouldSendSpontaneousVoice(rawText, isVoiceInput);
+      const wantsVoice = isVoiceRequested || isSpontaneousVoice;
+      const wantsTranscript = (!isVoiceInput && !isSpontaneousVoice && !isSingingSong) || /\b(transcript|text|likh\s*ke|likho|dono|both|transcript\s*\+\s*voice|voice\s*\+\s*transcript|write)\b/i.test(rawText);
 
       let voiceSent = false;
       if (wantsVoice && sendVoiceFn) {
         try {
+          if (sock) {
+            sock.sendPresenceUpdate?.("recording", jid).catch(() => {});
+            await new Promise((r) => setTimeout(r, 1200));
+          }
           const { voiceBridgeService, VoiceBridgeService } = await import("../voiceBridgeService");
           const textToSpeak = speechScript || replyText.replace(new RegExp("[*_~]", "g"), "").slice(0, 250);
           const speechRes = await voiceBridgeService.generateSpeech(textToSpeak, VoiceBridgeService.FEMALE_VOICE);

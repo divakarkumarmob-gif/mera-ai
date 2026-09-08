@@ -233,6 +233,7 @@ class WhatsAppBotService {
       isVoiceInput,
       (j, t, inT, k) => this.sendHumanLikeMessage(j, t, inT, k),
       (j, b, k, m) => this.sendVoiceMessage(j, b, k, m),
+      (j, img, cap, k) => this.sendPhotoMessage(j, img, cap, k),
       this.sock
     );
   }
