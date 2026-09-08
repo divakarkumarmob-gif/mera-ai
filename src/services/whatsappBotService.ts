@@ -110,6 +110,15 @@ class WhatsAppBotService {
   > = new Map();
   // Set of message IDs dispatched by Friday bot itself to prevent self-trigger/echo loops
   private botSentMessageIds: Set<string> = new Set();
+  // RAM buffer cache for last 3 photos per chat (used for 2-photo Face Swap & Style Fusion)
+  private chatRecentPhotos: Map<string, Array<{ buffer: Buffer; mimeType: string; timestamp: number }>> = new Map();
+
+  private recordChatPhoto(jid: string, buffer: Buffer, mimeType: string) {
+    const list = this.chatRecentPhotos.get(jid) || [];
+    list.unshift({ buffer, mimeType, timestamp: Date.now() });
+    if (list.length > 4) list.pop();
+    this.chatRecentPhotos.set(jid, list);
+  }
 
   constructor() {
     // Restore last-known phone from Firestore so dashboard shows 'linked' even after restart
@@ -1045,10 +1054,83 @@ class WhatsAppBotService {
                       }
                     }
 
-                    // 2. Photo -> Vision AI Summary / Analysis / Memory Saving
+                    // 2. Photo -> Vision AI Summary / Analysis / Dual Photo Fusion / Editing
                     if (isPhoto) {
                       try {
+                        this.recordChatPhoto(replyJid, buffer, mimeType);
                         const cap = (caption || "").trim();
+
+                        // 🎭 Dual Photo Face Swap & Style Fusion Intent (Quoting Photo 1 while sending Photo 2)
+                        const isDualFusionIntent =
+                          /^(?:@faceswap|@swap|@combine|@blend|@style|faceswap|face\s*swap|combine|blend|style\s*transfer|color\s*transfer)\b/i.test(cap) ||
+                          cap.match(/(?:face\s*swap|color\s*transfer|style\s*transfer|dono\s*photo|dono\s*image|blend|combine|fusion)/i) ||
+                          (cap.includes("photo 1") && cap.includes("photo 2")) ||
+                          (cap.includes("face") && (cap.includes("laga") || cap.includes("badal") || cap.includes("swap")));
+
+                        if (isDualFusionIntent && quotedMessage?.rawQuotedMessage) {
+                          const qMsgWrapper = { message: quotedMessage.rawQuotedMessage };
+                          const quotedBuffer: Buffer = await downloadFn(qMsgWrapper, "buffer", {}, { reuploadRequest: this.sock?.updateMediaMessage });
+                          if (quotedBuffer && quotedBuffer.length > 0) {
+                            const qMime = quotedMessage.rawQuotedMessage?.imageMessage?.mimetype || "image/jpeg";
+                            await this.sendHumanLikeMessage(replyJid, `🎭 *Dual Photo Fusion / Face Swap process ho raha hai...* ⚡\n📝 _"${cap || "Face Swap & Style Fusion"}"_`, "", msg.key);
+                            try {
+                              const { imageGenerationService } = await import("./imageGenerationService");
+                              const fuseRes = await imageGenerationService.fuseTwoImagesWithAI(quotedBuffer, buffer, cap, qMime, mimeType);
+                              if (fuseRes.success && fuseRes.buffer && this.sock) {
+                                this.recordChatPhoto(replyJid, fuseRes.buffer, fuseRes.mimeType || "image/jpeg");
+                                await this.sock.sendMessage(
+                                  replyJid,
+                                  {
+                                    image: fuseRes.buffer,
+                                    mimetype: fuseRes.mimeType || "image/jpeg",
+                                    caption: `🎭 *Dual Photo Fusion via Friday AI* 🚀\n\n✨ *Engine:* ${fuseRes.model}\n📝 *Task:* _${cap || "Face Swap & Style Fusion"}_`,
+                                  },
+                                  { quoted: msg.key }
+                                );
+                                continue;
+                              }
+                            } catch (fErr: any) {
+                              console.error("[WhatsAppBot] Dual photo fusion error:", fErr);
+                            }
+                          }
+                        }
+
+                        const isPhotoEditIntent =
+                          /^(?:@image\s*edit|@edit|\/edit|edit\s*photo|photo\s*edit|edit\s*karo|image\s*edit|edit\s*image|edit)\b/i.test(cap) ||
+                          cap.match(/(?:is\s*photo|iss\s*photo|isme|is\s*image)\s*(?:me|ko|par|mein)?\s*(?:edit|change|badal|add|laga|remove|hata)/i);
+
+                        // 🎨 Photo Editing Intent (Direct Caption)
+                        if (isPhotoEditIntent) {
+                          const editInstruction = cap
+                            .replace(/^(?:@image\s*edit|@edit|\/edit|edit\s*photo|photo\s*edit|edit\s*karo|image\s*edit|edit\s*image|edit)\s*[:=-]?\s*/i, "")
+                            .trim() || cap.trim();
+                          await this.sendHumanLikeMessage(replyJid, `🎨 *Photo edit ho rahi hai...* ⚡\n📝 _"${editInstruction}"_`, "", msg.key);
+                          try {
+                            const { imageGenerationService } = await import("./imageGenerationService");
+                            const editRes = await imageGenerationService.editImageWithAI(buffer, editInstruction, mimeType);
+                            if (editRes.success && editRes.buffer && this.sock) {
+                              this.recordChatPhoto(replyJid, editRes.buffer, editRes.mimeType || "image/jpeg");
+                              await this.sock.sendMessage(
+                                replyJid,
+                                {
+                                  image: editRes.buffer,
+                                  mimetype: editRes.mimeType || "image/jpeg",
+                                  caption: `🎨 *Photo Edited via Friday AI* 🚀\n\n✨ *Engine:* ${editRes.model}\n✏️ *Changes:* _${editInstruction}_`,
+                                },
+                                { quoted: msg.key }
+                              );
+                              continue;
+                            } else {
+                              await this.sendHumanLikeMessage(replyJid, `❌ Photo edit nahi ho payi: ${editRes.error || "Please try again."}`, "", msg.key);
+                              continue;
+                            }
+                          } catch (eErr: any) {
+                            console.error("[WhatsAppBot] Photo edit error:", eErr);
+                            await this.sendHumanLikeMessage(replyJid, `❌ Photo edit error: ${eErr?.message || eErr}`, "", msg.key);
+                            continue;
+                          }
+                        }
+
                         const isSummaryRequested =
                           /\b(summary|summarize|summarise|friday\s*summary|analysis|analyze|analyse|photo\s*analyze|ocr|dekho|check|batao|kya\s*hai|padho|scan|explain)\b/i.test(cap) ||
                           cap.startsWith("@summary") ||
@@ -1393,6 +1475,42 @@ CRITICAL INSTRUCTIONS:
               return true;
             }
 
+            // ── Quoted Photo Editing Engine ("@image edit ...", "@edit ...", "is photo me ...") ──
+            const isPhotoEditIntent =
+              quotedMessage.mediaType === "photo" &&
+              (/^(?:@image\s*edit|@edit|\/edit|edit\s*photo|photo\s*edit|edit\s*karo|image\s*edit|edit\s*image|edit)\b/i.test(rawText.trim()) ||
+                rawText.match(/(?:is\s*photo|iss\s*photo|isme|is\s*image)\s*(?:me|ko|par|mein)?\s*(?:edit|change|badal|add|laga|remove|hata)/i));
+
+            if (isPhotoEditIntent) {
+              const editInstruction = rawText
+                .replace(/^(?:@image\s*edit|@edit|\/edit|edit\s*photo|photo\s*edit|edit\s*karo|image\s*edit|edit\s*image|edit)\s*[:=-]?\s*/i, "")
+                .trim() || rawText.trim();
+              try {
+                const { imageGenerationService } = await import("./imageGenerationService");
+                const editRes = await imageGenerationService.editImageWithAI(buffer, editInstruction, mimeType);
+                if (editRes.success && editRes.buffer && this.sock) {
+                  this.recordChatPhoto(replyJid, editRes.buffer, editRes.mimeType || "image/jpeg");
+                  await this.sock.sendMessage(
+                    replyJid,
+                    {
+                      image: editRes.buffer,
+                      mimetype: editRes.mimeType || "image/jpeg",
+                      caption: `🎨 *Photo Edited via Friday AI* 🚀\n\n✨ *Engine:* ${editRes.model}\n✏️ *Changes:* _${editInstruction}_`,
+                    },
+                    { quoted: messageKey }
+                  );
+                  return true;
+                } else {
+                  await this.sendHumanLikeMessage(replyJid, `❌ Photo edit nahi ho payi: ${editRes.error || "Please try again."}`, rawText, messageKey);
+                  return true;
+                }
+              } catch (eErr: any) {
+                console.error("[WhatsAppBot] Quoted photo edit error:", eErr);
+                await this.sendHumanLikeMessage(replyJid, `❌ Photo edit error: ${eErr?.message || eErr}`, rawText, messageKey);
+                return true;
+              }
+            }
+
             if (isSummaryIntent && !visionMemoryService.isMediaQuestionIntent(rawText)) {
               const summaryRes = await visionMemoryService.generateMediaSummary(buffer, mimeType, rawText, fileName, replyJid);
               await this.sendHumanLikeMessage(replyJid, summaryRes, rawText, messageKey);
@@ -1426,6 +1544,41 @@ CRITICAL INSTRUCTIONS:
 
     // Case 3: Quoted message is a Text message, Summary Card, or forwarded text
     if (quotedMessage.text && quotedMessage.text.trim().length > 0) {
+      // 🎨 Quoted Friday AI Generated Photo Editing ("@edit ...", "@photo edit ...", "is photo me ...")
+      const isPhotoEditIntentOnQuotedText =
+        (/^(?:@image\s*edit|@edit|\/edit|edit\s*photo|photo\s*edit|edit\s*karo|image\s*edit|edit\s*image|edit)\b/i.test(rawText.trim()) ||
+          rawText.match(/(?:is\s*photo|iss\s*photo|isme|is\s*image|is\s*pic)\s*(?:me|ko|par|mein)?\s*(?:edit|change|badal|add|laga|remove|hata)/i)) &&
+        (quotedMessage.text.includes("🎨") || quotedMessage.text.toLowerCase().includes("image") || quotedMessage.text.toLowerCase().includes("photo") || quotedMessage.text.toLowerCase().includes("prompt"));
+
+      if (isPhotoEditIntentOnQuotedText) {
+        const cached = this.chatRecentPhotos.get(replyJid)?.[0];
+        if (cached && cached.buffer) {
+          const editInstruction = rawText
+            .replace(/^(?:@image\s*edit|@edit|\/edit|edit\s*photo|photo\s*edit|edit\s*karo|image\s*edit|edit\s*image|edit)\s*[:=-]?\s*/i, "")
+            .trim() || rawText.trim();
+          await this.sendHumanLikeMessage(replyJid, `🎨 *AI Generated Photo edit ho rahi hai...* ⚡\n📝 _"${editInstruction}"_`, rawText, messageKey);
+          try {
+            const { imageGenerationService } = await import("./imageGenerationService");
+            const editRes = await imageGenerationService.editImageWithAI(cached.buffer, editInstruction, cached.mimeType || "image/jpeg");
+            if (editRes.success && editRes.buffer && this.sock) {
+              this.recordChatPhoto(replyJid, editRes.buffer, editRes.mimeType || "image/jpeg");
+              await this.sock.sendMessage(
+                replyJid,
+                {
+                  image: editRes.buffer,
+                  mimetype: editRes.mimeType || "image/jpeg",
+                  caption: `🎨 *Photo Re-Edited via Friday AI* 🚀\n\n✨ *Engine:* ${editRes.model}\n✏️ *Changes:* _${editInstruction}_`,
+                },
+                { quoted: messageKey }
+              );
+              return true;
+            }
+          } catch (eErr: any) {
+            console.error("[WhatsAppBot] Quoted generated photo edit error:", eErr);
+          }
+        }
+      }
+
       const isVoiceRequested = /\b(voice|audio|speak|bolo|sunao|bol\s*kar|bol\s*ke|padh\s*ke|voice\s*me)\b/i.test(cleanText);
       const isExplicitAnalysisRequested = /\b(summary\s*voice|analysis\s*voice|voice\s*summary|voice\s*analysis|summary|analysis|kya\s*likha\s*hai|kya\s*likha\s*h|kya\s*hai|samjhao|explain|batao|tarjuma|meaning|matlab)\b/i.test(cleanText);
       const targetLangMatch = cleanText.match(/\b(?:in|to|me|mein|language)?\s*(hindi|english|bengali|bangla|marathi|gujarati|punjabi|urdu|tamil|telugu|kannada|malayalam|french|spanish|german|japanese|russian|arabic|chinese|italian|portuguese|korean)\b/i);
@@ -2198,6 +2351,46 @@ CRITICAL LANGUAGE & TONE MANDATE:
       const musicCard = await whatsappFeatureEngine.searchMusicWithLyrics(songQuery);
       await this.sendHumanLikeMessage(replyJid, musicCard, rawText, messageKey);
       return;
+    }
+
+    // 🎭 Dual Photo Face Swap & Style Fusion ("@faceswap", "@combine", "@style transfer", "pehle photo ka color dusre jaisa kar do")
+    const dualFusionMatch = rawText.match(/^(?:@faceswap|\/faceswap|@swap|@combine|\/combine|@style\s*transfer|@color\s*transfer|faceswap|face\s*swap|combine\s*photo|combine\s*photos)\s*[:=-]?\s*(.*)/i) ||
+      (rawText.toLowerCase().includes("face swap") || (rawText.toLowerCase().includes("photo 1") && rawText.toLowerCase().includes("photo 2")) || (rawText.toLowerCase().includes("pehle photo") && rawText.toLowerCase().includes("dusre")));
+
+    if (dualFusionMatch) {
+      const taskDesc = (typeof dualFusionMatch === "object" && dualFusionMatch[1] ? dualFusionMatch[1].trim() : rawText.trim()) || "Face Swap & Style Fusion";
+      const recent = this.chatRecentPhotos.get(replyJid) || [];
+      if (recent.length >= 2) {
+        const photo1 = recent[1]; // older photo (Source)
+        const photo2 = recent[0]; // newer photo (Reference)
+        await this.sendHumanLikeMessage(replyJid, `🎭 *Dono photos ka Face Swap / Style Fusion process ho raha hai...* ⚡\n📝 _"${taskDesc}"_`, rawText, messageKey);
+        try {
+          const { imageGenerationService } = await import("./imageGenerationService");
+          const fuseRes = await imageGenerationService.fuseTwoImagesWithAI(photo1.buffer, photo2.buffer, taskDesc, photo1.mimeType, photo2.mimeType);
+          if (fuseRes.success && fuseRes.buffer && this.sock) {
+            await this.sock.sendMessage(
+              replyJid,
+              {
+                image: fuseRes.buffer,
+                mimetype: fuseRes.mimeType || "image/jpeg",
+                caption: `🎭 *Dual Photo Fusion via Friday AI* 🚀\n\n✨ *Engine:* ${fuseRes.model}\n📝 *Task:* _${taskDesc}_`,
+              },
+              { quoted: messageKey }
+            );
+            return;
+          }
+        } catch (fErr: any) {
+          console.error("[WhatsAppBot] Dual photo fusion text command error:", fErr);
+        }
+      } else {
+        await this.sendHumanLikeMessage(
+          replyJid,
+          `🎭 *Two Photos Required!* 💡\n\nBoss, face swap ya style/color transfer ke liye chat me kam se kam *2 photos* chahiye.\n\n*Kaise karein:*\n1. Pehle Photo 1 bhejein (Source face/photo).\n2. Phir Photo 2 bhejein (Target body/color reference) aur caption me \`@faceswap\` ya \`pehle photo ka color dusre jaisa kar do\` likhein!`,
+          rawText,
+          messageKey
+        );
+        return;
+      }
     }
 
     // 🎨 AI Image Generator ("@image <prompt>", "@photo <prompt>", "photo banao ...", "image banao ...", or quote + "@image")
@@ -4533,6 +4726,9 @@ TONE & STYLE:
       }
 
       const imagePayload = typeof imageSource === "string" ? { url: imageSource } : imageSource;
+      if (Buffer.isBuffer(imageSource)) {
+        this.recordChatPhoto(jid, imageSource, "image/jpeg");
+      }
       let sendRes: any = null;
       try {
         sendRes = await this.sock.sendMessage(
@@ -4665,6 +4861,7 @@ TONE & STYLE:
 
 🎨 *2. CREATIVE & MEDIA:*
 • \`@image <prompt>\` ➔ Instant 4K AI Image generation (e.g. \`@image futuristic sports car\`).
+• \`@image edit <instruction>\` / \`@edit <instruction>\` ➔ Photo par swipe karke ya photo ke caption me likhein (e.g. \`@edit add sunglasses and cyberpunk background\`).
 • \`@music <song name>\` ➔ Song details, live lyrics & singer info.
 • 📸 *Photo / Document Analysis:* Photo/PDF bhejkar niche \`summary\` ya \`analysis\` likhein.
 

@@ -369,6 +369,155 @@ class ImageGenerationService {
       error: "All image generation models failed. Please try again with a different description.",
     };
   }
+
+  /**
+   * Intelligently edits or modifies an existing photo based on user instructions.
+   * Uses Gemini Vision to analyze original photo structure & compose a specialized
+   * transformation prompt, then executes via the Multi-Tier Flux engine.
+   */
+  public async editImageWithAI(
+    imageBuffer: Buffer,
+    editInstructions: string,
+    mimeType = "image/jpeg"
+  ): Promise<GeneratedImageResult> {
+    const rawInstruction = (editInstructions || "").trim();
+    if (!rawInstruction) {
+      return {
+        success: false,
+        model: "none",
+        prompt: "",
+        error: "Edit instructions cannot be empty",
+      };
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    let enhancedPrompt = rawInstruction;
+
+    if (apiKey && imageBuffer && imageBuffer.length > 0) {
+      try {
+        const ai = new GoogleGenAI({ apiKey });
+        const base64Data = imageBuffer.toString("base64");
+        const cleanMime = mimeType.split(";")[0].trim() || "image/jpeg";
+
+        const visionPrompt = `You are a world-class AI Image Transformation & Inpainting Prompt Specialist.
+The user wants to EDIT/MODIFY this provided image according to these user instructions:
+"${rawInstruction}"
+
+Analyze this image in detail:
+1. Identify key subjects, characters, environment, colors, art style, lighting, and composition.
+2. Formulate a single, highly detailed, photorealistic prompt for modern diffusion models (Flux.1 / SDXL) that creates the edited version.
+3. Keep the original character/subject consistent while applying all user requested edits (e.g. background changes, accessories, lighting, style transforms).
+4. Output ONLY the raw descriptive prompt text without introductory remarks or quotes.`;
+
+        for (const model of ["gemini-2.5-flash", "gemini-3.5-flash", "gemini-2.5-flash-lite"]) {
+          try {
+            const resp = await ai.models.generateContent({
+              model,
+              contents: [
+                {
+                  role: "user",
+                  parts: [
+                    {
+                      inlineData: {
+                        mimeType: cleanMime,
+                        data: base64Data,
+                      },
+                    },
+                    { text: visionPrompt },
+                  ],
+                },
+              ],
+            });
+            const text = resp.text?.trim();
+            if (text && text.length > 10) {
+              enhancedPrompt = text;
+              console.log(`[ImageGen] Vision Edit Prompt formulated (${model}): "${enhancedPrompt.slice(0, 80)}..."`);
+              break;
+            }
+          } catch (modelErr: any) {
+            console.warn(`[ImageGen] Vision model ${model} failed for edit prompt (${modelErr?.message || modelErr})`);
+          }
+        }
+      } catch (err: any) {
+        console.warn("[ImageGen] Vision edit prompt generation failed:", err?.message || err);
+      }
+    }
+
+    return this.generateImage(enhancedPrompt);
+  }
+
+  /**
+   * Dual-Image AI Fusion Engine (Face Swap, Style & Color Grading Transfer, Outfit Transfer).
+   * Takes Image 1 (Source Face / Subject) and Image 2 (Target Body / Style / Color Reference),
+   * analyzes both with Gemini Multimodal Vision, and synthesizes the fused masterpiece.
+   */
+  public async fuseTwoImagesWithAI(
+    image1Buffer: Buffer,
+    image2Buffer: Buffer,
+    userInstruction: string,
+    mimeType1 = "image/jpeg",
+    mimeType2 = "image/jpeg"
+  ): Promise<GeneratedImageResult> {
+    const rawInstruction = (userInstruction || "Seamlessly blend the two photos").trim();
+    const apiKey = process.env.GEMINI_API_KEY;
+    let enhancedPrompt = rawInstruction;
+
+    if (apiKey && image1Buffer?.length > 0 && image2Buffer?.length > 0) {
+      try {
+        const ai = new GoogleGenAI({ apiKey });
+        const b64_1 = image1Buffer.toString("base64");
+        const b64_2 = image2Buffer.toString("base64");
+        const cleanMime1 = mimeType1.split(";")[0].trim() || "image/jpeg";
+        const cleanMime2 = mimeType2.split(";")[0].trim() || "image/jpeg";
+
+        const fusionPrompt = `You are a world-class AI Photo Fusion & Style Transfer Prompt Engineer.
+You have been given TWO images:
+• IMAGE 1 (First image): Source Subject / Face / Person 1.
+• IMAGE 2 (Second image): Reference Style / Body / Background / Color Palette / Lighting.
+
+USER GOAL / INSTRUCTIONS:
+"${rawInstruction}"
+
+TASK:
+1. If the user wants Face Swap: Take the exact facial identity, features, and hair of Image 1 and map it onto the body, pose, clothing, and environment of Image 2.
+2. If the user wants Color/Style Transfer: Take the subject/content from Image 1 and apply the cinematic color grading, tone curve, lighting mood, and visual aesthetics of Image 2.
+3. If the user wants Combination/Fusion: Harmoniously combine both subjects/scenes into a coherent 8k photorealistic photo.
+
+Generate a single, comprehensive, hyper-realistic diffusion prompt for Flux.1/SDXL that will generate the exact fused output.
+Output ONLY the raw descriptive prompt string.`;
+
+        for (const model of ["gemini-2.5-flash", "gemini-3.5-flash", "gemini-2.5-flash-lite"]) {
+          try {
+            const resp = await ai.models.generateContent({
+              model,
+              contents: [
+                {
+                  role: "user",
+                  parts: [
+                    { inlineData: { mimeType: cleanMime1, data: b64_1 } },
+                    { inlineData: { mimeType: cleanMime2, data: b64_2 } },
+                    { text: fusionPrompt },
+                  ],
+                },
+              ],
+            });
+            const text = resp.text?.trim();
+            if (text && text.length > 10) {
+              enhancedPrompt = text;
+              console.log(`[ImageGen] Dual Image Fusion Prompt formulated (${model}): "${enhancedPrompt.slice(0, 80)}..."`);
+              break;
+            }
+          } catch (modelErr: any) {
+            console.warn(`[ImageGen] Dual Image Fusion model ${model} failed (${modelErr?.message || modelErr})`);
+          }
+        }
+      } catch (err: any) {
+        console.warn("[ImageGen] Dual Image Fusion prompt error:", err?.message || err);
+      }
+    }
+
+    return this.generateImage(enhancedPrompt);
+  }
 }
 
 export const imageGenerationService = new ImageGenerationService();
