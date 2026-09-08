@@ -2200,6 +2200,49 @@ CRITICAL LANGUAGE & TONE MANDATE:
       return;
     }
 
+    // 🎨 AI Image Generator ("@image <prompt>", "@photo <prompt>", "photo banao ...", "image banao ...")
+    const imageMatch = rawText.match(/^(?:@image|\/image|@photo|\/photo|@draw|\/draw|photo\s*banao|image\s*banao)\s*[:=-]?\s*(.+)/i) ||
+      (rawText.toLowerCase().startsWith("image ") ? rawText.match(/^image\s+(.+)/i) : null) ||
+      (rawText.toLowerCase().startsWith("photo ") ? rawText.match(/^photo\s+(.+)/i) : null);
+    if (imageMatch) {
+      const imgPrompt = imageMatch[1].trim();
+      if (imgPrompt) {
+        await this.sendHumanLikeMessage(replyJid, `🎨 *AI Image generate ho rahi hai...* ⚡\n📝 _"${imgPrompt}"_`, rawText, messageKey);
+        try {
+          const { imageGenerationService } = await import("./imageGenerationService");
+          const imgRes = await imageGenerationService.generateImage(imgPrompt);
+          if (imgRes.success && imgRes.buffer && this.sock) {
+            await this.sock.sendMessage(
+              replyJid,
+              {
+                image: imgRes.buffer,
+                caption: `🎨 *Friday AI Image* 🚀\n\n✨ *Engine:* ${imgRes.model}\n📝 *Prompt:* _${imgPrompt}_`,
+              },
+              { quoted: messageKey }
+            );
+            return;
+          } else {
+            await this.sendHumanLikeMessage(
+              replyJid,
+              `❌ Image generate nahi ho payi: ${imgRes.error || "Please try with a different prompt."}`,
+              rawText,
+              messageKey
+            );
+            return;
+          }
+        } catch (imgErr: any) {
+          console.error("[WhatsAppBot] Image generation error:", imgErr);
+          await this.sendHumanLikeMessage(
+            replyJid,
+            `❌ Image generation failed: ${imgErr?.message || imgErr}`,
+            rawText,
+            messageKey
+          );
+          return;
+        }
+      }
+    }
+
     // J. Group Bill Splitter & Instant UPI ("@split 1200 between Aman, Rahul, DK")
     const splitMatch = rawText.match(/^(?:@split|\/split|split\s*bill|bill\s*split|split)\s*[:=-]?\s*(.+)/i);
     if (splitMatch) {
@@ -3598,6 +3641,49 @@ ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` 
       const musicCard = await whatsappFeatureEngine.searchMusicWithLyrics(songQuery);
       await this.sendHumanLikeMessage(groupJid, musicCard, text, messageKey);
       return;
+    }
+
+    // 🎨 AI Image Generator in Groups ("@image <prompt>", "@photo <prompt>", "photo banao ...", "image banao ...")
+    const groupImageMatch = text.match(/^(?:@image|\/image|@photo|\/photo|@draw|\/draw|photo\s*banao|image\s*banao)\s*[:=-]?\s*(.+)/i) ||
+      (text.toLowerCase().startsWith("@image ") ? text.match(/^@image\s+(.+)/i) : null) ||
+      (text.toLowerCase().startsWith("@photo ") ? text.match(/^@photo\s+(.+)/i) : null);
+    if (groupImageMatch) {
+      const imgPrompt = groupImageMatch[1].trim();
+      if (imgPrompt) {
+        await this.sendHumanLikeMessage(groupJid, `🎨 *AI Image generate ho rahi hai ${senderName}...* ⚡\n📝 _"${imgPrompt}"_`, text, messageKey);
+        try {
+          const { imageGenerationService } = await import("./imageGenerationService");
+          const imgRes = await imageGenerationService.generateImage(imgPrompt);
+          if (imgRes.success && imgRes.buffer && this.sock) {
+            await this.sock.sendMessage(
+              groupJid,
+              {
+                image: imgRes.buffer,
+                caption: `🎨 *Friday AI Image for ${senderName}* 🚀\n\n✨ *Engine:* ${imgRes.model}\n📝 *Prompt:* _${imgPrompt}_`,
+              },
+              { quoted: messageKey }
+            );
+            return;
+          } else {
+            await this.sendHumanLikeMessage(
+              groupJid,
+              `❌ Image generate nahi ho payi: ${imgRes.error || "Please try with a different prompt."}`,
+              text,
+              messageKey
+            );
+            return;
+          }
+        } catch (imgErr: any) {
+          console.error("[WhatsAppBot] Group Image generation error:", imgErr);
+          await this.sendHumanLikeMessage(
+            groupJid,
+            `❌ Image generation failed: ${imgErr?.message || imgErr}`,
+            text,
+            messageKey
+          );
+          return;
+        }
+      }
     }
 
     // 9. Web Scraper & URL Reader ("@web <url>", "@read <url>")

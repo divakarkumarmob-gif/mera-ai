@@ -2,9 +2,11 @@
  * imageGenerationService.ts
  *
  * High-performance AI Image Generation Engine for WhatsApp, Telegram, and Live Assistant.
- * Dual-Engine Architecture:
- * 1. Primary: Google Imagen 3 (imagen-3.0-generate-002 / imagen-3.0-fast-generate-001) via @google/genai.
- * 2. Fallback: Ultra-fast Pollinations Flux / Turbo AI (100% reliable zero-downtime fallback).
+ * Multi-Tier Engine Architecture:
+ * 1. Primary: Hugging Face Inference API (FLUX.1-schnell & SDXL) - Ultra-HD Photorealistic.
+ * 2. Tier 2: Google Imagen 3 (imagen-3.0-generate-002 / imagen-3.0-fast-generate-001) via @google/genai.
+ * 3. Tier 3: Ultra-fast Pollinations Flux AI (Zero-downtime free fallback).
+ * 4. Tier 4: Pollinations Turbo AI (Instant backup).
  */
 
 import { GoogleGenAI } from "@google/genai";
@@ -40,13 +42,77 @@ class ImageGenerationService {
       };
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
+    // ── Tier 1: Hugging Face FLUX.1 / SDXL (Primary Engine) ─────────────────
+    const hfToken = (
+      process.env.HUGGINGFACE_API_KEY ||
+      process.env.HF_TOKEN ||
+      process.env.HUGGINGFACE_ACCESS_TOKEN ||
+      process.env.HF_API_KEY ||
+      process.env.HUGGING_FACE_HUB_TOKEN ||
+      ""
+    ).trim();
 
-    // ── Tier 1: Google Imagen 3 via @google/genai ───────────────────────────
-    if (apiKey) {
+    if (hfToken) {
+      const hfModels = [
+        "black-forest-labs/FLUX.1-schnell",
+        "stabilityai/stable-diffusion-xl-base-1.0",
+      ];
+
+      for (const modelName of hfModels) {
+        for (const baseUrl of [
+          `https://router.huggingface.co/hf-inference/models/${modelName}`,
+          `https://api-inference.huggingface.co/models/${modelName}`,
+        ]) {
+          try {
+            console.log(`[ImageGen] Trying Hugging Face (${modelName}) via ${baseUrl.split('/')[2]}...`);
+            const resp = await Promise.race([
+              fetch(baseUrl, {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${hfToken}`,
+                  "Content-Type": "application/json",
+                  "User-Agent": "MeraAI-Friday-Agent/1.0",
+                },
+                body: JSON.stringify({ inputs: rawPrompt }),
+              }),
+              new Promise<Response>((_, reject) =>
+                setTimeout(() => reject(new Error("Hugging Face API timeout")), 25000)
+              ),
+            ]);
+
+            if (resp.ok) {
+              const arrayBuf = await resp.arrayBuffer();
+              const buffer = Buffer.from(arrayBuf);
+              if (buffer.length > 2000) {
+                console.log(
+                  `[ImageGen] Successfully generated image via Hugging Face (${modelName}) [${buffer.length} bytes]`
+                );
+                return {
+                  success: true,
+                  buffer,
+                  model: `Hugging Face (${modelName.split("/").pop()})`,
+                  prompt: rawPrompt,
+                };
+              }
+            } else {
+              const errBody = await resp.text().catch(() => "");
+              console.warn(
+                `[ImageGen] Hugging Face (${modelName}) returned status ${resp.status}: ${errBody.slice(0, 150)}`
+              );
+            }
+          } catch (hfErr: any) {
+            console.warn(`[ImageGen] Hugging Face (${modelName}) failed (${hfErr?.message || hfErr}), trying next endpoint/model...`);
+          }
+        }
+      }
+    }
+
+    // ── Tier 2: Google Imagen 3 via @google/genai ───────────────────────────
+    const geminiKey = process.env.GEMINI_API_KEY;
+    if (geminiKey) {
       for (const modelName of ["imagen-3.0-generate-002", "imagen-3.0-fast-generate-001"]) {
         try {
-          const ai = new GoogleGenAI({ apiKey });
+          const ai = new GoogleGenAI({ apiKey: geminiKey });
           console.log(`[ImageGen] Trying Google Imagen 3 (${modelName}) for prompt: "${rawPrompt.slice(0, 60)}..."`);
 
           const response: any = await Promise.race([
@@ -69,7 +135,7 @@ class ImageGenerationService {
             return {
               success: true,
               buffer,
-              model: modelName,
+              model: `Google ${modelName}`,
               prompt: rawPrompt,
             };
           }
@@ -79,7 +145,7 @@ class ImageGenerationService {
       }
     }
 
-    // ── Tier 2: Ultra-Fast Pollinations Flux AI Fallback ───────────────────
+    // ── Tier 3: Ultra-Fast Pollinations Flux AI Fallback ───────────────────
     try {
       console.log(`[ImageGen] Falling back to Pollinations Flux AI for prompt: "${rawPrompt.slice(0, 60)}..."`);
       const width = options.aspectRatio === "16:9" ? 1280 : options.aspectRatio === "9:16" ? 720 : 1024;
@@ -115,7 +181,7 @@ class ImageGenerationService {
       console.error("[ImageGen] Pollinations Flux fallback failed:", pollErr?.message || pollErr);
     }
 
-    // ── Tier 3: Pollinations Turbo Model Final Fallback ───────────────────
+    // ── Tier 4: Pollinations Turbo Model Final Fallback ───────────────────
     try {
       const seed = Math.floor(Math.random() * 1000000);
       const encodedPrompt = encodeURIComponent(rawPrompt);
