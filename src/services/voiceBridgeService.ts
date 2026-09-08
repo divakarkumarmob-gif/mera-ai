@@ -63,7 +63,7 @@ export class VoiceBridgeService {
    */
   public async elevenLabsTTS(
     text: string,
-    voiceId: string = process.env.ELEVENLABS_VOICE_ID || "21m00Tcm4TlvDq8ikWAM"
+    voiceId: string = process.env.ELEVENLABS_VOICE_ID || "cgSgspJ2msm6clMCkdW9" // Jessica (Free Premade Voice)
   ): Promise<{ buffer: Buffer; mimeType: string } | null> {
     const apiKey = process.env.ELEVENLABS_API_KEY?.trim();
     if (!apiKey) return null;
@@ -112,7 +112,7 @@ export class VoiceBridgeService {
   public async sarvamTTS(
     text: string,
     targetLanguageCode: string = "hi-IN",
-    speaker: string = "meera"
+    speaker: string = "simran_hindi_ai_assistant"
   ): Promise<{ buffer: Buffer; mimeType: string } | null> {
     const apiKey = (process.env.SARVAM_API_KEY || process.env.SARVAM_AI_API_KEY)?.trim();
     if (!apiKey) return null;
@@ -133,7 +133,7 @@ export class VoiceBridgeService {
           loudness: 1.5,
           speech_sample_rate: 22050,
           enable_preprocessing: true,
-          model: "bulbul:v1",
+          model: "bulbul:v2",
         }),
       });
 
