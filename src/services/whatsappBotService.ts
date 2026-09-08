@@ -4407,7 +4407,7 @@ TONE & STYLE:
           {
             audio: audioBuffer,
             mimetype,
-            ptt: true,
+            ptt: false,
           },
           sendOptions
         );
@@ -4415,7 +4415,7 @@ TONE & STYLE:
         sendRes = await this.sock.sendMessage(jid, {
           audio: audioBuffer,
           mimetype,
-          ptt: true,
+          ptt: false,
         });
       }
 
