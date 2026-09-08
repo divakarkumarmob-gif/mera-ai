@@ -2042,6 +2042,16 @@ CRITICAL LANGUAGE & TONE MANDATE:
 
     // 10. ADVANCED FEATURE SUITE SHORTCUTS FOR BOSS:
 
+    // 0. Master All Commands Directory ("@allcmd", "all cmd", "friday all cmd", "all commands", "commands", "@help")
+    if (
+      /^(?:@all\s*cmd|@allcmd|\/allcmd|all\s*cmd|friday\s*all\s*cmd|all\s*commands|@commands?|\/commands?|@help|\/help|help|commands?)$/i.test(rawText) ||
+      /\b(all\s*cmd|friday\s*all\s*cmd|all\s*commands|sare\s*commands?)\b/i.test(rawText)
+    ) {
+      const cmdCard = this.getMasterAllCommandsCard();
+      await this.sendHumanLikeMessage(replyJid, cmdCard, rawText, messageKey);
+      return;
+    }
+
     // A. Personal Catch-Up Digest ("@digest", "kiska msg aaya", "who messaged me")
     if (/^(?:@digest|\/digest|digest|kiska\s*msg\s*aaya|kiska\s*kiska\s*msg\s*aaya|who\s*messaged|messages\s*digest)/i.test(rawText)) {
       const recent = await this.getMessages({ limit: 40 });
@@ -3355,9 +3365,15 @@ ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` 
       "/search",
       "kisi ne",
       "kisne bola",
-      "dhundo",
-      "dhundho",
       "dhoondo",
+      "all cmd",
+      "allcmd",
+      "@allcmd",
+      "@all cmd",
+      "commands",
+      "@commands",
+      "all commands",
+      "sare command",
     ];
     if (nameTriggers.some((t) => cleanText.includes(t))) {
       return true;
@@ -3428,7 +3444,17 @@ ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` 
 
     const { whatsappFeatureEngine } = await import("./whatsappFeatureEngine");
 
-    // 0. Group Quoted Swipe-to-Reply Media / Document / Photo Summary Engine
+    // 0. Master All Commands Directory in Group
+    if (
+      /^(?:@all\s*cmd|@allcmd|\/allcmd|all\s*cmd|friday\s*all\s*cmd|all\s*commands|@commands?|\/commands?|@help|\/help|help|commands?)$/i.test(text.trim()) ||
+      /\b(all\s*cmd|friday\s*all\s*cmd|all\s*commands|sare\s*commands?)\b/i.test(text)
+    ) {
+      const cmdCard = this.getMasterAllCommandsCard();
+      await this.sendHumanLikeMessage(groupJid, cmdCard, text, messageKey);
+      return;
+    }
+
+    // 0.1 Group Quoted Swipe-to-Reply Media / Document / Photo Summary Engine
     if (quotedMessage && quotedMessage.isReply) {
       const handledQuoted = await this.handleQuotedMediaSummary(groupJid, text, quotedMessage, messageKey);
       if (handledQuoted) return;
@@ -4495,6 +4521,49 @@ TONE & STYLE:
 
   public setAutoReply(enabled: boolean) {
     this.autoReplyEnabled = enabled;
+  }
+
+  /**
+   * Generates the Master @ Commands Directory Card.
+   */
+  public getMasterAllCommandsCard(): string {
+    return `⚡ *FRIDAY AI — ALL @ COMMANDS DIRECTORY* 🚀
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🎙️ *1. VOICE & MULTI-LANGUAGE TRANSLATION:*
+• \`@speak <text>\` ➔ Friday real voice me bol kar sunati hai.
+• \`@translate <lang>: <text>\` ➔ 20+ bhashaon me translate karein (e.g. \`@translate english: kaise ho\`).
+• 💬 *Swipe-to-Reply Voice:* Kisi bhi text/photo/voice note par swipe karke \`voice\`, \`kya likha h\`, ya \`hindi/english me bolo\` likhein!
+
+🎨 *2. CREATIVE & MEDIA:*
+• \`@image <prompt>\` ➔ Instant 4K AI Image generation (e.g. \`@image futuristic sports car\`).
+• \`@music <song name>\` ➔ Song details, live lyrics & singer info.
+• 📸 *Photo / Document Analysis:* Photo/PDF bhejkar niche \`summary\` ya \`analysis\` likhein.
+
+📊 *3. CHAT SUMMARY & DIGEST:*
+• \`@summary\` / \`@catchup\` ➔ Current chat ya group ki complete summary.
+• \`@digest\` ➔ Kiska kiska message aaya hai uska personal catchup digest.
+• \`@web <url>\` ➔ Kisi bhi website/link ka instant executive summary.
+
+⏱️ *4. PRODUCTIVITY & AUTOMATION:*
+• \`@schedule <Name> in <time>: <msg>\` ➔ WhatsApp message schedule karein (e.g. \`@schedule Rahul in 10 mins: meeting link\`).
+• \`@remind me in <time>: <task>\` ➔ Auto WhatsApp reminder ping (e.g. \`@remind me in 30 mins: gym jana hai\`).
+• \`@meet with <person> <time>\` ➔ Google Calendar meeting schedule karein.
+
+🧠 *5. MEMORY VAULT:*
+• \`@remember <fact>\` ➔ Permanent memory me save karein (e.g. \`@remember passport drawer me rakha hai\`).
+• \`@recall <query>\` ➔ Memory vault se dhoondhein (e.g. \`@recall passport\`).
+
+👥 *6. GROUPS & UTILITIES:*
+• \`@poll <question>\` ➔ Interactive WhatsApp poll create karein.
+• \`@quiz <topic>\` ➔ Group trivia/quiz game start karein.
+• \`@split <amount> between <names>\` ➔ Group bill split & instant UPI split.
+• \`@code <code>\` / \`@debug <code>\` ➔ Programming code explain & error debug.
+• \`@call\` ➔ 1-Click live real incoming voice call on phone app.
+• \`@nearby <place>\` / \`@route to <place>\` ➔ Maps & traffic navigation.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+💡 *Tip:* Aap natural bhasha me bhi bol sakte hain (e.g. _"Ram ko msg kar do"_, _"kal subah 8 baje utha dena"_). Friday automatically execute karegi! 👍`;
   }
 
   public getStatus() {
