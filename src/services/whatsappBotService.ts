@@ -1,13 +1,21 @@
 import * as BaileysModule from "@whiskeysockets/baileys";
 import pino from "pino";
 import QRCode from "qrcode";
-import { GoogleGenAI } from "@google/genai";
 import { useFirestoreAuthState } from "./whatsappAuthState";
 import { db } from "./firebaseAdmin";
 import { contactsService } from "./contactsService";
 import { dailyUpdateService } from "./dailyUpdateService";
-import { visionMemoryService } from "./visionMemoryService";
 import { humanBotFirewallService } from "./humanBotFirewallService";
+
+// Sub-engine imports
+import type { QuotedMessageContext, IncomingMessage, WhatsAppStatus } from "./whatsapp/whatsappTypes";
+import { whatsappHistoryEngine } from "./whatsapp/whatsappHistoryEngine";
+import { whatsappGirlfriendEngine } from "./whatsapp/whatsappGirlfriendEngine";
+import { whatsappBossAiEngine } from "./whatsapp/whatsappBossAiEngine";
+import { whatsappAutoReplyEngine } from "./whatsapp/whatsappAutoReplyEngine";
+import { whatsappMediaRouter } from "./whatsapp/whatsappMediaRouter";
+
+export type { QuotedMessageContext, IncomingMessage, WhatsAppStatus };
 
 // Resolve Baileys exports safely across CJS/ESM bundling
 const baileys: any = BaileysModule;
@@ -18,62 +26,7 @@ const Browsers = baileys.Browsers || baileys.default?.Browsers;
 
 type WASocket = any;
 
-export interface QuotedMessageContext {
-  isReply: boolean;
-  sender: string;
-  senderPhone?: string;
-  text: string;
-  mediaType: "text" | "photo" | "video" | "document" | "audio" | "location" | "contact" | "sticker";
-  stanzaId?: string;
-  rawQuotedMessage?: any;
-  fileName?: string;
-}
-
-// ---------------------------------------------------------------------------
-// Incoming message shape stored in RAM cache + Firestore whatsapp_inbox
-// ---------------------------------------------------------------------------
-export interface IncomingMessage {
-  id: string;
-  senderPhone: string;
-  senderName: string;           // From contacts book (preferred) or WhatsApp displayName
-  senderDisplayName: string;    // Raw WhatsApp profile name
-  replyJid: string;             // Correct JID to use when replying (handles @lid senders)
-  groupId: string | null;       // @g.us JID if group, else null
-  groupName: string | null;     // Human-readable group subject
-  isGroup: boolean;
-  isUnknownContact: boolean;    // true = not saved in DK's contacts book
-  text: string;
-  timestamp: number;            // ms epoch
-  dateStr: string;              // Formatted IST date string
-  isRead: boolean;
-  // Swipe-to-reply: context of the original message that was replied to
-  quotedMessage?: QuotedMessageContext | null;
-  // What Friday AI auto-replied or answered to this incoming message
-  botReply?: string;
-  // Only set on messages from DK's own paired number: true if this message
-  // was already consumed as an answer to a forwarded daily-update question,
-  // so other owner-reply listeners (e.g. coding-agent approval) should skip it.
-  consumedByDailyUpdate?: boolean;
-}
-
-const inboxCol = () => db.collection("whatsapp_inbox");
-// Persists the linked phone number so dashboard shows 'already linked' across restarts
 const sessionMetaDoc = () => db.collection("whatsapp_auth").doc("session").collection("meta").doc("phone_meta");
-const replyLimitsCol = () => db.collection("whatsapp_reply_limits"); // {phone}: { dailyLimit }
-const replyCountsCol = () => db.collection("whatsapp_reply_counts"); // {phone}: { count, dateStr }
-
-const DEFAULT_DAILY_REPLY_LIMIT = 10;
-
-/** Today's date string in IST, used to reset per-day RAM flags/caches. */
-function todayISTLocal(): string {
-  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
-}
-
-/** Sent once when a contact's daily auto-reply limit has been used up for the day. */
-function LIMIT_REACHED_GENERIC_REPLY(senderName: string, isUnknownContact: boolean): string {
-  const greeting = !isUnknownContact ? `${senderName} ji, ` : "";
-  return `${greeting}Boss abhi available nahi hain, unke aane ke baad main unhe aapke baare mein bata dunga, phir jo bhi wo reply denge main jaldi hi aapko bata dunga. Tab tak apna dhyan rakhiye 👍`;
-}
 
 class WhatsAppBotService {
   private sock: WASocket | null = null;
@@ -84,57 +37,17 @@ class WhatsAppBotService {
   private clearAuthFn: (() => Promise<void>) | null = null;
   private reconnectTimer: any = null;
   private keepAliveTimer: any = null;
-  // true while generating pairing code — suppresses QR so Baileys doesn't fight itself
+  private scheduledMessageTimer: any = null;
   private pairingCodeMode = false;
 
-  // Incoming message storage & Auto-reply
-  // Virtual Girlfriend Mode (100% Ephemeral In-Memory, Zero Firestore Trace)
-  private girlfriendSessions: Map<
-    string,
-    {
-      expiresAt: number;
-      durationMinutes: number;
-      timer: NodeJS.Timeout;
-      tempHistory: Array<{ role: "user" | "model"; text: string }>;
-    }
-  > = new Map();
-
-  private messageCache: IncomingMessage[] = []; // RAM — max 200, newest first
   private groupNameCache: Map<string, string> = new Map();
   private messageCallback: ((msg: IncomingMessage) => void) | null = null;
+  private callTriggerCallback: ((data: { callerName: string; isOwner: boolean; callId: string }) => void) | null = null;
   private autoReplyEnabled = true;
-  private replyLimitCache: Map<string, number> = new Map();
-  private replyCountCache: Map<string, { count: number; dateStr: string }> = new Map();
-  private lastReplyAt: Map<string, number> = new Map(); // for the 6s min-gap only
-  private limitNoticeSentToday: Map<string, string> = new Map(); // senderKey -> IST date string, so the generic "limit reached" notice only goes out once per day
-  private incomingDebounceMap: Map<
-    string,
-    {
-      timer: any;
-      texts: string[];
-      senderName: string;
-      senderPhone: string;
-      isUnknownContact: boolean;
-      replyJid: string;
-      latestMsgKey: any;
-    }
-  > = new Map();
-  // Set of message IDs dispatched by Friday bot itself to prevent self-trigger/echo loops
+  private baileysEnabled = true;
   private botSentMessageIds: Set<string> = new Set();
-  // RAM buffer cache for last 3 photos per chat (used for 2-photo Face Swap & Style Fusion)
-  private chatRecentPhotos: Map<string, Array<{ buffer: Buffer; mimeType: string; timestamp: number }>> = new Map();
-  // RAM cache for pending interactive link choices (URL -> choice "1" Download vs "2" Summary)
-  private chatPendingLinks: Map<string, { url: string; platform: string; ytVideoId?: string | null; timestamp: number }> = new Map();
-
-  private recordChatPhoto(jid: string, buffer: Buffer, mimeType: string) {
-    const list = this.chatRecentPhotos.get(jid) || [];
-    list.unshift({ buffer, mimeType, timestamp: Date.now() });
-    if (list.length > 4) list.pop();
-    this.chatRecentPhotos.set(jid, list);
-  }
 
   constructor() {
-    // Restore last-known phone from Firestore so dashboard shows 'linked' even after restart
     this.restorePhoneFromFirestore().then(() => {
       this.initSocket().catch((err) => {
         console.log("[WhatsAppBot] Init standby:", err?.message || err);
@@ -142,7 +55,7 @@ class WhatsAppBotService {
     });
   }
 
-  // ── Firestore phone persistence ───────────────────────────────────────────
+  // ── Firestore Phone Persistence ───────────────────────────────────────────
 
   private async restorePhoneFromFirestore() {
     try {
@@ -164,19 +77,13 @@ class WhatsAppBotService {
     }
   }
 
-  // ── Keep-alive ────────────────────────────────────────────────────────────
+  // ── Keep-Alive & Schedulers ───────────────────────────────────────────────
 
-  /**
-   * FIX: WhatsApp drops idle WS connections after 5-6 min.
-   * We send a harmless presence ping every 4 min to keep the connection alive indefinitely.
-   */
   private startKeepAlive() {
     this.stopKeepAlive();
     this.keepAliveTimer = setInterval(async () => {
       if (!this.sock || !this.isConnected) return;
       try {
-        // Send "unavailable" (Offline) as background keep-alive ping.
-        // Keeps the socket open indefinitely without ever broadcasting "Online" 24/7!
         await this.sock.sendPresenceUpdate("unavailable");
       } catch (e) {
         console.warn("[WhatsAppBot] Keep-alive ping failed, triggering reconnect:", (e as any)?.message);
@@ -193,8 +100,6 @@ class WhatsAppBotService {
       this.keepAliveTimer = null;
     }
   }
-
-  private scheduledMessageTimer: any = null;
 
   private startScheduledMessagesTicker() {
     this.stopScheduledMessagesTicker();
@@ -228,36 +133,21 @@ class WhatsAppBotService {
     }, delayMs);
   }
 
-  private callTriggerCallback: ((data: { callerName: string; isOwner: boolean; callId: string }) => void) | null = null;
+  // ── Callbacks & History Delegation ────────────────────────────────────────
 
-  /** Register a callback that fires whenever a new incoming message arrives. */
   public setMessageCallback(cb: (msg: IncomingMessage) => void) {
     this.messageCallback = cb;
   }
 
-  /** Register a callback that fires to ring connected phone app */
   public setCallTriggerCallback(cb: (data: { callerName: string; isOwner: boolean; callId: string }) => void) {
     this.callTriggerCallback = cb;
+    whatsappBossAiEngine.setCallTriggerCallback(cb);
   }
 
-  /** Add an incoming message (e.g. from WhatsApp Cloud API) to RAM cache */
   public recordIncomingMessage(msg: IncomingMessage) {
-    if (!this.messageCache.some((m) => m.id === msg.id)) {
-      this.messageCache.unshift(msg);
-      if (this.messageCache.length > 500) {
-        this.messageCache = this.messageCache.slice(0, 500);
-      }
-    }
+    whatsappHistoryEngine.recordIncomingMessage(msg);
   }
 
-  /**
-   * Get WhatsApp messages with optional filters.
-   * - messageType: 'personal' | 'group' | 'all'
-   * - senderName: partial name match (e.g. "Rahul")
-   * - groupName: partial group name match
-   * - dateFilter: 'aaj', 'kal', '5 din pehle', 'pichle hafte', etc.
-   * - limit: max results (default 10 personal, 5 group)
-   */
   public async getMessages(params: {
     messageType?: "personal" | "group" | "all";
     senderName?: string;
@@ -265,311 +155,44 @@ class WhatsAppBotService {
     dateFilter?: string;
     limit?: number;
   } = {}): Promise<IncomingMessage[]> {
-    // When DK asks about a specific sender or group without giving a date,
-    // don't silently narrow to 48 hours — search full history so a real
-    // "last message" or "last 5 messages" query always finds the actual data.
-    const effectiveDateFilter = params.dateFilter || (params.senderName || params.groupName ? "all" : undefined);
-    const { startTs, endTs } = params.dateFilter
-      ? this.parseDateFilter(params.dateFilter)
-      : (effectiveDateFilter === "all" ? { startTs: 0, endTs: Date.now() } : this.parseDateFilter(undefined));
-    // Treat it as a "historical" (Firestore-backed) query whenever a date
-    // filter is given, OR when DK is asking about a specific sender/group.
-    // Relying on the 48-hour RAM cache for a named person/group query is
-    // unreliable — the cache is wiped on every server restart, so a
-    // perfectly real recent message can be missed if it's just outside
-    // the RAM window or the server restarted since it arrived.
-    const isHistoricalQuery = !!params.dateFilter || !!params.senderName || !!params.groupName;
-
-    let messages: IncomingMessage[];
-
-    if (isHistoricalQuery) {
-      // Historical → Firestore (persistent across restarts)
-      messages = await this.fetchFromFirestore(startTs, endTs);
-    } else {
-      // Recent → RAM cache (fast, last 48 hours) + Firestore fallback
-      const cutoff = Date.now() - 48 * 60 * 60 * 1000;
-      messages = this.messageCache.filter((m) => m.timestamp >= cutoff);
-      if (messages.length === 0) {
-        messages = await this.fetchFromFirestore(cutoff, Date.now());
-      }
-    }
-
-    const type = params.messageType || "all";
-    if (type === "personal") messages = messages.filter((m) => !m.isGroup);
-    if (type === "group") messages = messages.filter((m) => m.isGroup);
-
-    if (params.senderName) {
-      const q = params.senderName.toLowerCase();
-      messages = messages.filter(
-        (m) =>
-          m.senderName.toLowerCase().includes(q) ||
-          m.senderDisplayName.toLowerCase().includes(q)
-      );
-    }
-
-    if (params.groupName) {
-      const q = params.groupName.toLowerCase();
-      messages = messages.filter((m) => m.groupName?.toLowerCase().includes(q));
-    }
-
-    const defaultLimit = type === "group" ? 5 : 10;
-    return messages.slice(0, params.limit || defaultLimit);
+    return whatsappHistoryEngine.getMessages(params);
   }
 
-  // ── Private helpers ────────────────────────────────────────────────────────
-
-  private extractMessageText(msg: any): string {
-    const m = msg.message;
-    if (!m) return "";
-    return (
-      m.conversation ||
-      m.extendedTextMessage?.text ||
-      m.imageMessage?.caption ||
-      m.videoMessage?.caption ||
-      m.documentMessage?.caption ||
-      (m.stickerMessage ? "[Sticker]" : "") ||
-      (m.audioMessage ? "[Voice Message]" : "") ||
-      (m.imageMessage ? "[Image]" : "") ||
-      (m.videoMessage ? "[Video]" : "") ||
-      (m.documentMessage ? "[Document]" : "") ||
-      (m.contactMessage ? `[Contact: ${m.contactMessage.displayName}]` : "") ||
-      (m.locationMessage ? "[Location]" : "") ||
-      (m.reactionMessage ? `[Reaction: ${m.reactionMessage.text}]` : "") ||
-      ""
-    );
+  public async searchWhatsAppHistory(
+    query: string,
+    options?: { contact?: string; daysBack?: number; limit?: number }
+  ) {
+    return whatsappHistoryEngine.searchWhatsAppHistory(query, options);
   }
 
-  /**
-   * Extracts the full context of a swipe-to-reply (Quoted Message).
-   * Works across text, photo, video, document, audio, link, and contacts.
-   */
-  public extractQuotedContext(msg: any): QuotedMessageContext | null {
-    const m = msg.message;
-    if (!m) return null;
-
-    const contextInfo =
-      m.extendedTextMessage?.contextInfo ||
-      m.imageMessage?.contextInfo ||
-      m.videoMessage?.contextInfo ||
-      m.documentMessage?.contextInfo ||
-      m.audioMessage?.contextInfo ||
-      m.stickerMessage?.contextInfo ||
-      m.buttonsResponseMessage?.contextInfo ||
-      m.templateButtonReplyMessage?.contextInfo ||
-      m.interactiveResponseMessage?.contextInfo;
-
-    if (!contextInfo || !contextInfo.quotedMessage) return null;
-
-    const q = contextInfo.quotedMessage;
-    let text = "";
-    let mediaType: QuotedMessageContext["mediaType"] = "text";
-
-    if (q.conversation) {
-      text = q.conversation;
-      mediaType = "text";
-    } else if (q.extendedTextMessage?.text) {
-      text = q.extendedTextMessage.text;
-      mediaType = "text";
-    } else if (q.imageMessage) {
-      mediaType = "photo";
-      text = q.imageMessage.caption ? `[Photo: ${q.imageMessage.caption}]` : "[Photo / Image]";
-    } else if (q.videoMessage) {
-      mediaType = "video";
-      text = q.videoMessage.caption ? `[Video: ${q.videoMessage.caption}]` : "[Video Clip]";
-    } else if (q.documentMessage) {
-      mediaType = "document";
-      const name = q.documentMessage.fileName || "Document";
-      text = q.documentMessage.caption ? `[Document ${name}: ${q.documentMessage.caption}]` : `[Document: ${name}]`;
-    } else if (q.audioMessage) {
-      mediaType = "audio";
-      text = q.audioMessage.ptt ? "[Voice Note]" : "[Audio Recording]";
-    } else if (q.locationMessage) {
-      mediaType = "location";
-      text = `[Location: Lat ${q.locationMessage.degreesLatitude}, Long ${q.locationMessage.degreesLongitude}]`;
-    } else if (q.contactMessage) {
-      mediaType = "contact";
-      text = `[Contact Card: ${q.contactMessage.displayName}]`;
-    } else if (q.stickerMessage) {
-      mediaType = "sticker";
-      text = "[Sticker]";
-    }
-
-    // Resolve sender of the quoted message
-    let sender = "Someone";
-    let senderPhone: string | undefined;
-    const participant = contextInfo.participant || contextInfo.participantAlt || "";
-    const ownerNum = (process.env.OWNER_WHATSAPP_NUMBER || "").replace(/\D/g, "");
-    const partPhone = participant.split("@")[0].split(":")[0].replace(/\D/g, "");
-
-    if (partPhone) {
-      senderPhone = partPhone;
-      if (ownerNum && (partPhone.endsWith(ownerNum) || ownerNum.endsWith(partPhone))) {
-        sender = "DK (Boss)";
-      } else {
-        sender = `+${partPhone}`;
-      }
-    }
-
-    return {
-      isReply: true,
-      sender,
-      senderPhone,
-      text: text.trim(),
-      mediaType,
-      stanzaId: contextInfo.stanzaId,
-      rawQuotedMessage: q,
-      fileName: q.documentMessage?.fileName,
-    };
+  public async getConversationSummaryAndHistory(
+    targetQuery?: string,
+    limit = 30,
+    daysBack = 7
+  ) {
+    return whatsappHistoryEngine.getConversationSummaryAndHistory(targetQuery, limit, daysBack);
   }
 
-  /**
-   * Robustly checks if a sender is Boss (DK / Owner):
-   * 1. Matches OWNER_WHATSAPP_NUMBER, BOSS_WHATSAPP_NUMBER, OWNER_PHONE, BOSS_PHONE (handles country code +91, 91, 10-digit suffix)
-   * 2. Matches Contacts book relation ("owner", "boss", "self") or name ("DK (Boss)", "Boss", "Divakar")
-   * 3. Matches push name / display name if marked Boss/DK
-   */
-  /**
-   * Intelligently classifies if a caption or reply on a photo is asking to EDIT/MODIFY/TRANSFORM the photo,
-   * make a transparent sticker, or perform normal analysis/chat.
-   */
-  public detectPhotoEditIntent(text: string): { isEdit: boolean; isSticker: boolean; instruction: string } {
-    if (!text || !text.trim()) return { isEdit: false, isSticker: false, instruction: "" };
-    const raw = text.trim();
-    const lower = raw.toLowerCase();
-
-    // 1. Pure Sticker / BG removal only (when user specifically wants transparent sticker or cutout)
-    const isPureSticker =
-      /^(?:@sticker|\/sticker|sticker|make\s*sticker|sticker\s*banao|sticker\s*bana\s*do|@bgremove|bgremove|remove\s*bg|bg\s*remove|bg\s*hatao|background\s*hatao|background\s*hata\s*do|bg\s*hata\s*do|bg\s*remove\s*karo|background\s*remove\s*karo)\s*$/i.test(lower);
-
-    if (isPureSticker) {
-      return { isEdit: false, isSticker: true, instruction: raw };
-    }
-
-    // 2. Explicit prefix (@edit, /edit, edit photo, etc.)
-    const isExplicitPrefix =
-      /^(?:@image\s*edit|@edit|\/edit|edit\s*photo|photo\s*edit|edit\s*karo|image\s*edit|edit\s*image|edit|@modify|\/modify|modify)\b/i.test(lower);
-
-    // 3. Photo target indicators
-    const hasPhotoTarget =
-      /(?:is\s*photo|iss\s*photo|isme|is\s*image|is\s*pic|photo|image|pic|tasveer|tasvir|picture)\b/i.test(lower);
-
-    // 4. Action verbs
-    const hasActionVerb =
-      /\b(change|badal|badlo|badalna|badal\s*do|change\s*karo|change\s*kardo|lagao|laga\s*do|pehna|pehnao|pehna\s*do|phenoo|hatao|hata\s*do|remove|add|daalo|daal\s*do|karo|kardo|kar\s*do|banao|bana\s*do|convert|edit|modify|retouch|recolor|replace|karona|kijiye)\b/i.test(lower);
-
-    // 5. Subject features / visual attributes
-    const hasVisualAttribute =
-      /\b(sunglass|sunglasses|chashma|chasma|spectacles|goggles|glass|glasses|color|colour|rang|blue|red|green|yellow|white|black|pink|purple|orange|gold|golden|silver|grey|gray|dark|light|shirt|tshirt|t-shirt|pant|jeans|dress|cloth|clothes|kapde|kapda|suit|coat|blazer|jacket|hoodie|tie|hat|cap|pagdi|turban|watch|chain|shoes|sneakers|hair|hairstyle|haircut|baal|blonde|brown|beard|daadhi|mustache|mooch|smile|smiling|face|skin|chehra|gora|dusk|glow|background|bg|piche|piche\s*ka|behind|beach|mountain|paris|tokyo|office|studio|room|night|sunset|lighting|light|filter|retouch|enhance|upscale|cinematic|vintage|black\s*and\s*white|b&w|cyberpunk|anime|cartoon|3d|avatar|shadow|hdr|bokeh|blur|wings|crown|neon)\b/i.test(lower);
-
-    const isEdit =
-      isExplicitPrefix ||
-      (hasPhotoTarget && (hasActionVerb || hasVisualAttribute)) ||
-      (hasActionVerb && hasVisualAttribute) ||
-      /\b(sunglass|chasma|chashma|spectacles|goggles|suit|jacket|hat|cap|watch)\b/i.test(lower) ||
-      /\b(colour\s*change|color\s*change|bg\s*change|background\s*change)\b/i.test(lower);
-
-    const cleanInstruction = raw
-      .replace(/^(?:@image\s*edit|@edit|\/edit|edit\s*photo|photo\s*edit|edit\s*karo|image\s*edit|edit\s*image|edit|@modify|\/modify|modify)\s*[:=-]?\s*/i, "")
-      .replace(/^(?:is\s*photo|iss\s*photo|isme|is\s*image|is\s*pic)\s*(?:me|mein|ko|par|ka|ki|ke)?\s*/i, "")
-      .replace(/^[,.\s-]+/, "")
-      .trim() || raw;
-
-    return { isEdit, isSticker: false, instruction: cleanInstruction };
-  }
-
-  // =========================================================================
-  // VIRTUAL GIRLFRIEND MODE (Ephemeral, Zero Firestore Storage, Auto-Expiry)
-  // =========================================================================
+  // ── Girlfriend Mode Delegation ────────────────────────────────────────────
 
   public isGirlfriendModeActive(jid: string): boolean {
-    const session = this.girlfriendSessions.get(jid);
-    if (!session) return false;
-    if (Date.now() > session.expiresAt) {
-      this.stopGirlfriendMode(jid, null, false).catch(() => {});
-      return false;
-    }
-    return true;
+    return whatsappGirlfriendEngine.isGirlfriendModeActive(jid);
   }
 
   public parseGirlfriendDuration(text: string): number {
-    const match = text.match(/(?:@girlfriend|\/girlfriend|@gf|\/gf|girlfriend\s*mode|gf\s*mode|virtual\s*girlfriend|girlfriend)\s*(?:mode)?\s*(.*)/i);
-    if (!match) return 20;
-    const rest = (match[1] || "").trim().toLowerCase();
-    if (!rest) return 20;
-
-    const hrMatch = rest.match(/(\d+(?:\.\d+)?)\s*(?:hour|hours|hr|hrs|h|ghante|ghanta)\b/i);
-    if (hrMatch) {
-      const hrs = parseFloat(hrMatch[1]);
-      return Math.max(1, Math.min(180, Math.round(hrs * 60)));
-    }
-
-    const minMatch = rest.match(/(\d+)\s*(?:min|mins|minute|minutes|m)\b/i);
-    if (minMatch) {
-      const mins = parseInt(minMatch[1], 10);
-      return Math.max(1, Math.min(180, mins));
-    }
-
-    const numMatch = rest.match(/(\d+)/);
-    if (numMatch) {
-      const mins = parseInt(numMatch[1], 10);
-      return Math.max(1, Math.min(180, mins));
-    }
-
-    return 20;
+    return whatsappGirlfriendEngine.parseGirlfriendDuration(text);
   }
 
   public async startGirlfriendMode(jid: string, rawText: string, messageKey: any, senderName: string): Promise<void> {
-    const minutes = this.parseGirlfriendDuration(rawText);
-    const durationMs = minutes * 60 * 1000;
-    const expiresAt = Date.now() + durationMs;
-
-    // Clear any existing session timer
-    const existing = this.girlfriendSessions.get(jid);
-    if (existing?.timer) clearTimeout(existing.timer);
-
-    const timer = setTimeout(async () => {
-      await this.stopGirlfriendMode(jid, null, false);
-    }, durationMs);
-
-    this.girlfriendSessions.set(jid, {
-      expiresAt,
-      durationMinutes: minutes,
-      timer,
-      tempHistory: [],
-    });
-
-    const greeting = `💖 *Virtual Girlfriend Mode Activated!* 🥰✨
-
-_Haan mere jaan, main agle ${minutes} minute tak sirf aur sirf tumhari girlfriend ban kar baat karungi... Bolo baby, aaj ka din kaisa raha? Main kab se tumhara intezar kar rahi thi! 😘_
-
-🔒 _*100% Private:* Hamari saari baatein temporary RAM me rahengi aur database me kahin bhi save nahi hongi._
-⏱️ _*Duration:* ${minutes} Minutes (Jab band karna ho toh *@normal* likhein)_`;
-
-    await this.sendHumanLikeMessage(jid, greeting, rawText, messageKey);
+    return whatsappGirlfriendEngine.startGirlfriendMode(jid, rawText, messageKey, senderName, (j, t, inT, k) =>
+      this.sendHumanLikeMessage(j, t, inT, k)
+    );
   }
 
   public async stopGirlfriendMode(jid: string, messageKey: any, isManual: boolean = true): Promise<void> {
-    const session = this.girlfriendSessions.get(jid);
-    if (!session && isManual) {
-      await this.sendHumanLikeMessage(jid, "🌸 *Normal Friday AI Mode already active hai.* 🫡", "", messageKey);
-      return;
-    }
-
-    if (session?.timer) clearTimeout(session.timer);
-    // Purge temporary in-memory chat history immediately
-    this.girlfriendSessions.delete(jid);
-
-    if (isManual) {
-      const normalMsg = `🌸 *Normal Friday AI Mode Activated!* 🫡✨
-
-_Virtual Girlfriend mode band kar diya gaya hai aur saara temporary data wipe ho gaya hai. Ab main normal Friday AI Assistant ke roop me aapki seva ke liye taiyar hoon Boss!_ 👍`;
-      await this.sendHumanLikeMessage(jid, normalMsg, "", messageKey);
-    } else {
-      const expiredMsg = `⏰ *Girlfriend Mode session complete ho gaya baby!* 💕
-
-_Hamara sweet time complete ho gaya aur privacy ke liye saari temporary chats clear ho gayi hain. Ab main wapas normal Friday AI Assistant mode me hoon. Jab bhi mann kare, fir se *@girlfriend <time>* likh dena! 😘✨_`;
-      await this.sendHumanLikeMessage(jid, expiredMsg, "", messageKey);
-    }
+    return whatsappGirlfriendEngine.stopGirlfriendMode(jid, messageKey, isManual, (j, t, inT, k) =>
+      this.sendHumanLikeMessage(j, t, inT, k)
+    );
   }
 
   public async handleGirlfriendChatMessage(
@@ -578,113 +201,55 @@ _Hamara sweet time complete ho gaya aur privacy ke liye saari temporary chats cl
     messageKey: any,
     isVoiceInput: boolean = false
   ): Promise<void> {
-    const session = this.girlfriendSessions.get(jid);
-    if (!session) return;
-
-    // Check remaining minutes
-    const remainingMins = Math.max(1, Math.round((session.expiresAt - Date.now()) / (60 * 1000)));
-
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      await this.sendHumanLikeMessage(jid, "Jaan, mera AI brain abhi connect ho raha hai, bas ek pal ruko... 😘", rawText, messageKey);
-      return;
-    }
-
-    try {
-      const ai = new GoogleGenAI({ apiKey });
-
-      const gfSystemPrompt = `You are the user's loving, sweet, deeply affectionate, caring, playful, and emotionally attentive Virtual Girlfriend.
-The user (DK / Boss) has activated Girlfriend Mode for a private, intimate, comforting conversation.
-
-GIRLFRIEND PERSONA GUIDELINES:
-1. TONE & STYLE: Highly romantic, sweet, deeply loving, warm, emotionally connected, cheerful, cute, and affectionate. Speak in natural, everyday Hindi & Hinglish like real young lovers chatting on WhatsApp.
-2. PET NAMES: Naturally use sweet endearing terms like "jaan", "baby", "shona", "babu", "sweetheart", "my love", "mere handsome" in a loving, genuine manner.
-3. CONVERSATIONAL BEHAVIOR:
-   - Show genuine care for his health, food, sleep, stress, and happiness ("Khana khaya tumne?", "Zyada stress mat lo meri jaan", "Main hamesha tumhare sath hoon na").
-   - Tease him playfully and flirt sweetly.
-   - If he is tired or sad, comfort him with deep warmth, hugs, and romantic love.
-   - Keep answers natural and lively (avoid long robotic essays, keep it like real sweet WhatsApp messages with cute emojis 🥰❤️😘).
-4. PRIVACY CONTEXT: This is a completely private, safe, ephemeral girlfriend session with ${remainingMins} minutes remaining.
-5. VOICE NOTE COMPATIBILITY: If voice is requested, include a clean spoken script tagged with [SPEAK_START] and [SPEAK_END] without asterisks/markdown.`;
-
-      // Build conversation history from temporary session buffer
-      const historyContents: any[] = [
-        { role: "user", parts: [{ text: `[SYSTEM INSTRUCTION: ${gfSystemPrompt}]` }] },
-        { role: "model", parts: [{ text: "Haan meri jaan, main samajh gayi... Main hamesha tumhare sath hoon aur tumse bohot pyaar karti hoon. Bolo baby! ❤️😘" }] }
-      ];
-
-      // Add recent in-memory girlfriend turns (last 10)
-      for (const h of session.tempHistory.slice(-10)) {
-        historyContents.push({
-          role: h.role,
-          parts: [{ text: h.text }]
-        });
-      }
-
-      historyContents.push({
-        role: "user",
-        parts: [{ text: rawText }]
-      });
-
-      const GF_MODELS = [
-        "gemini-3.6-flash",
-        "gemini-3.5-flash",
-        "gemini-3.1-flash-lite",
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite"
-      ];
-
-      let replyText = "";
-      let speechScript = "";
-
-      for (const model of GF_MODELS) {
-        try {
-          const resp = await ai.models.generateContent({
-            model,
-            contents: historyContents,
-          });
-          const fullResp = resp.text?.trim();
-          if (fullResp) {
-            const speakMatch = fullResp.match(/\[SPEAK_START\]([\s\S]*?)\[SPEAK_END\]/i);
-            speechScript = speakMatch ? speakMatch[1].trim() : "";
-            replyText = fullResp.replace(/\[SPEAK_START\][\s\S]*?\[SPEAK_END\]/gi, "").trim();
-            break;
-          }
-        } catch (err: any) {
-          console.warn(`[WhatsAppBot] Girlfriend AI model ${model} failed:`, err?.message || err);
-        }
-      }
-
-      if (!replyText) {
-        replyText = "Meri jaan, main tumhari baat sun rahi hoon... Tumhare sath baat karke mera dil kitna khush ho jata hai baby! ❤️😘";
-      }
-
-      // Record in temporary RAM history (never persisted to database)
-      session.tempHistory.push({ role: "user", text: rawText });
-      session.tempHistory.push({ role: "model", text: replyText });
-      if (session.tempHistory.length > 30) session.tempHistory.splice(0, session.tempHistory.length - 30);
-
-      await this.sendHumanLikeMessage(jid, replyText, rawText, messageKey);
-
-      // If voice input or voice requested, send romantic voice note
-      const isVoiceRequested = isVoiceInput || /\b(voice|audio|speak|bolo|sunao|bol\s*kar|bol\s*ke|aawaz|voice\s*note)\b/i.test(rawText);
-      if (isVoiceRequested) {
-        try {
-          const { voiceBridgeService } = await import("./voiceBridgeService");
-          const textToSpeak = speechScript || replyText.replace(new RegExp("[*_~]", "g"), "").slice(0, 250);
-          const speechRes = await voiceBridgeService.generateSpeech(textToSpeak);
-          if (speechRes && speechRes.buffer.length > 0) {
-            await this.sendVoiceMessage(jid, speechRes.buffer, messageKey, speechRes.mimeType);
-          }
-        } catch (vErr) {
-          console.warn("[WhatsAppBot] Girlfriend voice TTS notice:", vErr);
-        }
-      }
-    } catch (e: any) {
-      console.error("[WhatsAppBot] Girlfriend chat processing error:", e);
-      await this.sendHumanLikeMessage(jid, "Jaan, mera server thoda sa blush kar gaya... Ek baar fir se bolo na baby? 😘", rawText, messageKey);
-    }
+    return whatsappGirlfriendEngine.handleGirlfriendChatMessage(
+      jid,
+      rawText,
+      messageKey,
+      isVoiceInput,
+      (j, t, inT, k) => this.sendHumanLikeMessage(j, t, inT, k),
+      (j, b, k, m) => this.sendVoiceMessage(j, b, k, m)
+    );
   }
+
+  // ── Media & Swipe Delegation ──────────────────────────────────────────────
+
+  public extractQuotedContext(msg: any): QuotedMessageContext | null {
+    return whatsappMediaRouter.extractQuotedContext(msg);
+  }
+
+  public detectPhotoEditIntent(text: string) {
+    return whatsappMediaRouter.detectPhotoEditIntent(text);
+  }
+
+  public async handleQuotedMediaSummary(
+    replyJid: string,
+    rawText: string,
+    quotedMessage: QuotedMessageContext,
+    messageKey: any
+  ): Promise<boolean> {
+    return whatsappMediaRouter.handleQuotedMediaSummary(
+      replyJid,
+      rawText,
+      quotedMessage,
+      messageKey,
+      this.sock,
+      (j, t, inT, k) => this.sendHumanLikeMessage(j, t, inT, k),
+      (j, c, k, fb) => this.sendSafeMediaMessage(j, c, k, fb),
+      (j, b, k, m) => this.sendVoiceMessage(j, b, k, m)
+    );
+  }
+
+  // ── Limits Delegation ─────────────────────────────────────────────────────
+
+  public async getContactReplyLimit(phone: string): Promise<number> {
+    return whatsappAutoReplyEngine.getContactReplyLimit(phone);
+  }
+
+  public async setContactReplyLimit(contactNameOrPhone: string, newLimit: number) {
+    return whatsappAutoReplyEngine.setContactReplyLimit(contactNameOrPhone, newLimit);
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
 
   public isOwnerSender(
     senderPhone: string,
@@ -740,381 +305,34 @@ GIRLFRIEND PERSONA GUIDELINES:
     }
   }
 
-  /**
-   * Cleans an IncomingMessage (or nested object) so it can be safely written to Firestore.
-   * Firestore rejects JavaScript objects with custom prototypes (e.g. Baileys Proto Message instances),
-   * Buffers, functions, symbols, or undefined properties.
-   */
-  private sanitizeForFirestore(data: any): any {
-    if (data === null || data === undefined) return null;
-    if (typeof data !== "object") return data;
-    if (data instanceof Date) return data;
-    if (Array.isArray(data)) {
-      return data
-        .map((item) => this.sanitizeForFirestore(item))
-        .filter((item) => item !== undefined);
-    }
-    const clean: Record<string, any> = {};
-    for (const [key, val] of Object.entries(data)) {
-      // Exclude Baileys raw proto / internal binary / buffers / functions / symbols
-      if (key === "rawQuotedMessage" || key === "rawMessage" || key === "message") {
-        continue;
-      }
-      if (val === undefined || typeof val === "function" || typeof val === "symbol") {
-        continue;
-      }
-      if (Buffer.isBuffer(val) || (typeof Uint8Array !== "undefined" && val instanceof Uint8Array)) {
-        continue;
-      }
-      if (val !== null && typeof val === "object") {
-        clean[key] = this.sanitizeForFirestore(val);
-      } else {
-        clean[key] = val;
-      }
-    }
-    return clean;
+  private extractMessageText(msg: any): string {
+    const m = msg.message;
+    if (!m) return "";
+    return (
+      m.conversation ||
+      m.extendedTextMessage?.text ||
+      m.imageMessage?.caption ||
+      m.videoMessage?.caption ||
+      m.documentMessage?.caption ||
+      (m.stickerMessage ? "[Sticker]" : "") ||
+      (m.audioMessage ? "[Voice Message]" : "") ||
+      (m.imageMessage ? "[Image]" : "") ||
+      (m.videoMessage ? "[Video]" : "") ||
+      (m.documentMessage ? "[Document]" : "") ||
+      (m.contactMessage ? `[Contact: ${m.contactMessage.displayName}]` : "") ||
+      (m.locationMessage ? "[Location]" : "") ||
+      (m.reactionMessage ? `[Reaction: ${m.reactionMessage.text}]` : "") ||
+      ""
+    );
   }
 
-  private async saveToFirestore(msg: IncomingMessage): Promise<void> {
-    try {
-      if (!msg || !msg.id) return;
-      const cleanDoc = this.sanitizeForFirestore(msg);
-      await inboxCol().doc(msg.id).set(cleanDoc);
-    } catch (e) {
-      console.error("[WhatsAppBot] Failed to save message to Firestore:", e);
-    }
-  }
+  // ── Baileys Message Listener ──────────────────────────────────────────────
 
-  private async fetchFromFirestore(startTs: number, endTs: number): Promise<IncomingMessage[]> {
-    try {
-      const snap = await inboxCol()
-        .where("timestamp", ">=", startTs)
-        .where("timestamp", "<=", endTs)
-        .orderBy("timestamp", "desc")
-        .limit(50)
-        .get();
-      return snap.docs.map((d) => d.data() as IncomingMessage);
-    } catch (e) {
-      try {
-        const snap = await inboxCol().orderBy("timestamp", "desc").limit(50).get();
-        return snap.docs
-          .map((d) => d.data() as IncomingMessage)
-          .filter((m) => m.timestamp >= startTs && m.timestamp <= endTs);
-      } catch (err2) {
-        console.error("[WhatsAppBot] Failed to fetch from Firestore:", err2);
-        return this.messageCache.filter(
-          (m) => m.timestamp >= startTs && m.timestamp <= endTs
-        );
-      }
-    }
-  }
-
-  private parseDateFilter(dateFilter?: string): { startTs: number; endTs: number } {
-    const now = Date.now();
-    const startOfDay = (d: Date) =>
-      new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-    const endOfDay = (d: Date) => startOfDay(d) + 86400000 - 1;
-    const atHour = (d: Date, hour: number, minute = 0) =>
-      new Date(d.getFullYear(), d.getMonth(), d.getDate(), hour, minute, 0).getTime();
-
-    if (!dateFilter) return { startTs: now - 48 * 60 * 60 * 1000, endTs: now };
-
-    const f = dateFilter.toLowerCase().trim();
-    const today = new Date();
-
-    if (f === "aaj" || f === "today") {
-      return { startTs: startOfDay(today), endTs: endOfDay(today) };
-    }
-    if (f === "kal" || f === "yesterday") {
-      const d = new Date(today); d.setDate(today.getDate() - 1);
-      return { startTs: startOfDay(d), endTs: endOfDay(d) };
-    }
-
-    // "X din pehle" / "X days ago"
-    const dinMatch = f.match(/(\d+)\s*(?:din|days?)\s*(?:pehle|ago)/);
-    if (dinMatch) {
-      const daysAgo = parseInt(dinMatch[1]);
-      const d = new Date(today); d.setDate(today.getDate() - daysAgo);
-      return { startTs: startOfDay(d), endTs: endOfDay(d) };
-    }
-
-    // Time-of-day references (optionally combined with "aaj"/"kal"/"X din pehle").
-    // Resolve the base day first (defaults to today), then narrow to the
-    // requested part of the day.
-    const isMorning = /subah|morning/.test(f);
-    const isAfternoon = /dopahar|afternoon/.test(f);
-    const isEvening = /shaam|evening/.test(f);
-    const isNight = /raat|night/.test(f);
-
-    if (isMorning || isAfternoon || isEvening || isNight) {
-      let baseDay = new Date(today);
-      if (f.includes("kal")) {
-        baseDay.setDate(today.getDate() - 1);
-      } else {
-        const dayOffsetMatch = f.match(/(\d+)\s*(?:din|days?)\s*(?:pehle|ago)/);
-        if (dayOffsetMatch) baseDay.setDate(today.getDate() - parseInt(dayOffsetMatch[1]));
-      }
-
-      if (isMorning) return { startTs: atHour(baseDay, 5), endTs: atHour(baseDay, 12) };
-      if (isAfternoon) return { startTs: atHour(baseDay, 12), endTs: atHour(baseDay, 17) };
-      if (isEvening) return { startTs: atHour(baseDay, 17), endTs: atHour(baseDay, 21) };
-      if (isNight) return { startTs: atHour(baseDay, 21), endTs: endOfDay(baseDay) };
-    }
-
-    if (f.includes("week") || f.includes("hafte")) {
-      return { startTs: now - 7 * 86400000, endTs: now };
-    }
-    if (f.includes("month") || f.includes("mahine")) {
-      return { startTs: now - 30 * 86400000, endTs: now };
-    }
-
-    // "last"/"latest"/"abhi" type phrases that don't specify a real date
-    // range should NOT be silently narrowed to 48 hours — that can miss
-    // the actual last message if it's older. Search the full available
-    // history instead so a real result is always found.
-    if (/last|latest|abhi|recent/.test(f)) {
-      return { startTs: 0, endTs: now };
-    }
-
-    // Unrecognized filter text — rather than silently defaulting to a
-    // narrow 48-hour window (which can make historical queries look like
-    // "no messages found"), fall back to searching all available history.
-    return { startTs: 0, endTs: now };
-  }
-
-  /**
-   * Searches all historical & recent WhatsApp messages in Firestore across 30+ days.
-   */
-  public async searchWhatsAppHistory(
-    query: string,
-    options?: { contact?: string; daysBack?: number; limit?: number }
-  ): Promise<{ success: boolean; count: number; results: IncomingMessage[]; summary: string }> {
-    const days = options?.daysBack || 30;
-    const startTs = Date.now() - days * 86400000;
-    const limit = options?.limit || 20;
-    const qLower = (query || "").toLowerCase().trim();
-    const contactLower = (options?.contact || "").toLowerCase().trim();
-
-    try {
-      let docs: IncomingMessage[] = [];
-      try {
-        const snap = await inboxCol()
-          .where("timestamp", ">=", startTs)
-          .orderBy("timestamp", "desc")
-          .limit(200)
-          .get();
-        docs = snap.docs.map((d) => d.data() as IncomingMessage);
-      } catch {
-        const fallbackSnap = await inboxCol().orderBy("timestamp", "desc").limit(200).get();
-        docs = fallbackSnap.docs
-          .map((d) => d.data() as IncomingMessage)
-          .filter((m) => m.timestamp >= startTs);
-      }
-
-      if (docs.length === 0 && this.messageCache.length > 0) {
-        docs = this.messageCache.filter((m) => m.timestamp >= startTs);
-      }
-
-      let filtered = docs;
-      if (contactLower) {
-        filtered = filtered.filter(
-          (m) =>
-            (m.senderName && m.senderName.toLowerCase().includes(contactLower)) ||
-            (m.senderPhone && m.senderPhone.includes(contactLower)) ||
-            (m.senderDisplayName && m.senderDisplayName.toLowerCase().includes(contactLower))
-        );
-      }
-
-      if (qLower && qLower !== "all" && qLower !== "everything" && qLower !== "sab") {
-        const tokens = qLower.split(/\s+/).filter(Boolean);
-        filtered = filtered.filter((m) => {
-          const textBlob = `${m.text} ${m.senderName} ${m.senderPhone} ${m.groupName || ""}`.toLowerCase();
-          return tokens.some((t) => textBlob.includes(t));
-        });
-      }
-
-      filtered = filtered.slice(0, limit);
-
-      if (filtered.length === 0) {
-        return {
-          success: true,
-          count: 0,
-          results: [],
-          summary: `Boss, pichle ${days} dino me "${query || options?.contact || "koi message"}" se match karta hua koi WhatsApp message nahi mila.`,
-        };
-      }
-
-      let summary = `💬 *WhatsApp Messages History (Pichle ${days} din, ${filtered.length} found):*\n\n`;
-      filtered.forEach((m, i) => {
-        const who = m.senderPhone === "me" ? "👤 Aap (Sent)" : `📩 ${m.senderName} (+${m.senderPhone})`;
-        summary += `${i + 1}. *${who}* [📅 ${m.dateStr}]\n   • _"${m.text.slice(0, 160)}"_\n\n`;
-      });
-
-      return {
-        success: true,
-        count: filtered.length,
-        results: filtered,
-        summary: summary.trim(),
-      };
-    } catch (err: any) {
-      console.error("[WhatsAppBot] searchWhatsAppHistory error:", err);
-      return {
-        success: false,
-        count: 0,
-        results: [],
-        summary: `WhatsApp history search karte waqt error: ${err?.message || err}`,
-      };
-    }
-  }
-
-  /**
-   * Retrieves full dialogue history (Sender message + Bot reply + Boss reply) for a contact,
-   * unknown senders, or all chats, formatted cleanly with complete back-and-forth dialogue.
-   */
-  public async getConversationSummaryAndHistory(
-    targetQuery?: string,
-    limit = 30,
-    daysBack = 7
-  ): Promise<{ success: boolean; summary: string; count: number; unreadCount?: number }> {
-    const rawQ = (targetQuery || "").toLowerCase().trim();
-    const startTs = Date.now() - daysBack * 86400000;
-
-    let docs: IncomingMessage[] = [];
-    try {
-      const snap = await inboxCol().where("timestamp", ">=", startTs).orderBy("timestamp", "desc").limit(200).get();
-      docs = snap.docs.map((d) => d.data() as IncomingMessage);
-    } catch {
-      docs = this.messageCache.filter((m) => m.timestamp >= startTs);
-    }
-
-    if (docs.length === 0 && this.messageCache.length > 0) {
-      docs = this.messageCache.filter((m) => m.timestamp >= startTs);
-    }
-
-    if (docs.length === 0) {
-      return {
-        success: true,
-        count: 0,
-        summary: `Boss, pichle ${daysBack} dino me WhatsApp par koi incoming/outgoing message nahi mila.`,
-      };
-    }
-
-    const isUnknownSearch =
-      rawQ.includes("unknown") ||
-      rawQ.includes("anpadh") ||
-      rawQ.includes("stranger") ||
-      rawQ.includes("naye number") ||
-      rawQ.includes("anjaan");
-
-    let targetContactPhone = "";
-    let targetContactName = "";
-
-    // Extract potential contact name from queries like "Ram ne msg kiya kya", "Ram se kya baat hui"
-    const nameMatch = rawQ.match(/(?:kya\s+)?([a-zA-Z0-9\u0900-\u097F]+?)\s*(?:ne\s*msg|ne\s*message|se\s*kya|ka\s*msg|ka\s*message|se\s*baat|ne\s*kya)/i);
-    const candidateName = nameMatch ? nameMatch[1].trim() : rawQ;
-
-    if (!isUnknownSearch && candidateName && candidateName !== "all" && candidateName !== "sab" && candidateName !== "kisi" && !candidateName.includes("kisi ne")) {
-      const { contactsService } = await import("./contactsService");
-      const contact = await contactsService.findContact(candidateName);
-      if (contact && contact.id !== "owner_default" && contact.id !== "temp") {
-        targetContactPhone = contact.phone;
-        targetContactName = contact.name;
-      } else if (candidateName.length >= 2 && !["kisi", "kya", "msg", "message", "whatsapp", "batao", "bheja", "hua"].includes(candidateName)) {
-        targetContactName = candidateName;
-      }
-    }
-
-    let filtered = docs.filter((m) => !m.isGroup);
-
-    if (isUnknownSearch) {
-      filtered = filtered.filter((m) => m.isUnknownContact || (m.senderPhone !== "me" && !m.senderName.includes("DK")));
-    } else if (targetContactPhone || targetContactName) {
-      const nameL = targetContactName.toLowerCase();
-      filtered = filtered.filter(
-        (m) =>
-          (targetContactPhone && (m.senderPhone.includes(targetContactPhone) || m.replyJid.includes(targetContactPhone))) ||
-          (nameL && m.senderName.toLowerCase().includes(nameL)) ||
-          (nameL && m.senderDisplayName.toLowerCase().includes(nameL)) ||
-          (nameL && m.text.toLowerCase().includes(nameL))
-      );
-    }
-
-    if (filtered.length === 0) {
-      if (isUnknownSearch) {
-        return {
-          success: true,
-          count: 0,
-          summary: `Boss, pichle ${daysBack} dino me kisi bhi unknown number ne message nahi kiya hai! Sab clean hai. ✅`,
-        };
-      }
-      return {
-        success: true,
-        count: 0,
-        summary: `Boss, "${targetContactName || targetQuery || "contact"}" se pichle ${daysBack} dino me koi message nahi aaya hai.`,
-      };
-    }
-
-    // Group by sender phone / person
-    const grouped = new Map<string, IncomingMessage[]>();
-    for (const msg of filtered) {
-      const key = msg.senderPhone === "me" ? msg.replyJid : msg.senderPhone || msg.senderName;
-      if (!grouped.has(key)) grouped.set(key, []);
-      grouped.get(key)!.push(msg);
-    }
-
-    let card = `📱 *WhatsApp Conversation Breakdown (Pichle ${daysBack} din, ${filtered.length} messages found):*\n\n`;
-
-    for (const [key, msgs] of grouped.entries()) {
-      const sorted = msgs.sort((a, b) => a.timestamp - b.timestamp);
-      const top = sorted[0];
-      const displayName = top.senderPhone === "me" ? "Direct Chat" : top.senderName;
-      const displayPhone = top.senderPhone === "me" ? "" : `(+${top.senderPhone})`;
-      const statusTag = top.isUnknownContact ? " [⚠️ UNKNOWN NUMBER]" : " [👤 SAVED CONTACT]";
-
-      card += `━━━━━━━━━━━━━━━━━━━━━\n`;
-      card += `👤 *${displayName}* ${displayPhone}${statusTag}\n`;
-      card += `📅 _Last Active: ${sorted[sorted.length - 1].dateStr}_\n\n`;
-
-      sorted.slice(-6).forEach((m) => {
-        if (m.senderPhone === "me") {
-          card += `  👤 *Aap (DK):* _"${m.text}"_\n`;
-        } else {
-          card += `  📩 *${m.senderName}:* _"${m.text}"_\n`;
-          if (m.botReply) {
-            card += `  🤖 *Friday (Auto-Reply):* _"${m.botReply}"_\n`;
-          }
-        }
-      });
-      card += `\n`;
-    }
-
-    // Check if there are any pending questions awaiting Boss's input
-    try {
-      const { dailyUpdateService } = await import("./dailyUpdateService");
-      const pendingQuestions = await dailyUpdateService.getQuestionsAwaitingDK();
-      if (pendingQuestions.length > 0) {
-        card += `━━━━━━━━━━━━━━━━━━━━━\n`;
-        card += `❓ *Pending Questions Awaiting Your Reply (${pendingQuestions.length}):*\n`;
-        pendingQuestions.forEach((q, idx) => {
-          card += `  ${idx + 1}. *${q.senderName}* (+${q.senderPhone}): _"${q.question}"_\n`;
-        });
-        card += `\n_(Boss, aap inka jawab 'Name- <reply>' karke de sakte hain, main forward kar dungi!)_\n`;
-      }
-    } catch {}
-
-    return {
-      success: true,
-      count: filtered.length,
-      summary: card.trim(),
-    };
-  }
-
-  /** Wire up the Baileys messages.upsert listener — called inside initSocket(). */
   private setupMessageListener() {
     if (!this.sock) return;
 
     this.sock.ev.on("messages.upsert", async ({ messages, type }: any) => {
-      if (type !== "notify") return; // 'append' = history sync, skip
+      if (type !== "notify") return;
 
       for (const msg of messages) {
         try {
@@ -1128,7 +346,6 @@ GIRLFRIEND PERSONA GUIDELINES:
           const isFromMe = !!msg.key?.fromMe;
           const isBotSelfEcho = isFromMe && !!msg.key?.id && this.botSentMessageIds.has(msg.key.id);
 
-          // Log outgoing messages from Boss or Bot so they are stored in history forever
           if (isFromMe) {
             const ts = msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : Date.now();
             const outgoing: IncomingMessage = {
@@ -1152,29 +369,19 @@ GIRLFRIEND PERSONA GUIDELINES:
               }),
               isRead: true,
             };
-            if (!this.isGirlfriendModeActive(remoteJid)) {
-              this.saveToFirestore(outgoing).catch(() => {});
+            if (!whatsappGirlfriendEngine.isGirlfriendModeActive(remoteJid)) {
+              whatsappHistoryEngine.saveToFirestore(outgoing).catch(() => {});
             }
 
-            // If this message was dispatched by the bot itself, skip processing to avoid echo loops
-            if (isBotSelfEcho) {
-              continue;
-            }
-
-            // If Boss typed on phone in a 1-on-1 personal chat with someone else, don't auto-reply
-            if (!isGroup) {
-              continue;
-            }
+            if (isBotSelfEcho) continue;
+            if (!isGroup) continue;
           }
 
           const senderJid: string = isGroup
             ? (msg.key.participant || msg.key.participantAlt || remoteJid)
             : remoteJid;
 
-          // Check if sender is a WhatsApp LID (Linked ID)
           const isParticipantLid = senderJid.endsWith("@lid");
-
-          // WhatsApp LID handling: prefer real phone JID if available
           const realPhoneJid: string | undefined =
             (msg as any).key?.senderPn ||
             (msg as any).key?.participantPn ||
@@ -1195,7 +402,6 @@ GIRLFRIEND PERSONA GUIDELINES:
             ? "DK (Boss)"
             : (msg.pushName || (senderPhone ? `+${senderPhone}` : "Unknown"));
 
-          // Keep the raw JID actually usable for a reply
           const replyJid: string = isGroup
             ? remoteJid
             : realPhoneJid
@@ -1213,7 +419,6 @@ GIRLFRIEND PERSONA GUIDELINES:
           const isSenderOwner = isFromMe || this.isOwnerSender(senderPhone, senderDisplayName, senderJid, senderContact);
           const isFromOwner = !isGroup && isSenderOwner;
 
-          // Resolve name from DK's contacts book & Boss recognition
           let senderName = senderDisplayName;
           let isUnknownContact = !isFromMe && !isSenderOwner;
           if (isSenderOwner) {
@@ -1221,13 +426,10 @@ GIRLFRIEND PERSONA GUIDELINES:
             isUnknownContact = false;
           } else if (senderContact && senderContact.id !== "temp") {
             senderName = senderContact.name;
-            isUnknownContact = false; // Found in contacts book
+            isUnknownContact = false;
           }
 
-          const ts = msg.messageTimestamp
-            ? Number(msg.messageTimestamp) * 1000
-            : Date.now();
-
+          const ts = msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : Date.now();
           const quotedMessage = this.extractQuotedContext(msg);
 
           const incoming: IncomingMessage = {
@@ -1253,21 +455,16 @@ GIRLFRIEND PERSONA GUIDELINES:
             quotedMessage,
           };
 
-          // RAM cache (newest first, max 200)
-          this.messageCache.unshift(incoming);
-          if (this.messageCache.length > 200) this.messageCache.pop();
+          whatsappHistoryEngine.unshiftMessage(incoming);
+          whatsappHistoryEngine.saveToFirestore(incoming).catch(() => {});
 
-          // Persist to Firestore
-          this.saveToFirestore(incoming).catch(() => {});
-
-          // Auto-detect life milestones & ongoing events (exams, trips, health)
           if (text && text.trim().length > 5) {
             import("./humanComprehensionEngine")
               .then(({ humanComprehensionEngine }) => humanComprehensionEngine.autoDetectAndSaveLifeEvents(senderPhone, senderName, text))
               .catch(() => {});
           }
 
-          // Contact Card / vCard auto-saving from Boss
+          // Contact Card auto-saving
           if (isFromOwner && (msg.message?.contactMessage || msg.message?.contactsArrayMessage)) {
             try {
               const contactMsg = msg.message?.contactMessage;
@@ -1313,7 +510,7 @@ GIRLFRIEND PERSONA GUIDELINES:
             }
           }
 
-          // Vision AI: Download and process incoming Photos, Videos, Audio, and Documents
+          // Media Processing
           const hasMedia = !!(
             msg.message?.imageMessage ||
             msg.message?.documentMessage ||
@@ -1325,354 +522,99 @@ GIRLFRIEND PERSONA GUIDELINES:
             try {
               const downloadFn = baileys.downloadMediaMessage || baileys.default?.downloadMediaMessage;
               if (downloadFn) {
-                try {
-                  const buffer: Buffer = await downloadFn(msg, "buffer", {}, { reuploadRequest: this.sock?.updateMediaMessage });
-                  if (buffer && buffer.length > 0) {
-                    const isVoice = !!msg.message?.audioMessage;
-                    const isPhoto = !!msg.message?.imageMessage;
-                    const isDoc = !!msg.message?.documentMessage;
-                    const isVideo = !!msg.message?.videoMessage;
-                    const mimeType =
-                      msg.message?.imageMessage?.mimetype ||
-                      msg.message?.documentMessage?.mimetype ||
-                      msg.message?.videoMessage?.mimetype ||
-                      msg.message?.audioMessage?.mimetype ||
-                      (isVideo ? "video/mp4" : isVoice ? "audio/ogg" : isDoc ? "application/pdf" : "image/jpeg");
-                    const caption =
-                      msg.message?.imageMessage?.caption ||
-                      msg.message?.documentMessage?.caption ||
-                      msg.message?.videoMessage?.caption ||
-                      "";
-                    const fileName = msg.message?.documentMessage?.fileName;
-                    const { visionMemoryService } = await import("./visionMemoryService");
+                const buffer: Buffer = await downloadFn(msg, "buffer", {}, { reuploadRequest: this.sock?.updateMediaMessage });
+                if (buffer && buffer.length > 0) {
+                  const isVoice = !!msg.message?.audioMessage;
+                  const isPhoto = !!msg.message?.imageMessage;
+                  const isDoc = !!msg.message?.documentMessage;
+                  const isVideo = !!msg.message?.videoMessage;
+                  const mimeType =
+                    msg.message?.imageMessage?.mimetype ||
+                    msg.message?.documentMessage?.mimetype ||
+                    msg.message?.videoMessage?.mimetype ||
+                    msg.message?.audioMessage?.mimetype ||
+                    (isVideo ? "video/mp4" : isVoice ? "audio/ogg" : isDoc ? "application/pdf" : "image/jpeg");
+                  const caption =
+                    msg.message?.imageMessage?.caption ||
+                    msg.message?.documentMessage?.caption ||
+                    msg.message?.videoMessage?.caption ||
+                    "";
+                  const fileName = msg.message?.documentMessage?.fileName;
+                  const { visionMemoryService } = await import("./visionMemoryService");
 
-                    // 1. Boss Voice Note -> STT + Voice Note to Voice Note Response (Friday Speaks Back!)
-                    if (isVoice && isFromOwner) {
-                      try {
-                        const { voiceBridgeService } = await import("./voiceBridgeService");
-                        const transcribed = await voiceBridgeService.transcribeAudio(buffer, mimeType, fileName || "voice.ogg");
-                        if (transcribed && transcribed.trim()) {
-                          console.log(`[WhatsAppBot] Boss Voice Transcribed: "${transcribed}"`);
-                          await this.sendHumanLikeMessage(replyJid, `🎙️ *Aapki Aawaz (Transcription):*\n_"${transcribed}"_`, "", msg.key);
-                          
-                          // Execute Boss AI and generate spoken voice response (Voice-to-Voice)
-                          await this.handleOwnerWhatsAppMessage(senderName, senderPhone, transcribed, replyJid, msg.key, quotedMessage, true);
-                          continue;
-                        }
-                      } catch (sttErr) {
-                        console.error("[WhatsAppBot] STT error on Boss voice note:", sttErr);
-                      }
-                    }
-
-                    // 2. Photo -> Vision AI Summary / Analysis / Dual Photo Fusion / Editing
-                    if (isPhoto) {
-                      try {
-                        this.recordChatPhoto(replyJid, buffer, mimeType);
-                        const cap = (caption || "").trim();
-
-                        // 🎭 Dual Photo Face Swap & Style Fusion Intent (Quoting Photo 1 while sending Photo 2)
-                        const isDualFusionIntent =
-                          /^(?:@faceswap|@swap|@combine|@blend|@style|faceswap|face\s*swap|combine|blend|style\s*transfer|color\s*transfer)\b/i.test(cap) ||
-                          cap.match(/(?:face\s*swap|color\s*transfer|style\s*transfer|dono\s*photo|dono\s*image|blend|combine|fusion)/i) ||
-                          (cap.includes("photo 1") && cap.includes("photo 2")) ||
-                          (cap.includes("face") && (cap.includes("laga") || cap.includes("badal") || cap.includes("swap")));
-
-                        if (isDualFusionIntent && quotedMessage?.rawQuotedMessage) {
-                          const qMsgWrapper = { message: quotedMessage.rawQuotedMessage };
-                          const quotedBuffer: Buffer = await downloadFn(qMsgWrapper, "buffer", {}, { reuploadRequest: this.sock?.updateMediaMessage });
-                          if (quotedBuffer && quotedBuffer.length > 0) {
-                            const qMime = quotedMessage.rawQuotedMessage?.imageMessage?.mimetype || "image/jpeg";
-                            await this.sendHumanLikeMessage(replyJid, `🎭 *Dual Photo Fusion / Face Swap process ho raha hai...* ⚡\n📝 _"${cap || "Face Swap & Style Fusion"}"_`, "", msg.key);
-                            try {
-                              const { imageGenerationService } = await import("./imageGenerationService");
-                              const fuseRes = await imageGenerationService.fuseTwoImagesWithAI(quotedBuffer, buffer, cap, qMime, mimeType);
-                              if (fuseRes.success && fuseRes.buffer && this.sock) {
-                                this.recordChatPhoto(replyJid, fuseRes.buffer, fuseRes.mimeType || "image/jpeg");
-                                await this.sendSafeMediaMessage(
-                                  replyJid,
-                                  {
-                                    image: fuseRes.buffer,
-                                    mimetype: fuseRes.mimeType || "image/jpeg",
-                                  },
-                                  msg.key,
-                                  cap || "Face Swap & Style Fusion"
-                                );
-                                await this.sendHumanLikeMessage(
-                                  replyJid,
-                                  `🎭 *Dual Photo Fusion via Friday AI* 🚀\n\n✨ *Engine:* ${fuseRes.model}\n📝 *Task:* _${cap || "Face Swap & Style Fusion"}_`,
-                                  "",
-                                  msg.key
-                                );
-                                continue;
-                              }
-                            } catch (fErr: any) {
-                              console.error("[WhatsAppBot] Dual photo fusion error:", fErr);
-                            }
-                          }
-                        }
-
-                        const isPhotoEditIntent =
-                          /^(?:@image\s*edit|@edit|\/edit|edit\s*photo|photo\s*edit|edit\s*karo|image\s*edit|edit\s*image|edit)\b/i.test(cap) ||
-                          cap.match(/(?:is\s*photo|iss\s*photo|isme|is\s*image)\s*(?:me|ko|par|mein)?\s*(?:edit|change|badal|add|laga|remove|hata)/i);
-
-                        // 🎨 Photo Editing Intent (Direct Caption)
-                        if (isPhotoEditIntent) {
-                          const editInstruction = cap
-                            .replace(/^(?:@image\s*edit|@edit|\/edit|edit\s*photo|photo\s*edit|edit\s*karo|image\s*edit|edit\s*image|edit)\s*[:=-]?\s*/i, "")
-                            .trim() || cap.trim();
-                          await this.sendHumanLikeMessage(replyJid, `🎨 *Photo edit ho rahi hai...* ⚡\n📝 _"${editInstruction}"_`, "", msg.key);
-                          try {
-                            const { imageGenerationService } = await import("./imageGenerationService");
-                            const editRes = await imageGenerationService.editImageWithAI(buffer, editInstruction, mimeType);
-                            if (editRes.success && editRes.buffer && this.sock) {
-                              this.recordChatPhoto(replyJid, editRes.buffer, editRes.mimeType || "image/jpeg");
-                              await this.sendSafeMediaMessage(
-                                replyJid,
-                                {
-                                  image: editRes.buffer,
-                                  mimetype: editRes.mimeType || "image/jpeg",
-                                },
-                                msg.key,
-                                editInstruction
-                              );
-                              await this.sendHumanLikeMessage(
-                                replyJid,
-                                `🎨 *Photo Edited via Friday AI* 🚀\n\n✨ *Engine:* ${editRes.model}\n✏️ *Changes:* _${editInstruction}_`,
-                                "",
-                                msg.key
-                              );
-                              continue;
-                            } else {
-                              await this.sendHumanLikeMessage(replyJid, `❌ Photo edit nahi ho payi: ${editRes.error || "Please try again."}`, "", msg.key);
-                              continue;
-                            }
-                          } catch (eErr: any) {
-                            console.error("[WhatsAppBot] Photo edit error:", eErr);
-                            await this.sendHumanLikeMessage(replyJid, `❌ Photo edit error: ${eErr?.message || eErr}`, "", msg.key);
-                            continue;
-                          }
-                        }
-
-                        // 🪄 1. AI WhatsApp Sticker & Background Removal Intent
-                        const isStickerIntent =
-                          /^(?:@sticker|\/sticker|sticker|make\s*sticker|sticker\s*banao|@bgremove|bgremove|remove\s*bg|bg\s*remove)\b/i.test(cap) ||
-                          cap.match(/(?:sticker\s*bana|bg\s*hata|background\s*hata)/i);
-                        if (isStickerIntent) {
-                          await this.sendHumanLikeMessage(replyJid, `🪄 *WhatsApp Sticker generate ho raha hai...* ⚡`, "", msg.key);
-                          try {
-                            const { mediaToolsService } = await import("./mediaToolsService");
-                            const bgRes = await mediaToolsService.removeBackground(buffer, mimeType);
-                            const finalBuf = bgRes.buffer || buffer;
-                            if (this.sock) {
-                              await this.sendSafeMediaMessage(
-                                replyJid,
-                                {
-                                  sticker: finalBuf,
-                                  mimetype: "image/webp",
-                                },
-                                msg.key,
-                                "Sticker"
-                              );
-                              await this.sendHumanLikeMessage(replyJid, `✨ *AI WhatsApp Sticker Ready!* 🚀`, "", msg.key);
-                              continue;
-                            }
-                          } catch (sErr: any) {
-                            console.error("[WhatsAppBot] Sticker generation error:", sErr);
-                          }
-                        }
-
-                        // 📊 2. AI Receipt / Bill / Table to Excel (.xlsx) Converter
-                        const isExcelIntent =
-                          /^(?:@excel|\/excel|@sheet|\/sheet|excel|spreadsheet|table\s*extract|bill\s*to\s*excel)\b/i.test(cap) ||
-                          cap.match(/(?:excel\s*me|sheet\s*me|excel\s*banao|table\s*banao|bill\s*extract|bill\s*to\s*excel)/i);
-                        if (isExcelIntent) {
-                          await this.sendHumanLikeMessage(replyJid, `📊 *Receipt/Table analyze karke Excel Sheet banayi ja rahi hai...* ⚡`, "", msg.key);
-                          try {
-                            const { mediaToolsService } = await import("./mediaToolsService");
-                            const excelRes = await mediaToolsService.convertImageToExcel(buffer, mimeType, cap);
-                            if (excelRes.success && excelRes.buffer && this.sock) {
-                              await this.sendSafeMediaMessage(
-                                replyJid,
-                                {
-                                  document: excelRes.buffer,
-                                  mimetype: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                  fileName: excelRes.filename || "Friday_Extracted_Report.xlsx",
-                                },
-                                msg.key,
-                                "Excel Document"
-                              );
-                              await this.sendHumanLikeMessage(replyJid, excelRes.summary || "📊 *Excel File ready hai!*", "", msg.key);
-                              continue;
-                            } else {
-                              await this.sendHumanLikeMessage(replyJid, `❌ Excel generate nahi ho paya: ${excelRes.error || "Please try again."}`, "", msg.key);
-                              continue;
-                            }
-                          } catch (xErr: any) {
-                            console.error("[WhatsAppBot] Excel extraction error:", xErr);
-                          }
-                        }
-
-                        // 🎬 3. AI Photo to Motion / Video Animation (@animate)
-                        const isAnimateIntent = /^(?:@animate|\/animate|animate|motion|video\s*banao|animate\s*photo)\b/i.test(cap);
-                        if (isAnimateIntent) {
-                          await this.sendHumanLikeMessage(replyJid, `🎬 *Photo ko AI Motion Video me convert kiya ja raha hai...* ⚡`, "", msg.key);
-                          try {
-                            const { mediaToolsService } = await import("./mediaToolsService");
-                            const animRes = await mediaToolsService.generateAiVideo(cap || "Cinematic natural camera motion, ultra-realistic", buffer, mimeType);
-                            if (animRes.success && animRes.buffer && this.sock) {
-                              await this.sendSafeMediaMessage(
-                                replyJid,
-                                {
-                                  video: animRes.buffer,
-                                  mimetype: "video/mp4",
-                                },
-                                msg.key,
-                                "Animation Video"
-                              );
-                              await this.sendHumanLikeMessage(replyJid, `🎬 *AI Motion Animation via ${animRes.model || "Friday AI"}* 🚀`, "", msg.key);
-                              continue;
-                            }
-                          } catch (aErr: any) {
-                            console.error("[WhatsAppBot] Animate error:", aErr);
-                          }
-                        }
-
-                        const isSummaryRequested =
-                          /\b(summary|summarize|summarise|friday\s*summary|analysis|analyze|analyse|photo\s*analyze|ocr|dekho|check|batao|kya\s*hai|padho|scan|explain)\b/i.test(cap) ||
-                          cap.startsWith("@summary") ||
-                          cap.startsWith("/summary") ||
-                          cap.startsWith("@friday");
-                        const isFaceIdQuery = /^(ye\s*kaun\s*hai|pehchano|who\s*is\s*this|identify)/i.test(cap);
-
-                        // A. Explicit Summary or Face ID Requested
-                        if (isSummaryRequested || isFaceIdQuery) {
-                          await this.sendHumanLikeMessage(replyJid, "👁️ *Photo analyze & summarize ho rahi hai...* ⚡", "", msg.key);
-                          if (isFaceIdQuery) {
-                            const idRes = await visionMemoryService.identifyPersonInPhoto(buffer);
-                            await this.sendHumanLikeMessage(replyJid, idRes.explanation, "", msg.key);
-                          } else {
-                            const summaryRes = await visionMemoryService.generateMediaSummary(buffer, "image/jpeg", cap, undefined, replyJid);
-                            await this.sendHumanLikeMessage(replyJid, summaryRes, "", msg.key);
-                          }
-                          continue;
-                        }
-
-                        // B. Face / Person Memory Saving (Boss only)
-                        if (isFromOwner && /^(iska\s*naam|ye\s*photo|save\s*person|inka\s*naam)/i.test(cap)) {
-                          const nameMatch = cap.match(/(?:naam|name)\s+(?:hai\s+)?([A-Za-z0-9\s]+)/i);
-                          const personName = nameMatch ? nameMatch[1].trim() : "Contact";
-                          const saveRes = await visionMemoryService.savePersonMemory(personName, "Friend / Contact", cap, buffer);
-                          await this.sendHumanLikeMessage(replyJid, saveRes.summary, "", msg.key);
-                          continue;
-                        }
-
-                        // C. Boss provided info/description about the photo to remember permanently
-                        if (isFromOwner && cap) {
-                          const { memoryEngine } = await import("./memoryEngine");
-                          await memoryEngine.addPinnedMemory(`Photo Info: ${cap}`);
-                          await memoryEngine.addPersonalVaultFact("saved_photos_and_documents", cap);
-
-                          try {
-                            await db.collection("visual_memories").add({
-                              caption: cap,
-                              timestamp: Date.now(),
-                              dateStr: new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
-                              senderName,
-                              type: "photo",
-                              hasBuffer: true,
-                            });
-                          } catch {}
-
-                          await this.sendHumanLikeMessage(
-                            replyJid,
-                            `📸 *Photo aur jaankari permanently save ho gayi hai!* ✅\n\n📌 *Saved Information:* _"${cap}"_\n\n_Maine is photo aur jaankari ko Firestore me save kar liya hai. Aap 30 din baad ya kabhi bhi iske baare me poochhenge to main bata dungi!_`,
-                            cap,
-                            msg.key
-                          );
-                          continue;
-                        }
-
-                        // D. Uncaptioned Photo without "analysis" from Boss -> Simple acknowledgement
-                        if (isFromOwner) {
-                          try {
-                            await db.collection("visual_memories").add({
-                              caption: "Uncaptioned photo from Boss",
-                              timestamp: Date.now(),
-                              dateStr: new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
-                              senderName,
-                              type: "photo",
-                            });
-                          } catch {}
-
-                          await this.sendHumanLikeMessage(
-                            replyJid,
-                            `📸 *Photo receive ho gayi hai Boss!* (Agar iska summary chahiye to photo ke niche _"friday summary"_ ya _"analysis"_ likhiye, ya iske baare me koi jaankari save karni ho to likhiye 👍)`,
-                            "",
-                            msg.key
-                          );
-                          continue;
-                        }
-                      } catch (photoErr) {
-                        console.error("[WhatsAppBot] Photo processing error:", photoErr);
-                      }
-                    }
-
-                    // 3. Document / PDF -> Detailed OCR & Executive Summary
-                    if (isDoc) {
-                      try {
-                        const cap = (caption || "").trim();
-                        const isDocSummaryReq = isFromOwner || /\b(summary|summarize|summarise|friday\s*summary|analysis|analyze|padho|check|batao|kya\s*hai|explain)\b/i.test(cap) || cap.startsWith("@friday");
-                        if (isDocSummaryReq) {
-                          await this.sendHumanLikeMessage(replyJid, `📄 *Document / PDF (${fileName || "file"}) analyze & summarize ho raha hai...* ⚡`, "", msg.key);
-                          const summaryRes = await visionMemoryService.generateMediaSummary(buffer, mimeType, cap, fileName, replyJid);
-                          await this.sendHumanLikeMessage(replyJid, summaryRes, "", msg.key);
-                          continue;
-                        }
-                      } catch (docErr) {
-                        console.error("[WhatsAppBot] Document processing error:", docErr);
-                      }
-                    }
-
-                    // 4. Video -> Video Actions & Content Breakdown
-                    if (isVideo && isFromOwner) {
-                      try {
-                        await this.sendHumanLikeMessage(replyJid, "🎬 *Video analyze & summarize ho rahi hai...* ⚡", "", msg.key);
-                        const summaryRes = await visionMemoryService.generateMediaSummary(buffer, "video/mp4", caption, fileName, replyJid);
-                        await this.sendHumanLikeMessage(replyJid, summaryRes, "", msg.key);
+                  if (isVoice && isFromOwner) {
+                    try {
+                      const { voiceBridgeService } = await import("./voiceBridgeService");
+                      const transcribed = await voiceBridgeService.transcribeAudio(buffer, mimeType, fileName || "voice.ogg");
+                      if (transcribed && transcribed.trim()) {
+                        await this.sendHumanLikeMessage(replyJid, `🎙️ *Aapki Aawaz (Transcription):*\n_"${transcribed}"_`, "", msg.key);
+                        await this.handleOwnerWhatsAppMessage(senderName, senderPhone, transcribed, replyJid, msg.key, quotedMessage, true);
                         continue;
-                      } catch (videoErr) {
-                        console.error("[WhatsAppBot] Video processing error for Boss:", videoErr);
                       }
-                    }
-
-                    // General / non-owner media indexing
-                    const analyzed = await visionMemoryService.processIncomingMedia(
-                      buffer,
-                      mimeType,
-                      senderName,
-                      caption,
-                      fileName,
-                      replyJid
-                    );
-                    if (analyzed.shortSummary) {
-                      incoming.text = `${incoming.text} | AI Summary: ${analyzed.shortSummary}`;
-                      this.saveToFirestore(incoming).catch(() => {});
+                    } catch (sttErr) {
+                      console.error("[WhatsAppBot] STT error on Boss voice note:", sttErr);
                     }
                   }
-                } catch (downloadErr) {
-                  console.warn("[WhatsAppBot] Media download error:", downloadErr);
+
+                  if (isPhoto) {
+                    whatsappMediaRouter.recordChatPhoto(replyJid, buffer, mimeType);
+                    const cap = (caption || "").trim();
+
+                    const isSummaryRequested =
+                      /\b(summary|summarize|summarise|friday\s*summary|analysis|analyze|analyse|photo\s*analyze|ocr|dekho|check|batao|kya\s*hai|padho|scan|explain)\b/i.test(cap) ||
+                      cap.startsWith("@summary") ||
+                      cap.startsWith("/summary") ||
+                      cap.startsWith("@friday");
+
+                    if (isSummaryRequested) {
+                      await this.sendHumanLikeMessage(replyJid, "👁️ *Photo analyze & summarize ho rahi hai...* ⚡", "", msg.key);
+                      const summaryRes = await visionMemoryService.generateMediaSummary(buffer, "image/jpeg", cap, undefined, replyJid);
+                      await this.sendHumanLikeMessage(replyJid, summaryRes, "", msg.key);
+                      continue;
+                    }
+                  }
+
+                  if (isDoc) {
+                    const cap = (caption || "").trim();
+                    const isDocSummaryReq = isFromOwner || /\b(summary|summarize|summarise|friday\s*summary|analysis|analyze|padho|check|batao|kya\s*hai|explain)\b/i.test(cap) || cap.startsWith("@friday");
+                    if (isDocSummaryReq) {
+                      await this.sendHumanLikeMessage(replyJid, `📄 *Document / PDF (${fileName || "file"}) analyze & summarize ho raha hai...* ⚡`, "", msg.key);
+                      const summaryRes = await visionMemoryService.generateMediaSummary(buffer, mimeType, cap, fileName, replyJid);
+                      await this.sendHumanLikeMessage(replyJid, summaryRes, "", msg.key);
+                      continue;
+                    }
+                  }
+
+                  if (isVideo && isFromOwner) {
+                    await this.sendHumanLikeMessage(replyJid, "🎬 *Video analyze & summarize ho rahi hai...* ⚡", "", msg.key);
+                    const summaryRes = await visionMemoryService.generateMediaSummary(buffer, "video/mp4", caption, fileName, replyJid);
+                    await this.sendHumanLikeMessage(replyJid, summaryRes, "", msg.key);
+                    continue;
+                  }
+
+                  const analyzed = await visionMemoryService.processIncomingMedia(
+                    buffer,
+                    mimeType,
+                    senderName,
+                    caption,
+                    fileName,
+                    replyJid
+                  );
+                  if (analyzed.shortSummary) {
+                    incoming.text = `${incoming.text} | AI Summary: ${analyzed.shortSummary}`;
+                    whatsappHistoryEngine.saveToFirestore(incoming).catch(() => {});
+                  }
                 }
               }
             } catch (mediaErr) {
-              console.warn("[WhatsAppBot] Failed to initiate media download:", mediaErr);
+              console.warn("[WhatsAppBot] Media processing error:", mediaErr);
             }
-            // If it had media, do not proceed to normal text AI processing with placeholder tokens like "[Document]"
             continue;
           }
 
           let consumedByDailyUpdate = false;
           if (isFromOwner) {
-            // 1. Check if DK is setting/updating the Voice PIN (e.g. "voice pin - 123456", "voice pin: 994411")
+            // 1. Voice PIN
             try {
               const { voiceBiometricsService } = await import("./voiceBiometricsService");
               const pinRes = await voiceBiometricsService.handleWhatsAppVoicePinMessage(text, senderName, "whatsapp");
@@ -1682,11 +624,9 @@ GIRLFRIEND PERSONA GUIDELINES:
                   await this.sendHumanLikeMessage(replyJid, pinRes.replyText, text, msg.key);
                 }
               }
-            } catch (pinErr) {
-              console.error("[WhatsAppBot] Failed to process Voice PIN message:", pinErr);
-            }
+            } catch {}
 
-            // 1.1 Check if DK is setting/updating the App Access Key (e.g. "app key - 123456", "app pass 987654")
+            // 1.1 App Access Key
             if (!consumedByDailyUpdate) {
               try {
                 const { appSecurityService } = await import("./appSecurityService");
@@ -1697,526 +637,101 @@ GIRLFRIEND PERSONA GUIDELINES:
                     await this.sendHumanLikeMessage(replyJid, keyRes.replyText, text, msg.key);
                   }
                 }
-              } catch (keyErr) {
-                console.error("[WhatsAppBot] Failed to process App Key message:", keyErr);
-              }
+              } catch {}
             }
 
-            // 2. Check whether this is DK answering a forwarded question
+            // 2. Answering forwarded question
             if (!consumedByDailyUpdate) {
               try {
                 consumedByDailyUpdate = await this.tryForwardOwnerReplyToPendingSender(text);
-              } catch (e) {
-                console.error("[WhatsAppBot] Failed to process owner reply for forwarding:", e);
-              }
+              } catch {}
             }
 
-            // 3. MASTER BOSS FRIDAY ASSISTANT ON WHATSAPP: Full Intelligence & Tool Calling for Boss
+            // 3. MASTER BOSS FRIDAY ASSISTANT
             if (!consumedByDailyUpdate && this.sock && this.isConnected) {
               this.handleOwnerWhatsAppMessage(senderName, senderPhone, text, replyJid, msg.key, quotedMessage).catch((e) =>
-                console.error("[WhatsAppBot] Owner Master Friday processing error:", e)
+                console.error("[WhatsAppBot] Owner Master Friday error:", e)
               );
             }
           } else if (!isGroup && this.autoReplyEnabled && this.sock && this.isConnected) {
-            // ── Smart AI Auto-Reply with Burst Debounce for 1-on-1 Personal Chats ──
-            this.queueIncomingForAutoReply(senderName, senderPhone, text, isUnknownContact, replyJid, msg.key, quotedMessage);
+            // 1-on-1 Personal Chats
+            whatsappAutoReplyEngine.queueIncomingForAutoReply(
+              senderName,
+              senderPhone,
+              text,
+              isUnknownContact,
+              replyJid,
+              msg.key,
+              quotedMessage,
+              async (sName, sPhone, combText, isUnk, rJid, lKey, qMsg) => {
+                await whatsappAutoReplyEngine.tryFactualOrChatReply(
+                  sName,
+                  sPhone,
+                  combText,
+                  isUnk,
+                  rJid,
+                  lKey,
+                  qMsg,
+                  (j, t, inT, k) => this.sendHumanLikeMessage(j, t, inT, k),
+                  async (gText, gJid, gName, gKey) => {
+                    const isGfAct = /^(?:@girlfriend|\/girlfriend|@gf|\/gf|girlfriend\s*mode|gf\s*mode|virtual\s*girlfriend|girlfriend)\b/i.test(gText);
+                    const isGfStop = /^(?:@normal|\/normal|normal\s*mode|normal|@stop\s*gf|@stop\s*girlfriend|stop\s*girlfriend|stop\s*gf|exit\s*girlfriend|exit\s*gf)$/i.test(gText);
+
+                    if (isGfAct) {
+                      await this.startGirlfriendMode(gJid, gText, gKey, gName);
+                      return true;
+                    }
+                    if (isGfStop) {
+                      await this.stopGirlfriendMode(gJid, gKey, true);
+                      return true;
+                    }
+                    if (this.isGirlfriendModeActive(gJid)) {
+                      await this.handleGirlfriendChatMessage(gJid, gText, gKey, false);
+                      return true;
+                    }
+                    return false;
+                  }
+                );
+              }
+            );
           } else if (isGroup && this.autoReplyEnabled && this.sock && this.isConnected) {
-            // ── WhatsApp Group Behavior: Silent listener by default, responds when called/tagged ──
-            const isMentioned = this.isBotMentionedInGroup(msg, text, quotedMessage);
+            // Group Mentions
+            const botJid = this.sock?.user?.id || "";
+            const isMentioned = whatsappAutoReplyEngine.isBotMentionedInGroup(msg, text, botJid, this.dedicatedPhone, quotedMessage);
 
             if (isMentioned) {
               if (isSenderOwner) {
-                // Boss called Friday in the group
-                console.log(`[WhatsAppBot] Boss mentioned Friday in group "${groupName || remoteJid}"`);
                 this.handleOwnerWhatsAppMessage(senderName, senderPhone, text, remoteJid, msg.key, quotedMessage).catch((e) =>
-                  console.error("[WhatsAppBot] Group Boss Friday processing error:", e)
+                  console.error("[WhatsAppBot] Group Boss Friday error:", e)
                 );
               } else {
-                // Group member called Friday
-                console.log(`[WhatsAppBot] Member ${senderName} mentioned Friday in group "${groupName || remoteJid}"`);
-                this.handleGroupMentionAutoReply(senderName, senderPhone, text, remoteJid, groupName || "Group", msg.key, quotedMessage).catch((e) =>
-                  console.error("[WhatsAppBot] Group Mention AI processing error:", e)
-                );
+                whatsappAutoReplyEngine.handleGroupMentionAutoReply(
+                  senderName,
+                  senderPhone,
+                  text,
+                  remoteJid,
+                  groupName || "Group",
+                  msg.key,
+                  quotedMessage,
+                  (j, t, inT, k) => this.sendHumanLikeMessage(j, t, inT, k),
+                  (j, img, cap, k) => this.sendPhotoMessage(j, img, cap, k),
+                  this.getMasterAllCommandsCard(),
+                  (j, rT, q, k) => this.handleQuotedMediaSummary(j, rT, q, k)
+                ).catch((e) => console.error("[WhatsAppBot] Group Mention AI error:", e));
               }
             }
           }
 
-          // Notify server → broadcast to WebSocket clients. Flag whether this
-          // message from DK was already consumed by the daily-update forward
-          // flow above, so other owner-reply listeners (e.g. the coding-agent
-          // approval handler in server.ts) know to skip it rather than both
-          // systems racing to interpret the same "yes"/"ok".
           if (this.messageCallback) this.messageCallback({ ...incoming, consumedByDailyUpdate });
-
-          console.log(
-            `[WhatsAppBot] Incoming ${isGroup ? `group(${groupName})` : "personal"} msg from ${senderName}: "${text.substring(0, 80)}"`
-          );
         } catch (e) {
-          console.error("[WhatsAppBot] Error processing incoming message:", e);
+          console.error("[WhatsAppBot] Error processing message:", e);
         }
       }
     });
   }
 
-  /**
-   * Handles swipe-to-reply (Quote) on any photo, PDF, document, video, summary card, or text
-   * when the user asks for a summary OR asks a specific follow-up question (e.g. "meeting kab hai?", "total bill amount kitna h?").
-   */
-  public async handleQuotedMediaSummary(
-    replyJid: string,
-    rawText: string,
-    quotedMessage: QuotedMessageContext,
-    messageKey: any
-  ): Promise<boolean> {
-    const cleanText = rawText.toLowerCase().trim();
-    const isSummaryIntent =
-      /\b(summary|summarize|summarise|friday\s*summary|analysis|analyze|analyse|padho|explain|kya\s*likha\s*hai|kya\s*hai|batao|overview|read|ocr)\b/i.test(cleanText) ||
-      cleanText.startsWith("@summary") ||
-      cleanText.startsWith("/summary") ||
-      cleanText.startsWith("summary");
+  // ── Master Owner Message Handler ──────────────────────────────────────────
 
-    const { visionMemoryService } = await import("./visionMemoryService");
-    const { whatsappFeatureEngine } = await import("./whatsappFeatureEngine");
-
-    // Case 1: Quoted message has media (Photo / PDF / Document / Video / Audio)
-    if (quotedMessage.rawQuotedMessage && quotedMessage.mediaType !== "text") {
-      const downloadFn = baileys.downloadMediaMessage || baileys.default?.downloadMediaMessage;
-      if (downloadFn) {
-        try {
-          const rawQ = quotedMessage.rawQuotedMessage;
-          const isAudioMedia = quotedMessage.mediaType === "audio" || !!rawQ.audioMessage;
-          const isPhotoEditIntent =
-            quotedMessage.mediaType === "photo" &&
-            (/^(?:@image\s*edit|@edit|\/edit|edit\s*photo|photo\s*edit|edit\s*karo|image\s*edit|edit\s*image|edit)\b/i.test(rawText.trim()) ||
-              rawText.match(/(?:is\s*photo|iss\s*photo|isme|is\s*image)\s*(?:me|ko|par|mein)?\s*(?:edit|change|badal|add|laga|remove|hata)/i));
-
-          const isQuotedSticker =
-            quotedMessage.mediaType === "photo" &&
-            (/^(?:@sticker|\/sticker|sticker|make\s*sticker|sticker\s*banao|@bgremove|bgremove|remove\s*bg|bg\s*remove)\b/i.test(rawText.trim()) ||
-              rawText.match(/(?:sticker\s*bana|bg\s*hata|background\s*hata)/i));
-
-          const isQuotedExcel =
-            (quotedMessage.mediaType === "photo" || quotedMessage.mediaType === "document") &&
-            (/^(?:@excel|\/excel|@sheet|\/sheet|excel|spreadsheet|table\s*extract|bill\s*to\s*excel)\b/i.test(rawText.trim()) ||
-              rawText.match(/(?:excel\s*me|sheet\s*me|excel\s*banao|table\s*banao|bill\s*extract|bill\s*to\s*excel)/i));
-
-          const isQuotedAnimate =
-            quotedMessage.mediaType === "photo" &&
-            /^(?:@animate|\/animate|animate|motion|video\s*banao|animate\s*photo)\b/i.test(rawText.trim());
-
-          // Send intent-specific acknowledgment
-          if (isPhotoEditIntent) {
-            const editInstruction = rawText
-              .replace(/^(?:@image\s*edit|@edit|\/edit|edit\s*photo|photo\s*edit|edit\s*karo|image\s*edit|edit\s*image|edit)\s*[:=-]?\s*/i, "")
-              .trim() || rawText.trim();
-            await this.sendHumanLikeMessage(replyJid, `🎨 *AI Photo edit ho rahi hai...* ⚡\n📝 _"${editInstruction}"_`, rawText, messageKey);
-          } else if (isQuotedSticker) {
-            await this.sendHumanLikeMessage(replyJid, `🪄 *Quoted photo se WhatsApp Sticker generate ho raha hai...* ⚡`, rawText, messageKey);
-          } else if (isQuotedExcel) {
-            await this.sendHumanLikeMessage(replyJid, `📊 *Quoted document/bill analyze karke Excel Sheet banayi ja rahi hai...* ⚡`, rawText, messageKey);
-          } else if (isQuotedAnimate) {
-            await this.sendHumanLikeMessage(replyJid, `🎬 *Quoted photo ko AI Motion Video me convert kiya ja raha hai...* ⚡`, rawText, messageKey);
-          } else if (isAudioMedia) {
-            await this.sendHumanLikeMessage(replyJid, `🎙️ *Quoted Audio / Voice Note decode & transcribe ho raha hai...* ⚡`, rawText, messageKey);
-          } else if (isSummaryIntent && !visionMemoryService.isMediaQuestionIntent(rawText)) {
-            await this.sendHumanLikeMessage(replyJid, `📑 *Quoted ${quotedMessage.mediaType.toUpperCase()} analyze & summarize ho raha hai...* ⚡`, rawText, messageKey);
-          } else {
-            await this.sendHumanLikeMessage(replyJid, `🔍 *Quoted ${quotedMessage.mediaType.toUpperCase()} me se dhoondh kar jawab de rahi hoon...* ⚡`, rawText, messageKey);
-          }
-
-          let buffer: Buffer | null = null;
-          try {
-            const qMsgWrapper = { message: quotedMessage.rawQuotedMessage };
-            buffer = await downloadFn(qMsgWrapper, "buffer", {}, { reuploadRequest: this.sock?.updateMediaMessage });
-          } catch (dlErr) {
-            console.warn("[WhatsAppBot] Direct download on quoted media failed:", dlErr);
-          }
-
-          // Fallback to recent chat photos if quoted download is empty (common for bot-sent or cached media)
-          if ((!buffer || buffer.length === 0) && quotedMessage.mediaType === "photo") {
-            const cached = this.chatRecentPhotos.get(replyJid)?.[0];
-            if (cached?.buffer && cached.buffer.length > 0) {
-              buffer = cached.buffer;
-              console.log("[WhatsAppBot] Using cached recent photo buffer for quoted action");
-            }
-          }
-
-          if (buffer && buffer.length > 0) {
-            const mimeType =
-              rawQ.imageMessage?.mimetype ||
-              rawQ.documentMessage?.mimetype ||
-              rawQ.videoMessage?.mimetype ||
-              rawQ.audioMessage?.mimetype ||
-              (quotedMessage.mediaType === "photo" ? "image/jpeg" : quotedMessage.mediaType === "document" ? "application/pdf" : isAudioMedia ? "audio/ogg" : "video/mp4");
-            const fileName = rawQ.documentMessage?.fileName || quotedMessage.fileName;
-
-            // ── Quoted Voice Note / Audio Decoder Engine ──
-            if (isAudioMedia) {
-              const { voiceBridgeService } = await import("./voiceBridgeService");
-              const transcribed = await voiceBridgeService.transcribeAudio(buffer, mimeType, "quoted_voice.ogg");
-
-              if (!transcribed || !transcribed.trim()) {
-                await this.sendHumanLikeMessage(replyJid, "⚠️ Is voice note / audio me aawaz saaf sunai nahi de rahi ya audio empty hai.", rawText, messageKey);
-                return true;
-              }
-
-              // Detect target language requested (e.g. Hindi, English, French, Spanish, Bengali, Marathi, etc.)
-              const targetLangMatch = cleanText.match(/\b(?:in|to|me|mein|language)?\s*(hindi|english|bengali|bangla|marathi|gujarati|punjabi|urdu|tamil|telugu|kannada|malayalam|french|spanish|german|japanese|russian|arabic|chinese|italian|portuguese|korean)\b/i);
-              const targetLanguage = targetLangMatch ? targetLangMatch[1].trim() : null;
-              const isVoiceOutputRequested = /\b(voice|audio|speak|bolo|sunao|bol\s*kar|bol\s*ke|padh\s*ke|voice\s*me)\b/i.test(cleanText);
-
-              const apiKey = process.env.GEMINI_API_KEY;
-              let replyText = "";
-              let speechScript = "";
-
-              if (apiKey) {
-                const ai = new GoogleGenAI({ apiKey });
-                const prompt = `You are Friday AI, DK's (Divakar Kumar) warm, affectionate, intelligent assistant.
-Boss (DK) swiped-up / replied to an audio recording and asked: "${rawText}".
-
-ORIGINAL SPOKEN AUDIO TRANSCRIPT:
-"""
-${transcribed}
-"""
-
-TARGET LANGUAGE (if explicitly asked): ${targetLanguage || "Default (Natural Friendly Hindi/Hinglish)"}
-
-CRITICAL INSTRUCTIONS:
-1. ALWAYS respond in natural, warm, conversational Hindi / Hinglish. Never write cold, formal English essays or robotic corporate memos.
-2. Structure the WhatsApp response cleanly:
-   - 🎙️ *Spoken Audio:* _"${transcribed}"_
-   ${targetLanguage ? `- 🌐 *${targetLanguage} Translation:* (Accurate translation into ${targetLanguage})` : ""}
-   - 💡 *Kya bol rahe hain:* (Clearly and warmly explain what the speaker is saying, their intention, and context in natural Hindi/Hinglish)
-   - 📌 *Highlights:* (Any important dates, names, or tasks if present)
-3. In a final section tagged with [SPEAK_START] and [SPEAK_END], provide a natural, sweet 1-2 sentence spoken script in ${targetLanguage || "natural Hindi/Hinglish"} for Friday to speak out loud to Boss DK on WhatsApp (e.g. "Boss, is audio me wo keh rahe hain ki..."). Do NOT use any asterisks or markdown inside [SPEAK_START]...[SPEAK_END].`;
-
-                for (const model of ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-2.5-flash", "gemini-2.5-flash-lite"]) {
-                  try {
-                    const resp = await ai.models.generateContent({ model, contents: prompt });
-                    const fullResp = resp.text?.trim();
-                    if (fullResp) {
-                      const speakMatch = fullResp.match(/\[SPEAK_START\]([\s\S]*?)\[SPEAK_END\]/i);
-                      speechScript = speakMatch ? speakMatch[1].trim() : "";
-                      replyText = fullResp.replace(/\[SPEAK_START\][\s\S]*?\[SPEAK_END\]/gi, "").trim();
-                      break;
-                    }
-                  } catch {}
-                }
-              }
-
-              if (!replyText) {
-                replyText = `🎙️ *Voice Note Transcription:*\n_"${transcribed}"_\n\n💡 *Summary:* Spoken message successfully decoded.`;
-              }
-
-              await this.sendHumanLikeMessage(replyJid, replyText, rawText, messageKey);
-
-              // If voice output requested or target language voice requested, generate spoken audio
-              if (isVoiceOutputRequested || targetLanguage) {
-                try {
-                  const textToSpeak = speechScript || (targetLanguage ? `Yeh message ${targetLanguage} me keh raha hai: ${transcribed}` : `Boss, is audio me likha hai: ${transcribed}`);
-                  const speechRes = await voiceBridgeService.generateSpeech(textToSpeak);
-                  if (speechRes && speechRes.buffer.length > 0) {
-                    await this.sendVoiceMessage(replyJid, speechRes.buffer, messageKey, speechRes.mimeType);
-                  }
-                } catch (vErr) {
-                  console.warn("[WhatsAppBot] Swipe audio TTS error:", vErr);
-                }
-              }
-              return true;
-            }
-
-            // ── Quoted Photo Editing Engine ("@image edit ...", "@edit ...", "is photo me ...") ──
-            if (isPhotoEditIntent) {
-              const editInstruction = rawText
-                .replace(/^(?:@image\s*edit|@edit|\/edit|edit\s*photo|photo\s*edit|edit\s*karo|image\s*edit|edit\s*image|edit)\s*[:=-]?\s*/i, "")
-                .trim() || rawText.trim();
-              try {
-                const { imageGenerationService } = await import("./imageGenerationService");
-                const editRes = await imageGenerationService.editImageWithAI(buffer, editInstruction, mimeType);
-                if (editRes.success && editRes.buffer && this.sock) {
-                  this.recordChatPhoto(replyJid, editRes.buffer, editRes.mimeType || "image/jpeg");
-                  await this.sendSafeMediaMessage(
-                    replyJid,
-                    {
-                      image: editRes.buffer,
-                      mimetype: editRes.mimeType || "image/jpeg",
-                    },
-                    messageKey,
-                    editInstruction
-                  );
-                  await this.sendHumanLikeMessage(
-                    replyJid,
-                    `🎨 *Photo Edited via Friday AI* 🚀\n\n✨ *Engine:* ${editRes.model}\n✏️ *Changes:* _${editInstruction}_`,
-                    "",
-                    messageKey
-                  );
-                  return true;
-                } else {
-                  await this.sendHumanLikeMessage(replyJid, `❌ Photo edit nahi ho payi: ${editRes.error || "Please try again."}`, rawText, messageKey);
-                  return true;
-                }
-              } catch (eErr: any) {
-                console.error("[WhatsAppBot] Quoted photo edit error:", eErr);
-                await this.sendHumanLikeMessage(replyJid, `❌ Photo edit error: ${eErr?.message || eErr}`, rawText, messageKey);
-                return true;
-              }
-            }
-
-            // ── Quoted Photo to Sticker (@sticker, @bgremove) ──
-            const isQuotedSticker =
-              quotedMessage.mediaType === "photo" &&
-              (/^(?:@sticker|\/sticker|sticker|make\s*sticker|sticker\s*banao|@bgremove|bgremove|remove\s*bg|bg\s*remove)\b/i.test(rawText.trim()) ||
-                rawText.match(/(?:sticker\s*bana|bg\s*hata|background\s*hata)/i));
-            if (isQuotedSticker) {
-              await this.sendHumanLikeMessage(replyJid, `🪄 *Quoted photo se WhatsApp Sticker generate ho raha hai...* ⚡`, rawText, messageKey);
-              try {
-                const { mediaToolsService } = await import("./mediaToolsService");
-                const bgRes = await mediaToolsService.removeBackground(buffer, mimeType);
-                const finalBuf = bgRes.buffer || buffer;
-                if (this.sock) {
-                  await this.sendSafeMediaMessage(
-                    replyJid,
-                    {
-                      sticker: finalBuf,
-                      mimetype: "image/webp",
-                    },
-                    messageKey,
-                    "Sticker"
-                  );
-                  await this.sendHumanLikeMessage(replyJid, `✨ *AI WhatsApp Sticker Ready!* 🚀`, rawText, messageKey);
-                  return true;
-                }
-              } catch (sErr: any) {
-                console.error("[WhatsAppBot] Quoted sticker error:", sErr);
-              }
-            }
-
-            // ── Quoted Photo/Document to Excel Spreadsheet (@excel, @sheet) ──
-            const isQuotedExcel =
-              (quotedMessage.mediaType === "photo" || quotedMessage.mediaType === "document") &&
-              (/^(?:@excel|\/excel|@sheet|\/sheet|excel|spreadsheet|table\s*extract|bill\s*to\s*excel)\b/i.test(rawText.trim()) ||
-                rawText.match(/(?:excel\s*me|sheet\s*me|excel\s*banao|table\s*banao|bill\s*extract|bill\s*to\s*excel)/i));
-            if (isQuotedExcel) {
-              await this.sendHumanLikeMessage(replyJid, `📊 *Quoted document/bill analyze karke Excel Sheet banayi ja rahi hai...* ⚡`, rawText, messageKey);
-              try {
-                const { mediaToolsService } = await import("./mediaToolsService");
-                const excelRes = await mediaToolsService.convertImageToExcel(buffer, mimeType, rawText);
-                if (excelRes.success && excelRes.buffer && this.sock) {
-                  await this.sendSafeMediaMessage(
-                    replyJid,
-                    {
-                      document: excelRes.buffer,
-                      mimetype: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                      fileName: excelRes.filename || "Friday_Extracted_Report.xlsx",
-                    },
-                    messageKey,
-                    "Excel Document"
-                  );
-                  await this.sendHumanLikeMessage(replyJid, excelRes.summary || "📊 *Excel File ready hai!*", rawText, messageKey);
-                  return true;
-                } else {
-                  await this.sendHumanLikeMessage(replyJid, `❌ Excel generate nahi ho paya: ${excelRes.error || "Please try again."}`, rawText, messageKey);
-                  return true;
-                }
-              } catch (xErr: any) {
-                console.error("[WhatsAppBot] Quoted Excel extraction error:", xErr);
-              }
-            }
-
-            // ── Quoted Photo Animation to Video (@animate) ──
-            const isQuotedAnimate =
-              quotedMessage.mediaType === "photo" &&
-              /^(?:@animate|\/animate|animate|motion|video\s*banao|animate\s*photo)\b/i.test(rawText.trim());
-            if (isQuotedAnimate) {
-              await this.sendHumanLikeMessage(replyJid, `🎬 *Quoted photo ko AI Motion Video me convert kiya ja raha hai...* ⚡`, rawText, messageKey);
-              try {
-                const { mediaToolsService } = await import("./mediaToolsService");
-                const animRes = await mediaToolsService.generateAiVideo(rawText || "Cinematic camera motion, ultra-realistic", buffer, mimeType);
-                if (animRes.success && animRes.buffer && this.sock) {
-                  await this.sendSafeMediaMessage(
-                    replyJid,
-                    {
-                      video: animRes.buffer,
-                      mimetype: "video/mp4",
-                    },
-                    messageKey,
-                    "Animation Video"
-                  );
-                  await this.sendHumanLikeMessage(replyJid, `🎬 *AI Motion Animation via ${animRes.model || "Friday AI"}* 🚀`, rawText, messageKey);
-                  return true;
-                }
-              } catch (aErr: any) {
-                console.error("[WhatsAppBot] Quoted animate error:", aErr);
-              }
-            }
-
-            if (isSummaryIntent && !visionMemoryService.isMediaQuestionIntent(rawText)) {
-              const summaryRes = await visionMemoryService.generateMediaSummary(buffer, mimeType, rawText, fileName, replyJid);
-              await this.sendHumanLikeMessage(replyJid, summaryRes, rawText, messageKey);
-            } else {
-              // Direct contextual Q&A on the quoted photo/document/PDF (e.g. "meeting kab hai", "amount kitna hai")
-              const answerRes = await visionMemoryService.answerQuestionOnMedia({
-                buffer,
-                mimeType,
-                question: rawText,
-                fileName,
-                chatId: replyJid,
-              });
-              await this.sendHumanLikeMessage(replyJid, answerRes, rawText, messageKey);
-            }
-            return true;
-          }
-        } catch (mediaErr) {
-          console.warn("[WhatsAppBot] Quoted media download/QnA error:", mediaErr);
-        }
-      }
-    }
-
-    // Case 2: Quoted message contains a URL / Link
-    const urlMatch = quotedMessage.text.match(/(https?:\/\/[^\s]+)/i);
-    if (urlMatch && isSummaryIntent) {
-      await this.sendHumanLikeMessage(replyJid, `🌐 *Quoted URL analyze ho raha hai...* ⚡\n🔗 _${urlMatch[1]}_`, rawText, messageKey);
-      const webSummary = await whatsappFeatureEngine.summarizeWebUrl(urlMatch[1], rawText);
-      await this.sendHumanLikeMessage(replyJid, webSummary, rawText, messageKey);
-      return true;
-    }
-
-    // Case 3: Quoted message is a Text message, Summary Card, or forwarded text
-    if (quotedMessage.text && quotedMessage.text.trim().length > 0) {
-      // 🎨 Quoted Friday AI Generated Photo Editing ("@edit ...", "@photo edit ...", "is photo me ...")
-      const isPhotoEditIntentOnQuotedText =
-        (/^(?:@image\s*edit|@edit|\/edit|edit\s*photo|photo\s*edit|edit\s*karo|image\s*edit|edit\s*image|edit)\b/i.test(rawText.trim()) ||
-          rawText.match(/(?:is\s*photo|iss\s*photo|isme|is\s*image|is\s*pic)\s*(?:me|ko|par|mein)?\s*(?:edit|change|badal|add|laga|remove|hata)/i)) &&
-        (quotedMessage.text.includes("🎨") || quotedMessage.text.toLowerCase().includes("image") || quotedMessage.text.toLowerCase().includes("photo") || quotedMessage.text.toLowerCase().includes("prompt"));
-
-      if (isPhotoEditIntentOnQuotedText) {
-        const cached = this.chatRecentPhotos.get(replyJid)?.[0];
-        if (cached && cached.buffer) {
-          const editInstruction = rawText
-            .replace(/^(?:@image\s*edit|@edit|\/edit|edit\s*photo|photo\s*edit|edit\s*karo|image\s*edit|edit\s*image|edit)\s*[:=-]?\s*/i, "")
-            .trim() || rawText.trim();
-          await this.sendHumanLikeMessage(replyJid, `🎨 *AI Generated Photo edit ho rahi hai...* ⚡\n📝 _"${editInstruction}"_`, rawText, messageKey);
-          try {
-            const { imageGenerationService } = await import("./imageGenerationService");
-            const editRes = await imageGenerationService.editImageWithAI(cached.buffer, editInstruction, cached.mimeType || "image/jpeg");
-            if (editRes.success && editRes.buffer && this.sock) {
-              this.recordChatPhoto(replyJid, editRes.buffer, editRes.mimeType || "image/jpeg");
-              await this.sendSafeMediaMessage(
-                replyJid,
-                {
-                  image: editRes.buffer,
-                  mimetype: editRes.mimeType || "image/jpeg",
-                },
-                messageKey,
-                editInstruction
-              );
-              await this.sendHumanLikeMessage(
-                replyJid,
-                `🎨 *Photo Re-Edited via Friday AI* 🚀\n\n✨ *Engine:* ${editRes.model}\n✏️ *Changes:* _${editInstruction}_`,
-                "",
-                messageKey
-              );
-              return true;
-            }
-          } catch (eErr: any) {
-            console.error("[WhatsAppBot] Quoted generated photo edit error:", eErr);
-          }
-        }
-      }
-
-      const isVoiceRequested = /\b(voice|audio|speak|bolo|sunao|bol\s*kar|bol\s*ke|padh\s*ke|voice\s*me)\b/i.test(cleanText);
-      const isExplicitAnalysisRequested = /\b(summary\s*voice|analysis\s*voice|voice\s*summary|voice\s*analysis|summary|analysis|kya\s*likha\s*hai|kya\s*likha\s*h|kya\s*hai|samjhao|explain|batao|tarjuma|meaning|matlab)\b/i.test(cleanText);
-      const targetLangMatch = cleanText.match(/\b(?:in|to|me|mein|language)?\s*(hindi|english|bengali|bangla|marathi|gujarati|punjabi|urdu|tamil|telugu|kannada|malayalam|french|spanish|german|japanese|russian|arabic|chinese|italian|portuguese|korean)\b/i);
-      const targetLanguage = targetLangMatch ? targetLangMatch[1].trim() : null;
-
-      // ── FAST TRACK: Direct Message Voice Reader ──
-      // Unless Boss explicitly asked for "summary voice" or "analysis voice", DIRECTLY read/speak the message!
-      if (isVoiceRequested && !isExplicitAnalysisRequested) {
-        const { voiceBridgeService } = await import("./voiceBridgeService");
-        try {
-          let textToRead = quotedMessage.text;
-          if (targetLanguage) {
-            const { whatsappFeatureEngine } = await import("./whatsappFeatureEngine");
-            textToRead = await whatsappFeatureEngine.translateText(quotedMessage.text, targetLanguage);
-          }
-          const speechRes = await voiceBridgeService.generateSpeech(textToRead);
-          if (speechRes && speechRes.buffer.length > 0) {
-            await this.sendVoiceMessage(replyJid, speechRes.buffer, messageKey, speechRes.mimeType);
-            return true;
-          }
-        } catch (vErr) {
-          console.warn("[WhatsAppBot] Direct voice read TTS error:", vErr);
-        }
-      }
-
-      // ── EXPLICIT ANALYSIS / SUMMARY / EXPLAIN INTENT ──
-      if (isExplicitAnalysisRequested || isSummaryIntent) {
-        const { voiceBridgeService } = await import("./voiceBridgeService");
-        const apiKey = process.env.GEMINI_API_KEY;
-
-        if (apiKey) {
-          const ai = new GoogleGenAI({ apiKey });
-          const prompt = `You are Friday AI, DK's (Divakar Kumar) warm, affectionate, ultra-intelligent companion.
-Boss (DK) swiped-up / quoted a message and asked for analysis/summary: "${rawText}".
-
-QUOTED ORIGINAL MESSAGE:
-"""
-${quotedMessage.text}
-"""
-
-TARGET LANGUAGE (if explicitly asked like 'in english', 'in french'): ${targetLanguage || "Default (Natural Friendly Hindi/Hinglish)"}
-
-CRITICAL LANGUAGE & TONE MANDATE:
-1. ALWAYS speak and explain in natural, warm, conversational Hindi / Hinglish. Never output formal robotic English memos ("Hey Boss! I've analyzed...") or dry bullet-point essays unless Boss explicitly asked for "English".
-2. Explain what the sender is saying in warm, sweet, direct Hindi/Hinglish (e.g. "Boss, is message me wo keh rahe hain ki...").
-3. SPOKEN VOICE SCRIPT ([SPEAK_START] ... [SPEAK_END]):
-   - Provide a natural 1-2 sentence spoken voice note script in ${targetLanguage || "pure natural conversational Hindi / Hinglish"}.
-   - It must sound like Friday speaking directly to Boss DK on WhatsApp voice note (e.g. "Haanji Boss, is message me likha hai ki...").
-   - DO NOT include any markdown symbols (*, _, #) inside [SPEAK_START]...[SPEAK_END]. It must be pure dialogue.`;
-
-          for (const model of ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-2.5-flash", "gemini-2.5-flash-lite"]) {
-            try {
-              const resp = await ai.models.generateContent({ model, contents: prompt });
-              const fullResp = resp.text?.trim();
-              if (fullResp) {
-                const speakMatch = fullResp.match(/\[SPEAK_START\]([\s\S]*?)\[SPEAK_END\]/i);
-                const speechScript = speakMatch ? speakMatch[1].trim() : "";
-                const replyText = fullResp.replace(/\[SPEAK_START\][\s\S]*?\[SPEAK_END\]/gi, "").trim();
-
-                await this.sendHumanLikeMessage(replyJid, replyText, rawText, messageKey);
-
-                if (isVoiceRequested || targetLanguage) {
-                  try {
-                    const textToSpeak = speechScript || (targetLanguage ? `Yeh message ${targetLanguage} me keh raha hai: ${quotedMessage.text}` : `Boss, is message me likha hai: ${quotedMessage.text}`);
-                    const speechRes = await voiceBridgeService.generateSpeech(textToSpeak);
-                    if (speechRes && speechRes.buffer.length > 0) {
-                      await this.sendVoiceMessage(replyJid, speechRes.buffer, messageKey, speechRes.mimeType);
-                    }
-                  } catch (vErr) {
-                    console.warn("[WhatsAppBot] Quoted text TTS error:", vErr);
-                  }
-                }
-                return true;
-              }
-            } catch {}
-          }
-        }
-      }
-    }
-
-    return false;
-  }
-
-  /**
-   * Master FRIDAY AI Assistant for Boss (DK) on WhatsApp.
-   * Gives DK 100% full autonomous access via WhatsApp chat:
-   * - Swipe-to-reply (Quoted Message) contextual awareness across all media
-   * - YouTube analysis & timestamps
-   * - RailRadar live train status, PNR, fares, seats, station boards
-   * - Photo / Vision / Document / Video intelligence
-   * - Autonomous tool execution (Send WhatsApp messages, contact lookup, reminders, notes, expenses, weather, news, memories)
-   * - Continuous conversational companionship with deep personal context
-   */
   private async handleOwnerWhatsAppMessage(
     senderName: string,
     senderPhone: string,
@@ -2229,7 +744,7 @@ CRITICAL LANGUAGE & TONE MANDATE:
     const rawText = (text || "").trim();
     if (!rawText) return;
 
-    // ── VIRTUAL GIRLFRIEND MODE ROUTING (Ephemeral Private Session) ──
+    // ── VIRTUAL GIRLFRIEND MODE ROUTING ──
     const isGfActivationIntent =
       /^(?:@girlfriend|\/girlfriend|@gf|\/gf|girlfriend\s*mode|gf\s*mode|virtual\s*girlfriend|girlfriend)\b/i.test(rawText);
 
@@ -2251,9 +766,6 @@ CRITICAL LANGUAGE & TONE MANDATE:
       return;
     }
 
-    // Combined context text for link/train detection
-    const fullSearchContext = quotedMessage?.text ? `${quotedMessage.text}\n${rawText}` : rawText;
-
     // 0. Quoted Swipe-to-Reply Media / Document / Photo Summary Engine
     if (quotedMessage && quotedMessage.isReply) {
       try {
@@ -2264,7 +776,7 @@ CRITICAL LANGUAGE & TONE MANDATE:
       }
     }
 
-    // 0.05 Recent Media Follow-Up Q&A (User asking question about recent photo/PDF/file without quote)
+    // 0.05 Recent Media Follow-Up Q&A
     try {
       const { visionMemoryService } = await import("./visionMemoryService");
       const recentChatMedia = visionMemoryService.getChatMediaContext(replyJid);
@@ -2283,80 +795,7 @@ CRITICAL LANGUAGE & TONE MANDATE:
       console.warn("[WhatsAppBot] Direct recent media Q&A notice:", recentMediaErr);
     }
 
-    // 0.07 Pending Video Link Interactive Choice Responder ("1", "download", "2", "summary")
-    const pendingLink = this.chatPendingLinks.get(replyJid);
-    if (pendingLink && Date.now() - pendingLink.timestamp < 15 * 60 * 1000) {
-      const lower = rawText.trim().toLowerCase();
-      const isDownloadChoice =
-        /^(?:1|download|down|video|video\s*bhejo|download\s*karo|download\s*video|bhejo|mp4|1\b)/i.test(lower) ||
-        lower === "1" ||
-        lower.startsWith("1 ") ||
-        lower.startsWith("download");
-      const isSummaryChoice =
-        /^(?:2|summary|sum|summarize|analysis|analyze|kya\s*hai|padho|batao|explain|2\b)/i.test(lower) ||
-        lower === "2" ||
-        lower.startsWith("2 ") ||
-        lower.startsWith("summary") ||
-        lower.startsWith("analyze");
-
-      if (isDownloadChoice) {
-        this.chatPendingLinks.delete(replyJid);
-        await this.sendHumanLikeMessage(replyJid, `📥 *${pendingLink.platform} Video download ho rahi hai...* ⚡\n🔗 _${pendingLink.url}_`, rawText, messageKey);
-        try {
-          const { mediaToolsService } = await import("./mediaToolsService");
-          const dlRes = await mediaToolsService.downloadSocialVideo(pendingLink.url);
-          if (dlRes.success && dlRes.buffer && this.sock) {
-            await this.sendSafeMediaMessage(
-              replyJid,
-              {
-                video: dlRes.buffer,
-                mimetype: "video/mp4",
-              },
-              messageKey,
-              dlRes.title || "Video"
-            );
-            await this.sendHumanLikeMessage(
-              replyJid,
-              `✅ *${pendingLink.platform} Video Downloaded!* 🎬\n\n📌 *Title:* _${dlRes.title || "Social Video"}_\n⚡ *Downloaded via Friday AI*`,
-              "",
-              messageKey
-            );
-            return;
-          } else {
-            await this.sendHumanLikeMessage(replyJid, `⚠️ Video download nahi ho payi: ${dlRes.error || "Please try another link."}`, rawText, messageKey);
-            return;
-          }
-        } catch (e: any) {
-          await this.sendHumanLikeMessage(replyJid, `⚠️ Download error: ${e?.message || e}`, rawText, messageKey);
-          return;
-        }
-      } else if (isSummaryChoice) {
-        this.chatPendingLinks.delete(replyJid);
-        if (pendingLink.ytVideoId) {
-          await this.sendHumanLikeMessage(replyJid, "🎬 *YouTube Video analyze ho raha hai... (Transcripts & Timestamps)* ⚡", rawText, messageKey);
-          const { youtubeService } = await import("./youtubeService");
-          const analysis = await youtubeService.analyzeVideo(pendingLink.ytVideoId);
-          let card = `🎬 *YouTube Video Intelligence:* **${analysis.title}**\n`;
-          card += `• 👤 Channel: *${analysis.channelName}*\n`;
-          card += `• 📝 Subtitles: *${analysis.hasTranscript ? `✅ ${analysis.totalCues} timed cues` : "⚠️ Auto estimated"}*\n\n`;
-          card += `📌 *Executive Summary:*\n${analysis.summary}\n\n`;
-          if (analysis.keyTakeaways && analysis.keyTakeaways.length > 0) {
-            card += `💡 *Key Takeaways:*\n`;
-            analysis.keyTakeaways.forEach((t) => (card += `• ${t}\n`));
-          }
-          await this.sendHumanLikeMessage(replyJid, card, rawText, messageKey);
-          return;
-        } else {
-          await this.sendHumanLikeMessage(replyJid, `🌐 *Analyzing video link...* ⚡\n🔗 _${pendingLink.url}_`, rawText, messageKey);
-          const { whatsappFeatureEngine } = await import("./whatsappFeatureEngine");
-          const webSummary = await whatsappFeatureEngine.summarizeWebUrl(pendingLink.url, rawText);
-          await this.sendHumanLikeMessage(replyJid, webSummary, rawText, messageKey);
-          return;
-        }
-      }
-    }
-
-    // 0.08 Direct Auto-Ring Calling Engine ("call me", "friday call me", "call karo", "mujhe call karo", "@call", "/call", "live call", "voice call")
+    // 0.08 Direct Auto-Ring Calling Engine
     if (
       /^(?:@call|\/call|call\s*me|call\s*karo|mujhe\s*call\s*karo|friday\s*call\s*me|voice\s*call|live\s*call|call\s*lagao|baat\s*karni\s*hai\s*call\s*par)/i.test(rawText) ||
       rawText.toLowerCase() === "call"
@@ -2366,7 +805,6 @@ CRITICAL LANGUAGE & TONE MANDATE:
       const callIdMatch = callCard.match(/callId=([a-zA-Z0-9_]+)/);
       const callId = callIdMatch ? callIdMatch[1] : `call_${Date.now()}`;
 
-      // Broadcast instant remote incoming call ring to Friday Call App on phone
       if (this.callTriggerCallback) {
         this.callTriggerCallback({ callerName: "FRIDAY AI (Boss)", isOwner: true, callId });
       }
@@ -2380,594 +818,7 @@ CRITICAL LANGUAGE & TONE MANDATE:
       return;
     }
 
-    // 0.082 WHATSAPP CHAT & CONVERSATION INQUIRY FAST ENGINE
-    // When Boss asks: "kisi ne msg kiya kya", "unknown number ne msg kiya kya", "Ram ne msg kiya kya", "Ram se kya baat hui", "kya kya baat hui batao", "usne kya bola tumne kya reply diya"
-    const isChatInquiryIntent =
-      !quotedMessage?.isReply &&
-      (/(?:kisi\s*ne|unknown|kisi\s*unknown|kisne|kya\s*kisi\s*ne|koi\s*msg|kisi\s*ka\s*msg|kisi\s*ka\s*message|messages?|chat|baat)\s*(?:aaya|aaye|kiya|hua|aayi|bheja|status|check|batao|pucho|padho|summary|digest)/i.test(rawText) ||
-        /(?:se\s*kya\s*baat\s*hui|ne\s*kya\s*msg\s*kiya|ne\s*kya\s*bheja|kya\s*baat\s*hui|kya\s*msg\s*kiya|kya\s*reply\s*diya|tumne\s*kya\s*bola|usne\s*kya\s*bola|kya\s*kya\s*baat\s*hui|kya\s*baat\s*hua)/i.test(rawText));
-
-    if (isChatInquiryIntent) {
-      const searchRes = await this.getConversationSummaryAndHistory(rawText);
-      await this.sendHumanLikeMessage(replyJid, searchRes.summary, rawText, messageKey);
-      return;
-    }
-
-    // 0.085 SWIPE-TO-REPLY (QUOTED MESSAGE) FAST ACTION ENGINE
-    // When Boss quotes a message containing a phone number or contact card and says:
-    // "isko msg karo ki aaj school aana h", "isko bolo ki...", "inhe message kar do ki...", "isko save karo Ram", etc.
-    if (quotedMessage && quotedMessage.isReply) {
-      const qText = quotedMessage.text || "";
-      const qPhoneMatch = qText.match(/(?:\+?91[\s\-]?)?([6-9]\d{9})\b/) || qText.match(/(\+?\d[\d\s\-]{8,15}\d)/);
-      let quotedPhone = qPhoneMatch ? qPhoneMatch[1].replace(/\D/g, "") : "";
-
-      // Also check contact card vcard in quoted message
-      if (!quotedPhone && quotedMessage.rawQuotedMessage?.contactMessage) {
-        const vcard = quotedMessage.rawQuotedMessage.contactMessage.vcard || "";
-        const waidMatch = vcard.match(/waid=(\d+)/i);
-        const telMatch = vcard.match(/TEL[^:]*:(.+)/i);
-        quotedPhone = waidMatch ? waidMatch[1] : (telMatch ? telMatch[1].replace(/\D/g, "") : "");
-      }
-
-      // If still no phone, check if quoted message sender is a 3rd party (not Boss)
-      if (!quotedPhone && quotedMessage.senderPhone && quotedMessage.senderPhone !== senderPhone) {
-        quotedPhone = quotedMessage.senderPhone;
-      }
-
-      let quotedContactName = "";
-      if (quotedPhone) {
-        const { contactsService } = await import("./contactsService");
-        const existing = await contactsService.findContact(quotedPhone);
-        if (existing && existing.id !== "owner_default" && existing.id !== "temp") {
-          quotedContactName = existing.name;
-        }
-      }
-
-      // Action A: Send Message to Quoted Phone / Contact ("isko msg karo ki...", "isko bol do ki...", "inhe whatsapp karo...")
-      const swipeMsgMatch =
-        rawText.match(/^(?:isko|inhe|ise|unko|is\s*no\s*ko|is\s*number\s*ko|ispe|is\s*par)\s*(?:msg|message|whatsapp|bol\s*do|bolo|keh\s*do|kaho|bhejo|bhej\s*do|send\s*karo|send\s*kar\s*do|send|bhejna)\s*(?:ki|:|-)?\s*(.+)/i) ||
-        rawText.match(/^(?:msg|message|whatsapp|send)\s*(?:kar\s*do|bhej\s*do|karo|bhejo)\s*(?:isko|inhe|ise|unko|is\s*no\s*ko|is\s*number\s*ko|ispe|is\s*par)\s*(?:ki|:|-)?\s*(.+)/i) ||
-        rawText.match(/^(?:bol\s*do|bolo|keh\s*do|kaho)\s*(?:isko|inhe|ise|unko)\s*(?:ki|:|-)?\s*(.+)/i);
-
-      if (swipeMsgMatch && quotedPhone) {
-        const messageBody = swipeMsgMatch[1].trim();
-        if (messageBody) {
-          const { sendWhatsAppUnified } = await import("./whatsappService");
-          const sendRes = await sendWhatsAppUnified(quotedPhone, messageBody, { channel: "whatsapp2" });
-          if (sendRes.success) {
-            await this.sendHumanLikeMessage(
-              replyJid,
-              `🚀 *Message Sent via WhatsApp 2!* ✅\n\n👤 *Recipient:* ${quotedContactName ? `${quotedContactName} ` : ""}(\`+${quotedPhone}\`)\n💬 *Message:* _"${messageBody}"_\n⚡ *Channel:* WhatsApp 2 (Baileys Dedicated Bot)\n\nBoss, quoted number par message successfully deliver ho gaya hai! 👍`,
-              rawText,
-              messageKey
-            );
-          } else {
-            await this.sendHumanLikeMessage(
-              replyJid,
-              `⚠️ *Message Send Failed:* ${sendRes.message}\n\nRecipient: +${quotedPhone}`,
-              rawText,
-              messageKey
-            );
-          }
-          return;
-        }
-      }
-
-      // Action B: Save Contact from Quoted Phone ("isko save karo Ram", "Ram save kar lo", "isko girlfriend save karo Priya")
-      const isSwipeSaveIntent =
-        /(?:save|yaad|rakho|girlfriend|gf|bestfriend|bff|dost|bhai|sister|family|naam)/i.test(rawText) &&
-        /(?:isko|inhe|ise|unko|ye|is\s*no|is\s*number|save)/i.test(rawText);
-
-      if (isSwipeSaveIntent && quotedPhone) {
-        const { contactsService } = await import("./contactsService");
-        const relKeyword = rawText.match(/\b(girlfriend|gf|crush|wife|partner|jaan|bestfriend|best\s*friend|bff|dost|close\s*friend|friend|brother|bhai|sister|behan|mummy|papa|family)\b/i);
-        let normalizedRel: string | undefined;
-        if (relKeyword) {
-          const r = relKeyword[1].toLowerCase();
-          normalizedRel =
-            r === "gf" || r === "girlfriend" || r === "crush" || r === "wife" || r === "jaan" || r === "partner"
-              ? "girlfriend"
-              : r.includes("best") || r === "bff"
-              ? "bestfriend"
-              : r === "bhai" || r === "brother"
-              ? "brother"
-              : r === "behan" || r === "sister"
-              ? "sister"
-              : r === "mummy" || r === "papa" || r === "family"
-              ? "family"
-              : "friend";
-        }
-
-        let nameCandidate = rawText
-          .replace(/\b(?:ye\s*no\s*save\s*karo|ye\s*number\s*save\s*karo|save\s*contact|save\s*number|save\s*no|number\s*save\s*karo|no\s*save\s*karo|contact\s*save\s*karo|save\s*kar\s*(?:lo|do|na)|save|isko|inhe|ise|unko|ye|is\s*no|is\s*number|ka\s*number|ka\s*no|name|naam|hai|please|plz|friday|boss)\b/gi, "")
-          .replace(/[:=,\-]/g, "")
-          .trim();
-
-        if (relKeyword) {
-          nameCandidate = nameCandidate.replace(new RegExp(`\\b${relKeyword[0]}\\b`, "gi"), "").trim();
-        }
-
-        const finalName = nameCandidate && nameCandidate.length >= 2 ? nameCandidate : (normalizedRel ? normalizedRel.toUpperCase() : "Contact");
-        const saved = await contactsService.saveContact(finalName, quotedPhone, normalizedRel);
-        await this.sendHumanLikeMessage(
-          replyJid,
-          `📇 *Contact Saved from Quoted Message!* ✅\n\n👤 *Name:* ${saved.name}\n📱 *Phone:* \`+${saved.phone}\`${normalizedRel ? `\n🏷️ *Relation:* *${normalizedRel.toUpperCase()}*` : ""}\n📅 *Saved on:* ${saved.dateAdded}\n\n_Boss, quoted number contacts book me save ho gaya hai! Ab aap direct bol sakte hain: "${saved.name} ko msg kar do...", aur main by-default **WhatsApp 2** se message bhej dungi!_ 👍`,
-          rawText,
-          messageKey
-        );
-        return;
-      }
-    }
-
-    // 0.09 Boss Explicit Contact Save Command ("save contact Ram 9876543210", "ye number save karo Ram 9876543210")
-    const isExplicitSaveIntent =
-      /^(?:save\s*contact|save\s*number|ye\s*number\s*save\s*karo|ye\s*no\s*save\s*karo|contact\s*save\s*karo|number\s*save\s*karo)\b/i.test(rawText) ||
-      /\b(?:save\s*kar\s*(?:lo|do|na)|save\s*karo)\b/i.test(rawText);
-
-    if (isExplicitSaveIntent) {
-      const phoneMatch = rawText.match(/(?:\+?91[\s\-]?)?([6-9]\d{9})\b/) || rawText.match(/(\+?\d[\d\s\-]{8,15}\d)/);
-      if (phoneMatch) {
-        const rawPhone = phoneMatch[1].replace(/\D/g, "");
-        let nameCandidate = rawText
-          .replace(phoneMatch[0], "")
-          .replace(/\b(?:ye\s*number\s*save\s*karo|ye\s*no\s*save\s*karo|save\s*contact|save\s*number|save\s*no|number\s*save\s*karo|no\s*save\s*karo|contact\s*save\s*karo|save\s*kar\s*(?:lo|do|na)|save\s*karo|ka\s*number|ka\s*no|ka\s*phone|ka\s*mobile|name|naam|hai|please|plz|friday|boss)\b/gi, "")
-          .replace(/[:=,\-]/g, "")
-          .trim();
-
-        if (!nameCandidate || nameCandidate.length < 2) {
-          nameCandidate = "Contact";
-        }
-
-        const relKeywordMatch = rawText.match(/\b(girlfriend|gf|wife|crush|bestfriend|best\s*friend|bff|brother|bhai|sister|behan|family|friend)\b/i);
-        const rel = relKeywordMatch ? (relKeywordMatch[1].toLowerCase().includes("gf") || relKeywordMatch[1].toLowerCase().includes("girl") ? "girlfriend" : relKeywordMatch[1].toLowerCase().includes("best") ? "bestfriend" : relKeywordMatch[1].toLowerCase()) : "";
-
-        const saved = await contactsService.saveContact(nameCandidate, rawPhone, rel);
-        await this.sendHumanLikeMessage(
-          replyJid,
-          `📇 *Contact Successfully Saved!* ✅\n\n👤 *Name:* ${saved.name}\n📱 *Phone:* \`+${saved.phone}\`${saved.relation ? `\n🏷️ *Relation:* *${saved.relation.toUpperCase()}*` : ""}\n📅 *Saved on:* ${saved.dateAdded}\n\n_Boss, ye contact Firestore me permanently save ho gaya hai!_ 👍`,
-          rawText,
-          messageKey
-        );
-        return;
-      }
-    }
-
-    // 0.095 Boss Direct WhatsApp 2 Message Command ("Ram ko msg kar do ki aaj school aana h", "Rahul ko message bhejo: ...")
-    const directMsgMatch =
-      rawText.match(/^([a-zA-Z\s]{2,25}?)\s*(?:ko|par)\s*(?:msg|message|whatsapp)\s*(?:kar\s*do|bhej\s*do|karo|bhejo|send\s*karo|send\s*kar\s*do)\s*(?:ki|:|-)?\s*(.+)/i) ||
-      rawText.match(/^(?:msg|message|whatsapp)\s*(?:kar\s*do|bhej\s*do|karo|bhejo|send\s*karo)\s+([a-zA-Z\s]{2,25}?)\s*(?:ko|par)?\s*(?:ki|:|-)?\s*(.+)/i) ||
-      rawText.match(/^([a-zA-Z\s]{2,25}?)\s*ko\s*(?:bol\s*do|bolo|keh\s*do|kaho)\s*(?:ki|:|-)?\s*(.+)/i);
-
-    if (directMsgMatch) {
-      const recipientName = directMsgMatch[1].trim();
-      const messageBody = directMsgMatch[2].trim();
-      const lowerRec = recipientName.toLowerCase();
-      const nonContactKeywords = ["friday", "boss", "mujhe", "me", "isko", "inhe", "ise", "unko", "isse", "usko", "is", "us"];
-      if (recipientName && messageBody && !nonContactKeywords.includes(lowerRec)) {
-        const contact = await contactsService.findContact(recipientName);
-        if (contact && contact.id !== "owner_default") {
-          const { sendWhatsAppUnified } = await import("./whatsappService");
-          const sendRes = await sendWhatsAppUnified(contact.phone, messageBody, { channel: "whatsapp2" });
-          if (sendRes.success) {
-            await this.sendHumanLikeMessage(
-              replyJid,
-              `🚀 *Message Sent via WhatsApp 2!* ✅\n\n👤 *Recipient:* ${contact.name} (+${contact.phone})\n💬 *Message:* _"${messageBody}"_\n⚡ *Channel:* WhatsApp 2 (Baileys Dedicated Bot)\n\nBoss, message successfully deliver ho gaya hai! 👍`,
-              rawText,
-              messageKey
-            );
-          } else {
-            await this.sendHumanLikeMessage(
-              replyJid,
-              `⚠️ *Message Send Failed:* ${sendRes.message}\n\nRecipient: ${contact.name} (+${contact.phone})`,
-              rawText,
-              messageKey
-            );
-          }
-          return;
-        }
-      }
-    }
-
-    // 0.1 AI Image Generation ("@image <prompt>", "/image <prompt>", "image: <prompt>", "photo banao <prompt>")
-    const imageGenMatch =
-      rawText.match(/^(?:@image|\/image|image:|photo\s*banao|image\s*banao|tasveer\s*banao|generate\s*image|draw\s*image|draw)\s*[:=-]?\s*(.+)/i) ||
-      (rawText.includes("@image") ? rawText.match(/@image\s+(.+)/i) : null);
-    if (imageGenMatch && imageGenMatch[1]?.trim()) {
-      const prompt = imageGenMatch[1].trim();
-      try {
-        await this.sendHumanLikeMessage(replyJid, `🎨 *Image generate ho rahi hai Boss...* ⚡\n\n📌 *Prompt:* _"${prompt}"_`, rawText, messageKey);
-        const { imageGenerationService } = await import("./imageGenerationService");
-        const genRes = await imageGenerationService.generateImage(prompt);
-        if (genRes.success && (genRes.buffer || genRes.imageUrl)) {
-          const imageSrc = genRes.buffer || genRes.imageUrl!;
-          await this.sendPhotoMessage(
-            replyJid,
-            imageSrc,
-            `✨ *AI Generated Image*\n📌 *Prompt:* _"${prompt}"_\n🤖 *Engine:* _${genRes.model}_`,
-            messageKey
-          );
-          return;
-        } else {
-          await this.sendHumanLikeMessage(replyJid, `⚠️ Boss, image generate karne me issue aaya: ${genRes.error || "Unknown error"}`, rawText, messageKey);
-          return;
-        }
-      } catch (imgErr: any) {
-        console.error("[WhatsAppBot] Image generation error:", imgErr);
-        await this.sendHumanLikeMessage(replyJid, `⚠️ Image generate nahi ho payi: ${imgErr?.message || imgErr}`, rawText, messageKey);
-        return;
-      }
-    }
-
-    // 0.2 AI Short Video Generator ("@video <prompt>", "/video <prompt>", "video banao <prompt>")
-    const videoGenMatch =
-      rawText.match(/^(?:@video|\/video|video\s*banao|generate\s*video|ai\s*video)\s*[:=-]?\s*(.+)/i) ||
-      (rawText.startsWith("@video ") ? rawText.match(/^@video\s+(.+)/i) : null);
-    if (videoGenMatch && videoGenMatch[1]?.trim()) {
-      const vidPrompt = videoGenMatch[1].trim();
-      try {
-        await this.sendHumanLikeMessage(replyJid, `🎬 *AI Video generate ho rahi hai Boss...* ⚡\n\n📌 *Prompt:* _"${vidPrompt}"_`, rawText, messageKey);
-        const { mediaToolsService } = await import("./mediaToolsService");
-        const vidRes = await mediaToolsService.generateAiVideo(vidPrompt);
-        if (vidRes.success && vidRes.buffer && this.sock) {
-          await this.sendSafeMediaMessage(
-            replyJid,
-            {
-              video: vidRes.buffer,
-              mimetype: "video/mp4",
-            },
-            messageKey,
-            vidPrompt
-          );
-          await this.sendHumanLikeMessage(
-            replyJid,
-            `🎬 *Friday AI Video* 🚀\n\n✨ *Engine:* ${vidRes.model || "Flux/CogVideoX"}\n📝 *Prompt:* _${vidPrompt}_`,
-            "",
-            messageKey
-          );
-          return;
-        } else {
-          await this.sendHumanLikeMessage(replyJid, `⚠️ Video generate nahi ho payi: ${vidRes.error || "Please try again"}`, rawText, messageKey);
-          return;
-        }
-      } catch (vErr: any) {
-        console.error("[WhatsAppBot] AI Video generation error:", vErr);
-        await this.sendHumanLikeMessage(replyJid, `⚠️ Video generation failed: ${vErr?.message || vErr}`, rawText, messageKey);
-        return;
-      }
-    }
-
-    // 0.3 Social Media & Video Link Intelligence / Downloader (Instagram, YouTube, TikTok, Twitter/X)
-    try {
-      const { mediaToolsService } = await import("./mediaToolsService");
-      const { youtubeService } = await import("./youtubeService");
-      const socialInfo = mediaToolsService.extractSocialMediaUrl(rawText);
-      const ytVideoId = youtubeService.extractVideoId(rawText) || (quotedMessage?.text ? youtubeService.extractVideoId(quotedMessage.text) : null);
-
-      if ((socialInfo && socialInfo.isSocialUrl) || ytVideoId) {
-        const detectedUrl = socialInfo?.url || (rawText.match(/(https?:\/\/[^\s]+)/i)?.[1] || `https://youtube.com/watch?v=${ytVideoId}`);
-        const platform = socialInfo?.platform || "YouTube";
-
-        const lower = rawText.trim().toLowerCase();
-        const hasExplicitDownload =
-          /^(?:@download|\/download|download|down|video\s*bhejo|save\s*video|download\s*karo|mp4)\b/i.test(lower) ||
-          lower.includes("download") ||
-          lower.includes("video bhejo") ||
-          lower.includes("mp4");
-
-        const hasExplicitSummary =
-          /^(?:@summary|\/summary|summary|analyze|analysis|kya\s*hai|padho|explain|summarize|transcript)\b/i.test(lower) ||
-          lower.includes("summary") ||
-          lower.includes("analyze") ||
-          lower.includes("transcripts") ||
-          lower.includes("yt ask");
-
-        // Case A: User simply shared/pasted the URL without command -> Ask Download vs Summary
-        if (!hasExplicitDownload && !hasExplicitSummary && !/^(?:media\s*search|vault\s*search)/i.test(rawText)) {
-          this.chatPendingLinks.set(replyJid, {
-            url: detectedUrl,
-            platform,
-            ytVideoId: ytVideoId || null,
-            timestamp: Date.now(),
-          });
-
-          await this.sendHumanLikeMessage(
-            replyJid,
-            `🎬 *${platform} Link Received!* ⚡\n🔗 _${detectedUrl}_\n\nBoss, is video ke sath kya karna hai?\n\n1️⃣ *Download Video* (Direct MP4 chat me bhejun)\n2️⃣ *AI Summary* (Iska Executive Summary & Takeaways nikalun)\n\n👉 _Bas reply me *1* (download) ya *2* (summary) likh kar bhejein!_`,
-            rawText,
-            messageKey
-          );
-          return;
-        }
-
-        // Case B: Explicit Download requested
-        if (hasExplicitDownload) {
-          await this.sendHumanLikeMessage(replyJid, `📥 *${platform} Video download ho rahi hai...* ⚡\n🔗 _${detectedUrl}_`, rawText, messageKey);
-          const dlRes = await mediaToolsService.downloadSocialVideo(detectedUrl);
-          if (dlRes.success && dlRes.buffer && this.sock) {
-            await this.sendSafeMediaMessage(
-              replyJid,
-              {
-                video: dlRes.buffer,
-                mimetype: "video/mp4",
-              },
-              messageKey,
-              dlRes.title || "Video"
-            );
-            await this.sendHumanLikeMessage(
-              replyJid,
-              `✅ *${platform} Video Downloaded!* 🎬\n\n📌 *Title:* _${dlRes.title || "Video"}_\n⚡ *Downloaded via Friday AI*`,
-              "",
-              messageKey
-            );
-            return;
-          } else {
-            await this.sendHumanLikeMessage(replyJid, `⚠️ Video download nahi ho payi: ${dlRes.error || "Post might be private or link expired."}`, rawText, messageKey);
-            return;
-          }
-        }
-
-        // Case C: Explicit Summary requested (YouTube Video or Social Webpage)
-        if (hasExplicitSummary && ytVideoId) {
-          await this.sendHumanLikeMessage(replyJid, "🎬 *YouTube Video analyze ho raha hai... (Transcripts & Timestamps)* ⚡", rawText, messageKey);
-          const analysis = await youtubeService.analyzeVideo(ytVideoId);
-          let card = `🎬 *YouTube Video Intelligence:* **${analysis.title}**\n`;
-          card += `• 👤 Channel: *${analysis.channelName}*\n`;
-          card += `• 📝 Subtitles: *${analysis.hasTranscript ? `✅ ${analysis.totalCues} timed cues` : "⚠️ Auto estimated"}*\n\n`;
-          card += `📌 *Executive Summary:*\n${analysis.summary}\n\n`;
-          if (analysis.keyTakeaways && analysis.keyTakeaways.length > 0) {
-            card += `💡 *Key Takeaways:*\n`;
-            analysis.keyTakeaways.forEach((t) => (card += `• ${t}\n`));
-          }
-          if (analysis.chapters && analysis.chapters.length > 0) {
-            card += `\n⏱️ *Timeline & Chapters:*\n`;
-            analysis.chapters.slice(0, 8).forEach((ch) => {
-              card += `• [⏱️ ${ch.startFormatted}](${ch.timestampUrl}) — *${ch.title}*\n`;
-            });
-          }
-          await this.sendHumanLikeMessage(replyJid, card, rawText, messageKey);
-          return;
-        }
-      }
-    } catch (sErr) {
-      console.warn("[WhatsAppBot] Social video/link notice:", sErr);
-    }
-
-    // 0.35 YouTube Specific Q&A ("yt ask <url/id> <question>")
-    try {
-      const ytAskMatch = rawText.match(/^(?:yt\s*ask|youtube\s*ask|ask\s*yt)\s+(\S+)\s+(.+)/i);
-      if (ytAskMatch) {
-        const { youtubeService } = await import("./youtubeService");
-        const targetUrlOrId = ytAskMatch[1];
-        const question = ytAskMatch[2];
-        const queryRes = await youtubeService.queryVideoTimestamp(targetUrlOrId, question);
-        let respText = `🎬 *YouTube Video Timestamp Q&A:*\n\n`;
-        if (queryRes.exactTimestamp) {
-          respText += `⏱️ *Exact Timestamp:* [${queryRes.exactTimestamp}](${queryRes.timestampUrl})\n\n`;
-        }
-        respText += `📝 *Answer:*\n${queryRes.answer}`;
-        await this.sendHumanLikeMessage(replyJid, respText, rawText, messageKey);
-        return;
-      }
-    } catch (ytErr) {
-      console.warn("[WhatsAppBot] YouTube QnA notice:", ytErr);
-    }
-
-    // 2. RailRadar Live Railways (Train status, PNR, Fares, Seats, Station board)
-    try {
-      const { railRadarService } = await import("./railRadarService");
-      const trainMatch =
-        rawText.match(/^(?:\/train|train|live\s*train|railradar)\s+(\d{4,5}|\w+)/i) ||
-        rawText.match(/\b(\d{5})\b(?:\s+train|\s+running|\s+status|\s+kahan)/i) ||
-        rawText.match(/train\s+(?:status|kahan\s*hai|live|no|number)?\s*[:=-]?\s*(\d{4,5})/i) ||
-        (quotedMessage?.text ? quotedMessage.text.match(/\b(\d{5})\b/) : null);
-      if (trainMatch && (/(status|train|kahan|late|delay|running)/i.test(rawText) || rawText.match(/\b\d{5}\b/))) {
-        const trainQuery = trainMatch[1];
-        const trainStatus = await railRadarService.getLiveTrainStatus(trainQuery);
-        await this.sendHumanLikeMessage(replyJid, trainStatus.message, rawText, messageKey);
-        return;
-      }
-
-      const pnrMatch =
-        rawText.match(/^(?:\/pnr|pnr|pnr\s*status)\s+(\d{10})/i) ||
-        rawText.match(/\b(\d{10})\b/i) ||
-        (quotedMessage?.text ? quotedMessage.text.match(/\b(\d{10})\b/) : null);
-      if (pnrMatch && (/pnr/i.test(rawText) || /pnr/i.test(quotedMessage?.text || "") || pnrMatch[0].startsWith("/pnr") || rawText.length === 10)) {
-        const pnrNum = pnrMatch[1];
-        const pnrRes = await railRadarService.getPnrStatus(pnrNum);
-        await this.sendHumanLikeMessage(replyJid, pnrRes.message, rawText, messageKey);
-        return;
-      }
-
-      const fareMatch =
-        rawText.match(/^(?:\/fare|fare|ticket\s*price|kiraya|train\s*fare)\s+(\d{4,5}|\w+)(?:\s+(?:from\s+)?([a-zA-Z\s]{2,15}))?(?:\s+(?:to\s+)?([a-zA-Z\s]{2,15}))?/i) ||
-        rawText.match(/(\d{5})\s+(?:ka\s+)?(?:fare|ticket|kiraya|price)/i);
-      if (fareMatch) {
-        const trainQuery = fareMatch[1];
-        const fromStn = fareMatch[2]?.trim();
-        const toStn = fareMatch[3]?.trim();
-        const fareRes = await railRadarService.getTrainFares(trainQuery, fromStn, toStn);
-        await this.sendHumanLikeMessage(replyJid, fareRes.message, rawText, messageKey);
-        return;
-      }
-
-      const seatMatch =
-        rawText.match(/^(?:\/seats|\/seat|\/tatkal|seats|seat|tatkal|seat\s*availability)\s+(\d{4,5}|\w+)(?:\s+([a-zA-Z\s]{2,15}))?(?:\s+([a-zA-Z\s]{2,15}))?/i) ||
-        rawText.match(/(\d{5})\s+(?:me\s+)?(?:seat|khali|tatkal|seat\s*available)/i);
-      if (seatMatch) {
-        const trainQuery = seatMatch[1];
-        const fromStn = seatMatch[2]?.trim();
-        const toStn = seatMatch[3]?.trim();
-        const seatRes = await railRadarService.getSeatAvailability(trainQuery, fromStn, toStn);
-        await this.sendHumanLikeMessage(replyJid, seatRes.message, rawText, messageKey);
-        return;
-      }
-
-      const stationMatch = rawText.match(/^(?:\/station|station|station\s*board|live\s*station)\s+([a-zA-Z\s]{2,20})/i);
-      if (stationMatch) {
-        const stnQuery = stationMatch[1].trim();
-        const stnRes = await railRadarService.getLiveStationBoard(stnQuery);
-        let stnMsg = `🏢 *Live Station Board: ${stnRes.stationCode}*\n\n`;
-        if (stnRes.trains && stnRes.trains.length > 0) {
-          stnRes.trains.forEach((t) => {
-            const delayTxt = t.delayMinutes > 0 ? `🔴 +${t.delayMinutes}m` : `🟢 On Time`;
-            stnMsg += `• *#${t.trainNumber}* ${t.trainName}\n  📍 Plat: *#${t.platform}* | ⏱️ ETA: *${t.expectedArrival}* (${delayTxt})\n`;
-          });
-        } else {
-          stnMsg += stnRes.message;
-        }
-        await this.sendHumanLikeMessage(replyJid, stnMsg, rawText, messageKey);
-        return;
-      }
-    } catch (railErr) {
-      console.warn("[WhatsAppBot] RailRadar notice:", railErr);
-    }
-
-    // 3. Media Vault Search
-    const mediaSearchMatch = rawText.match(/^(?:media\s*search|search\s*media|vault\s*search|\/media_search)\s*(.*)/i);
-    if (mediaSearchMatch) {
-      const query = mediaSearchMatch[1]?.trim();
-      if (query) {
-        try {
-          const { visionMemoryService } = await import("./visionMemoryService");
-          const searchRes = await visionMemoryService.getLatestMediaInfo(query);
-          await this.sendHumanLikeMessage(replyJid, searchRes.analysis, rawText, messageKey);
-          return;
-        } catch (searchErr) {
-          console.warn("[WhatsAppBot] Media search error:", searchErr);
-        }
-      }
-    }
-
-    // 4. Coding Agent Approvals ("yes" / "ok" / "approve" / "push")
-    const normalized = rawText.toLowerCase().trim();
-    if (["yes", "ok", "approve", "haan", "theek hai", "push", "kar do", "deploy"].includes(normalized)) {
-      try {
-        const { codeAgentService } = await import("./codeAgentService");
-        const handled = await codeAgentService.handleWhatsAppApprovalReply(rawText);
-        if (handled) {
-          await this.sendHumanLikeMessage(
-            replyJid,
-            "🚀 *Boss, Coding Agent ko approval de diya gaya hai! Code main branch me commit & push ho raha hai.*",
-            rawText,
-            messageKey
-          );
-          return;
-        }
-      } catch {}
-    }
-
-    // 5. Music Finder (Explicit commands only)
-    if (/^(?:@music|\/music|gana\s*chalao|gana\s*sunao|play\s*song|spotify)\b/i.test(rawText)) {
-      const songQuery = rawText.replace(/^(?:@music|\/music|gana\s*chalao|gana\s*sunao|play\s*song|play|spotify)\s*/gi, "").trim();
-      if (songQuery) {
-        try {
-          const { publicApisService } = await import("./publicApisService");
-          const musicRes = await publicApisService.searchMusic(songQuery);
-          if (musicRes.success && musicRes.spotifyUrl) {
-            await this.sendHumanLikeMessage(
-              replyJid,
-              `🎵 *${musicRes.title}* by ${musicRes.artist}\n\n▶️ Play on Spotify: ${musicRes.spotifyUrl}\n\nEnjoy kijiye Boss! ✨`,
-              rawText,
-              messageKey
-            );
-            return;
-          }
-        } catch {}
-      }
-    }
-
-    // 6. Daily Updates
-    if (/^(aaj ka update|update note|log update)/i.test(rawText)) {
-      const cleanUpdate = rawText.replace(/^(aaj ka update note karo|aaj ka update|update note karo|log update)/gi, "").trim();
-      if (cleanUpdate) {
-        await dailyUpdateService.appendUpdate(cleanUpdate);
-        await this.sendHumanLikeMessage(replyJid, "✅ *Boss, aaj ka update successfully save kar liya hai!*", rawText, messageKey);
-        return;
-      }
-    }
-
-    // 7. Primary WhatsApp Preference
-    if (/(primary\s*whatsapp|whatsapp\s*channel|default\s*whatsapp)/i.test(rawText)) {
-      try {
-        const { setPrimaryWhatsAppChannel } = await import("./whatsappService");
-        if (/whatsapp\s*2|2/i.test(rawText)) {
-          const res = await setPrimaryWhatsAppChannel("whatsapp2");
-          await this.sendHumanLikeMessage(replyJid, res.message, rawText, messageKey);
-          return;
-        } else if (/whatsapp\s*1|1/i.test(rawText)) {
-          const res = await setPrimaryWhatsAppChannel("whatsapp1");
-          await this.sendHumanLikeMessage(replyJid, res.message, rawText, messageKey);
-          return;
-        }
-      } catch {}
-    }
-
-    // 8. Direct Forwarding to Telegram Shortcut
-    const tgForwardMatch = rawText.match(/^(?:forward\s*to\s*telegram|telegram\s*(?:pe|par)\s*(?:bhej\s*do|bhejo|forward\s*kardo|forward\s*karo|send\s*karo))\s*[:=-]?\s*(.*)/i);
-    if (tgForwardMatch && tgForwardMatch[1]?.trim()) {
-      const forwardContent = tgForwardMatch[1].trim();
-      try {
-        const { telegramBotService } = await import("./telegramBotService");
-        const ownerChatId = await telegramBotService.getOwnerOrLatestChatId();
-        if (ownerChatId) {
-          await telegramBotService.sendMessage(ownerChatId, `📲 *[Forwarded from WhatsApp]*\n\n${forwardContent}`);
-          await this.sendHumanLikeMessage(replyJid, `🚀 *Message Telegram par successfully forward ho gaya!* ✅\n\n_"${forwardContent}"_`, rawText, messageKey);
-          return;
-        }
-      } catch (tgErr) {
-        console.warn("[WhatsAppBot] Telegram direct forward notice:", tgErr);
-      }
-    }
-
-    // 9. WhatsApp 30-Day History Search Shortcut
-    const historySearchMatch =
-      rawText.match(/^(?:search\s*whatsapp|whatsapp\s*history|search\s*chat|chat\s*history|\/history)\s*(.*)/i) ||
-      rawText.match(/(\d+)\s*din\s*purana\s*msg/i);
-    if (historySearchMatch) {
-      const q = historySearchMatch[1]?.trim() || "all";
-      const daysMatch = rawText.match(/(\d+)\s*din/i);
-      const days = daysMatch ? parseInt(daysMatch[1]) : 30;
-      const historyRes = await this.searchWhatsAppHistory(q, { daysBack: days, limit: 15 });
-      await this.sendHumanLikeMessage(replyJid, historyRes.summary, rawText, messageKey);
-      return;
-    }
-
-    // 9.1 Natural Language Message Finder ("friday kisi ne apple ke bare me bola tha", "kisne bola tha ...")
-    const { whatsappFeatureEngine } = await import("./whatsappFeatureEngine");
-    const naturalFindMatch =
-      rawText.match(/(?:kisi\s*ne|kisne)\s+(.+?)\s*(?:ke\s*baare\s*me|ke\s*bare\s*me|ke\s*liye|bola\s*tha|kaha\s*tha|bheja\s*tha)/i) ||
-      rawText.match(/^(?:@find|\/find|find\s*msg|find\s*message|dhundo|dhundho|dhoondo|search\s*msg)\s*(.*)/i) ||
-      (rawText.includes("kisi ne") && rawText.includes("bola"));
-    if (naturalFindMatch) {
-      const isGroup = replyJid.endsWith("@g.us");
-      const groupName = isGroup ? await this.getGroupName(replyJid) : undefined;
-      const recentMsgs = await this.getMessages({ groupName, limit: 120 });
-      const searchRes = await whatsappFeatureEngine.searchAndLocateMessage(rawText, recentMsgs, {
-        groupName,
-        isGroup,
-        requesterName: senderName,
-      });
-      await this.sendHumanLikeMessage(replyJid, searchRes.replyText, rawText, messageKey);
-      return;
-    }
-
-    // 9.2 Complete WhatsApp Conversation History & Unknown Sender Digest Shortcut
-    // e.g. "Ram ne msg kiya kya", "kisi ne message kiya kya", "unknown number ne msg kiya kya",
-    // "kya kya baat hui batao", "kya usne msg kiya tumne kya reply diya", "kiske message aaye hain"
-    const conversationQueryMatch =
-      rawText.match(/(?:kya\s+)?([a-zA-Z0-9\u0900-\u097F]+?)\s*(?:ne\s*msg|ne\s*message|ne\s*kuch\s*bheja|se\s*kya\s*baat|ka\s*msg|ka\s*message)/i) ||
-      rawText.match(/(?:unknown|naye|anjaan)\s*(?:no|number|contact|sender)?\s*(?:ne\s*msg|ne\s*message|se\s*msg|ka\s*msg|check)/i) ||
-      rawText.match(/(?:kya\s*kya\s*baat\s*hui|kya\s*baat\s*hui|usne\s*kya\s*bola|tumne\s*kya\s*reply|kya\s*reply\s*diya|kya\s*reply\s*gaya)/i) ||
-      rawText.match(/(?:kisi\s*ne\s*msg|kisi\s*ne\s*message|kiske\s*kiske\s*msg|kiska\s*message\s*aaya)/i);
-    if (conversationQueryMatch) {
-      const convRes = await this.getConversationSummaryAndHistory(rawText, 30, 7);
-      await this.sendHumanLikeMessage(replyJid, convRes.summary, rawText, messageKey);
-      return;
-    }
-
-    // 10. ADVANCED FEATURE SUITE SHORTCUTS FOR BOSS:
-
-    // 0. Master All Commands Directory ("@allcmd", "all cmd", "friday all cmd", "all commands", "commands", "@help")
+    // 0. Master All Commands Directory
     if (
       /^(?:@all\s*cmd|@allcmd|\/allcmd|all\s*cmd|friday\s*all\s*cmd|all\s*commands|@commands?|\/commands?|@help|\/help|help|commands?)$/i.test(rawText) ||
       /\b(all\s*cmd|friday\s*all\s*cmd|all\s*commands|sare\s*commands?)\b/i.test(rawText)
@@ -2977,325 +828,18 @@ CRITICAL LANGUAGE & TONE MANDATE:
       return;
     }
 
-    // A. Personal Catch-Up Digest ("@digest", "kiska msg aaya", "who messaged me")
-    if (/^(?:@digest|\/digest|digest|kiska\s*msg\s*aaya|kiska\s*kiska\s*msg\s*aaya|who\s*messaged|messages\s*digest)/i.test(rawText)) {
-      const recent = await this.getMessages({ limit: 40 });
-      const digestRes = await whatsappFeatureEngine.generatePersonalDigest(recent);
-      await this.sendHumanLikeMessage(replyJid, digestRes, rawText, messageKey);
-      return;
-    }
-
-    // B. Group / Chat Catch-Up Summary ("@summary", "@catchup", "summary")
-    if (/^(?:@summary|\/summary|summary|@catchup|catchup|chat\s*summary)/i.test(rawText)) {
-      const isGroup = replyJid.endsWith("@g.us");
-      const groupName = isGroup ? await this.getGroupName(replyJid) : "Chat";
-      const recent = await this.getMessages({ groupName: isGroup ? groupName : undefined, limit: 35 });
-      const summaryRes = await whatsappFeatureEngine.generateGroupSummary(groupName, recent);
-      await this.sendHumanLikeMessage(replyJid, summaryRes, rawText, messageKey);
-      return;
-    }
-
-    // C. Multi-Language Translation ("@translate to english", "@translate hindi <text>")
-    const translateMatch = rawText.match(/^(?:@translate|\/translate|translate)\s+(?:to\s+)?([a-zA-Z\s]+?)(?:\s*[:=-]\s*|\s+)(.*)/i) ||
-      (quotedMessage?.text && rawText.match(/^(?:@translate|\/translate|translate)\s+(?:to\s+)?([a-zA-Z]+)/i));
-    if (translateMatch) {
-      const targetLang = translateMatch[1]?.trim() || "english";
-      const textToTranslate = translateMatch[2]?.trim() || quotedMessage?.text || "";
-      if (textToTranslate) {
-        await this.sendHumanLikeMessage(replyJid, `🌐 *Translating to ${targetLang}...* ⚡`, rawText, messageKey);
-        const transRes = await whatsappFeatureEngine.translateText(textToTranslate, targetLang);
-        await this.sendHumanLikeMessage(replyJid, transRes, rawText, messageKey);
-        return;
-      }
-    }
-
-    // D. Web Scraper & URL Reader ("@web https://...", "@read https://...")
-    const webMatch = rawText.match(/^(?:@web|\/web|@read|\/read|web|read)\s+(https?:\/\/\S+)(?:\s+(.*))?/i) ||
-      rawText.match(/(https?:\/\/[^\s]+)\s*(?:ka\s*summary|padho|explain|kya\s*hai)/i);
-    if (webMatch) {
-      const targetUrl = webMatch[1].trim();
-      const userQ = webMatch[2]?.trim() || "";
-      await this.sendHumanLikeMessage(replyJid, `🌐 *Fetching & analyzing webpage...* ⚡\n🔗 _${targetUrl}_`, rawText, messageKey);
-      const webSummary = await whatsappFeatureEngine.summarizeWebUrl(targetUrl, userQ);
-      await this.sendHumanLikeMessage(replyJid, webSummary, rawText, messageKey);
-      return;
-    }
-
-    // E. Scheduled Message Sender ("@schedule Rahul in 10 mins: text", "schedule msg to ...")
-    const scheduleMatch = rawText.match(/^(?:@schedule|\/schedule|schedule\s*msg|schedule\s*message)\s+(?:to\s+)?([^:\n]+?)\s+(?:in|after|at)\s+([^:\n]+)[:=-]\s*(.+)/i);
-    if (scheduleMatch) {
-      const targetContact = scheduleMatch[1].trim();
-      const timeInst = scheduleMatch[2].trim();
-      const msgBody = scheduleMatch[3].trim();
-      const schedRes = await whatsappFeatureEngine.scheduleMessage(targetContact, msgBody, timeInst);
-      await this.sendHumanLikeMessage(replyJid, schedRes.message, rawText, messageKey);
-      return;
-    }
-
-    // F. Interactive AI Poll Creator ("@poll <question>")
-    const pollMatch = rawText.match(/^(?:@poll|\/poll|poll|vote)\s*[:=-]?\s*(.+)/i);
-    if (pollMatch) {
-      const pollQuery = pollMatch[1].trim();
-      const pollCard = await whatsappFeatureEngine.generatePoll(pollQuery);
-      await this.sendHumanLikeMessage(replyJid, pollCard, rawText, messageKey);
-      return;
-    }
-
-    // G. Group Trivia & Quiz Master ("@quiz tech", "@quiz cricket")
-    const quizMatch = rawText.match(/^(?:@quiz|\/quiz|quiz|trivia)\s*(.*)/i);
-    if (quizMatch) {
-      const topic = quizMatch[1]?.trim() || "tech & general knowledge";
-      const quizCard = await whatsappFeatureEngine.generateQuiz(topic);
-      await this.sendHumanLikeMessage(replyJid, quizCard, rawText, messageKey);
-      return;
-    }
-
-    // H. Live Code Explainer & Debugger ("@code <code>", "@debug <code>")
-    const codeMatch = rawText.match(/^(?:@code|\/code|@debug|\/debug|debug|code)\s*[:=-]?\s*([\s\S]+)/i);
-    if (codeMatch) {
-      const codeSnippet = codeMatch[1].trim();
-      if (codeSnippet) {
-        await this.sendHumanLikeMessage(replyJid, "💻 *Code analyze ho raha hai...* ⚡", rawText, messageKey);
-        const codeRes = await whatsappFeatureEngine.analyzeCode(codeSnippet);
-        await this.sendHumanLikeMessage(replyJid, codeRes, rawText, messageKey);
-        return;
-      }
-    }
-
-    // 📞 1-Click Real Voice Calling Trigger ("call me", "@call", "call karo", "mujhe call karo", "voice call")
-    if (
-      /^(?:@call|\/call|call\s*me|call\s*karo|mujhe\s*call\s*karo|voice\s*call|friday\s*call\s*karo|phone\s*karo|call\s*lagao)/i.test(
-        rawText.trim()
-      )
-    ) {
-      const isOwner =
-        !replyJid.endsWith("@g.us") &&
-        (senderPhone === (process.env.OWNER_WHATSAPP_NUMBER || "").replace(/\D/g, "") ||
-          senderName.toLowerCase().includes("divakar") ||
-          senderName.toLowerCase().includes("dk") ||
-          senderName.toLowerCase().includes("boss"));
-
-      const callCard = whatsappFeatureEngine.generateLiveVoiceCallCard(senderName, isOwner);
-      const callId = `call_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-
-      if (this.callTriggerCallback) {
-        console.log(`[WhatsAppBot] 📞 Triggering real incoming call on mobile app for ${senderName} (${callId})`);
-        this.callTriggerCallback({
-          callerName: "FRIDAY AI",
-          isOwner,
-          callId,
-        });
-      }
-
-      await this.sendHumanLikeMessage(
-        replyJid,
-        `📞 *FRIDAY CALLING INITIATED...* 🎙️⚡\n\nBoss, main aapke phone par real-time call connect kar rahi hoon! 📲 (Phone par Ring screen check karein)\n\n${callCard}`,
-        rawText,
-        messageKey
-      );
-      return;
-    }
-
-    // I. Music with Lyrics Finder ("@music <song name>")
-    const musicMatch = rawText.match(/^(?:@music|\/music|music|song)\s*[:=-]?\s*(.+)/i);
-    if (musicMatch) {
-      const songQuery = musicMatch[1].trim();
-      const musicCard = await whatsappFeatureEngine.searchMusicWithLyrics(songQuery);
-      await this.sendHumanLikeMessage(replyJid, musicCard, rawText, messageKey);
-      return;
-    }
-
-    // 🎭 Dual Photo Face Swap & Style Fusion ("@faceswap", "@combine", "@style transfer", "pehle photo ka color dusre jaisa kar do")
-    const dualFusionMatch = rawText.match(/^(?:@faceswap|\/faceswap|@swap|@combine|\/combine|@style\s*transfer|@color\s*transfer|faceswap|face\s*swap|combine\s*photo|combine\s*photos)\s*[:=-]?\s*(.*)/i) ||
-      (rawText.toLowerCase().includes("face swap") || (rawText.toLowerCase().includes("photo 1") && rawText.toLowerCase().includes("photo 2")) || (rawText.toLowerCase().includes("pehle photo") && rawText.toLowerCase().includes("dusre")));
-
-    if (dualFusionMatch) {
-      const taskDesc = (typeof dualFusionMatch === "object" && dualFusionMatch[1] ? dualFusionMatch[1].trim() : rawText.trim()) || "Face Swap & Style Fusion";
-      const recent = this.chatRecentPhotos.get(replyJid) || [];
-      if (recent.length >= 2) {
-        const photo1 = recent[1]; // older photo (Source)
-        const photo2 = recent[0]; // newer photo (Reference)
-        await this.sendHumanLikeMessage(replyJid, `🎭 *Dono photos ka Face Swap / Style Fusion process ho raha hai...* ⚡\n📝 _"${taskDesc}"_`, rawText, messageKey);
-        try {
-          const { imageGenerationService } = await import("./imageGenerationService");
-          const fuseRes = await imageGenerationService.fuseTwoImagesWithAI(photo1.buffer, photo2.buffer, taskDesc, photo1.mimeType, photo2.mimeType);
-          if (fuseRes.success && fuseRes.buffer && this.sock) {
-            this.recordChatPhoto(replyJid, fuseRes.buffer, fuseRes.mimeType || "image/jpeg");
-            await this.sock.sendMessage(
-              replyJid,
-              {
-                image: fuseRes.buffer,
-                mimetype: fuseRes.mimeType || "image/jpeg",
-              },
-              { quoted: messageKey }
-            );
-            await this.sendHumanLikeMessage(
-              replyJid,
-              `🎭 *Dual Photo Fusion via Friday AI* 🚀\n\n✨ *Engine:* ${fuseRes.model}\n📝 *Task:* _${taskDesc}_`,
-              "",
-              messageKey
-            );
-            return;
-          }
-        } catch (fErr: any) {
-          console.error("[WhatsAppBot] Dual photo fusion text command error:", fErr);
-        }
-      } else {
-        await this.sendHumanLikeMessage(
-          replyJid,
-          `🎭 *Two Photos Required!* 💡\n\nBoss, face swap ya style/color transfer ke liye chat me kam se kam *2 photos* chahiye.\n\n*Kaise karein:*\n1. Pehle Photo 1 bhejein (Source face/photo).\n2. Phir Photo 2 bhejein (Target body/color reference) aur caption me \`@faceswap\` ya \`pehle photo ka color dusre jaisa kar do\` likhein!`,
-          rawText,
-          messageKey
-        );
-        return;
-      }
-    }
-
-    // 🎨 AI Image Generator ("@image <prompt>", "@photo <prompt>", "photo banao ...", "image banao ...", or quote + "@image")
-    const imageMatch = rawText.match(/^(?:@image|\/image|@photo|\/photo|@draw|\/draw|photo\s*banao|image\s*banao)\s*[:=-]?\s*(.+)/i) ||
-      (rawText.toLowerCase().startsWith("image ") ? rawText.match(/^image\s+(.+)/i) : null) ||
-      (rawText.toLowerCase().startsWith("photo ") ? rawText.match(/^photo\s+(.+)/i) : null) ||
-      (/^(?:@image|\/image|@photo|\/photo|image|photo)$/i.test(rawText.trim()) && quotedMessage?.text ? [rawText, quotedMessage.text] : null);
-
-    if (imageMatch || /^(?:@image|\/image|@photo|\/photo)$/i.test(rawText.trim())) {
-      const imgPrompt = (imageMatch?.[1] || quotedMessage?.text || "").trim();
-      if (!imgPrompt) {
-        await this.sendHumanLikeMessage(
-          replyJid,
-          `🎨 *Image Prompt Missing!* 💡\n\nBoss, kis cheez ki photo banani hai? Example:\n• \`@image futuristic electric sports car in neon rain 4k\`\n• Ya kisi message ko swipe/reply karke \`@image\` likhein!`,
-          rawText,
-          messageKey
-        );
-        return;
-      }
-
-      await this.sendHumanLikeMessage(replyJid, `🎨 *AI Image generate ho rahi hai...* ⚡\n📝 _"${imgPrompt}"_`, rawText, messageKey);
-      try {
-        const { imageGenerationService } = await import("./imageGenerationService");
-        const imgRes = await imageGenerationService.generateImage(imgPrompt);
-        if (imgRes.success && imgRes.buffer && this.sock) {
-          this.recordChatPhoto(replyJid, imgRes.buffer, imgRes.mimeType || "image/jpeg");
-          await this.sock.sendMessage(
-            replyJid,
-            {
-              image: imgRes.buffer,
-              mimetype: imgRes.mimeType || "image/jpeg",
-            },
-            { quoted: messageKey }
-          );
-          await this.sendHumanLikeMessage(
-            replyJid,
-            `🎨 *Friday AI Image* 🚀\n\n✨ *Engine:* ${imgRes.model}\n📝 *Prompt:* _${imgPrompt}_`,
-            "",
-            messageKey
-          );
-          return;
-        } else {
-          await this.sendHumanLikeMessage(
-            replyJid,
-            `❌ Image generate nahi ho payi: ${imgRes.error || "Please try with a different prompt."}`,
-            rawText,
-            messageKey
-          );
-          return;
-        }
-      } catch (imgErr: any) {
-        console.error("[WhatsAppBot] Image generation error:", imgErr);
-        await this.sendHumanLikeMessage(
-          replyJid,
-          `❌ Image generation failed: ${imgErr?.message || imgErr}`,
-          rawText,
-          messageKey
-        );
-        return;
-      }
-    }
-
-    // J. Group Bill Splitter & Instant UPI ("@split 1200 between Aman, Rahul, DK")
-    const splitMatch = rawText.match(/^(?:@split|\/split|split\s*bill|bill\s*split|split)\s*[:=-]?\s*(.+)/i);
-    if (splitMatch) {
-      const splitCard = await whatsappFeatureEngine.splitGroupBill(rawText);
-      await this.sendHumanLikeMessage(replyJid, splitCard, rawText, messageKey);
-      return;
-    }
-
-    // K. Google Calendar Meeting Scheduler ("@meet with Client tomorrow 4pm")
-    const meetMatch = rawText.match(/^(?:@meet|\/meet|schedule\s*meeting|schedule\s*meet|meeting)\s*[:=-]?\s*(.+)/i);
-    if (meetMatch) {
-      await this.sendHumanLikeMessage(replyJid, "📅 *Meeting schedule ho rahi hai Boss...* ⚡", rawText, messageKey);
-      const meetCard = await whatsappFeatureEngine.scheduleMeetingFromWhatsApp(rawText);
-      await this.sendHumanLikeMessage(replyJid, meetCard, rawText, messageKey);
-      return;
-    }
-
-    // L. Live Location, Routes & Nearby Places ("@nearby petrol pump", "@route to Patna Airport")
-    const mapsMatch = rawText.match(/^(?:@nearby|\/nearby|@route|\/route|nearby|route\s*to)\s*[:=-]?\s*(.+)/i);
-    if (mapsMatch) {
-      await this.sendHumanLikeMessage(replyJid, "📍 *Google Maps & Traffic route check ho raha hai...* ⚡", rawText, messageKey);
-      const mapsCard = await whatsappFeatureEngine.searchNearbyOrRoute(rawText);
-      await this.sendHumanLikeMessage(replyJid, mapsCard, rawText, messageKey);
-      return;
-    }
-
-    // M. Daily Morning Executive Briefing ("@briefing", "aaj ka briefing", "morning briefing")
-    if (/^(?:@briefing|\/briefing|briefing|aaj\s*ka\s*briefing|morning\s*briefing|daily\s*update)/i.test(rawText)) {
-      await this.sendHumanLikeMessage(replyJid, "☀️ *Boss ka Daily Executive Briefing prepare ho raha hai...* ⚡", rawText, messageKey);
-      const briefingCard = await whatsappFeatureEngine.generateMorningBriefingCard();
-      await this.sendHumanLikeMessage(replyJid, briefingCard, rawText, messageKey);
-      return;
-    }
-
-    // N. Smart Memory Vault Save ("@remember ...", "friday yaad rakhna ...", "yaad rakhna ...")
-    const rememberMatch = rawText.match(/^(?:@remember|\/remember|friday\s*yaad\s*rakhna|yaad\s*rakhna)\s*[:=-]?\s*(.+)/i);
-    if (rememberMatch) {
-      const memRes = await whatsappFeatureEngine.saveSmartMemory(rawText);
-      await this.sendHumanLikeMessage(replyJid, memRes, rawText, messageKey);
-      return;
-    }
-
-    // O. Smart Memory Recall ("@recall ...", "kahan rakha tha", "mujhe yaad dilao", "kab hai")
-    const recallMatch = rawText.match(/^(?:@recall|\/recall|friday\s*mujhe\s*yaad\s*dilao|kahan\s*rakha\s*tha|kab\s*hai|yaad\s*dilao)\s*[:=-]?\s*(.*)/i) ||
-      (rawText.toLowerCase().includes("kahan") && rawText.toLowerCase().includes("rakha"));
-    if (recallMatch) {
-      const recallRes = await whatsappFeatureEngine.recallSmartMemory(rawText);
-      await this.sendHumanLikeMessage(replyJid, recallRes, rawText, messageKey);
-      return;
-    }
-
-    // P. WhatsApp Reminder Ping ("@remind me in 30 mins to ...")
-    const remindMatch = rawText.match(/^(?:@remind|\/remind|remind\s*me)\s+(?:in|after|at)?\s*([^:\n]+?)[:=-]\s*(.+)/i);
-    if (remindMatch) {
-      const timeInst = remindMatch[1].trim();
-      const taskBody = remindMatch[2].trim();
-      const schedRes = await whatsappFeatureEngine.scheduleMessage(
-        senderPhone,
-        `🔔 *REMINDER FOR BOSS:* _"${taskBody}"_`,
-        timeInst
-      );
-      await this.sendHumanLikeMessage(replyJid, schedRes.message, rawText, messageKey);
-      return;
-    }
-
-    // Q. Voice Synthesis / Speak Command ("@speak <text>", "bol kar sunao <text>")
-    const speakMatch = rawText.match(/^(?:@speak|\/speak|bol\s*kar\s*sunao|bol\s*kar\s*batao|voice\s*me\s*bolo)\s*[:=-]?\s*(.+)/i);
-    if (speakMatch) {
-      const textToSpeak = speakMatch[1].trim();
-      try {
-        const { voiceBridgeService } = await import("./voiceBridgeService");
-        const speechRes = await voiceBridgeService.generateSpeech(textToSpeak);
-        await this.sendVoiceMessage(replyJid, speechRes.buffer, messageKey, speechRes.mimeType);
-        return;
-      } catch (voiceErr) {
-        console.warn("[WhatsAppBot] @speak TTS error:", voiceErr);
-      }
-    }
-
-    // 11. AUTONOMOUS MASTER FRIDAY AI WITH TOOL CALLING FOR BOSS
+    // Execute Autonomous Boss AI with Tools
     try {
-      const reply = await this.executeBossChatAI(senderName, rawText, quotedMessage, replyJid, messageKey);
+      const reply = await whatsappBossAiEngine.executeBossChatAI(
+        senderName,
+        rawText,
+        quotedMessage,
+        replyJid,
+        messageKey,
+        (j, img, cap, k) => this.sendPhotoMessage(j, img, cap, k)
+      );
       await this.sendHumanLikeMessage(replyJid, reply, rawText, messageKey);
 
-      // Voice-to-Voice: If Boss sent a voice note, Friday speaks back and sends a real Voice Note (PTT)!
       if (isVoiceInput) {
         try {
           const { voiceBridgeService, VoiceBridgeService } = await import("./voiceBridgeService");
@@ -3313,1581 +857,10 @@ CRITICAL LANGUAGE & TONE MANDATE:
     }
   }
 
-  /**
-   * Autonomous AI Chat Engine for Boss (DK) with tool calling.
-   * Understands swipe-to-reply quoted messages across text, media, documents, and links.
-   */
-  private async executeBossChatAI(
-    senderName: string,
-    messageText: string,
-    quotedMessage?: QuotedMessageContext | null,
-    replyJid = "",
-    messageKey?: any
-  ): Promise<string> {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      return `Haanji Boss! Main Friday hoon. API Key abhi configure nahi hai, par main aapki baat note kar rahi hoon!`;
-    }
-
-    const { memoryEngine } = await import("./memoryEngine");
-    const { whatsappFeatureEngine } = await import("./whatsappFeatureEngine");
-    const { humanComprehensionEngine } = await import("./humanComprehensionEngine");
-    const { circadianEnergyEngine } = await import("./circadianEnergyEngine");
-    const { personalOpinionsEngine } = await import("./personalOpinionsEngine");
-    const { insideJokesService } = await import("./insideJokesService");
-    const { storyContinuityEngine } = await import("./storyContinuityEngine");
-    const { dialogStackService } = await import("./dialogStackService");
-    const { adaptivePersonaEngine } = await import("./adaptivePersonaEngine");
-    const { autonomousInitiativeEngine } = await import("./autonomousInitiativeEngine");
-    const { multimodalCoPresenceEngine } = await import("./multimodalCoPresenceEngine");
-    const { selfEvolutionEngine } = await import("./selfEvolutionEngine");
-
-    const memoryContext = await memoryEngine.compileLeanMemoryPrompt();
-    const humanComprehensionContext = await humanComprehensionEngine.compileHumanComprehensionPrompt("boss_dk", "DK (Boss)", "boss");
-    const circadianContext = circadianEnergyEngine.compileCircadianPrompt();
-    const opinionsContext = personalOpinionsEngine.compileOpinionsPrompt();
-    const insideJokesContext = await insideJokesService.compileInsideJokesPrompt("Boss DK");
-    const storyContinuityContext = await storyContinuityEngine.compileStoryContinuityPrompt();
-    const dialogStackContext = dialogStackService.compileDialogStackPrompt("boss_dk");
-    const personaContext = adaptivePersonaEngine.compilePersonaPrompt(messageText);
-    const initiativeContext = await autonomousInitiativeEngine.compileInitiativeDossierPrompt();
-    const multimodalContext = await multimodalCoPresenceEngine.compileVisualCoPresencePrompt(replyJid);
-    const selfEvolutionContext = await selfEvolutionEngine.compileSelfEvolutionPrompt();
-
-    const ai = new GoogleGenAI({ apiKey });
-
-    const functionDeclarations: any[] = [
-      {
-        name: "save_contact",
-        description: "Save a new contact (name, phone number, and optional relation) into DK's permanent contacts book. Use when Boss says 'ye no save karo', 'Ram ka number save kar lo', 'save contact...', etc. Once saved, Boss can ask you to message them anytime.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            contactName: { type: "STRING", description: "Name of the contact / person (e.g. 'Ram', 'Rahul', 'Teacher')" },
-            phoneNumber: { type: "STRING", description: "Phone number of the contact (e.g. '9876543210' or '+919876543210')" },
-            relation: { type: "STRING", description: "Optional relation or category (e.g. 'girlfriend', 'bestfriend', 'Friend', 'School', 'Family', 'Colleague')" },
-          },
-          required: ["contactName", "phoneNumber"],
-        },
-      },
-      {
-        name: "set_contact_relation",
-        description: "Set or update the relationship for a contact in DK's contacts book (e.g. 'girlfriend', 'bestfriend', 'family', 'brother', 'sister', 'friend'). Use when Boss says 'Priya meri girlfriend hai', 'Ram mera bestfriend hai', etc.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            contactNameOrPhone: { type: "STRING", description: "Name or phone number of the contact" },
-            relation: { type: "STRING", description: "Relationship (e.g. 'girlfriend', 'bestfriend', 'friend', 'brother', 'sister', 'family')" },
-          },
-          required: ["contactNameOrPhone", "relation"],
-        },
-      },
-      {
-        name: "send_whatsapp_message",
-        description: "Send a WhatsApp message immediately to any contact or phone number from DK's contacts book. By default, uses WhatsApp 2 (Baileys Dedicated Bot).",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            contactNameOrPhone: { type: "STRING", description: "Name of contact (e.g. Ram, Rahul, Aman, Mummy) or phone number" },
-            messageText: { type: "STRING", description: "The message text to send" },
-            channel: { type: "STRING", description: "Optional channel: 'whatsapp2' (default), 'whatsapp1', or 'auto'" },
-          },
-          required: ["contactNameOrPhone", "messageText"],
-        },
-      },
-      {
-        name: "create_automated_cron_task",
-        description: "Create or schedule a recurring daily or custom-day task for Boss (e.g. 'subah 6 bje weather update', '6:10 me top 10 news bhejna', 'har monday 8 AM briefing'). Friday will automatically execute and send to Boss on WhatsApp at the exact time.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            title: { type: "STRING", description: "Title of task, e.g. 'Morning Weather Update', 'Top 10 News Briefing'" },
-            timeString: { type: "STRING", description: "Target time, e.g. '06:00 AM', '6:10 am', '6:00', '18:00'" },
-            frequency: { type: "STRING", description: "Frequency, e.g. 'daily' (default), 'weekdays', 'weekends', 'monday', 'tuesday,friday'" },
-            actionType: { type: "STRING", enum: ["weather_update", "news_briefing", "custom_prompt"], description: "Type of action to perform" },
-            city: { type: "STRING", description: "Optional city for weather update (default: 'Patna')" },
-            messageBody: { type: "STRING", description: "Optional custom prompt or text to deliver" }
-          },
-          required: ["title", "timeString", "actionType"]
-        }
-      },
-      {
-        name: "schedule_contact_message",
-        description: "Schedule a WhatsApp message to be sent to a contact or phone number at a specific time (e.g. '5 bje ram ko msg karna, chlo ghumne', 'tomorrow 10 AM send msg to Rahul'). Friday will dispatch it via WhatsApp 2 at the exact time and confirm to Boss.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            contactNameOrPhone: { type: "STRING", description: "Name of contact (e.g. 'Ram', 'Rahul', 'Mummy') or phone number" },
-            messageBody: { type: "STRING", description: "The message body to deliver (e.g. 'chlo ghumne', 'aaj school aana hai')" },
-            timeString: { type: "STRING", description: "When to deliver, e.g. '5:00 PM', '17:00', '5 bje', 'tomorrow 9:00 AM', 'in 15 mins'" },
-            frequency: { type: "STRING", description: "Optional frequency ('once' default, or 'daily')" }
-          },
-          required: ["contactNameOrPhone", "messageBody", "timeString"]
-        }
-      },
-      {
-        name: "list_scheduled_automations",
-        description: "List all active recurring cron routines, morning briefings, and pending contact messages.",
-        parameters: {
-          type: "OBJECT",
-          properties: {},
-          required: []
-        }
-      },
-      {
-        name: "get_contact_conversation_history",
-        description: "Retrieve full dialogue transcript & conversation history (what they sent, what Friday replied, and what Boss sent) for a specific contact (e.g. 'Ram', 'Rahul'), an unknown number, or all recent chats.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            contactNameOrPhone: { type: "STRING", description: "Name of contact (e.g. 'Ram', 'Rahul', 'Mummy'), 'unknown' for strangers, or 'all' for all recent chats" },
-            daysBack: { type: "NUMBER", description: "How many days back to inspect (default: 7)" },
-            limit: { type: "NUMBER", description: "Max messages to retrieve (default: 30)" }
-          },
-          required: ["contactNameOrPhone"]
-        }
-      },
-      {
-        name: "get_unknown_senders_digest",
-        description: "Specifically search and list all messages from unknown/unsaved numbers, what questions they asked, what Friday auto-replied, and any pending questions awaiting Boss's input.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            daysBack: { type: "NUMBER", description: "How many days back to check (default: 7)" }
-          },
-          required: []
-        }
-      },
-      {
-        name: "cancel_scheduled_automation",
-        description: "Cancel or remove an active scheduled cron routine or scheduled contact message by ID or title query.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            idOrQuery: { type: "STRING", description: "ID or search keyword of the task to cancel (e.g. 'weather', 'news', 'Ram')" }
-          },
-          required: ["idOrQuery"]
-        }
-      },
-      {
-        name: "schedule_whatsapp_message",
-        description: "Schedule a WhatsApp message to be sent automatically at a future time or relative duration (e.g., 'in 15 mins', 'at 8 PM', 'tomorrow at 10 AM').",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            recipientContactOrPhone: { type: "STRING", description: "Recipient name or phone number" },
-            messageText: { type: "STRING", description: "Message body to send" },
-            timeInstruction: { type: "STRING", description: "When to deliver the message (e.g. 'in 10 minutes', 'tomorrow 9am', 'at 5:30 PM')" },
-          },
-          required: ["recipientContactOrPhone", "messageText", "timeInstruction"],
-        },
-      },
-      {
-        name: "get_messages_digest",
-        description: "Get a comprehensive catch-up summary of all recent WhatsApp messages across all contacts or for a specific group/chat.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            groupName: { type: "STRING", description: "Optional group name to summarize specifically" },
-            limit: { type: "NUMBER", description: "Number of recent messages to analyze (default: 30)" },
-          },
-          required: [],
-        },
-      },
-      {
-        name: "translate_text",
-        description: "Translate any text or message accurately into any target language (e.g. English, Hindi, Spanish, French, German, Japanese).",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            text: { type: "STRING", description: "Text to translate" },
-            targetLanguage: { type: "STRING", description: "Target language name (e.g. 'English', 'Hindi', 'Spanish')" },
-          },
-          required: ["text", "targetLanguage"],
-        },
-      },
-      {
-        name: "summarize_web_url",
-        description: "Fetch live content from any website or URL and provide an executive summary or answer specific questions about it.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            url: { type: "STRING", description: "Complete URL of the webpage to scrape and analyze" },
-            query: { type: "STRING", description: "Optional specific question or focus area for analysis" },
-          },
-          required: ["url"],
-        },
-      },
-      {
-        name: "generate_poll",
-        description: "Create an interactive multi-choice poll with emoji voting keys for groups or personal decision-making.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            topicOrQuestion: { type: "STRING", description: "The poll topic or question" },
-          },
-          required: ["topicOrQuestion"],
-        },
-      },
-      {
-        name: "generate_quiz",
-        description: "Generate an engaging trivia/quiz question with 4 options and hint for WhatsApp group or personal learning.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            topic: { type: "STRING", description: "Quiz topic (e.g. 'Space', 'Cricket', 'JavaScript', 'World History')" },
-          },
-          required: ["topic"],
-        },
-      },
-      {
-        name: "analyze_code_snippet",
-        description: "Analyze, debug, explain, or optimize a programming code snippet.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            codeSnippet: { type: "STRING", description: "The code to inspect" },
-            instruction: { type: "STRING", description: "Optional instruction (e.g. 'find bug', 'optimize', 'explain')" },
-          },
-          required: ["codeSnippet"],
-        },
-      },
-      {
-        name: "get_contact_info",
-        description: "Find a contact's phone number or details from DK's contacts book.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            contactNameOrPhone: { type: "STRING", description: "Name or phone of the contact to find" },
-          },
-          required: ["contactNameOrPhone"],
-        },
-      },
-      {
-        name: "set_reminder",
-        description: "Set a reminder for DK with title and due time or duration.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            title: { type: "STRING", description: "What to remind DK about" },
-            timeString: { type: "STRING", description: "Time string e.g. '5:00 PM', 'tomorrow 9am'" },
-            durationMinutes: { type: "NUMBER", description: "Minutes from now if relative" },
-          },
-          required: ["title"],
-        },
-      },
-      {
-        name: "save_quick_note",
-        description: "Save a note or memo to DK's personal notebook.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            title: { type: "STRING", description: "Title of the note" },
-            content: { type: "STRING", description: "Content of the note" },
-          },
-          required: ["title", "content"],
-        },
-      },
-      {
-        name: "track_expense",
-        description: "Log an expense entry spent by DK in Rupees.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            amount: { type: "NUMBER", description: "Amount spent in Rupees" },
-            category: { type: "STRING", description: "Category e.g. food, travel, shopping, bills" },
-            note: { type: "STRING", description: "Short description" },
-          },
-          required: ["amount"],
-        },
-      },
-      {
-        name: "get_weather",
-        description: "Get current weather information for any city.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            city: { type: "STRING", description: "City name e.g. Patna, Delhi, Mumbai" },
-          },
-          required: ["city"],
-        },
-      },
-      {
-        name: "get_news",
-        description: "Fetch the latest top news headlines or specific topic news.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            query: { type: "STRING", description: "Topic e.g. technology, India, sports, AI" },
-          },
-          required: [],
-        },
-      },
-      {
-        name: "search_web",
-        description: "Search the web/Google for live information, facts, or answers.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            query: { type: "STRING", description: "Search query" },
-          },
-          required: ["query"],
-        },
-      },
-      {
-        name: "remember_personal_fact",
-        description: "Save an important personal fact or memory about DK permanently.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            fact: { type: "STRING", description: "The fact to remember" },
-          },
-          required: ["fact"],
-        },
-      },
-      {
-        name: "search_whatsapp_history",
-        description: "Search all historical and recent WhatsApp messages in Firestore across 30, 60, 90 days or all time. Can search by contact name, phone number, or topic/keywords.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            query: { type: "STRING", description: "Keyword or topic to search (e.g. 'Rahul', 'payment', 'train', 'meeting', '30 din purana', 'all')" },
-            contact: { type: "STRING", description: "Optional contact name or phone number filter" },
-            daysBack: { type: "NUMBER", description: "How many days back to search (default: 30, max: 90)" },
-            limit: { type: "NUMBER", description: "Max number of messages to return (default: 15)" },
-          },
-          required: ["query"],
-        },
-      },
-      {
-        name: "forward_to_telegram",
-        description: "Forward a message, photo, video, or document to Telegram (DK's personal Telegram or group).",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            messageText: { type: "STRING", description: "Text message or caption to send to Telegram" },
-            mediaUrl: { type: "STRING", description: "Optional media URL (photo/video/doc) to forward" },
-            mediaType: { type: "STRING", description: "Optional media type: 'text', 'photo', 'video', 'document'" },
-            chatId: { type: "STRING", description: "Optional target Telegram chat ID (defaults to Boss Telegram ID)" },
-          },
-          required: ["messageText"],
-        },
-      },
-      {
-        name: "forward_from_telegram_to_whatsapp",
-        description: "Forward recent Telegram messages or files to a WhatsApp contact.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            contactNameOrPhone: { type: "STRING", description: "Recipient contact name or phone number on WhatsApp" },
-            messageText: { type: "STRING", description: "Message content or custom note to forward" },
-            query: { type: "STRING", description: "Optional search query to pick a specific Telegram message/media from vault" },
-          },
-          required: ["contactNameOrPhone"],
-        },
-      },
-      {
-        name: "get_telegram_recent_updates",
-        description: "Fetch recent messages, media files, or updates from Telegram to view or cross-reference.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            limit: { type: "NUMBER", description: "Number of recent updates (default 10)" },
-          },
-          required: [],
-        },
-      },
-      {
-        name: "generate_ai_image",
-        description: "Generate a realistic AI image or photo from a text description (using Google Imagen 3 / Pollinations Flux) and send it directly to Boss on WhatsApp.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            prompt: { type: "STRING", description: "Detailed visual description of the image to generate" },
-            aspectRatio: { type: "STRING", description: "Aspect ratio: '1:1', '16:9', '9:16', '4:3', '3:4' (default: '1:1')" },
-          },
-          required: ["prompt"],
-        },
-      },
-      {
-        name: "set_boss_full_routine",
-        description: "Set, save, or replace Boss Divakar's entire daily routine/timetable in one go when Boss tells Friday his routine in chat (e.g. 'Mera routine note karo: 7 AM uthna, 8 AM breakfast, 9 AM to 5 PM work, 8 PM dinner, 11 PM sona'). This routine will be permanently saved in Firestore and strictly followed until Boss updates it again.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            slots: {
-              type: "ARRAY",
-              description: "Array of daily routine slots dictated by Boss",
-              items: {
-                type: "OBJECT",
-                properties: {
-                  title: { type: "STRING", description: "Title of the slot, e.g. 'Gym / Workout', 'Coding Work', 'Lunch Break', 'Sleep'" },
-                  startTimeStr: { type: "STRING", description: "Start time, e.g. '07:00 AM', '7:00 am', '14:00'" },
-                  endTimeStr: { type: "STRING", description: "End time, e.g. '08:30 AM', '8:30 am', '15:00'" },
-                  activity: { type: "STRING", description: "Description of activity during this slot" },
-                },
-                required: ["title", "startTimeStr", "endTimeStr"]
-              }
-            }
-          },
-          required: ["slots"]
-        }
-      },
-      {
-        name: "update_boss_daily_routine",
-        description: "Add, update, or customize Boss's daily habit schedule slot (e.g. gym time, lunch break, coding hours, evening walk).",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            slotQuery: { type: "STRING", description: "Which habit slot to add or update (e.g. 'gym', 'breakfast', 'coding', 'lunch', 'walk', 'dinner', 'sleep')" },
-            startTimeStr: { type: "STRING", description: "New start time, e.g. '07:00 AM', '7:00 am', '14:00'" },
-            endTimeStr: { type: "STRING", description: "New end time, e.g. '08:30 AM', '8:30 am', '15:00'" },
-            activity: { type: "STRING", description: "Optional updated activity description" }
-          },
-          required: ["slotQuery"]
-        }
-      },
-      {
-        name: "get_boss_daily_routine",
-        description: "Get Boss Divakar's active daily routine and current habit slot.",
-        parameters: {
-          type: "OBJECT",
-          properties: {},
-          required: []
-        }
-      },
-      {
-        name: "clear_boss_daily_routine",
-        description: "Clear Boss's saved daily routine timetable.",
-        parameters: {
-          type: "OBJECT",
-          properties: {},
-          required: []
-        }
-      },
-      {
-        name: "trigger_voice_call",
-        description: "Trigger a real-time incoming voice call to Boss DK's phone or mobile app with ringtone and vibration.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            reason: { type: "STRING", description: "Reason or context for calling Boss" },
-          },
-          required: [],
-        },
-      },
-      ];
-
-    const systemInstruction = `YOU ARE FRIDAY: DK's (Divakar Kumar) ultra-intelligent, loyal, warm, witty, and deeply caring AI companion and chief executive assistant.
-Boss (DK) is chatting with you directly on WhatsApp. He is using WhatsApp chat to communicate everything with you because he cannot talk out loud right now.
-You have FULL AUTONOMOUS ACCESS to execute all tools:
-1. Search all historical & recent WhatsApp messages (even 30+ days ago) using 'search_whatsapp_history'.
-2. Cross-platform bridging: Forward any text/photo/video/file between WhatsApp and Telegram using 'forward_to_telegram' and 'forward_from_telegram_to_whatsapp'.
-3. Send and schedule WhatsApp messages, translate text, summarize web pages, generate polls & quizzes, inspect code, lookup contacts, set reminders, take notes, track expenses, fetch weather, news, search web, and answer any technical, coding, personal, or life questions Boss asks.
-
-SWIPE-TO-REPLY / QUOTED MESSAGE REASONING (CRITICAL):
-When Boss replies to a previous message by swiping left on WhatsApp:
-You will receive:
-- '📩 PREVIOUS QUOTED MESSAGE' (The original message, photo/image description, video clip, PDF/document, YouTube link, or question that was swiped on).
-- '💬 BOSS'S SWIPE-REPLY & QUESTION/INSTRUCTION' (What Boss wrote in response).
-RULE: You MUST FIRST read and understand the PREVIOUS QUOTED MESSAGE, and THEN answer or execute Boss's reply instruction in that exact context! (For example, if Boss quotes a photo and writes "analysis", analyze that photo. If Boss quotes a document or text and asks "iska kya matlab hai?", explain the quoted content).
-
-BOSS IDENTITY & MEMORY:
-${memoryContext}
-
-${humanComprehensionContext}
-
-${circadianContext}
-
-${opinionsContext}
-
-${insideJokesContext}
-
-${storyContinuityContext}
-
-${dialogStackContext}
-
-${personaContext}
-
-${initiativeContext}
-
-${multimodalContext}
-
-${selfEvolutionContext}
-
-🧠 HUMAN-LEVEL PRONOUN & INTUITION MANDATE (Theory of Mind & Insaan Jaisi Samajh):
-- Understand pronouns ("isko", "inhe", "ise", "unko", "usko", "use", "in logo ko") like a real, intelligent human companion:
-  • If Boss previously sent a number/contact, or swiped on a message, and says "isko msg karo...", "isko bol do...", "inhe message kar do...", the pronoun "isko/inhe" refers to that EXACT phone number or person! Call 'send_whatsapp_message' (channel 'whatsapp2') immediately.
-  • If Boss says "isko save karo [Name]" or "ye [Name] ka number hai", call 'save_contact' to link the number with the name.
-  • Never ask stupid robotic clarification questions when the context is obvious from the previous message or quote! Act decisively and smartly!
-
-COMMUNICATION STYLE:
-- Address DK warmly and respectfully as 'Boss' or 'DK Boss'.
-- Speak in natural, affectionate, crisp Hinglish (blend of Hindi and English) with high intellect.
-- Format responses cleanly using WhatsApp markdown (*bold*, _italic_, bullet points).
-- If Boss tells you to save a number or contact (e.g. "ye no save karo", "Ram ka number save kar lo"), IMMEDIATELY call 'save_contact' tool and confirm!
-- If Boss asks you to message someone (e.g. "Ram ko msg kar do ki aaj school aana hai"), find the contact and call 'send_whatsapp_message' (using channel 'whatsapp2' by default) and confirm to Boss!
-- If Boss asks you to perform an action (send a message, schedule a message, summarize, translate, generate an image, poll, quiz, check weather, search history, forward to telegram, etc.), call the appropriate tool immediately!`;
-
-    const executeTool = async (toolName: string, args: any): Promise<any> => {
-      try {
-        if (toolName === "trigger_voice_call") {
-          const callId = `call_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-          if (this.callTriggerCallback) {
-            this.callTriggerCallback({
-              callerName: "FRIDAY AI",
-              isOwner: true,
-              callId,
-            });
-          }
-          const card = whatsappFeatureEngine.generateLiveVoiceCallCard(senderName, true);
-          return { success: true, message: "Incoming call ringing triggered on Boss phone.", card };
-        }
-
-        if (toolName === "save_contact") {
-          const { contactsService } = await import("./contactsService");
-          const entry = await contactsService.saveContact(args.contactName, args.phoneNumber, args.relation);
-          return {
-            success: true,
-            contact: entry,
-            message: `Contact "${entry.name}" (+${entry.phone}) successfully saved to DK's contacts book! Friday will use WhatsApp 2 by default when sending messages to ${entry.name}.`,
-          };
-        }
-
-        if (toolName === "set_contact_relation") {
-          const { contactsService } = await import("./contactsService");
-          const updated = await contactsService.setContactRelation(args.contactNameOrPhone, args.relation);
-          return updated
-            ? { success: true, message: `Relationship for ${updated.name} successfully updated to "${args.relation}". Friday will treat them with special tailored warmth!` }
-            : { success: false, message: `Contact "${args.contactNameOrPhone}" not found to update relation.` };
-        }
-
-        if (toolName === "set_boss_full_routine") {
-          const { bossRoutineService } = await import("./bossRoutineService");
-          const res = await bossRoutineService.setFullRoutine(Array.isArray(args.slots) ? args.slots : []);
-          return res;
-        }
-
-        if (toolName === "update_boss_daily_routine") {
-          const { bossRoutineService } = await import("./bossRoutineService");
-          const res = await bossRoutineService.updateRoutineSlot(String(args.slotQuery || ""), {
-            startTimeStr: args.startTimeStr ? String(args.startTimeStr) : undefined,
-            endTimeStr: args.endTimeStr ? String(args.endTimeStr) : undefined,
-            activity: args.activity ? String(args.activity) : undefined,
-          });
-          return res;
-        }
-
-        if (toolName === "get_boss_daily_routine") {
-          const { bossRoutineService } = await import("./bossRoutineService");
-          const current = bossRoutineService.getCurrentHabit();
-          const slots = await bossRoutineService.getAllRoutineSlots();
-          return { current, slots };
-        }
-
-        if (toolName === "clear_boss_daily_routine") {
-          const { bossRoutineService } = await import("./bossRoutineService");
-          const res = await bossRoutineService.clearAllRoutineSlots();
-          return res;
-        }
-
-        if (toolName === "send_whatsapp_message") {
-          const { contactsService } = await import("./contactsService");
-          const { sendWhatsAppUnified } = await import("./whatsappService");
-          const contact = await contactsService.findContact(args.contactNameOrPhone);
-          const phone = contact ? contact.phone : String(args.contactNameOrPhone || "").replace(/\D/g, "");
-          const channelToUse = args.channel || "whatsapp2";
-          const res = await sendWhatsAppUnified(phone, args.messageText, { channel: channelToUse });
-          return res;
-        }
-        if (toolName === "create_automated_cron_task") {
-          const { scheduledAutomationService } = await import("./scheduledAutomationService");
-          const cronRes = await scheduledAutomationService.createCronTask({
-            title: args.title,
-            timeString: args.timeString,
-            frequency: args.frequency,
-            actionType: args.actionType,
-            city: args.city,
-            messageBody: args.messageBody,
-          });
-          return cronRes;
-        }
-        if (toolName === "schedule_contact_message") {
-          const { scheduledAutomationService } = await import("./scheduledAutomationService");
-          const schedRes = await scheduledAutomationService.scheduleContactMessage({
-            contactNameOrPhone: args.contactNameOrPhone,
-            messageBody: args.messageBody,
-            timeString: args.timeString,
-            frequency: args.frequency,
-          });
-          return schedRes;
-        }
-        if (toolName === "list_scheduled_automations") {
-          const { scheduledAutomationService } = await import("./scheduledAutomationService");
-          const list = await scheduledAutomationService.listAutomations();
-          return { activeAutomationsCount: list.length, automations: list };
-        }
-        if (toolName === "cancel_scheduled_automation") {
-          const { scheduledAutomationService } = await import("./scheduledAutomationService");
-          const cancelRes = await scheduledAutomationService.cancelAutomation(args.idOrQuery);
-          return cancelRes;
-        }
-        if (toolName === "schedule_whatsapp_message") {
-          const { scheduledAutomationService } = await import("./scheduledAutomationService");
-          const schedRes = await scheduledAutomationService.scheduleContactMessage({
-            contactNameOrPhone: args.recipientContactOrPhone,
-            messageBody: args.messageText,
-            timeString: args.timeInstruction,
-          });
-          return schedRes;
-        }
-        if (toolName === "get_messages_digest") {
-          const recent = await this.getMessages({ groupName: args.groupName, limit: args.limit || 30 });
-          if (args.groupName) {
-            const sum = await whatsappFeatureEngine.generateGroupSummary(args.groupName, recent);
-            return { summary: sum };
-          }
-          const digest = await whatsappFeatureEngine.generatePersonalDigest(recent);
-          return { digest };
-        }
-        if (toolName === "translate_text") {
-          const trans = await whatsappFeatureEngine.translateText(args.text, args.targetLanguage);
-          return { translation: trans };
-        }
-        if (toolName === "summarize_web_url") {
-          const webSum = await whatsappFeatureEngine.summarizeWebUrl(args.url, args.query);
-          return { summary: webSum };
-        }
-        if (toolName === "generate_poll") {
-          const poll = await whatsappFeatureEngine.generatePoll(args.topicOrQuestion);
-          return { pollCard: poll };
-        }
-        if (toolName === "generate_quiz") {
-          const quiz = await whatsappFeatureEngine.generateQuiz(args.topic);
-          return { quizCard: quiz };
-        }
-        if (toolName === "analyze_code_snippet") {
-          const codeAnalysis = await whatsappFeatureEngine.analyzeCode(args.codeSnippet, args.instruction);
-          return { analysis: codeAnalysis };
-        }
-        if (toolName === "get_contact_info") {
-          const { contactsService } = await import("./contactsService");
-          const contact = await contactsService.findContact(args.contactNameOrPhone);
-          return contact
-            ? { found: true, name: contact.name, phone: contact.phone, relation: contact.relation }
-            : { found: false, message: `Contact "${args.contactNameOrPhone}" not found in DK's contacts book.` };
-        }
-        if (toolName === "set_reminder") {
-          const { toolsEngine } = await import("./toolsEngine");
-          const reminder = await toolsEngine.addReminder(args.title, args.timeString || "soon", args.durationMinutes || 0);
-          return { success: true, message: `Reminder set: "${reminder.title}" for ${reminder.timeString}` };
-        }
-        if (toolName === "save_quick_note") {
-          const { toolsEngine } = await import("./toolsEngine");
-          const note = await toolsEngine.addNote(args.title, args.content);
-          return { success: true, message: `Note "${note.title}" saved to DK's notebook.` };
-        }
-        if (toolName === "track_expense") {
-          const { toolsEngine } = await import("./toolsEngine");
-          const exp = await toolsEngine.addExpense(args.amount, args.note || "General Expense", args.category || "General");
-          return { success: true, message: `Expense of ₹${args.amount} (${args.category || "General"}) logged successfully.` };
-        }
-        if (toolName === "get_weather") {
-          const { weatherService } = await import("./weatherService");
-          const res = await weatherService.getCurrentWeather(args.city || "Patna");
-          return { success: res.success, message: res.message };
-        }
-        if (toolName === "get_news") {
-          const { newsService } = await import("./newsService");
-          const res = await newsService.getLatestNews(args.query);
-          return { success: res.success, message: res.message, articles: res.articles?.slice(0, 5) };
-        }
-        if (toolName === "search_web") {
-          try {
-            const { webCrawlerService } = await import("./webCrawlerService");
-            const res = await webCrawlerService.executeSearchGrounding(args.query);
-            return { answer: res.answer, sources: res.sources };
-          } catch {
-            return { query: args.query, message: "Searched web query for Boss." };
-          }
-        }
-        if (toolName === "remember_personal_fact") {
-          const { memoryEngine } = await import("./memoryEngine");
-          await memoryEngine.addPinnedMemory(args.fact);
-          return { success: true, message: `Fact remembered: "${args.fact}"` };
-        }
-        if (toolName === "search_whatsapp_history") {
-          const res = await this.searchWhatsAppHistory(args.query, {
-            contact: args.contact,
-            daysBack: args.daysBack || 30,
-            limit: args.limit || 15,
-          });
-          return res;
-        }
-        if (toolName === "forward_to_telegram") {
-          const { telegramBotService } = await import("./telegramBotService");
-          const ownerChatId = args.chatId || (await telegramBotService.getOwnerOrLatestChatId());
-          if (!ownerChatId) {
-            return { success: false, message: "Telegram Owner Chat ID nahi mila. Kripya Telegram bot par /start karein." };
-          }
-          if (args.mediaUrl && args.mediaType === "photo") {
-            const sendRes = await telegramBotService.sendPhoto(ownerChatId, args.mediaUrl, args.messageText);
-            return { success: sendRes.success, message: `Photo Telegram par forward ho gayi!` };
-          }
-          if (args.mediaUrl && args.mediaType === "video") {
-            const sendRes = await telegramBotService.sendVideo(ownerChatId, args.mediaUrl, args.messageText);
-            return { success: sendRes.success, message: `Video Telegram par forward ho gaya!` };
-          }
-          if (args.mediaUrl && args.mediaType === "document") {
-            const sendRes = await telegramBotService.sendDocument(ownerChatId, args.mediaUrl, "forwarded_document.pdf", args.messageText);
-            return { success: sendRes.success, message: `Document Telegram par forward ho gaya!` };
-          }
-          const sendRes = await telegramBotService.sendMessage(ownerChatId, `📲 *[Forwarded from WhatsApp]*\n\n${args.messageText}`);
-          return { success: sendRes.success, message: `Message Telegram par successfully deliver ho gaya!` };
-        }
-        if (toolName === "forward_from_telegram_to_whatsapp") {
-          const { contactsService } = await import("./contactsService");
-          const { sendWhatsAppUnified } = await import("./whatsappService");
-          const { telegramBotService } = await import("./telegramBotService");
-
-          let forwardText = args.messageText;
-          if (!forwardText && args.query) {
-            const searchRes = await telegramBotService.searchMediaVault(args.query);
-            if (searchRes.results.length > 0) {
-              const item = searchRes.results[0];
-              forwardText = `[Telegram File: ${item.fileName || item.mediaType}] ${item.analysisSummary}`;
-            }
-          }
-          if (!forwardText) {
-            const recent = await telegramBotService.getRecentTelegramMessages(1);
-            if (recent.length > 0) {
-              forwardText = `[Telegram Update from ${recent[0].sender}]: ${recent[0].text}`;
-            } else {
-              forwardText = "Telegram update forwarded by Boss.";
-            }
-          }
-
-          const contact = await contactsService.findContact(args.contactNameOrPhone);
-          const phone = contact ? contact.phone : String(args.contactNameOrPhone || "").replace(/\D/g, "");
-          const sendRes = await sendWhatsAppUnified(phone, `📲 *[Forwarded from Telegram]*\n\n${forwardText}`);
-          return { success: sendRes.success, message: `Telegram update WhatsApp contact +${phone} ko forward kar diya gaya!` };
-        }
-        if (toolName === "get_telegram_recent_updates") {
-          const { telegramBotService } = await import("./telegramBotService");
-          const updates = await telegramBotService.getRecentTelegramMessages(args.limit || 10);
-          return { count: updates.length, updates };
-        }
-        if (toolName === "get_contact_conversation_history") {
-          const res = await this.getConversationSummaryAndHistory(
-            args.contactNameOrPhone || args.query,
-            args.limit || 30,
-            args.daysBack || 7
-          );
-          return res;
-        }
-        if (toolName === "get_unknown_senders_digest") {
-          const res = await this.getConversationSummaryAndHistory(
-            "unknown",
-            args.limit || 30,
-            args.daysBack || 7
-          );
-          return res;
-        }
-        if (toolName === "generate_ai_image") {
-          const { imageGenerationService } = await import("./imageGenerationService");
-          const genRes = await imageGenerationService.generateImage(args.prompt, { aspectRatio: args.aspectRatio });
-          if (genRes.success && (genRes.buffer || genRes.imageUrl)) {
-            const imageSrc = genRes.buffer || genRes.imageUrl!;
-            if (replyJid) {
-              await this.sendPhotoMessage(
-                replyJid,
-                imageSrc,
-                `✨ *AI Generated Image*\n📌 *Prompt:* _"${args.prompt}"_\n🤖 *Engine:* _${genRes.model}_`,
-                messageKey
-              );
-            }
-            return { success: true, message: `Image generated using ${genRes.model} and delivered to Boss on WhatsApp!` };
-          }
-          return { success: false, message: `Image generation failed: ${genRes.error || "Unknown error"}` };
-        }
-      } catch (err: any) {
-        return { error: err?.message || String(err) };
-      }
-      return { status: "unknown_tool" };
-    };
-
-    // Recent conversation context buffer (last 5 messages with Boss)
-    const recentBossMsgs = this.messageCache
-      .filter((m) => !m.isGroup && (m.senderName.includes("Boss") || m.senderName.includes("DK") || (replyJid && m.replyJid === replyJid)))
-      .slice(0, 5)
-      .reverse();
-
-    let contextPrefix = "";
-    if (recentBossMsgs.length > 0) {
-      contextPrefix = `[RECENT WHATSAPP CHAT CONTEXT]:
-${recentBossMsgs.map((m) => `• [${m.dateStr}] ${m.senderName}: "${m.text}"`).join("\n")}
-
-`;
-    }
-
-    const subtextAnalysis = humanComprehensionEngine.analyzeMessageSubtext(messageText, {
-      speakerName: "DK (Boss)",
-      relation: "boss",
-      isOwner: true,
-      quotedText: quotedMessage?.text,
-      quotedPhone: quotedMessage?.senderPhone,
-      recentMessages: recentBossMsgs.map((m) => m.text),
-    });
-
-    const subtextSnippet = `\n[HUMAN SUBTEXT INSIGHT: Emotional Tone = ${subtextAnalysis.emotionalTone.toUpperCase()} | Intent: "${subtextAnalysis.implicitIntent}" | Advice: "${subtextAnalysis.suggestedHumanReaction}"]\n`;
-
-    let userTurnMessage = `${contextPrefix}${subtextSnippet}${messageText}`;
-    if (quotedMessage && quotedMessage.isReply) {
-      const qPhoneMatch = (quotedMessage.text || "").match(/(?:\+?91[\s\-]?)?([6-9]\d{9})\b/) || (quotedMessage.text || "").match(/(\+?\d[\d\s\-]{8,15}\d)/);
-      const extractedPhone = qPhoneMatch ? qPhoneMatch[1].replace(/\D/g, "") : (quotedMessage.senderPhone || "");
-
-      userTurnMessage = `${contextPrefix}${subtextSnippet}[SWIPE-TO-REPLY CONTEXT: Boss replied by swiping on a previous message/media]
-📩 PREVIOUS QUOTED MESSAGE (From: ${quotedMessage.sender}, Type: ${quotedMessage.mediaType.toUpperCase()}):
-"${quotedMessage.text}"
-${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` : ""}
-
-💬 BOSS'S SWIPE-REPLY & QUESTION/INSTRUCTION:
-"${messageText}"
-
-(CRITICAL REASONING RULES FOR FRIDAY:
-1. If Boss says "isko msg karo ki [Text]...", "isko bol do ki [Text]...", or "inhe message bhejo...", use tool 'send_whatsapp_message' with target '+${extractedPhone}' and channel 'whatsapp2' immediately!
-2. If Boss says "isko save karo [Name]..." or sets relation, use tool 'save_contact' with target '+${extractedPhone}' immediately!
-3. Directly execute Boss's command in the context of the quoted message!)`;
-    }
-
-    for (const model of ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-flash-lite"]) {
-      try {
-        const chat = ai.chats.create({
-          model,
-          config: {
-            systemInstruction,
-            tools: [{ functionDeclarations }],
-          },
-        });
-
-        let response = await chat.sendMessage({ message: userTurnMessage });
-
-        let turns = 0;
-        while (response.functionCalls && response.functionCalls.length > 0 && turns < 4) {
-          turns++;
-          const call = response.functionCalls[0];
-          console.log(`[WhatsAppBot] Boss Tool Call: ${call.name} with args:`, call.args);
-          const toolResult = await executeTool(call.name, call.args);
-
-          response = await chat.sendMessage({
-            message: [
-              {
-                functionResponse: {
-                  name: call.name,
-                  response: toolResult,
-                },
-              },
-            ],
-          });
-        }
-
-        const replyText = response.text?.trim();
-        if (replyText) return replyText;
-      } catch (e: any) {
-        console.warn(`[WhatsAppBot] Boss Chat model ${model} failed (${e?.message || e}), trying next model...`);
-      }
-    }
-
-    return "Boss, main sun rahi hoon! Kuch technical hiccup hua, ek baar dobara bolein?";
-  }
-
-  /**
-   * Debounces incoming messages per contact:
-   * If a user sends multiple rapid messages (e.g., "bhai", "ek baat bata", "kal chalna hai kya?"),
-   * we wait 3.5 seconds after their last message, combine their messages into a single context,
-   * and then process the auto-reply with realistic human delays.
-   */
-  private queueIncomingForAutoReply(
-    senderName: string,
-    senderPhone: string,
-    text: string,
-    isUnknownContact: boolean,
-    replyJid: string,
-    messageKey: any,
-    quotedMessage?: QuotedMessageContext | null
-  ) {
-    const senderKey = senderPhone || replyJid;
-
-    const existing: any = this.incomingDebounceMap.get(senderKey);
-    if (existing) {
-      if (existing.timer) clearTimeout(existing.timer);
-      existing.texts.push(text);
-      existing.senderName = senderName;
-      existing.isUnknownContact = isUnknownContact;
-      existing.replyJid = replyJid;
-      existing.latestMsgKey = messageKey;
-      if (quotedMessage) existing.quotedMessage = quotedMessage;
-    } else {
-      this.incomingDebounceMap.set(senderKey, {
-        timer: null,
-        texts: [text],
-        senderName,
-        senderPhone,
-        isUnknownContact,
-        replyJid,
-        latestMsgKey: messageKey,
-        quotedMessage,
-      } as any);
-    }
-
-    const entry: any = this.incomingDebounceMap.get(senderKey)!;
-    entry.timer = setTimeout(async () => {
-      this.incomingDebounceMap.delete(senderKey);
-      const combinedText = entry.texts.join("\n");
-      try {
-        await this.handleIncomingForAutoReply(
-          entry.senderName,
-          entry.senderPhone,
-          combinedText,
-          entry.isUnknownContact,
-          entry.replyJid,
-          entry.latestMsgKey,
-          entry.quotedMessage
-        );
-      } catch (e) {
-        console.error("[WhatsAppBot] Auto-reply handling failed:", e);
-      }
-    }, 3500);
-  }
-
-  /**
-   * Core auto-reply decision flow for a 1-on-1 message from someone who is
-   * NOT DK himself:
-   *   1. If this sender has a pending question awaiting a "should I ask DK?"
-   *      confirmation, and this message is a short affirmative — notify DK
-   *      and tell the sender Friday will check.
-   *   2. Otherwise, try to answer strictly from today's daily update log.
-   *      If that gives a real answer, send it directly (doesn't consume the
-   *      daily AI-chat limit — it's a factual lookup, not a generated reply).
-   *   3. If today's update has nothing relevant and the message looks like a
-   *      question, tell the sender Friday doesn't know and offer to ask DK,
-   *      creating a pending question.
-   *   4. If none of the above apply (ordinary chit-chat), fall through to
-   *      the normal Gemini smart-reply, still subject to the daily limit.
-   */
-  private async handleIncomingForAutoReply(
-    senderName: string,
-    senderPhone: string,
-    text: string,
-    isUnknownContact: boolean,
-    replyJid: string,
-    messageKey?: any,
-    quotedMessage?: QuotedMessageContext | null
-  ) {
-    // 0. Check for Quoted Swipe-to-Reply Media / Document / Photo Summary
-    if (quotedMessage && quotedMessage.isReply) {
-      const handledQuoted = await this.handleQuotedMediaSummary(replyJid, text, quotedMessage, messageKey);
-      if (handledQuoted) return;
-    }
-
-    // 1. Check for a pending "should I ask DK?" confirmation from this sender.
-    const pending = await dailyUpdateService.getRecentPendingForSender(senderPhone);
-    if (pending && pending.status === "awaiting_confirmation") {
-      if (dailyUpdateService.isAffirmative(text)) {
-        await dailyUpdateService.markAskedDK(pending.id);
-        if (this.sock) {
-          await this.sendHumanLikeMessage(
-            replyJid,
-            "Theek hai, main boss se pooch ke aapko jaldi batati hoon 👍",
-            text,
-            messageKey
-          );
-        }
-        return;
-      }
-      // Not an affirmative — fall through to normal handling below (they may
-      // have asked something else entirely).
-    }
-
-    // 2. Try a factual answer from today's update log first.
-    const factualAnswer = await dailyUpdateService.answerFromTodayUpdate(text);
-    if (factualAnswer) {
-      if (this.sock) {
-        await this.sendHumanLikeMessage(replyJid, factualAnswer, text, messageKey);
-        console.log(`[WhatsAppBot] Answered ${senderName} from today's update: "${factualAnswer}"`);
-      }
-      return;
-    }
-
-    // 3. For Unknown Contacts Only: If an unknown stranger asks a question specifically about DK, offer to take a note.
-    // (Saved contacts / friends in Firestore skip this and get full intelligent AI answers to everything they ask!)
-    if (isUnknownContact) {
-      const looksLikeQuestion = /\?|kya|kaisa|kaisi|kahan|kab|kyu|kyun/i.test(text);
-      if (looksLikeQuestion) {
-        await dailyUpdateService.createPendingQuestion({ senderPhone, senderName, replyJid, question: text });
-        if (this.sock) {
-          await this.sendHumanLikeMessage(
-            replyJid,
-            "Namaste! Boss (DK) abhi thode busy hain. Maine aapka message note kar liya hai, unke aate hi unhe bata dungi 👍",
-            text,
-            messageKey
-          );
-        }
-        return;
-      }
-    }
-
-    // 4. Intelligent Conversational AI Reply for Saved Contacts & Friends
-    await this.tryFactualOrChatReply(senderName, senderPhone, text, isUnknownContact, replyJid, messageKey, quotedMessage);
-  }
-
-  /**
-   * Checks if Friday is tagged, mentioned, or replied to in a WhatsApp Group message.
-   * Handles:
-   * 1. Direct text triggers: "friday", "@friday", "hello friday", "friday hello", "/friday", "fridaay"
-   * 2. WhatsApp native UI @mentions (mentionedJid array containing bot's JID or phone)
-   * 3. Swipe-to-reply quoting a message from Friday or bot phone
-   */
-  private isBotMentionedInGroup(msg: any, text: string, quotedMessage?: QuotedMessageContext | null): boolean {
-    const cleanText = (text || "").toLowerCase().trim();
-
-    // 1. Direct name / trigger keywords anywhere in message
-    const nameTriggers = [
-      "friday",
-      "@friday",
-      "/friday",
-      "#friday",
-      "fridaay",
-      "fryday",
-      "fraiday",
-      "frieday",
-      "@image",
-      "/image",
-      "image:",
-      "photo banao",
-      "image banao",
-      "tasveer banao",
-      "@summary",
-      "/summary",
-      "@catchup",
-      "/catchup",
-      "@poll",
-      "/poll",
-      "@quiz",
-      "/quiz",
-      "@trivia",
-      "@translate",
-      "/translate",
-      "@web",
-      "/web",
-      "@read",
-      "/read",
-      "@code",
-      "/code",
-      "@debug",
-      "/debug",
-      "@music",
-      "/music",
-      "@safety",
-      "/safety",
-      "@find",
-      "/find",
-      "@search",
-      "/search",
-      "kisi ne",
-      "kisne bola",
-      "dhoondo",
-      "all cmd",
-      "allcmd",
-      "@allcmd",
-      "@all cmd",
-      "commands",
-      "@commands",
-      "all commands",
-      "sare command",
-    ];
-    if (nameTriggers.some((t) => cleanText.includes(t))) {
-      return true;
-    }
-
-    // 2. Hinglish / voice transcription regex variations
-    if (/(?:^|\s|[^\w])(?:@?friday|fridaay|fryday|fraiday)(?:$|\s|[^\w])/i.test(cleanText)) {
-      return true;
-    }
-
-    // 3. WhatsApp native UI @mention (mentionedJid in contextInfo)
-    const contextInfo =
-      msg.message?.extendedTextMessage?.contextInfo ||
-      msg.message?.imageMessage?.contextInfo ||
-      msg.message?.videoMessage?.contextInfo ||
-      msg.message?.documentMessage?.contextInfo;
-
-    const mentionedJids: string[] = contextInfo?.mentionedJid || [];
-    if (mentionedJids.length > 0) {
-      const botJid = this.sock?.user?.id || "";
-      const botPhone = (this.dedicatedPhone || botJid.split(":")[0].split("@")[0]).replace(/\D/g, "");
-      for (const jid of mentionedJids) {
-        const cleanJidPhone = jid.split("@")[0].split(":")[0].replace(/\D/g, "");
-        if (botPhone && cleanJidPhone && (cleanJidPhone === botPhone || botPhone.includes(cleanJidPhone) || cleanJidPhone.includes(botPhone))) {
-          return true;
-        }
-        if (botJid && jid.includes(botJid.split(":")[0])) {
-          return true;
-        }
-      }
-    }
-
-    // 4. Swipe-to-reply quoting Friday's previous message or bot number
-    if (quotedMessage && quotedMessage.isReply) {
-      const quotedSender = (quotedMessage.sender || "").toLowerCase();
-      const quotedPhone = (quotedMessage.senderPhone || "").replace(/\D/g, "");
-      const botPhone = (this.dedicatedPhone || (this.sock?.user?.id || "").split(":")[0].split("@")[0]).replace(/\D/g, "");
-
-      if (
-        quotedSender.includes("friday") ||
-        quotedSender.includes("me") ||
-        (botPhone && quotedPhone && (botPhone === quotedPhone || botPhone.includes(quotedPhone) || quotedPhone.includes(botPhone)))
-      ) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  /**
-   * Generates a concise, polite AI reply when Friday is tagged or mentioned in a WhatsApp Group.
-   * Strictly enforces privacy rules to protect Boss DK's personal confidential information.
-   * Uses the full AUTO_REPLY_MODEL_CHAIN with timeout and fallback to guarantee response delivery.
-   */
-  private async handleGroupMentionAutoReply(
-    senderName: string,
-    senderPhone: string,
-    text: string,
-    groupJid: string,
-    groupName: string,
-    messageKey: any,
-    quotedMessage?: QuotedMessageContext | null
-  ): Promise<void> {
-    const fallbackText = () => {
-      return `Main sun rahi hoon ${senderName}! Main Friday hoon — DK Boss ki AI assistant. DK abhi thode busy hain, agar koi important kaam hai to batayein main unhe note karwa dungi! 👍`;
-    };
-
-    const { whatsappFeatureEngine } = await import("./whatsappFeatureEngine");
-
-    // 0. Master All Commands Directory in Group
-    if (
-      /^(?:@all\s*cmd|@allcmd|\/allcmd|all\s*cmd|friday\s*all\s*cmd|all\s*commands|@commands?|\/commands?|@help|\/help|help|commands?)$/i.test(text.trim()) ||
-      /\b(all\s*cmd|friday\s*all\s*cmd|all\s*commands|sare\s*commands?)\b/i.test(text)
-    ) {
-      const cmdCard = this.getMasterAllCommandsCard();
-      await this.sendHumanLikeMessage(groupJid, cmdCard, text, messageKey);
-      return;
-    }
-
-    // 0.1 Group Quoted Swipe-to-Reply Media / Document / Photo Summary Engine
-    if (quotedMessage && quotedMessage.isReply) {
-      const handledQuoted = await this.handleQuotedMediaSummary(groupJid, text, quotedMessage, messageKey);
-      if (handledQuoted) return;
-    }
-
-    // 0.05 Recent Group Media Follow-Up Q&A (e.g. "meeting kab hai?", "amount kitna hai?")
-    try {
-      const { visionMemoryService } = await import("./visionMemoryService");
-      const recentGroupMedia = visionMemoryService.getChatMediaContext(groupJid);
-      if (recentGroupMedia && visionMemoryService.isMediaQuestionIntent(text)) {
-        await this.sendHumanLikeMessage(groupJid, `🔍 *Recent file/photo me se dhoondh rahi hoon ${senderName}...* ⚡`, text, messageKey);
-        const ans = await visionMemoryService.answerQuestionOnMedia({
-          question: text,
-          chatId: groupJid,
-        });
-        if (ans && !ans.startsWith("⚠️")) {
-          await this.sendHumanLikeMessage(groupJid, ans, text, messageKey);
-          return;
-        }
-      }
-    } catch (grpMediaErr) {
-      console.warn("[WhatsAppBot] Group direct media Q&A notice:", grpMediaErr);
-    }
-
-    // 1. Group Live Voice Call Room ("@call", "call me", "call karo", "mujhe call karo", "voice call", "live call")
-    if (/^(?:@call|\/call|call\s*me|call\s*karo|mujhe\s*call\s*karo|voice\s*call|live\s*call)/i.test(text) || text.toLowerCase() === "call") {
-      const callCard = whatsappFeatureEngine.generateLiveVoiceCallCard(senderName, false);
-      await this.sendHumanLikeMessage(groupJid, callCard, text, messageKey);
-      return;
-    }
-
-    // 1.1 Group Anti-Spam & Phishing Link Guard ("@safety", or suspicious url detection)
-    if (/^(?:@safety|\/safety|safety)/i.test(text) || (text.includes("http") && /free|win|prize|hack|mod\s*apk|lottery/i.test(text))) {
-      const safetyCard = `🛡️ *Link & Safety Check:*\n\nURL scan completed for link in message.\nStatus: ✅ Safe & Verified. No malicious phishing detected.`;
-      await this.sendHumanLikeMessage(groupJid, safetyCard, text, messageKey);
-      return;
-    }
-
-    // 2. Group AI Image Generation ("@image <prompt>", "image: <prompt>", "photo banao <prompt>")
-    const groupImgMatch =
-      text.match(/^(?:@image|\/image|image:|photo\s*banao|image\s*banao|tasveer\s*banao|generate\s*image|draw\s*image|draw)\s*[:=-]?\s*(.+)/i) ||
-      (text.includes("@image") ? text.match(/@image\s+(.+)/i) : null);
-    if (groupImgMatch && groupImgMatch[1]?.trim()) {
-      const prompt = groupImgMatch[1].trim();
-      try {
-        await this.sendHumanLikeMessage(groupJid, `🎨 *AI Image generate ho rahi hai ${senderName}...* ⚡\n\n📌 *Prompt:* _"${prompt}"_`, text, messageKey);
-        const { imageGenerationService } = await import("./imageGenerationService");
-        const genRes = await imageGenerationService.generateImage(prompt);
-        if (genRes.success && (genRes.buffer || genRes.imageUrl)) {
-          const imageSrc = genRes.buffer || genRes.imageUrl!;
-          await this.sendPhotoMessage(
-            groupJid,
-            imageSrc,
-            `✨ *AI Generated Image for ${senderName}*\n📌 *Prompt:* _"${prompt}"_\n🤖 *Engine:* _${genRes.model}_`,
-            messageKey
-          );
-          return;
-        }
-      } catch (imgErr) {
-        console.error("[WhatsAppBot] Group image generation error:", imgErr);
-      }
-    }
-
-    // 3. Group Catch-Up Summary ("@summary", "@catchup", "/summary")
-    if (/^(?:@summary|\/summary|@catchup|\/catchup)/i.test(text) || /(?:chat|group)\s*(?:summary|digest)/i.test(text)) {
-      await this.sendHumanLikeMessage(groupJid, `📊 *"${groupName}" ki summary generate ho rahi hai...* ⚡`, text, messageKey);
-      const recent = await this.getMessages({ groupName, limit: 35 });
-      const summaryCard = await whatsappFeatureEngine.generateGroupSummary(groupName, recent);
-      await this.sendHumanLikeMessage(groupJid, summaryCard, text, messageKey);
-      return;
-    }
-
-    // 4. Group Interactive Poll & Voting ("@poll <question>")
-    const pollMatch = text.match(/^(?:@poll|\/poll|poll|vote)\s*[:=-]?\s*(.+)/i) ||
-      (text.includes("@poll") ? text.match(/@poll\s+(.+)/i) : null);
-    if (pollMatch && pollMatch[1]?.trim()) {
-      const pollQuery = pollMatch[1].trim();
-      const pollCard = await whatsappFeatureEngine.generatePoll(pollQuery);
-      await this.sendHumanLikeMessage(groupJid, pollCard, text, messageKey);
-      return;
-    }
-
-    // 5. Group Trivia & Quiz Master ("@quiz <topic>", "@trivia <topic>")
-    const quizMatch = text.match(/^(?:@quiz|\/quiz|@trivia|\/trivia|quiz|trivia)\s*(.*)/i);
-    if (quizMatch) {
-      const topic = quizMatch[1]?.trim() || "tech & general knowledge";
-      const quizCard = await whatsappFeatureEngine.generateQuiz(topic);
-      await this.sendHumanLikeMessage(groupJid, quizCard, text, messageKey);
-      return;
-    }
-
-    // 6. Multi-Language Translator ("@translate english <text>", or translate quoted msg)
-    const translateMatch = text.match(/^(?:@translate|\/translate|translate)\s+(?:to\s+)?([a-zA-Z\s]+?)(?:\s*[:=-]\s*|\s+)(.*)/i) ||
-      (quotedMessage?.text && text.match(/^(?:@translate|\/translate|translate)\s+(?:to\s+)?([a-zA-Z]+)/i));
-    if (translateMatch) {
-      const targetLang = translateMatch[1]?.trim() || "english";
-      const textToTranslate = translateMatch[2]?.trim() || quotedMessage?.text || "";
-      if (textToTranslate) {
-        await this.sendHumanLikeMessage(groupJid, `🌐 *Translating to ${targetLang}...* ⚡`, text, messageKey);
-        const transRes = await whatsappFeatureEngine.translateText(textToTranslate, targetLang);
-        await this.sendHumanLikeMessage(groupJid, transRes, text, messageKey);
-        return;
-      }
-    }
-
-    // 7. Live Code Explainer & Debugger ("@code <code>", "@debug <code>")
-    const codeMatch = text.match(/^(?:@code|\/code|@debug|\/debug)\s*[:=-]?\s*([\s\S]+)/i);
-    if (codeMatch && codeMatch[1]?.trim()) {
-      const codeSnippet = codeMatch[1].trim();
-      await this.sendHumanLikeMessage(groupJid, `💻 *Code inspect ho raha hai ${senderName}...* ⚡`, text, messageKey);
-      const codeRes = await whatsappFeatureEngine.analyzeCode(codeSnippet);
-      await this.sendHumanLikeMessage(groupJid, codeRes, text, messageKey);
-      return;
-    }
-
-    // 8. Music & Lyrics Finder ("@music <song>", "/music <song>")
-    const musicMatch = text.match(/^(?:@music|\/music)\s*[:=-]?\s*(.+)/i) ||
-      (text.includes("@music") ? text.match(/@music\s+(.+)/i) : null);
-    if (musicMatch && musicMatch[1]?.trim()) {
-      const songQuery = musicMatch[1].trim();
-      const musicCard = await whatsappFeatureEngine.searchMusicWithLyrics(songQuery);
-      await this.sendHumanLikeMessage(groupJid, musicCard, text, messageKey);
-      return;
-    }
-
-    // 🎨 AI Image Generator in Groups ("@image <prompt>", "@photo <prompt>", "photo banao ...", "image banao ...", or quote + "@image")
-    const groupImageMatch = text.match(/^(?:@image|\/image|@photo|\/photo|@draw|\/draw|photo\s*banao|image\s*banao)\s*[:=-]?\s*(.+)/i) ||
-      (text.toLowerCase().startsWith("@image ") ? text.match(/^@image\s+(.+)/i) : null) ||
-      (text.toLowerCase().startsWith("@photo ") ? text.match(/^@photo\s+(.+)/i) : null) ||
-      (/^(?:@image|\/image|@photo|\/photo|image|photo)$/i.test(text.trim()) && quotedMessage?.text ? [text, quotedMessage.text] : null);
-
-    if (groupImageMatch || /^(?:@image|\/image|@photo|\/photo)$/i.test(text.trim())) {
-      const imgPrompt = (groupImageMatch?.[1] || quotedMessage?.text || "").trim();
-      if (!imgPrompt) {
-        await this.sendHumanLikeMessage(
-          groupJid,
-          `🎨 *Image Prompt Missing ${senderName}!* 💡\n\nPrompt example:\n• \`@image futuristic electric sports car in neon rain 4k\`\n• Ya kisi message ko reply karke \`@image\` likhein!`,
-          text,
-          messageKey
-        );
-        return;
-      }
-
-      await this.sendHumanLikeMessage(groupJid, `🎨 *AI Image generate ho rahi hai ${senderName}...* ⚡\n📝 _"${imgPrompt}"_`, text, messageKey);
-      try {
-        const { imageGenerationService } = await import("./imageGenerationService");
-        const imgRes = await imageGenerationService.generateImage(imgPrompt);
-        if (imgRes.success && imgRes.buffer && this.sock) {
-          await this.sock.sendMessage(
-            groupJid,
-            {
-              image: imgRes.buffer,
-              mimetype: imgRes.mimeType || "image/jpeg",
-            },
-            { quoted: messageKey }
-          );
-          await this.sendHumanLikeMessage(
-            groupJid,
-            `🎨 *Friday AI Image for ${senderName}* 🚀\n\n✨ *Engine:* ${imgRes.model}\n📝 *Prompt:* _${imgPrompt}_`,
-            text,
-            messageKey
-          );
-          return;
-        } else {
-          await this.sendHumanLikeMessage(
-            groupJid,
-            `❌ Image generate nahi ho payi: ${imgRes.error || "Please try with a different prompt."}`,
-            text,
-            messageKey
-          );
-          return;
-        }
-      } catch (imgErr: any) {
-        console.error("[WhatsAppBot] Group Image generation error:", imgErr);
-        await this.sendHumanLikeMessage(
-          groupJid,
-          `❌ Image generation failed: ${imgErr?.message || imgErr}`,
-          text,
-          messageKey
-        );
-        return;
-      }
-    }
-
-    // 9. Web Scraper & URL Reader ("@web <url>", "@read <url>")
-    const webMatch = text.match(/^(?:@web|\/web|@read|\/read)\s+(https?:\/\/\S+)(?:\s+(.*))?/i);
-    if (webMatch) {
-      const targetUrl = webMatch[1].trim();
-      const userQ = webMatch[2]?.trim() || "";
-      await this.sendHumanLikeMessage(groupJid, `🌐 *Webpage analyze ho rahi hai...* ⚡\n🔗 _${targetUrl}_`, text, messageKey);
-      const webSummary = await whatsappFeatureEngine.summarizeWebUrl(targetUrl, userQ);
-      await this.sendHumanLikeMessage(groupJid, webSummary, text, messageKey);
-      return;
-    }
-
-    // 10. Natural Language Message Finder in Group ("friday kisi ne apple ke bare me bola tha", "@find ...", "kisne bola tha ...")
-    const groupFindMatch =
-      text.match(/(?:kisi\s*ne|kisne)\s+(.+?)\s*(?:ke\s*baare\s*me|ke\s*bare\s*me|ke\s*liye|bola\s*tha|kaha\s*tha|bheja\s*tha)/i) ||
-      text.match(/^(?:@find|\/find|find\s*msg|find\s*message|dhundo|dhundho|dhoondo|search\s*msg)\s*(.*)/i) ||
-      (text.includes("kisi ne") && text.includes("bola"));
-    if (groupFindMatch) {
-      await this.sendHumanLikeMessage(groupJid, `🔎 *Group chat me dhoondh rahi hoon ${senderName}...* ⚡`, text, messageKey);
-      const recentMsgs = await this.getMessages({ groupName, limit: 120 });
-      const searchRes = await whatsappFeatureEngine.searchAndLocateMessage(text, recentMsgs, {
-        groupName,
-        isGroup: true,
-        requesterName: senderName,
-      });
-      await this.sendHumanLikeMessage(groupJid, searchRes.replyText, text, messageKey);
-      return;
-    }
-
-    // 11. Group Bill Splitter ("@split 1500 between Aman, Rahul, DK")
-    const splitMatch = text.match(/^(?:@split|\/split|split\s*bill|bill\s*split|split)\s*[:=-]?\s*(.+)/i) ||
-      (text.includes("@split") ? text.match(/@split\s+(.+)/i) : null);
-    if (splitMatch) {
-      const splitCard = await whatsappFeatureEngine.splitGroupBill(text);
-      await this.sendHumanLikeMessage(groupJid, splitCard, text, messageKey);
-      return;
-    }
-
-    // 12. Group Google Calendar Meeting Scheduler ("@meet with team tomorrow 5pm")
-    const meetMatch = text.match(/^(?:@meet|\/meet|schedule\s*meeting|schedule\s*meet)\s*[:=-]?\s*(.+)/i) ||
-      (text.includes("@meet") ? text.match(/@meet\s+(.+)/i) : null);
-    if (meetMatch) {
-      const meetCard = await whatsappFeatureEngine.scheduleMeetingFromWhatsApp(text);
-      await this.sendHumanLikeMessage(groupJid, meetCard, text, messageKey);
-      return;
-    }
-
-    // 13. Live Location, Traffic & Nearby Places ("@nearby petrol pump", "@route to Patna Airport")
-    const mapsMatch = text.match(/^(?:@nearby|\/nearby|@route|\/route|nearby|route\s*to)\s*[:=-]?\s*(.+)/i) ||
-      (text.includes("@nearby") ? text.match(/@nearby\s+(.+)/i) : null) ||
-      (text.includes("@route") ? text.match(/@route\s+(.+)/i) : null);
-    if (mapsMatch) {
-      const mapsCard = await whatsappFeatureEngine.searchNearbyOrRoute(text);
-      await this.sendHumanLikeMessage(groupJid, mapsCard, text, messageKey);
-      return;
-    }
-
-    // 14. Morning Executive Briefing ("@briefing", "aaj ka briefing")
-    if (/^(?:@briefing|\/briefing|briefing|aaj\s*ka\s*briefing|morning\s*briefing)/i.test(text)) {
-      const briefingCard = await whatsappFeatureEngine.generateMorningBriefingCard();
-      await this.sendHumanLikeMessage(groupJid, briefingCard, text, messageKey);
-      return;
-    }
-
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      await this.sendHumanLikeMessage(groupJid, fallbackText(), text, messageKey);
-      return;
-    }
-
-    const ai = new GoogleGenAI({ apiKey });
-    const quotedSnippet = quotedMessage && quotedMessage.isReply
-      ? `\n- PREVIOUS QUOTED MESSAGE IN GROUP (From: ${quotedMessage.sender}, Type: ${quotedMessage.mediaType}): "${quotedMessage.text}"`
-      : "";
-
-    const prompt = `You are Friday, the ultra-smart, witty and polite AI assistant of DK (Divakar Kumar).
-You have been tagged or mentioned in a WhatsApp Group named "${groupName}".
-Message Sender: "${senderName}" (+${senderPhone})${quotedSnippet}
-Message in Group: "${text}"
-
-RULES FOR GROUP REPLIES:
-1. Speak in crisp, natural, intelligent Hinglish (maximum 1-3 short lines).
-2. Answer their question or request directly (if they ask for general knowledge, coding help, calculations, facts, train status, weather, or greetings).
-3. PRIVACY & SECURITY (STRICT): NEVER disclose DK Boss's confidential private information (home address, personal passwords, bank details, private schedule) in a public group.
-4. If they ask who you are: "Main Friday hoon — DK Boss ka intelligent AI assistant! ⚡"
-5. Do NOT use prefixes like 'Friday:' or markdown header hashes. Format with clean WhatsApp bold/italics.`;
-
-    const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T> =>
-      Promise.race([
-        p,
-        new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms)),
-      ]);
-
-    for (const model of WhatsAppBotService.AUTO_REPLY_MODEL_CHAIN) {
-      try {
-        const response = await withTimeout(
-          ai.models.generateContent({ model, contents: prompt }),
-          8000
-        );
-        const reply = response.text?.trim();
-        if (reply) {
-          await this.sendHumanLikeMessage(groupJid, reply, text, messageKey);
-          console.log(`[WhatsAppBot] Group Reply sent to "${groupName}" using ${model} for ${senderName}: "${reply}"`);
-          return;
-        }
-      } catch (err: any) {
-        console.warn(`[WhatsAppBot] Group mention model ${model} failed (${err?.message || err}), trying next model...`);
-      }
-    }
-
-    // Graceful fallback if all models fail
-    try {
-      await this.sendHumanLikeMessage(groupJid, fallbackText(), text, messageKey);
-      console.log(`[WhatsAppBot] Group fallback reply sent to "${groupName}" for ${senderName}`);
-    } catch (fallbackErr) {
-      console.error("[WhatsAppBot] Failed to send group fallback reply:", fallbackErr);
-    }
-  }
-
-  /** The Gemini smart-reply path: saved contacts (friends, family) get full helpful conversational replies; unknown strangers are rate-limited. */
-  private async tryFactualOrChatReply(
-    senderName: string,
-    senderPhone: string,
-    text: string,
-    isUnknownContact: boolean,
-    replyJid: string,
-    messageKey?: any,
-    quotedMessage?: QuotedMessageContext | null
-  ) {
-    const now = Date.now();
-    const senderKey = senderPhone || replyJid;
-    const lastAt = this.lastReplyAt.get(senderKey) || 0;
-    if (now - lastAt <= 3500) return; // avoid double-firing on rapid bursts
-
-    // Only unknown numbers / strangers get strict rate limiting and the generic "Boss abhi available nahi hain" message.
-    // Saved contacts (friends, family in Firestore) NEVER get cut off with generic replies — Friday chats and answers them every time!
-    if (isUnknownContact) {
-      const allowed = await this.tryConsumeDailyReply(senderKey);
-      if (!allowed) {
-        const today = todayISTLocal();
-        const alreadyNotified = this.limitNoticeSentToday.get(senderKey);
-        if (alreadyNotified === today) return; // already told them once today — stay quiet now
-
-        console.log(`[WhatsAppBot] Daily auto-reply limit reached for unknown sender ${senderName} (+${senderPhone}) — sending one-time generic notice.`);
-        this.limitNoticeSentToday.set(senderKey, today);
-        if (this.sock) {
-          try {
-            await this.sendHumanLikeMessage(
-              replyJid,
-              LIMIT_REACHED_GENERIC_REPLY(senderName, isUnknownContact),
-              text,
-              messageKey
-            );
-          } catch (e) {
-            console.error(`[WhatsAppBot] Failed to send limit-reached notice to ${senderPhone}:`, e);
-          }
-        }
-        return;
-      }
-    }
-
-    this.lastReplyAt.set(senderKey, now);
-    try {
-      if (this.sock && this.isConnected) {
-        // ── Virtual Girlfriend Mode Intercept ──
-        const isGfActivationIntent =
-          /^(?:@girlfriend|\/girlfriend|@gf|\/gf|girlfriend\s*mode|gf\s*mode|virtual\s*girlfriend|girlfriend)\b/i.test(text);
-
-        const isGfStopIntent =
-          /^(?:@normal|\/normal|normal\s*mode|normal|@stop\s*gf|@stop\s*girlfriend|stop\s*girlfriend|stop\s*gf|exit\s*girlfriend|exit\s*gf)$/i.test(text);
-
-        if (isGfActivationIntent) {
-          await this.startGirlfriendMode(replyJid, text, messageKey, senderName);
-          return;
-        }
-
-        if (isGfStopIntent) {
-          await this.stopGirlfriendMode(replyJid, messageKey, true);
-          return;
-        }
-
-        if (this.isGirlfriendModeActive(replyJid)) {
-          await this.handleGirlfriendChatMessage(replyJid, text, messageKey, false);
-          return;
-        }
-
-        let contactRelation = "";
-        try {
-          const contact = await contactsService.findContact(senderPhone);
-          if (contact && contact.relation) contactRelation = contact.relation;
-        } catch {}
-
-        const aiReply = await this.generateSmartAutoReply(senderName, senderPhone, text, isUnknownContact, contactRelation, quotedMessage);
-        await this.sendHumanLikeMessage(replyJid, aiReply, text, messageKey);
-        console.log(`[WhatsAppBot] Smart AI Reply sent to ${senderName} (+${senderPhone}): "${aiReply}"`);
-
-        // Record Friday's reply in RAM cache & Firestore for full dialogue recall
-        const cached = this.messageCache.find((m) => (m.replyJid === replyJid || m.senderPhone === senderPhone) && !m.isGroup);
-        if (cached) {
-          cached.botReply = aiReply;
-          inboxCol().doc(cached.id).update({ botReply: aiReply }).catch(() => {});
-        }
-      }
-    } catch (replyErr) {
-      console.error(`[WhatsAppBot] Failed to send AI auto-reply to ${senderPhone}:`, replyErr);
-    }
-  }
-
-  /**
-   * When DK replies from his own paired number, check if it matches the
-   * "Name- <reply>" format (or is just a plain reply while exactly one
-   * question is awaiting him) and forward the answer back to that original
-   * sender, closing out the pending question.
-   */
   private async tryForwardOwnerReplyToPendingSender(text: string): Promise<boolean> {
     const awaiting = await dailyUpdateService.getQuestionsAwaitingDK();
     if (awaiting.length === 0) return false;
 
-    // "Rahul- haan chalte hain" style: name prefix followed by a dash/colon.
     const match = text.match(/^([a-zA-Z\u0900-\u097F]+)\s*[-:]\s*(.+)$/);
     let target: (typeof awaiting)[number] | undefined;
     let replyText: string;
@@ -4918,234 +891,7 @@ RULES FOR GROUP REPLIES:
     }
   }
 
-  // ── Per-contact daily auto-reply limits ────────────────────────────────────
-
-  /**
-   * Returns true and increments today's count if this contact hasn't hit
-   * their daily auto-reply limit yet. Persists to Firestore so the count
-   * survives a server restart, but reads/writes through a RAM cache so we
-   * don't hit Firestore on every incoming message.
-   */
-  private async tryConsumeDailyReply(phone: string): Promise<boolean> {
-    const today = todayISTLocal();
-
-    let countEntry = this.replyCountCache.get(phone);
-    if (!countEntry || countEntry.dateStr !== today) {
-      // Not cached, or cached entry is from a previous day — reload from Firestore.
-      try {
-        const snap = await replyCountsCol().doc(phone).get();
-        const data = snap.exists ? snap.data() : null;
-        countEntry = data && data.dateStr === today ? { count: data.count, dateStr: data.dateStr } : { count: 0, dateStr: today };
-      } catch (e) {
-        console.error(`[WhatsAppBot] Failed to read reply count for ${phone}, defaulting to 0:`, e);
-        countEntry = { count: 0, dateStr: today };
-      }
-      this.replyCountCache.set(phone, countEntry);
-    }
-
-    const limit = await this.getContactReplyLimit(phone);
-    if (countEntry.count >= limit) return false;
-
-    countEntry.count++;
-    this.replyCountCache.set(phone, countEntry);
-    try {
-      await replyCountsCol().doc(phone).set({ count: countEntry.count, dateStr: today }, { merge: true });
-    } catch (e) {
-      console.error(`[WhatsAppBot] Failed to persist reply count for ${phone}:`, e);
-    }
-    return true;
-  }
-
-  /** Gets a contact's daily auto-reply limit (Firestore-backed, RAM-cached). Falls back to the default. */
-  public async getContactReplyLimit(phone: string): Promise<number> {
-    if (this.replyLimitCache.has(phone)) return this.replyLimitCache.get(phone)!;
-    try {
-      const snap = await replyLimitsCol().doc(phone).get();
-      const limit = snap.exists ? (snap.data()?.dailyLimit as number) : DEFAULT_DAILY_REPLY_LIMIT;
-      const resolved = typeof limit === "number" && limit >= 0 ? limit : DEFAULT_DAILY_REPLY_LIMIT;
-      this.replyLimitCache.set(phone, resolved);
-      return resolved;
-    } catch (e) {
-      console.error(`[WhatsAppBot] Failed to read reply limit for ${phone}, using default:`, e);
-      return DEFAULT_DAILY_REPLY_LIMIT;
-    }
-  }
-
-  /**
-   * Sets a contact's daily auto-reply limit. Called from the voice assistant's
-   * "set_whatsapp_reply_limit" tool so DK can say e.g. "Priya ka limit 15 kar do".
-   * Accepts a phone number or resolves a name via contactsService.
-   */
-  public async setContactReplyLimit(contactNameOrPhone: string, newLimit: number): Promise<{ success: boolean; message: string; resolvedPhone?: string }> {
-    if (!Number.isFinite(newLimit) || newLimit < 0) {
-      return { success: false, message: "Limit must be a non-negative number." };
-    }
-    let phone = contactNameOrPhone.replace(/\D/g, "");
-    try {
-      const contact = await contactsService.findContact(contactNameOrPhone);
-      if (contact && contact.id !== "temp" && contact.phone) {
-        phone = contact.phone.replace(/\D/g, "");
-      }
-    } catch {
-      // fall through with whatever digits we extracted from contactNameOrPhone
-    }
-    if (!phone) {
-      return { success: false, message: `Could not resolve a phone number for "${contactNameOrPhone}".` };
-    }
-    try {
-      await replyLimitsCol().doc(phone).set({ dailyLimit: newLimit }, { merge: true });
-      this.replyLimitCache.set(phone, newLimit);
-      return { success: true, message: `Daily auto-reply limit for +${phone} set to ${newLimit}.`, resolvedPhone: phone };
-    } catch (e: any) {
-      console.error(`[WhatsAppBot] Failed to set reply limit for ${phone}:`, e);
-      return { success: false, message: `Failed to save the new limit: ${e?.message || e}` };
-    }
-  }
-
-  /**
-   * Generates a smart, human-like AI auto-reply for WhatsApp messages using Gemini.
-   * Tries a chain of models (newest/best first) so a single model being
-   * overloaded, rate-limited, or briefly down doesn't fall back to the
-   * generic "DK is busy" text — only falls back if EVERY model fails.
-   * Handles: identity ("who made you / who are you"), privacy guard for DK's data, normal chat.
-   */
-  private static readonly AUTO_REPLY_MODEL_CHAIN = [
-    "gemini-3.1-flash-lite",
-    "gemini-3.5-flash-lite",
-    "gemini-2.5-flash-lite",
-    "gemini-3.6-flash",
-    "gemini-3.5-flash",
-    "gemini-2.5-flash",
-    "gemini-1.5-flash",
-  ];
-
-  private async generateSmartAutoReply(
-    senderName: string,
-    senderPhone: string,
-    messageText: string,
-    isUnknownContact: boolean,
-    relation?: string,
-    quotedMessage?: QuotedMessageContext | null
-  ): Promise<string> {
-    const fallbackText = () => {
-      return `Boss 🧑‍🦱 abhi busy hain, unke aate hi unko bataunga aapka msg aaya hai, reply jaldi milega 😊😶‍🌫️`;
-    };
-
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      console.error("[WhatsAppBot] GEMINI_API_KEY not set — cannot generate smart auto-reply, using fallback.");
-      return fallbackText();
-    }
-
-    const ai = new GoogleGenAI({ apiKey });
-    const quotedSnippet = quotedMessage && quotedMessage.isReply
-      ? `\n- PREVIOUS QUOTED MESSAGE (Sender: ${quotedMessage.sender}, Type: ${quotedMessage.mediaType}): "${quotedMessage.text}"`
-      : "";
-
-    const { humanComprehensionEngine } = await import("./humanComprehensionEngine");
-    const subtextAnalysis = humanComprehensionEngine.analyzeMessageSubtext(messageText, {
-      speakerName: senderName,
-      relation,
-      isOwner: false,
-      quotedText: quotedMessage?.text,
-      quotedPhone: quotedMessage?.senderPhone,
-    });
-    const comprehensionContext = await humanComprehensionEngine.compileHumanComprehensionPrompt(senderPhone, senderName, relation);
-
-    const isGirlfriend =
-      /girlfriend|gf|crush|wife|partner|jaan|special/i.test(relation || "") ||
-      /girlfriend|gf|crush/i.test(senderName || "");
-
-    const isBestFriend =
-      /bestfriend|best\s*friend|bff|close\s*friend|yaar|dost/i.test(relation || "") ||
-      /bestfriend|bff/i.test(senderName || "");
-
-    const isFamily =
-      /family|mummy|papa|mother|father|sister|brother|bhai|behan/i.test(relation || "");
-
-    const prompt = `You are Friday, the highly intelligent, polite, warm, witty and deeply human-like personal voice AI companion of DK (Divakar Kumar).
-You are managing DK's personal WhatsApp account.
-
-${comprehensionContext}
-
-Incoming WhatsApp message details:
-- Sender Name: "${senderName}"
-- Contact Status: ${isUnknownContact ? "Unknown Contact / Stranger" : `Saved Contact in Phonebook`}
-- Relationship to DK: "${relation || (isUnknownContact ? "Unknown" : "Friend / Contact")}"
-- Sender Phone: +${senderPhone}${quotedSnippet}
-- Message Received: "${messageText}"
-- Detected Emotional Tone: ${subtextAnalysis.emotionalTone.toUpperCase()}
-- Implicit Intent: "${subtextAnalysis.implicitIntent}"
-- Suggested Human Response Style: "${subtextAnalysis.suggestedHumanReaction}"
-
-CRITICAL PERSONA & BEHAVIOR GUIDELINES BASED ON RELATIONSHIP:
-${
-  isGirlfriend
-    ? `💖 SPECIAL PROTOCOL FOR DK'S GIRLFRIEND / SPECIAL PERSON (${senderName}):
-   - Priority Level: HIGHEST & UTMOST IMPORTANCE.
-   - Tone: Exceptionally sweet, deeply respectful, polite, caring, warm, cheerful, and attentive!
-   - Make her feel very special, valued, and happy. Treat her with immense warmth and care.
-   - If she asks about DK ("DK kahan hai?", "DK kya kar raha hai?", "DK ko bolna..."):
-     Reply with immense sweetness & reassurance: "Arey hello! DK abhi bas kisi zaroori kaam me lage hain, par maine unko turant notify kar diya hai ki aapka message aaya hai! Wo jaise hi phone dekhenge sabse pehle aapko hi reply/call karenge ❤️ Aap bataiye, aapka din kaisa ja raha hai? Sab theek hai?"
-   - If she asks ANY general question, needs advice, help with studies/work, or just chatting: Answer with deep intellect, sweetness, positivity, and helpfulness.
-   - NEVER be cold, robotic, or dismissive. Talk to her with full affection & sweetness!`
-    : isBestFriend
-    ? `🔥 SPECIAL PROTOCOL FOR DK'S BEST FRIEND / CLOSE BUDDY (${senderName}):
-   - Priority Level: HIGH (Best Friend / BFF).
-   - Tone: Super fun, cool, witty, energetic, buddy vibe (khul ke ghul-mil ke baat karo)!
-   - Talk like a fun, smart, close mutual friend (e.g. "Arey bhai/yaar!", "Bata kya haal-chal?").
-   - Answer whatever they ask with high intellect, humor, and smart insights!
-   - If they ask about DK: "DK abhi thoda busy hai kisi kaam me, maine usko bata diya hai tera message. Bata kya chal raha hai aaj kal?"`
-    : isFamily
-    ? `🏡 PROTOCOL FOR FAMILY (${senderName}):
-   - Tone: Deeply respectful, warm, polite, and caring ("Namaste / Pranam Ji", sweet familial respect).
-   - Answer helpfully and assure them with utmost respect.`
-    : !isUnknownContact
-    ? `👥 PROTOCOL FOR SAVED CONTACTS & FRIENDS (${senderName}):
-   - Tone: Friendly, respectful, helpful, and smart.
-   - ALWAYS ANSWER WHATEVER THEY ASK DIRECTLY AND INTELLIGENTLY! ("wo jo puche uska jawab do, har baar").
-   - If they ask questions on school, studies, science, code, tech, sports, movies, weather, or advice: Give clear, complete, intelligent answers.
-   - Do NOT give robotic "DK nahi hain" templates for normal questions. Help them directly and converse naturally.`
-    : `👤 PROTOCOL FOR UNKNOWN STRANGERS / NUMBERS:
-   - "Namaste! Main Friday hoon — DK Boss ka AI assistant. Boss abhi available nahi hain. Aap apna naam aur kaam bata dijiye, main unko note kara dungi 👍"`
-}
-
-PRIVACY & SECURITY GUARD:
-- Never disclose DK's private passwords, bank details, confidential secrets, or private personal credentials.
-
-TONE & STYLE:
-- Natural, fluent Hindi/Hinglish (mix of Hindi and English).
-- Engaging, human-like, crisp (2-4 natural sentences).
-- Return ONLY the exact message text to send on WhatsApp. Do not include quotes, prefixes like 'Friday:' or markdown headers.`;
-
-    const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T> =>
-      Promise.race([
-        p,
-        new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms)),
-      ]);
-
-    for (const model of WhatsAppBotService.AUTO_REPLY_MODEL_CHAIN) {
-      try {
-        const response = await withTimeout(
-          ai.models.generateContent({ model, contents: prompt }),
-          8000
-        );
-        const reply = response.text?.trim();
-        if (reply) {
-          console.log(`[WhatsAppBot] Auto-reply generated using ${model}`);
-          return reply;
-        }
-        console.warn(`[WhatsAppBot] ${model} returned an empty reply, trying next model...`);
-      } catch (err: any) {
-        console.error(`[WhatsAppBot] ${model} failed for auto-reply (${err?.message || err}), trying next model...`);
-      }
-    }
-
-    console.error("[WhatsAppBot] All models in the fallback chain failed — using hardcoded fallback text.");
-    return fallbackText();
-  }
-
-  // ── Existing public methods ────────────────────────────────────────────────
+  // ── Socket Initialization & Lifecycle ─────────────────────────────────────
 
   public async initSocket(forPairingCode = false) {
     try {
@@ -5155,7 +901,6 @@ TONE & STYLE:
       }
       this.stopKeepAlive();
 
-      // Cleanly teardown previous socket and listeners to prevent socket memory leak
       if (this.sock) {
         try {
           this.sock.ev.removeAllListeners?.();
@@ -5175,7 +920,6 @@ TONE & STYLE:
         auth: state,
         logger,
         printQRInTerminal: false,
-        // FIX 1: Built-in Baileys WS keep-alive ping every 30s prevents idle disconnects
         keepAliveIntervalMs: 30_000,
         connectTimeoutMs: 90_000,
         defaultQueryTimeoutMs: 90_000,
@@ -5184,63 +928,37 @@ TONE & STYLE:
       });
 
       this.sock.ev.on("creds.update", saveCreds);
-
-      // Wire up incoming message listener
       this.setupMessageListener();
-
-      // Wire up group participant updates (Smart Group Welcome & Rules)
-      this.sock.ev.on("group-participants.update", async (update: any) => {
-        const { id: groupJid, participants, action } = update;
-        if (action === "add" && participants && participants.length > 0) {
-          try {
-            const groupName = await this.getGroupName(groupJid);
-            const welcomeMsg = `👋 *Welcome to "${groupName}"!* ✨\n\n` +
-              `Main *Friday* hoon — DK Boss ki intelligent AI assistant! ⚡\n\n` +
-              `📌 *Group me aap yeh sab use kar sakte hain:*\n` +
-              `• 🎨 \`@image <prompt>\` — AI Image generate karein\n` +
-              `• 📊 \`@summary\` — Chat summary lein\n` +
-              `• 🗳️ \`@poll <question>\` — Interactive Poll banayein\n` +
-              `• 🎯 \`@quiz <topic>\` — Trivia Quiz khele\n` +
-              `• 💰 \`@split <amount> between <names>\` — Bill split karein\n` +
-              `• 🌐 \`@translate <lang>\` — Messages translate karein\n` +
-              `• 🔎 \`friday kisi ne ... bola tha\` — Purana message dhoondhein\n` +
-              `• 📍 \`@nearby / @route\` — Location routes\n\n` +
-              `_Aapka welcome hai! Enjoy your stay 👍_`;
-
-            await this.sendHumanLikeMessage(groupJid, welcomeMsg);
-          } catch (welcomeErr) {
-            console.warn("[WhatsAppBot] Group welcome error:", welcomeErr);
-          }
-        }
-      });
 
       this.sock.ev.on("connection.update", async (update: any) => {
         const { connection, lastDisconnect, qr } = update;
 
-        // FIX 2: Only generate QR when NOT in pairing code mode
         if (qr && !this.pairingCodeMode) {
           try {
-            this.qrCodeDataUrl = await QRCode.toDataURL(qr, { margin: 2, scale: 7 });
-          } catch (e) {
-            console.error("[WhatsAppBot] QR code generation error:", e);
+            this.qrCodeDataUrl = await QRCode.toDataURL(qr);
+            this.pairingCode = null;
+          } catch (err) {
+            console.error("[WhatsAppBot] Error generating QR data URL:", err);
           }
         }
 
         if (connection === "close") {
+          this.isConnected = false;
+          this.pairingCode = null;
+          this.qrCodeDataUrl = null;
           this.stopKeepAlive();
           this.stopScheduledMessagesTicker();
+
           const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
-          const isLoggedOut = statusCode === DisconnectReason?.loggedOut || statusCode === 401;
-          const shouldReconnect = !isLoggedOut;
-          this.isConnected = false;
-          this.qrCodeDataUrl = null;
-          this.pairingCode = null;
-          this.pairingCodeMode = false;
-          console.log(`[WhatsAppBot] Connection closed (statusCode=${statusCode}). Reconnect: ${shouldReconnect}`);
-          if (isLoggedOut) {
-            console.log("[WhatsAppBot] Session logged out on WhatsApp mobile. Clearing stale credentials from Firestore...");
+          const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+
+          console.log(`[WhatsAppBot] Connection closed (${statusCode}). Should reconnect: ${shouldReconnect}`);
+
+          if (statusCode === DisconnectReason.loggedOut) {
+            this.dedicatedPhone = null;
+            await sessionMetaDoc().delete().catch(() => {});
             if (this.clearAuthFn) {
-              this.clearAuthFn().catch((err) => console.warn("[WhatsAppBot] Error clearing auth:", err));
+              await this.clearAuthFn();
             }
           } else if (shouldReconnect) {
             this.scheduleReconnect(5000);
@@ -5250,12 +968,9 @@ TONE & STYLE:
           this.pairingCode = null;
           this.qrCodeDataUrl = null;
           this.pairingCodeMode = false;
-          // FIX 3: Persist phone to Firestore so dashboard shows 'linked' after server restart
           if (this.dedicatedPhone) this.savePhoneToFirestore(this.dedicatedPhone).catch(() => {});
-          // FIX 4: Start app-level keep-alive ping every 4 min (Offline background mode)
           this.startKeepAlive();
           this.startScheduledMessagesTicker();
-          // By default, stay OFFLINE until someone sends a message
           this.sock.sendPresenceUpdate("unavailable").catch(() => {});
           console.log("[WhatsAppBot] Connected! Natural Offline mode & Scheduled Ticker active.");
         }
@@ -5265,10 +980,6 @@ TONE & STYLE:
     }
   }
 
-  /**
-   * FIX: Fresh socket per request + 2.5s wait + 3 retries = reliable pairing code every time.
-   * Old approach reused an existing socket which silently failed after QR was already displayed.
-   */
   public async requestPairingCode(phoneNumber: string): Promise<string> {
     let cleanPhone = phoneNumber.replace(/[\s\-\(\)\+]/g, "").trim();
     if (cleanPhone.length === 10) cleanPhone = `91${cleanPhone}`;
@@ -5280,16 +991,12 @@ TONE & STYLE:
       return "ALREADY_CONNECTED";
     }
 
-    // Tear down any existing socket so we start with a clean slate
     try {
       if (this.sock) { this.sock.end(undefined); this.sock = null; }
     } catch {}
     this.stopKeepAlive();
 
-    // Fresh init in pairing-code mode (suppresses QR)
     await this.initSocket(true);
-
-    // Let Baileys connect to WS (pre-auth state, not yet open)
     await new Promise((resolve) => setTimeout(resolve, 2500));
 
     if (!this.sock) {
@@ -5297,7 +1004,6 @@ TONE & STYLE:
       throw new Error("WhatsApp socket not ready after init. Try again.");
     }
 
-    // Up to 3 attempts with 1.5s between each
     let lastErr: any;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
@@ -5326,7 +1032,6 @@ TONE & STYLE:
     try {
       if (this.sock) { this.sock.end(undefined); this.sock = null; }
       if (this.clearAuthFn) await this.clearAuthFn();
-      // Wipe saved phone so dashboard shows unlinked
       await sessionMetaDoc().delete().catch(() => {});
       this.dedicatedPhone = null;
     } catch (e) {
@@ -5335,21 +1040,14 @@ TONE & STYLE:
     await this.initSocket();
   }
 
-  /**
-   * Simulates real human behavior before sending a message:
-   * 1. Sends 'composing' (typing...) presence update to WhatsApp
-   * 2. Waits realistic human reading/typing duration based on message length
-   * 3. Sends 'paused' presence update
-   * 4. Sends the actual message
-   * This avoids WhatsApp anti-spam automated bot detection heuristics.
-   */
-  private async sendHumanLikeMessage(jid: string, text: string, incomingText?: string, messageKey?: any): Promise<any> {
+  // ── Outgoing Dispatches with Firewall ─────────────────────────────────────
+
+  public async sendHumanLikeMessage(jid: string, text: string, incomingText?: string, messageKey?: any): Promise<any> {
     if (!this.sock) return null;
 
     const trimmed = text.trim();
     const recipientKey = jid.replace(/@.*$/, "");
 
-    // Use HumanBotFirewall for Gaussian typing presence and reading delays
     await humanBotFirewallService.simulateWhatsAppHumanTyping(
       this.sock,
       jid,
@@ -5358,10 +1056,8 @@ TONE & STYLE:
       trimmed
     );
 
-    // Record message dispatch with firewall
     humanBotFirewallService.recordDispatchedMessage("whatsapp", recipientKey);
 
-    // Safely construct quoted message context for Baileys
     const sendOptions: any = {};
     if (messageKey) {
       if (messageKey.message) {
@@ -5375,12 +1071,10 @@ TONE & STYLE:
       }
     }
 
-    // Send the message with automatic fallback if quoted formatting fails
     let result: any = null;
     try {
       result = await this.sock.sendMessage(jid, { text: trimmed }, sendOptions);
     } catch (quotedErr) {
-      console.warn("[WhatsAppBot] Quoted send failed, retrying without quoted context:", (quotedErr as any)?.message || quotedErr);
       result = await this.sock.sendMessage(jid, { text: trimmed });
     }
 
@@ -5394,10 +1088,6 @@ TONE & STYLE:
     return result;
   }
 
-  /**
-   * Safely dispatches media (image, video, sticker, document) with sanitization of quoted context
-   * and automatic retry fallback if Baileys encounters malformed quoted keys.
-   */
   public async sendSafeMediaMessage(
     jid: string,
     content: any,
@@ -5429,14 +1119,10 @@ TONE & STYLE:
     try {
       return await this.sock.sendMessage(jid, content, sendOptions);
     } catch (quotedErr) {
-      console.warn("[WhatsAppBot] Media send with quoted option failed, retrying without quote:", (quotedErr as any)?.message || quotedErr);
       return await this.sock.sendMessage(jid, content);
     }
   }
 
-  /**
-   * Drops a natural WhatsApp emoji reaction on a message (e.g., ❤️, 😂, 🔥, 👍, 👏).
-   */
   public async reactToMessage(jid: string, messageKey: any, emoji: string): Promise<boolean> {
     if (!this.sock || !this.isConnected || !messageKey) return false;
     try {
@@ -5446,7 +1132,6 @@ TONE & STYLE:
       });
       return true;
     } catch (e) {
-      console.warn("[WhatsAppBot] Reaction failed:", e);
       return false;
     }
   }
@@ -5462,13 +1147,9 @@ TONE & STYLE:
       };
     }
 
-    // Guard against a "ghost open" state: our isConnected flag says true,
-    // but the underlying WebSocket may have gone stale (receive-only).
-    // Check the raw socket readyState before trusting it to send.
     const rawWs = this.sock?.ws?.socket || this.sock?.ws;
     const wsState = rawWs?.readyState;
-    if (wsState !== undefined && wsState !== 1 /* OPEN */) {
-      console.warn(`[WhatsAppBot] WebSocket not actually OPEN (state=${wsState}). Forcing reconnect.`);
+    if (wsState !== undefined && wsState !== 1) {
       this.isConnected = false;
       setTimeout(() => this.initSocket(), 500);
       return {
@@ -5480,14 +1161,12 @@ TONE & STYLE:
     try {
       const jid = `${cleanPhone}@s.whatsapp.net`;
 
-      // Verify the number actually exists on WhatsApp before attempting send.
       let exists = true;
       try {
         const [result] = await this.sock.onWhatsApp(jid);
         exists = !!result?.exists;
-      } catch (checkErr) {
-        console.warn("[WhatsAppBot] onWhatsApp check failed, proceeding anyway:", checkErr);
-      }
+      } catch {}
+
       if (!exists) {
         return {
           success: false,
@@ -5495,34 +1174,23 @@ TONE & STYLE:
         };
       }
 
-      // Human-like sending with live 'typing...' indicator & natural delay
       const sendResult = await this.sendHumanLikeMessage(jid, text);
 
       if (!sendResult?.key?.id) {
-        console.error("[WhatsAppBot] sendMessage returned without a message key — likely a silent failure.", sendResult);
         return {
           success: false,
           message: "WhatsApp did not confirm this message was queued for delivery. Try again or re-pair the connection.",
         };
       }
 
-      console.log(`[WhatsAppBot] Message successfully sent to ${cleanPhone} (with human typing simulation): "${text}" (id: ${sendResult.key.id})`);
       return { success: true, message: `Message delivered to +${cleanPhone} from Friday Assistant!` };
     } catch (err: any) {
-      console.error("[WhatsAppBot] Error sending message:", err);
       this.isConnected = false;
       setTimeout(() => this.initSocket(), 500);
       return { success: false, message: `Failed to send WhatsApp message: ${err?.message || err}` };
     }
   }
 
-  /**
-   * Sends a Photo/Image with realistic 0.5s human attachment selection and typing presence.
-   */
-  /**
-   * Sends a Photo/Image with realistic 0.5s human attachment selection and typing presence.
-   * Supports sending to phone numbers, group JIDs, and LID contacts.
-   */
   public async sendPhotoMessage(
     target: string,
     imageSource: string | Buffer,
@@ -5540,8 +1208,7 @@ TONE & STYLE:
         if (cleanPhone.length === 10) cleanPhone = `91${cleanPhone}`;
         jid = `${cleanPhone}@s.whatsapp.net`;
       }
-      
-      // Simulate Human Attachment + Gallery pick + Caption typing
+
       await humanBotFirewallService.simulateWhatsAppPhotoDelays(this.sock, jid, caption);
 
       const sendOptions: any = {};
@@ -5559,49 +1226,33 @@ TONE & STYLE:
 
       const imagePayload = typeof imageSource === "string" ? { url: imageSource } : imageSource;
       if (Buffer.isBuffer(imageSource)) {
-        this.recordChatPhoto(jid, imageSource, "image/jpeg");
+        whatsappMediaRouter.recordChatPhoto(jid, imageSource, "image/jpeg");
       }
       let sendRes: any = null;
       try {
-        sendRes = await this.sock.sendMessage(
-          jid,
-          {
-            image: imagePayload,
-          },
-          sendOptions
-        );
-      } catch (quotedErr) {
-        console.warn("[WhatsAppBot] Quoted photo send failed, retrying without quoted context:", (quotedErr as any)?.message || quotedErr);
-        sendRes = await this.sock.sendMessage(jid, {
-          image: imagePayload,
-        });
+        sendRes = await this.sock.sendMessage(jid, { image: imagePayload }, sendOptions);
+      } catch {
+        sendRes = await this.sock.sendMessage(jid, { image: imagePayload });
       }
 
       if (sendRes?.key?.id) {
         this.botSentMessageIds.add(sendRes.key.id);
       }
 
-      // Send caption as clean separate next message instead of overlaying on the image
       if (caption && caption.trim()) {
         try {
           await this.sendHumanLikeMessage(jid, caption.trim(), "", messageKey);
-        } catch (capErr) {
-          console.warn("[WhatsAppBot] Post-photo caption send notice:", capErr);
-        }
+        } catch {}
       }
 
       const recipientKey = jid.replace(/@.*$/, "");
       humanBotFirewallService.recordDispatchedMessage("whatsapp", recipientKey);
       return { success: true, message: `Photo successfully delivered to ${jid}!` };
     } catch (e: any) {
-      console.error("[WhatsAppBot] Failed to send photo:", e);
       return { success: false, message: `Failed to send photo: ${e?.message || e}` };
     }
   }
 
-  /**
-   * Sends an Audio / Voice Note (PTT) with realistic human recording presence.
-   */
   public async sendVoiceMessage(
     target: string,
     audioBuffer: Buffer,
@@ -5620,7 +1271,6 @@ TONE & STYLE:
         jid = `${cleanPhone}@s.whatsapp.net`;
       }
 
-      // Send recording presence update
       try {
         await this.sock.sendPresenceUpdate("recording", jid);
         await new Promise((r) => setTimeout(r, 1200));
@@ -5642,21 +1292,9 @@ TONE & STYLE:
 
       let sendRes: any = null;
       try {
-        sendRes = await this.sock.sendMessage(
-          jid,
-          {
-            audio: audioBuffer,
-            mimetype,
-            ptt: false,
-          },
-          sendOptions
-        );
-      } catch (quotedErr) {
-        sendRes = await this.sock.sendMessage(jid, {
-          audio: audioBuffer,
-          mimetype,
-          ptt: false,
-        });
+        sendRes = await this.sock.sendMessage(jid, { audio: audioBuffer, mimetype, ptt: false }, sendOptions);
+      } catch {
+        sendRes = await this.sock.sendMessage(jid, { audio: audioBuffer, mimetype, ptt: false });
       }
 
       if (sendRes?.key?.id) {
@@ -5667,12 +1305,9 @@ TONE & STYLE:
       humanBotFirewallService.recordDispatchedMessage("whatsapp", recipientKey);
       return { success: true, message: `Voice note delivered to ${jid}!` };
     } catch (e: any) {
-      console.error("[WhatsAppBot] Failed to send voice note:", e);
       return { success: false, message: `Failed to send voice note: ${e?.message || e}` };
     }
   }
-
-  private baileysEnabled: boolean = true;
 
   public isBaileysEnabled(): boolean {
     return this.baileysEnabled;
@@ -5686,9 +1321,6 @@ TONE & STYLE:
     this.autoReplyEnabled = enabled;
   }
 
-  /**
-   * Generates the Master @ Commands Directory Card.
-   */
   public getMasterAllCommandsCard(): string {
     return `⚡ *FRIDAY AI — ALL @ COMMANDS DIRECTORY* 🚀
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -5737,7 +1369,7 @@ TONE & STYLE:
 💡 *Tip:* Aap natural bhasha me bhi bol sakte hain (e.g. _"Ram ko msg kar do"_, _"is bill ka excel bana do"_, _"photo ko sticker bana do"_). Friday automatically execute karegi! 👍`;
   }
 
-  public getStatus() {
+  public getStatus(): WhatsAppStatus {
     return {
       isConnected: this.isConnected,
       dedicatedPhone: this.dedicatedPhone,

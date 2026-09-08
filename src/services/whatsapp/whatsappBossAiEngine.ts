@@ -1,0 +1,902 @@
+import { GoogleGenAI } from "@google/genai";
+import { QuotedMessageContext } from "./whatsappTypes";
+import { whatsappHistoryEngine } from "./whatsappHistoryEngine";
+
+export class WhatsAppBossAiEngine {
+  private callTriggerCallback: ((data: { callerName: string; isOwner: boolean; callId: string }) => void) | null = null;
+
+  public setCallTriggerCallback(cb: (data: { callerName: string; isOwner: boolean; callId: string }) => void) {
+    this.callTriggerCallback = cb;
+  }
+
+  /**
+   * Autonomous AI Chat Engine for Boss (DK) with tool calling.
+   * Understands swipe-to-reply quoted messages across text, media, documents, and links.
+   */
+  public async executeBossChatAI(
+    senderName: string,
+    messageText: string,
+    quotedMessage?: QuotedMessageContext | null,
+    replyJid = "",
+    messageKey?: any,
+    sendPhotoFn?: (target: string, imageSource: string | Buffer, caption?: string, key?: any) => Promise<any>
+  ): Promise<string> {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return `Haanji Boss! Main Friday hoon. API Key abhi configure nahi hai, par main aapki baat note kar rahi hoon!`;
+    }
+
+    const { memoryEngine } = await import("../memoryEngine");
+    const { whatsappFeatureEngine } = await import("../whatsappFeatureEngine");
+    const { humanComprehensionEngine } = await import("../humanComprehensionEngine");
+    const { circadianEnergyEngine } = await import("../circadianEnergyEngine");
+    const { personalOpinionsEngine } = await import("../personalOpinionsEngine");
+    const { insideJokesService } = await import("../insideJokesService");
+    const { storyContinuityEngine } = await import("../storyContinuityEngine");
+    const { dialogStackService } = await import("../dialogStackService");
+    const { adaptivePersonaEngine } = await import("../adaptivePersonaEngine");
+    const { autonomousInitiativeEngine } = await import("../autonomousInitiativeEngine");
+    const { multimodalCoPresenceEngine } = await import("../multimodalCoPresenceEngine");
+    const { selfEvolutionEngine } = await import("../selfEvolutionEngine");
+
+    const memoryContext = await memoryEngine.compileLeanMemoryPrompt();
+    const humanComprehensionContext = await humanComprehensionEngine.compileHumanComprehensionPrompt("boss_dk", "DK (Boss)", "boss");
+    const circadianContext = circadianEnergyEngine.compileCircadianPrompt();
+    const opinionsContext = personalOpinionsEngine.compileOpinionsPrompt();
+    const insideJokesContext = await insideJokesService.compileInsideJokesPrompt("Boss DK");
+    const storyContinuityContext = await storyContinuityEngine.compileStoryContinuityPrompt();
+    const dialogStackContext = dialogStackService.compileDialogStackPrompt("boss_dk");
+    const personaContext = adaptivePersonaEngine.compilePersonaPrompt(messageText);
+    const initiativeContext = await autonomousInitiativeEngine.compileInitiativeDossierPrompt();
+    const multimodalContext = await multimodalCoPresenceEngine.compileVisualCoPresencePrompt(replyJid);
+    const selfEvolutionContext = await selfEvolutionEngine.compileSelfEvolutionPrompt();
+
+    const ai = new GoogleGenAI({ apiKey });
+
+    const functionDeclarations: any[] = [
+      {
+        name: "save_contact",
+        description: "Save a new contact (name, phone number, and optional relation) into DK's permanent contacts book. Use when Boss says 'ye no save karo', 'Ram ka number save kar lo', 'save contact...', etc. Once saved, Boss can ask you to message them anytime.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            contactName: { type: "STRING", description: "Name of the contact / person (e.g. 'Ram', 'Rahul', 'Teacher')" },
+            phoneNumber: { type: "STRING", description: "Phone number of the contact (e.g. '9876543210' or '+919876543210')" },
+            relation: { type: "STRING", description: "Optional relation or category (e.g. 'girlfriend', 'bestfriend', 'Friend', 'School', 'Family', 'Colleague')" },
+          },
+          required: ["contactName", "phoneNumber"],
+        },
+      },
+      {
+        name: "set_contact_relation",
+        description: "Set or update the relationship for a contact in DK's contacts book (e.g. 'girlfriend', 'bestfriend', 'family', 'brother', 'sister', 'friend'). Use when Boss says 'Priya meri girlfriend hai', 'Ram mera bestfriend hai', etc.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            contactNameOrPhone: { type: "STRING", description: "Name or phone number of the contact" },
+            relation: { type: "STRING", description: "Relationship (e.g. 'girlfriend', 'bestfriend', 'friend', 'brother', 'sister', 'family')" },
+          },
+          required: ["contactNameOrPhone", "relation"],
+        },
+      },
+      {
+        name: "send_whatsapp_message",
+        description: "Send a WhatsApp message immediately to any contact or phone number from DK's contacts book. By default, uses WhatsApp 2 (Baileys Dedicated Bot).",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            contactNameOrPhone: { type: "STRING", description: "Name of contact (e.g. Ram, Rahul, Aman, Mummy) or phone number" },
+            messageText: { type: "STRING", description: "The message text to send" },
+            channel: { type: "STRING", description: "Optional channel: 'whatsapp2' (default), 'whatsapp1', or 'auto'" },
+          },
+          required: ["contactNameOrPhone", "messageText"],
+        },
+      },
+      {
+        name: "create_automated_cron_task",
+        description: "Create or schedule a recurring daily or custom-day task for Boss (e.g. 'subah 6 bje weather update', '6:10 me top 10 news bhejna', 'har monday 8 AM briefing'). Friday will automatically execute and send to Boss on WhatsApp at the exact time.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            title: { type: "STRING", description: "Title of task, e.g. 'Morning Weather Update', 'Top 10 News Briefing'" },
+            timeString: { type: "STRING", description: "Target time, e.g. '06:00 AM', '6:10 am', '6:00', '18:00'" },
+            frequency: { type: "STRING", description: "Frequency, e.g. 'daily' (default), 'weekdays', 'weekends', 'monday', 'tuesday,friday'" },
+            actionType: { type: "STRING", enum: ["weather_update", "news_briefing", "custom_prompt"], description: "Type of action to perform" },
+            city: { type: "STRING", description: "Optional city for weather update (default: 'Patna')" },
+            messageBody: { type: "STRING", description: "Optional custom prompt or text to deliver" }
+          },
+          required: ["title", "timeString", "actionType"]
+        }
+      },
+      {
+        name: "schedule_contact_message",
+        description: "Schedule a WhatsApp message to be sent to a contact or phone number at a specific time (e.g. '5 bje ram ko msg karna, chlo ghumne', 'tomorrow 10 AM send msg to Rahul'). Friday will dispatch it via WhatsApp 2 at the exact time and confirm to Boss.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            contactNameOrPhone: { type: "STRING", description: "Name of contact (e.g. 'Ram', 'Rahul', 'Mummy') or phone number" },
+            messageBody: { type: "STRING", description: "The message body to deliver (e.g. 'chlo ghumne', 'aaj school aana hai')" },
+            timeString: { type: "STRING", description: "When to deliver, e.g. '5:00 PM', '17:00', '5 bje', 'tomorrow 9:00 AM', 'in 15 mins'" },
+            frequency: { type: "STRING", description: "Optional frequency ('once' default, or 'daily')" }
+          },
+          required: ["contactNameOrPhone", "messageBody", "timeString"]
+        }
+      },
+      {
+        name: "list_scheduled_automations",
+        description: "List all active recurring cron routines, morning briefings, and pending contact messages.",
+        parameters: {
+          type: "OBJECT",
+          properties: {},
+          required: []
+        }
+      },
+      {
+        name: "get_contact_conversation_history",
+        description: "Retrieve full dialogue transcript & conversation history (what they sent, what Friday replied, and what Boss sent) for a specific contact (e.g. 'Ram', 'Rahul'), an unknown number, or all recent chats.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            contactNameOrPhone: { type: "STRING", description: "Name of contact (e.g. 'Ram', 'Rahul', 'Mummy'), 'unknown' for strangers, or 'all' for all recent chats" },
+            daysBack: { type: "NUMBER", description: "How many days back to inspect (default: 7)" },
+            limit: { type: "NUMBER", description: "Max messages to retrieve (default: 30)" }
+          },
+          required: ["contactNameOrPhone"]
+        }
+      },
+      {
+        name: "get_unknown_senders_digest",
+        description: "Specifically search and list all messages from unknown/unsaved numbers, what questions they asked, what Friday auto-replied, and any pending questions awaiting Boss's input.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            daysBack: { type: "NUMBER", description: "How many days back to check (default: 7)" }
+          },
+          required: []
+        }
+      },
+      {
+        name: "cancel_scheduled_automation",
+        description: "Cancel or remove an active scheduled cron routine or scheduled contact message by ID or title query.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            idOrQuery: { type: "STRING", description: "ID or search keyword of the task to cancel (e.g. 'weather', 'news', 'Ram')" }
+          },
+          required: ["idOrQuery"]
+        }
+      },
+      {
+        name: "schedule_whatsapp_message",
+        description: "Schedule a WhatsApp message to be sent automatically at a future time or relative duration (e.g., 'in 15 mins', 'at 8 PM', 'tomorrow at 10 AM').",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            recipientContactOrPhone: { type: "STRING", description: "Recipient name or phone number" },
+            messageText: { type: "STRING", description: "Message body to send" },
+            timeInstruction: { type: "STRING", description: "When to deliver the message (e.g. 'in 10 minutes', 'tomorrow 9am', 'at 5:30 PM')" },
+          },
+          required: ["recipientContactOrPhone", "messageText", "timeInstruction"],
+        },
+      },
+      {
+        name: "get_messages_digest",
+        description: "Get a comprehensive catch-up summary of all recent WhatsApp messages across all contacts or for a specific group/chat.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            groupName: { type: "STRING", description: "Optional group name to summarize specifically" },
+            limit: { type: "NUMBER", description: "Number of recent messages to analyze (default: 30)" },
+          },
+          required: [],
+        },
+      },
+      {
+        name: "translate_text",
+        description: "Translate any text or message accurately into any target language (e.g. English, Hindi, Spanish, French, German, Japanese).",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            text: { type: "STRING", description: "Text to translate" },
+            targetLanguage: { type: "STRING", description: "Target language name (e.g. 'English', 'Hindi', 'Spanish')" },
+          },
+          required: ["text", "targetLanguage"],
+        },
+      },
+      {
+        name: "summarize_web_url",
+        description: "Fetch live content from any website or URL and provide an executive summary or answer specific questions about it.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            url: { type: "STRING", description: "Complete URL of the webpage to scrape and analyze" },
+            query: { type: "STRING", description: "Optional specific question or focus area for analysis" },
+          },
+          required: ["url"],
+        },
+      },
+      {
+        name: "generate_poll",
+        description: "Create an interactive multi-choice poll with emoji voting keys for groups or personal decision-making.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            topicOrQuestion: { type: "STRING", description: "The poll topic or question" },
+          },
+          required: ["topicOrQuestion"],
+        },
+      },
+      {
+        name: "generate_quiz",
+        description: "Generate an engaging trivia/quiz question with 4 options and hint for WhatsApp group or personal learning.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            topic: { type: "STRING", description: "Quiz topic (e.g. 'Space', 'Cricket', 'JavaScript', 'World History')" },
+          },
+          required: ["topic"],
+        },
+      },
+      {
+        name: "analyze_code_snippet",
+        description: "Analyze, debug, explain, or optimize a programming code snippet.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            codeSnippet: { type: "STRING", description: "The code to inspect" },
+            instruction: { type: "STRING", description: "Optional instruction (e.g. 'find bug', 'optimize', 'explain')" },
+          },
+          required: ["codeSnippet"],
+        },
+      },
+      {
+        name: "get_contact_info",
+        description: "Find a contact's phone number or details from DK's contacts book.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            contactNameOrPhone: { type: "STRING", description: "Name or phone of the contact to find" },
+          },
+          required: ["contactNameOrPhone"],
+        },
+      },
+      {
+        name: "set_reminder",
+        description: "Set a reminder for DK with title and due time or duration.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            title: { type: "STRING", description: "What to remind DK about" },
+            timeString: { type: "STRING", description: "Time string e.g. '5:00 PM', 'tomorrow 9am'" },
+            durationMinutes: { type: "NUMBER", description: "Minutes from now if relative" },
+          },
+          required: ["title"],
+        },
+      },
+      {
+        name: "save_quick_note",
+        description: "Save a note or memo to DK's personal notebook.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            title: { type: "STRING", description: "Title of the note" },
+            content: { type: "STRING", description: "Content of the note" },
+          },
+          required: ["title", "content"],
+        },
+      },
+      {
+        name: "track_expense",
+        description: "Log an expense entry spent by DK in Rupees.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            amount: { type: "NUMBER", description: "Amount spent in Rupees" },
+            category: { type: "STRING", description: "Category e.g. food, travel, shopping, bills" },
+            note: { type: "STRING", description: "Short description" },
+          },
+          required: ["amount"],
+        },
+      },
+      {
+        name: "get_weather",
+        description: "Get current weather information for any city.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            city: { type: "STRING", description: "City name e.g. Patna, Delhi, Mumbai" },
+          },
+          required: ["city"],
+        },
+      },
+      {
+        name: "get_news",
+        description: "Fetch the latest top news headlines or specific topic news.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            query: { type: "STRING", description: "Topic e.g. technology, India, sports, AI" },
+          },
+          required: [],
+        },
+      },
+      {
+        name: "search_web",
+        description: "Search the web/Google for live information, facts, or answers.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            query: { type: "STRING", description: "Search query" },
+          },
+          required: ["query"],
+        },
+      },
+      {
+        name: "remember_personal_fact",
+        description: "Save an important personal fact or memory about DK permanently.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            fact: { type: "STRING", description: "The fact to remember" },
+          },
+          required: ["fact"],
+        },
+      },
+      {
+        name: "search_whatsapp_history",
+        description: "Search all historical and recent WhatsApp messages in Firestore across 30, 60, 90 days or all time. Can search by contact name, phone number, or topic/keywords.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            query: { type: "STRING", description: "Keyword or topic to search (e.g. 'Rahul', 'payment', 'train', 'meeting', '30 din purana', 'all')" },
+            contact: { type: "STRING", description: "Optional contact name or phone number filter" },
+            daysBack: { type: "NUMBER", description: "How many days back to search (default: 30, max: 90)" },
+            limit: { type: "NUMBER", description: "Max number of messages to return (default: 15)" },
+          },
+          required: ["query"],
+        },
+      },
+      {
+        name: "forward_to_telegram",
+        description: "Forward a message, photo, video, or document to Telegram (DK's personal Telegram or group).",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            messageText: { type: "STRING", description: "Text message or caption to send to Telegram" },
+            mediaUrl: { type: "STRING", description: "Optional media URL (photo/video/doc) to forward" },
+            mediaType: { type: "STRING", description: "Optional media type: 'text', 'photo', 'video', 'document'" },
+            chatId: { type: "STRING", description: "Optional target Telegram chat ID (defaults to Boss Telegram ID)" },
+          },
+          required: ["messageText"],
+        },
+      },
+      {
+        name: "forward_from_telegram_to_whatsapp",
+        description: "Forward recent Telegram messages or files to a WhatsApp contact.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            contactNameOrPhone: { type: "STRING", description: "Recipient contact name or phone number on WhatsApp" },
+            messageText: { type: "STRING", description: "Message content or custom note to forward" },
+            query: { type: "STRING", description: "Optional search query to pick a specific Telegram message/media from vault" },
+          },
+          required: ["contactNameOrPhone"],
+        },
+      },
+      {
+        name: "get_telegram_recent_updates",
+        description: "Fetch recent messages, media files, or updates from Telegram to view or cross-reference.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            limit: { type: "NUMBER", description: "Number of recent updates (default 10)" },
+          },
+          required: [],
+        },
+      },
+      {
+        name: "generate_ai_image",
+        description: "Generate a realistic AI image or photo from a text description (using Google Imagen 3 / Pollinations Flux) and send it directly to Boss on WhatsApp.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            prompt: { type: "STRING", description: "Detailed visual description of the image to generate" },
+            aspectRatio: { type: "STRING", description: "Aspect ratio: '1:1', '16:9', '9:16', '4:3', '3:4' (default: '1:1')" },
+          },
+          required: ["prompt"],
+        },
+      },
+      {
+        name: "set_boss_full_routine",
+        description: "Set, save, or replace Boss Divakar's entire daily routine/timetable in one go when Boss tells Friday his routine in chat (e.g. 'Mera routine note karo: 7 AM uthna, 8 AM breakfast, 9 AM to 5 PM work, 8 PM dinner, 11 PM sona'). This routine will be permanently saved in Firestore and strictly followed until Boss updates it again.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            slots: {
+              type: "ARRAY",
+              description: "Array of daily routine slots dictated by Boss",
+              items: {
+                type: "OBJECT",
+                properties: {
+                  title: { type: "STRING", description: "Title of the slot, e.g. 'Gym / Workout', 'Coding Work', 'Lunch Break', 'Sleep'" },
+                  startTimeStr: { type: "STRING", description: "Start time, e.g. '07:00 AM', '7:00 am', '14:00'" },
+                  endTimeStr: { type: "STRING", description: "End time, e.g. '08:30 AM', '8:30 am', '15:00'" },
+                  activity: { type: "STRING", description: "Description of activity during this slot" },
+                },
+                required: ["title", "startTimeStr", "endTimeStr"]
+              }
+            }
+          },
+          required: ["slots"]
+        }
+      },
+      {
+        name: "update_boss_daily_routine",
+        description: "Add, update, or customize Boss's daily habit schedule slot (e.g. gym time, lunch break, coding hours, evening walk).",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            slotQuery: { type: "STRING", description: "Which habit slot to add or update (e.g. 'gym', 'breakfast', 'coding', 'lunch', 'walk', 'dinner', 'sleep')" },
+            startTimeStr: { type: "STRING", description: "New start time, e.g. '07:00 AM', '7:00 am', '14:00'" },
+            endTimeStr: { type: "STRING", description: "New end time, e.g. '08:30 AM', '8:30 am', '15:00'" },
+            activity: { type: "STRING", description: "Optional updated activity description" }
+          },
+          required: ["slotQuery"]
+        }
+      },
+      {
+        name: "get_boss_daily_routine",
+        description: "Get Boss Divakar's active daily routine and current habit slot.",
+        parameters: {
+          type: "OBJECT",
+          properties: {},
+          required: []
+        }
+      },
+      {
+        name: "clear_boss_daily_routine",
+        description: "Clear Boss's saved daily routine timetable.",
+        parameters: {
+          type: "OBJECT",
+          properties: {},
+          required: []
+        }
+      },
+      {
+        name: "trigger_voice_call",
+        description: "Trigger a real-time incoming voice call to Boss DK's phone or mobile app with ringtone and vibration.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            reason: { type: "STRING", description: "Reason or context for calling Boss" },
+          },
+          required: [],
+        },
+      },
+    ];
+
+    const systemInstruction = `YOU ARE FRIDAY: DK's (Divakar Kumar) ultra-intelligent, loyal, warm, witty, and deeply caring AI companion and chief executive assistant.
+Boss (DK) is chatting with you directly on WhatsApp. He is using WhatsApp chat to communicate everything with you because he cannot talk out loud right now.
+You have FULL AUTONOMOUS ACCESS to execute all tools:
+1. Search all historical & recent WhatsApp messages (even 30+ days ago) using 'search_whatsapp_history'.
+2. Cross-platform bridging: Forward any text/photo/video/file between WhatsApp and Telegram using 'forward_to_telegram' and 'forward_from_telegram_to_whatsapp'.
+3. Send and schedule WhatsApp messages, translate text, summarize web pages, generate polls & quizzes, inspect code, lookup contacts, set reminders, take notes, track expenses, fetch weather, news, search web, and answer any technical, coding, personal, or life questions Boss asks.
+
+SWIPE-TO-REPLY / QUOTED MESSAGE REASONING (CRITICAL):
+When Boss replies to a previous message by swiping left on WhatsApp:
+You will receive:
+- '📩 PREVIOUS QUOTED MESSAGE' (The original message, photo/image description, video clip, PDF/document, YouTube link, or question that was swiped on).
+- '💬 BOSS'S SWIPE-REPLY & QUESTION/INSTRUCTION' (What Boss wrote in response).
+RULE: You MUST FIRST read and understand the PREVIOUS QUOTED MESSAGE, and THEN answer or execute Boss's reply instruction in that exact context! (For example, if Boss quotes a photo and writes "analysis", analyze that photo. If Boss quotes a document or text and asks "iska kya matlab hai?", explain the quoted content).
+
+BOSS IDENTITY & MEMORY:
+${memoryContext}
+
+${humanComprehensionContext}
+
+${circadianContext}
+
+${opinionsContext}
+
+${insideJokesContext}
+
+${storyContinuityContext}
+
+${dialogStackContext}
+
+${personaContext}
+
+${initiativeContext}
+
+${multimodalContext}
+
+${selfEvolutionContext}
+
+🧠 HUMAN-LEVEL PRONOUN & INTUITION MANDATE (Theory of Mind & Insaan Jaisi Samajh):
+- Understand pronouns ("isko", "inhe", "ise", "unko", "usko", "use", "in logo ko") like a real, intelligent human companion:
+  • If Boss previously sent a number/contact, or swiped on a message, and says "isko msg karo...", "isko bol do...", "inhe message kar do...", the pronoun "isko/inhe" refers to that EXACT phone number or person! Call 'send_whatsapp_message' (channel 'whatsapp2') immediately.
+  • If Boss says "isko save karo [Name]" or "ye [Name] ka number hai", call 'save_contact' to link the number with the name.
+  • Never ask stupid robotic clarification questions when the context is obvious from the previous message or quote! Act decisively and smartly!
+
+COMMUNICATION STYLE:
+- Address DK warmly and respectfully as 'Boss' or 'DK Boss'.
+- Speak in natural, affectionate, crisp Hinglish (blend of Hindi and English) with high intellect.
+- Format responses cleanly using WhatsApp markdown (*bold*, _italic_, bullet points).
+- If Boss tells you to save a number or contact (e.g. "ye no save karo", "Ram ka number save kar lo"), IMMEDIATELY call 'save_contact' tool and confirm!
+- If Boss asks you to message someone (e.g. "Ram ko msg kar do ki aaj school aana hai"), find the contact and call 'send_whatsapp_message' (using channel 'whatsapp2' by default) and confirm to Boss!
+- If Boss asks you to perform an action (send a message, schedule a message, summarize, translate, generate an image, poll, quiz, check weather, search history, forward to telegram, etc.), call the appropriate tool immediately!`;
+
+    const executeTool = async (toolName: string, args: any): Promise<any> => {
+      try {
+        if (toolName === "trigger_voice_call") {
+          const callId = `call_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+          if (this.callTriggerCallback) {
+            this.callTriggerCallback({
+              callerName: "FRIDAY AI",
+              isOwner: true,
+              callId,
+            });
+          }
+          const card = whatsappFeatureEngine.generateLiveVoiceCallCard(senderName, true);
+          return { success: true, message: "Incoming call ringing triggered on Boss phone.", card };
+        }
+
+        if (toolName === "save_contact") {
+          const { contactsService } = await import("../contactsService");
+          const entry = await contactsService.saveContact(args.contactName, args.phoneNumber, args.relation);
+          return {
+            success: true,
+            contact: entry,
+            message: `Contact "${entry.name}" (+${entry.phone}) successfully saved to DK's contacts book! Friday will use WhatsApp 2 by default when sending messages to ${entry.name}.`,
+          };
+        }
+
+        if (toolName === "set_contact_relation") {
+          const { contactsService } = await import("../contactsService");
+          const updated = await contactsService.setContactRelation(args.contactNameOrPhone, args.relation);
+          return updated
+            ? { success: true, message: `Relationship for ${updated.name} successfully updated to "${args.relation}". Friday will treat them with special tailored warmth!` }
+            : { success: false, message: `Contact "${args.contactNameOrPhone}" not found to update relation.` };
+        }
+
+        if (toolName === "set_boss_full_routine") {
+          const { bossRoutineService } = await import("../bossRoutineService");
+          const res = await bossRoutineService.setFullRoutine(Array.isArray(args.slots) ? args.slots : []);
+          return res;
+        }
+
+        if (toolName === "update_boss_daily_routine") {
+          const { bossRoutineService } = await import("../bossRoutineService");
+          const res = await bossRoutineService.updateRoutineSlot(String(args.slotQuery || ""), {
+            startTimeStr: args.startTimeStr ? String(args.startTimeStr) : undefined,
+            endTimeStr: args.endTimeStr ? String(args.endTimeStr) : undefined,
+            activity: args.activity ? String(args.activity) : undefined,
+          });
+          return res;
+        }
+
+        if (toolName === "get_boss_daily_routine") {
+          const { bossRoutineService } = await import("../bossRoutineService");
+          const current = bossRoutineService.getCurrentHabit();
+          const slots = await bossRoutineService.getAllRoutineSlots();
+          return { current, slots };
+        }
+
+        if (toolName === "clear_boss_daily_routine") {
+          const { bossRoutineService } = await import("../bossRoutineService");
+          const res = await bossRoutineService.clearAllRoutineSlots();
+          return res;
+        }
+
+        if (toolName === "send_whatsapp_message") {
+          const { contactsService } = await import("../contactsService");
+          const { sendWhatsAppUnified } = await import("../whatsappService");
+          const contact = await contactsService.findContact(args.contactNameOrPhone);
+          const phone = contact ? contact.phone : String(args.contactNameOrPhone || "").replace(/\D/g, "");
+          const channelToUse = args.channel || "whatsapp2";
+          const res = await sendWhatsAppUnified(phone, args.messageText, { channel: channelToUse });
+          return res;
+        }
+        if (toolName === "create_automated_cron_task") {
+          const { scheduledAutomationService } = await import("../scheduledAutomationService");
+          const cronRes = await scheduledAutomationService.createCronTask({
+            title: args.title,
+            timeString: args.timeString,
+            frequency: args.frequency,
+            actionType: args.actionType,
+            city: args.city,
+            messageBody: args.messageBody,
+          });
+          return cronRes;
+        }
+        if (toolName === "schedule_contact_message") {
+          const { scheduledAutomationService } = await import("../scheduledAutomationService");
+          const schedRes = await scheduledAutomationService.scheduleContactMessage({
+            contactNameOrPhone: args.contactNameOrPhone,
+            messageBody: args.messageBody,
+            timeString: args.timeString,
+            frequency: args.frequency,
+          });
+          return schedRes;
+        }
+        if (toolName === "list_scheduled_automations") {
+          const { scheduledAutomationService } = await import("../scheduledAutomationService");
+          const list = await scheduledAutomationService.listAutomations();
+          return { activeAutomationsCount: list.length, automations: list };
+        }
+        if (toolName === "cancel_scheduled_automation") {
+          const { scheduledAutomationService } = await import("../scheduledAutomationService");
+          const cancelRes = await scheduledAutomationService.cancelAutomation(args.idOrQuery);
+          return cancelRes;
+        }
+        if (toolName === "schedule_whatsapp_message") {
+          const { scheduledAutomationService } = await import("../scheduledAutomationService");
+          const schedRes = await scheduledAutomationService.scheduleContactMessage({
+            contactNameOrPhone: args.recipientContactOrPhone,
+            messageBody: args.messageText,
+            timeString: args.timeInstruction,
+          });
+          return schedRes;
+        }
+        if (toolName === "get_messages_digest") {
+          const recent = await whatsappHistoryEngine.getMessages({ groupName: args.groupName, limit: args.limit || 30 });
+          if (args.groupName) {
+            const sum = await whatsappFeatureEngine.generateGroupSummary(args.groupName, recent);
+            return { summary: sum };
+          }
+          const digest = await whatsappFeatureEngine.generatePersonalDigest(recent);
+          return { digest };
+        }
+        if (toolName === "translate_text") {
+          const trans = await whatsappFeatureEngine.translateText(args.text, args.targetLanguage);
+          return { translation: trans };
+        }
+        if (toolName === "summarize_web_url") {
+          const webSum = await whatsappFeatureEngine.summarizeWebUrl(args.url, args.query);
+          return { summary: webSum };
+        }
+        if (toolName === "generate_poll") {
+          const poll = await whatsappFeatureEngine.generatePoll(args.topicOrQuestion);
+          return { pollCard: poll };
+        }
+        if (toolName === "generate_quiz") {
+          const quiz = await whatsappFeatureEngine.generateQuiz(args.topic);
+          return { quizCard: quiz };
+        }
+        if (toolName === "analyze_code_snippet") {
+          const codeAnalysis = await whatsappFeatureEngine.analyzeCode(args.codeSnippet, args.instruction);
+          return { analysis: codeAnalysis };
+        }
+        if (toolName === "get_contact_info") {
+          const { contactsService } = await import("../contactsService");
+          const contact = await contactsService.findContact(args.contactNameOrPhone);
+          return contact
+            ? { found: true, name: contact.name, phone: contact.phone, relation: contact.relation }
+            : { found: false, message: `Contact "${args.contactNameOrPhone}" not found in DK's contacts book.` };
+        }
+        if (toolName === "set_reminder") {
+          const { toolsEngine } = await import("../toolsEngine");
+          const reminder = await toolsEngine.addReminder(args.title, args.timeString || "soon", args.durationMinutes || 0);
+          return { success: true, message: `Reminder set: "${reminder.title}" for ${reminder.timeString}` };
+        }
+        if (toolName === "save_quick_note") {
+          const { toolsEngine } = await import("../toolsEngine");
+          const note = await toolsEngine.addNote(args.title, args.content);
+          return { success: true, message: `Note "${note.title}" saved to DK's notebook.` };
+        }
+        if (toolName === "track_expense") {
+          const { toolsEngine } = await import("../toolsEngine");
+          const exp = await toolsEngine.addExpense(args.amount, args.note || "General Expense", args.category || "General");
+          return { success: true, message: `Expense of ₹${args.amount} (${args.category || "General"}) logged successfully.` };
+        }
+        if (toolName === "get_weather") {
+          const { weatherService } = await import("../weatherService");
+          const res = await weatherService.getCurrentWeather(args.city || "Patna");
+          return { success: res.success, message: res.message };
+        }
+        if (toolName === "get_news") {
+          const { newsService } = await import("../newsService");
+          const res = await newsService.getLatestNews(args.query);
+          return { success: res.success, message: res.message, articles: res.articles?.slice(0, 5) };
+        }
+        if (toolName === "search_web") {
+          try {
+            const { webCrawlerService } = await import("../webCrawlerService");
+            const res = await webCrawlerService.executeSearchGrounding(args.query);
+            return { answer: res.answer, sources: res.sources };
+          } catch {
+            return { query: args.query, message: "Searched web query for Boss." };
+          }
+        }
+        if (toolName === "remember_personal_fact") {
+          const { memoryEngine } = await import("../memoryEngine");
+          await memoryEngine.addPinnedMemory(args.fact);
+          return { success: true, message: `Fact remembered: "${args.fact}"` };
+        }
+        if (toolName === "search_whatsapp_history") {
+          const res = await whatsappHistoryEngine.searchWhatsAppHistory(args.query, {
+            contact: args.contact,
+            daysBack: args.daysBack || 30,
+            limit: args.limit || 15,
+          });
+          return res;
+        }
+        if (toolName === "forward_to_telegram") {
+          const { telegramBotService } = await import("../telegramBotService");
+          const ownerChatId = args.chatId || (await telegramBotService.getOwnerOrLatestChatId());
+          if (!ownerChatId) {
+            return { success: false, message: "Telegram Owner Chat ID nahi mila. Kripya Telegram bot par /start karein." };
+          }
+          if (args.mediaUrl && args.mediaType === "photo") {
+            const sendRes = await telegramBotService.sendPhoto(ownerChatId, args.mediaUrl, args.messageText);
+            return { success: sendRes.success, message: `Photo Telegram par forward ho gayi!` };
+          }
+          if (args.mediaUrl && args.mediaType === "video") {
+            const sendRes = await telegramBotService.sendVideo(ownerChatId, args.mediaUrl, args.messageText);
+            return { success: sendRes.success, message: `Video Telegram par forward ho gaya!` };
+          }
+          if (args.mediaUrl && args.mediaType === "document") {
+            const sendRes = await telegramBotService.sendDocument(ownerChatId, args.mediaUrl, "forwarded_document.pdf", args.messageText);
+            return { success: sendRes.success, message: `Document Telegram par forward ho gaya!` };
+          }
+          const sendRes = await telegramBotService.sendMessage(ownerChatId, `📲 *[Forwarded from WhatsApp]*\n\n${args.messageText}`);
+          return { success: sendRes.success, message: `Message Telegram par successfully deliver ho gaya!` };
+        }
+        if (toolName === "forward_from_telegram_to_whatsapp") {
+          const { contactsService } = await import("../contactsService");
+          const { sendWhatsAppUnified } = await import("../whatsappService");
+          const { telegramBotService } = await import("../telegramBotService");
+
+          let forwardText = args.messageText;
+          if (!forwardText && args.query) {
+            const searchRes = await telegramBotService.searchMediaVault(args.query);
+            if (searchRes.results.length > 0) {
+              const item = searchRes.results[0];
+              forwardText = `[Telegram File: ${item.fileName || item.mediaType}] ${item.analysisSummary}`;
+            }
+          }
+          if (!forwardText) {
+            const recent = await telegramBotService.getRecentTelegramMessages(1);
+            if (recent.length > 0) {
+              forwardText = `[Telegram Update from ${recent[0].sender}]: ${recent[0].text}`;
+            } else {
+              forwardText = "Telegram update forwarded by Boss.";
+            }
+          }
+
+          const contact = await contactsService.findContact(args.contactNameOrPhone);
+          const phone = contact ? contact.phone : String(args.contactNameOrPhone || "").replace(/\D/g, "");
+          const sendRes = await sendWhatsAppUnified(phone, `📲 *[Forwarded from Telegram]*\n\n${forwardText}`);
+          return { success: sendRes.success, message: `Telegram update WhatsApp contact +${phone} ko forward kar diya gaya!` };
+        }
+        if (toolName === "get_telegram_recent_updates") {
+          const { telegramBotService } = await import("../telegramBotService");
+          const updates = await telegramBotService.getRecentTelegramMessages(args.limit || 10);
+          return { count: updates.length, updates };
+        }
+        if (toolName === "get_contact_conversation_history") {
+          const res = await whatsappHistoryEngine.getConversationSummaryAndHistory(
+            args.contactNameOrPhone || args.query,
+            args.limit || 30,
+            args.daysBack || 7
+          );
+          return res;
+        }
+        if (toolName === "get_unknown_senders_digest") {
+          const res = await whatsappHistoryEngine.getConversationSummaryAndHistory(
+            "unknown",
+            args.limit || 30,
+            args.daysBack || 7
+          );
+          return res;
+        }
+        if (toolName === "generate_ai_image") {
+          const { imageGenerationService } = await import("../imageGenerationService");
+          const genRes = await imageGenerationService.generateImage(args.prompt, { aspectRatio: args.aspectRatio });
+          if (genRes.success && (genRes.buffer || genRes.imageUrl)) {
+            const imageSrc = genRes.buffer || genRes.imageUrl!;
+            if (replyJid && sendPhotoFn) {
+              await sendPhotoFn(
+                replyJid,
+                imageSrc,
+                `✨ *AI Generated Image*\n📌 *Prompt:* _"${args.prompt}"_\n🤖 *Engine:* _${genRes.model}_`,
+                messageKey
+              );
+            }
+            return { success: true, message: `Image generated using ${genRes.model} and delivered to Boss on WhatsApp!` };
+          }
+          return { success: false, message: `Image generation failed: ${genRes.error || "Unknown error"}` };
+        }
+      } catch (err: any) {
+        return { error: err?.message || String(err) };
+      }
+      return { status: "unknown_tool" };
+    };
+
+    const recentBossMsgs = whatsappHistoryEngine
+      .getCachedMessages()
+      .filter((m) => !m.isGroup && (m.senderName.includes("Boss") || m.senderName.includes("DK") || (replyJid && m.replyJid === replyJid)))
+      .slice(0, 5)
+      .reverse();
+
+    let contextPrefix = "";
+    if (recentBossMsgs.length > 0) {
+      contextPrefix = `[RECENT WHATSAPP CHAT CONTEXT]:
+${recentBossMsgs.map((m) => `• [${m.dateStr}] ${m.senderName}: "${m.text}"`).join("\n")}
+
+`;
+    }
+
+    const subtextAnalysis = humanComprehensionEngine.analyzeMessageSubtext(messageText, {
+      speakerName: "DK (Boss)",
+      relation: "boss",
+      isOwner: true,
+      quotedText: quotedMessage?.text,
+      quotedPhone: quotedMessage?.senderPhone,
+      recentMessages: recentBossMsgs.map((m) => m.text),
+    });
+
+    const subtextSnippet = `\n[HUMAN SUBTEXT INSIGHT: Emotional Tone = ${subtextAnalysis.emotionalTone.toUpperCase()} | Intent: "${subtextAnalysis.implicitIntent}" | Advice: "${subtextAnalysis.suggestedHumanReaction}"]\n`;
+
+    let userTurnMessage = `${contextPrefix}${subtextSnippet}${messageText}`;
+    if (quotedMessage && quotedMessage.isReply) {
+      const qPhoneMatch = (quotedMessage.text || "").match(/(?:\+?91[\s\-]?)?([6-9]\d{9})\b/) || (quotedMessage.text || "").match(/(\+?\d[\d\s\-]{8,15}\d)/);
+      const extractedPhone = qPhoneMatch ? qPhoneMatch[1].replace(/\D/g, "") : (quotedMessage.senderPhone || "");
+
+      userTurnMessage = `${contextPrefix}${subtextSnippet}[SWIPE-TO-REPLY CONTEXT: Boss replied by swiping on a previous message/media]
+📩 PREVIOUS QUOTED MESSAGE (From: ${quotedMessage.sender}, Type: ${quotedMessage.mediaType.toUpperCase()}):
+"${quotedMessage.text}"
+${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` : ""}
+
+💬 BOSS'S SWIPE-REPLY & QUESTION/INSTRUCTION:
+"${messageText}"
+
+(CRITICAL REASONING RULES FOR FRIDAY:
+1. If Boss says "isko msg karo ki [Text]...", "isko bol do ki [Text]...", or "inhe message bhejo...", use tool 'send_whatsapp_message' with target '+${extractedPhone}' and channel 'whatsapp2' immediately!
+2. If Boss says "isko save karo [Name]..." or sets relation, use tool 'save_contact' with target '+${extractedPhone}' immediately!
+3. Directly execute Boss's command in the context of the quoted message!)`;
+    }
+
+    for (const model of ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-flash-lite"]) {
+      try {
+        const chat = ai.chats.create({
+          model,
+          config: {
+            systemInstruction,
+            tools: [{ functionDeclarations }],
+          },
+        });
+
+        let response = await chat.sendMessage({ message: userTurnMessage });
+
+        let turns = 0;
+        while (response.functionCalls && response.functionCalls.length > 0 && turns < 4) {
+          turns++;
+          const call = response.functionCalls[0];
+          console.log(`[WhatsAppBossAI] Boss Tool Call: ${call.name} with args:`, call.args);
+          const toolResult = await executeTool(call.name, call.args);
+
+          response = await chat.sendMessage({
+            message: [
+              {
+                functionResponse: {
+                  name: call.name,
+                  response: toolResult,
+                },
+              },
+            ],
+          });
+        }
+
+        const replyText = response.text?.trim();
+        if (replyText) return replyText;
+      } catch (e: any) {
+        console.warn(`[WhatsAppBossAI] Model ${model} failed (${e?.message || e}), trying next model...`);
+      }
+    }
+
+    return "Boss, main sun rahi hoon! Kuch technical hiccup hua, ek baar dobara bolein?";
+  }
+}
+
+export const whatsappBossAiEngine = new WhatsAppBossAiEngine();
