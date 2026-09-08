@@ -135,40 +135,106 @@ export class MediaToolsService {
   /**
    * Downloads clean MP4 video buffer from social media link
    */
+  /**
+   * Downloads clean MP4 video buffer from social media link across Instagram, YouTube, TikTok, Twitter/X, and 40+ platforms
+   */
   public async downloadSocialVideo(videoUrl: string): Promise<{ success: boolean; buffer?: Buffer; filename?: string; title?: string; error?: string }> {
-    const cobaltInstances = [
-      "https://api.cobalt.tools",
-      "https://cobalt.kwiatekm.pl",
-      "https://co.wuk.sh",
-      "https://api.wuk.sh",
-      "https://cobalt-api.kwiatek.xyz",
-    ];
+    const cleanUrl = videoUrl.trim();
 
-    for (const instance of cobaltInstances) {
+    // ── Strategy 1: TikTok Dedicated Engine (TikWM API - 100% Free & No Watermark) ──
+    if (/tiktok\.com\//i.test(cleanUrl) || /douyin\.com\//i.test(cleanUrl)) {
       try {
-        const response = await fetch(`${instance}/api/json`, {
-          method: "POST",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/json",
-            "User-Agent": "FridayAI-Bot/2.0",
-          },
-          body: JSON.stringify({
-            url: videoUrl,
-            vQuality: "720",
-            filenamePattern: "basic",
-          }),
-          signal: AbortSignal.timeout(15000),
+        const tikRes = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(cleanUrl)}&hd=1`, {
+          signal: AbortSignal.timeout(10000),
+        });
+        if (tikRes.ok) {
+          const data: any = await tikRes.json();
+          const videoStreamUrl = data?.data?.hdplay || data?.data?.play || data?.data?.wmplay;
+          if (videoStreamUrl) {
+            const vidRes = await fetch(videoStreamUrl, { signal: AbortSignal.timeout(35000) });
+            if (vidRes.ok) {
+              const buffer = Buffer.from(await vidRes.arrayBuffer());
+              if (buffer.length > 5000) {
+                return {
+                  success: true,
+                  buffer,
+                  filename: `TikTok_${Date.now()}.mp4`,
+                  title: data?.data?.title || "TikTok Video",
+                };
+              }
+            }
+          }
+        }
+      } catch (tikErr) {
+        console.warn("[MediaTools] TikWM fallback:", (tikErr as any)?.message || tikErr);
+      }
+    }
+
+    // ── Strategy 2: Twitter / X Dedicated Engine (FxTwitter / VxTwitter Direct CDN) ──
+    const twitterMatch = cleanUrl.match(/(?:twitter\.com|x\.com)\/(?:[a-zA-Z0-9_]+)\/status\/(\d+)/i);
+    if (twitterMatch && twitterMatch[1]) {
+      const tweetId = twitterMatch[1];
+      const twitGateways = [
+        `https://api.fxtwitter.com/status/${tweetId}`,
+        `https://api.vxtwitter.com/Twitter/status/${tweetId}`,
+      ];
+
+      for (const gw of twitGateways) {
+        try {
+          const res = await fetch(gw, { signal: AbortSignal.timeout(8000) });
+          if (res.ok) {
+            const data: any = await res.json();
+            const mediaUrl =
+              data?.tweet?.media?.videos?.[0]?.url ||
+              data?.media_extended?.[0]?.url ||
+              data?.tweet?.media?.all?.[0]?.url;
+
+            if (mediaUrl) {
+              const vidRes = await fetch(mediaUrl, { signal: AbortSignal.timeout(35000) });
+              if (vidRes.ok) {
+                const buffer = Buffer.from(await vidRes.arrayBuffer());
+                if (buffer.length > 5000) {
+                  return {
+                    success: true,
+                    buffer,
+                    filename: `Twitter_${tweetId}.mp4`,
+                    title: data?.tweet?.text?.slice(0, 50) || "Twitter Video",
+                  };
+                }
+              }
+            }
+          }
+        } catch {}
+      }
+    }
+
+    // ── Strategy 3: Direct Instagram Stream & Metadata Scraper ──
+    const instaMatch = cleanUrl.match(/instagram\.com\/(?:reel|reels|p|tv)\/([a-zA-Z0-9_-]+)/i);
+    if (instaMatch && instaMatch[1]) {
+      const shortcode = instaMatch[1];
+      try {
+        const instaHeaders = {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.9",
+        };
+
+        const pageRes = await fetch(`https://www.instagram.com/reel/${shortcode}/`, {
+          headers: instaHeaders,
+          signal: AbortSignal.timeout(10000),
         });
 
-        if (response.ok) {
-          const data: any = await response.json();
-          const streamUrl = data.url || (data.picker && data.picker[0]?.url);
-          if (streamUrl) {
-            const vidRes = await fetch(streamUrl, {
-              headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
-              signal: AbortSignal.timeout(30000),
-            });
+        if (pageRes.ok) {
+          const html = await pageRes.text();
+          const videoMatch =
+            html.match(/<meta\s+(?:property|name)=["']og:video(?::secure_url)?["']\s+content=["'](https?:\/\/[^"']+)["']/i) ||
+            html.match(/"video_url":\s*"([^"]+)"/i) ||
+            html.match(/"playable_url":\s*"([^"]+)"/i) ||
+            html.match(/"contentUrl":\s*"([^"]+)"/i);
+
+          if (videoMatch && videoMatch[1]) {
+            let streamUrl = videoMatch[1].replace(/\\u0026/g, "&").replace(/\\/g, "").replace(/&amp;/g, "&");
+            const vidRes = await fetch(streamUrl, { headers: instaHeaders, signal: AbortSignal.timeout(30000) });
             if (vidRes.ok) {
               const arrayBuf = await vidRes.arrayBuffer();
               const buffer = Buffer.from(arrayBuf);
@@ -176,39 +242,159 @@ export class MediaToolsService {
                 return {
                   success: true,
                   buffer,
-                  filename: `Friday_${Date.now()}.mp4`,
-                  title: data.filename || "Social Media Video",
+                  filename: `Insta_Reel_${shortcode}.mp4`,
+                  title: `Instagram Reel (${shortcode})`,
                 };
               }
             }
           }
         }
-      } catch (err) {
-        // Try next instance
+      } catch (instaErr) {
+        console.warn("[MediaTools] Direct Instagram scraper fallback:", (instaErr as any)?.message || instaErr);
       }
     }
 
-    // Secondary fallback: SaveFrom / SSYouTube / SnapInsta Gateway
-    try {
-      const fallbackApi = `https://tools.imput.net/api/video?url=${encodeURIComponent(videoUrl)}`;
-      const res = await fetch(fallbackApi, { signal: AbortSignal.timeout(12000) });
-      if (res.ok) {
-        const data: any = await res.json();
-        if (data?.downloadUrl) {
-          const vidRes = await fetch(data.downloadUrl);
-          if (vidRes.ok) {
-            const buffer = Buffer.from(await vidRes.arrayBuffer());
-            return { success: true, buffer, filename: `Video_${Date.now()}.mp4`, title: data.title || "Video" };
+    // ── Strategy 4: Direct YouTube Streams (Invidious / Piped API) ──
+    const ytIdMatch = cleanUrl.match(/(?:youtube\.com\/(?:shorts\/|watch\?v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})/i);
+    if (ytIdMatch && ytIdMatch[1]) {
+      const videoId = ytIdMatch[1];
+      const invidiousInstances = [
+        "https://inv.nadeko.net",
+        "https://invidious.jing.rocks",
+        "https://invidious.nerdvpn.de",
+        "https://yt.artemislena.eu",
+      ];
+
+      for (const instance of invidiousInstances) {
+        try {
+          const apiRes = await fetch(`${instance}/api/v1/videos/${videoId}`, {
+            headers: { "User-Agent": "Mozilla/5.0" },
+            signal: AbortSignal.timeout(8000),
+          });
+
+          if (apiRes.ok) {
+            const data: any = await apiRes.json();
+            const formatStreams = data.formatStreams || [];
+            const stream =
+              formatStreams.find((s: any) => s.container === "mp4" && s.resolution === "720p") ||
+              formatStreams.find((s: any) => s.container === "mp4") ||
+              formatStreams[0];
+
+            if (stream?.url) {
+              const streamRes = await fetch(stream.url, { signal: AbortSignal.timeout(35000) });
+              if (streamRes.ok) {
+                const arrayBuf = await streamRes.arrayBuffer();
+                const buffer = Buffer.from(arrayBuf);
+                if (buffer.length > 5000) {
+                  return {
+                    success: true,
+                    buffer,
+                    filename: `YouTube_${videoId}.mp4`,
+                    title: data.title || "YouTube Video",
+                  };
+                }
+              }
+            }
+          }
+        } catch {}
+      }
+    }
+
+    // ── Strategy 5: Cobalt Multi-Instance Cluster (v10 & v7 compatibility) ──
+    const cobaltInstances = [
+      "https://api.cobalt.tools",
+      "https://cobalt.api.kwiatek.xyz",
+      "https://co.wuk.sh",
+      "https://api.wuk.sh",
+      "https://cobalt.slpy.one",
+      "https://cobalt.kwiatekm.pl",
+      "https://cobalt.canine.tools",
+      "https://cobalt.synced.ly",
+    ];
+
+    for (const instance of cobaltInstances) {
+      for (const endpoint of ["/api/json", "/"]) {
+        try {
+          const response = await fetch(`${instance}${endpoint}`, {
+            method: "POST",
+            headers: {
+              Accept: "application/json",
+              "Content-Type": "application/json",
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            },
+            body: JSON.stringify({
+              url: cleanUrl,
+              videoQuality: "720",
+              filenameStyle: "basic",
+            }),
+            signal: AbortSignal.timeout(10000),
+          });
+
+          if (response.ok) {
+            const data: any = await response.json();
+            const streamUrl = data.url || (data.picker && data.picker[0]?.url) || (data.audio && data.audio[0]?.url);
+            if (streamUrl) {
+              const vidRes = await fetch(streamUrl, {
+                headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+                signal: AbortSignal.timeout(35000),
+              });
+              if (vidRes.ok) {
+                const arrayBuf = await vidRes.arrayBuffer();
+                const buffer = Buffer.from(arrayBuf);
+                if (buffer.length > 5000) {
+                  return {
+                    success: true,
+                    buffer,
+                    filename: `Video_${Date.now()}.mp4`,
+                    title: data.filename || "Social Media Video",
+                  };
+                }
+              }
+            }
+          }
+        } catch {}
+      }
+    }
+
+    // ── Strategy 6: Universal Multi-Engine Gateways (VKRDown / Imput / FastDL) ──
+    const fallbackGateways = [
+      `https://api.vkrdown.com/api/index.php?url=${encodeURIComponent(cleanUrl)}`,
+      `https://tools.imput.net/api/video?url=${encodeURIComponent(cleanUrl)}`,
+    ];
+
+    for (const gateway of fallbackGateways) {
+      try {
+        const res = await fetch(gateway, { signal: AbortSignal.timeout(12000) });
+        if (res.ok) {
+          const data: any = await res.json();
+          const downloadUrl =
+            data?.data?.downloadUrl ||
+            data?.downloadUrl ||
+            data?.url ||
+            data?.video ||
+            (data?.data?.formats && data?.data?.formats[0]?.url);
+
+          if (downloadUrl) {
+            const vidRes = await fetch(downloadUrl, { signal: AbortSignal.timeout(30000) });
+            if (vidRes.ok) {
+              const buffer = Buffer.from(await vidRes.arrayBuffer());
+              if (buffer.length > 5000) {
+                return {
+                  success: true,
+                  buffer,
+                  filename: `Video_${Date.now()}.mp4`,
+                  title: data.title || "Video",
+                };
+              }
+            }
           }
         }
-      }
-    } catch (e) {
-      // Fallback failed
+      } catch {}
     }
 
     return {
       success: false,
-      error: "Video download service is currently busy or the post is private. Please try another link.",
+      error: "Video download server busy hai ya post private/restricted hai. Kripya doosra link try karein.",
     };
   }
 
