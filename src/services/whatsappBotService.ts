@@ -1329,13 +1329,17 @@ class WhatsAppBotService {
               }
 
               // Detect target language requested (e.g. Hindi, English, French, Spanish, Bengali, Marathi, etc.)
-              const targetLangMatch = cleanText.match(/\b(?:in|to|me|mein)?\s*(hindi|english|bengali|bangla|marathi|gujarati|punjabi|urdu|tamil|telugu|kannada|malayalam|french|spanish|german|japanese|russian|arabic|chinese)\b/i);
+              const targetLangMatch = cleanText.match(/\b(?:in|to|me|mein|language)?\s*(hindi|english|bengali|bangla|marathi|gujarati|punjabi|urdu|tamil|telugu|kannada|malayalam|french|spanish|german|japanese|russian|arabic|chinese|italian|portuguese|korean)\b/i);
               const targetLanguage = targetLangMatch ? targetLangMatch[1].trim() : null;
+              const isVoiceOutputRequested = /\b(voice|audio|speak|bolo|sunao|bol\s*kar|bol\s*ke|padh\s*ke|voice\s*me)\b/i.test(cleanText);
 
               const apiKey = process.env.GEMINI_API_KEY;
+              let replyText = "";
+              let speechScript = "";
+
               if (apiKey) {
                 const ai = new GoogleGenAI({ apiKey });
-                const prompt = `You are Friday AI, DK's ultra-intelligent audio decoder and voice note summarizer.
+                const prompt = `You are Friday AI, DK's ultra-intelligent audio decoder and voice assistant.
 The user swiped-up / replied to an audio recording and asked: "${rawText}".
 
 ORIGINAL SPOKEN AUDIO TRANSCRIPT:
@@ -1346,31 +1350,45 @@ ${transcribed}
 TARGET LANGUAGE REQUESTED (if any): ${targetLanguage || "None"}
 
 INSTRUCTIONS:
-1. Provide a clean, executive, beautifully structured WhatsApp response in natural Hinglish:
+1. Provide a clean, executive WhatsApp response in natural Hinglish:
    - 🎙️ *Spoken Audio Transcription (Original):* (Show the exact transcribed speech)
    ${targetLanguage ? `- 🌐 *Translation in ${targetLanguage}:* (Accurate, natural translation of what was spoken into ${targetLanguage})` : ""}
    - 💡 *Audio Decode & Summary (Kya bol raha hai):* (Explain clearly what the speaker is saying, their tone, intent, and context)
    - 📌 *Key Action Items / Highlights:* (Mention names, dates, amounts, decisions, or requests in the audio if present)
-2. Use clean WhatsApp formatting (*bold*, bullet points, emojis).`;
+2. In a final section tagged with [SPEAK_START] and [SPEAK_END], provide ONLY a short 1-3 sentence natural spoken script in ${targetLanguage || "Hindi"} explaining what was said so Friday can speak it out loud.`;
 
                 for (const model of ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-2.5-flash", "gemini-2.5-flash-lite"]) {
                   try {
                     const resp = await ai.models.generateContent({ model, contents: prompt });
-                    const reply = resp.text?.trim();
-                    if (reply) {
-                      await this.sendHumanLikeMessage(replyJid, reply, rawText, messageKey);
-                      return true;
+                    const fullResp = resp.text?.trim();
+                    if (fullResp) {
+                      const speakMatch = fullResp.match(/\[SPEAK_START\]([\s\S]*?)\[SPEAK_END\]/i);
+                      speechScript = speakMatch ? speakMatch[1].trim() : "";
+                      replyText = fullResp.replace(/\[SPEAK_START\][\s\S]*?\[SPEAK_END\]/gi, "").trim();
+                      break;
                     }
                   } catch {}
                 }
               }
 
-              await this.sendHumanLikeMessage(
-                replyJid,
-                `🎙️ *Voice Note Transcription:*\n_"${transcribed}"_\n\n💡 *Summary:* Spoken message successfully transcribed.`,
-                rawText,
-                messageKey
-              );
+              if (!replyText) {
+                replyText = `🎙️ *Voice Note Transcription:*\n_"${transcribed}"_\n\n💡 *Summary:* Spoken message successfully decoded.`;
+              }
+
+              await this.sendHumanLikeMessage(replyJid, replyText, rawText, messageKey);
+
+              // If voice output requested or target language voice requested, generate spoken audio
+              if (isVoiceOutputRequested || targetLanguage) {
+                try {
+                  const textToSpeak = speechScript || (targetLanguage ? `Yeh message ${targetLanguage} me keh raha hai: ${transcribed}` : transcribed);
+                  const speechRes = await voiceBridgeService.generateSpeech(textToSpeak);
+                  if (speechRes && speechRes.buffer.length > 0) {
+                    await this.sendVoiceMessage(replyJid, speechRes.buffer, messageKey, speechRes.mimeType);
+                  }
+                } catch (vErr) {
+                  console.warn("[WhatsAppBot] Swipe audio TTS error:", vErr);
+                }
+              }
               return true;
             }
 
@@ -1405,33 +1423,63 @@ INSTRUCTIONS:
       return true;
     }
 
-    // Case 3: Quoted message is a Summary Card or text message
-    if (quotedMessage.text && quotedMessage.text.length > 15) {
-      const isSummaryCard =
-        quotedMessage.text.includes("📌") ||
-        quotedMessage.text.includes("📝 *Key Summary") ||
-        quotedMessage.text.includes("💡 *Executive") ||
-        quotedMessage.text.includes("Executive Summary") ||
-        quotedMessage.text.toLowerCase().includes("summary");
+    // Case 3: Quoted message is a Text message, Summary Card, or forwarded text
+    if (quotedMessage.text && quotedMessage.text.trim().length > 0) {
+      const isVoiceRequested = /\b(voice|audio|speak|bolo|sunao|bol\s*kar|bol\s*ke|padh\s*ke|voice\s*me)\b/i.test(cleanText);
+      const isExplanationRequested = /\b(kya\s*likha\s*hai|kya\s*likha\s*h|kya\s*hai|samjhao|explain|batao|padho|translate|translation|tarjuma|meaning|matlab)\b/i.test(cleanText);
+      const targetLangMatch = cleanText.match(/\b(?:in|to|me|mein|language)?\s*(hindi|english|bengali|bangla|marathi|gujarati|punjabi|urdu|tamil|telugu|kannada|malayalam|french|spanish|german|japanese|russian|arabic|chinese|italian|portuguese|korean)\b/i);
+      const targetLanguage = targetLangMatch ? targetLangMatch[1].trim() : null;
 
-      if (isSummaryCard || (!isSummaryIntent && quotedMessage.text.length > 25)) {
-        // Direct question on Friday's summary card or quoted message (e.g. "meeting kab hai", "total kitna hai")
-        await this.sendHumanLikeMessage(replyJid, "🔍 *Summary me se dhoondh kar jawab de rahi hoon...* ⚡", rawText, messageKey);
-        const answer = await visionMemoryService.answerQuestionOnMedia({
-          question: rawText,
-          textContext: quotedMessage.text,
-          chatId: replyJid,
-        });
-        await this.sendHumanLikeMessage(replyJid, answer, rawText, messageKey);
-        return true;
-      } else if (isSummaryIntent) {
-        await this.sendHumanLikeMessage(replyJid, "📝 *Quoted message ki summary ban rahi hai...* ⚡", rawText, messageKey);
-        const textSummary = await whatsappFeatureEngine.translateText(
-          `Summarize this message clearly in 3-5 concise bullet points in Hinglish:\n"${quotedMessage.text}"`,
-          "Hinglish"
-        );
-        await this.sendHumanLikeMessage(replyJid, `📑 *Quoted Message Summary:*\n\n${textSummary}`, rawText, messageKey);
-        return true;
+      if (isVoiceRequested || isExplanationRequested || isSummaryIntent || targetLanguage) {
+        const { voiceBridgeService } = await import("./voiceBridgeService");
+        const apiKey = process.env.GEMINI_API_KEY;
+
+        if (apiKey) {
+          const ai = new GoogleGenAI({ apiKey });
+          const prompt = `You are Friday AI, DK's ultra-intelligent companion.
+Boss swiped-up / quoted a message and asked: "${rawText}".
+
+QUOTED ORIGINAL MESSAGE:
+"""
+${quotedMessage.text}
+"""
+
+TARGET LANGUAGE (if requested): ${targetLanguage || "None"}
+
+INSTRUCTIONS:
+1. Explain clearly what is written in the quoted message in natural Hinglish.
+2. If a specific target language is requested, provide an accurate translation.
+3. If user asked a question about the message, answer it clearly and concisely.
+4. Format with clean WhatsApp styling (*bold*, emojis).
+5. At the end, enclose a concise 1-3 sentence natural spoken script in [SPEAK_START] and [SPEAK_END] so Friday can speak it out loud.`;
+
+          for (const model of ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-2.5-flash", "gemini-2.5-flash-lite"]) {
+            try {
+              const resp = await ai.models.generateContent({ model, contents: prompt });
+              const fullResp = resp.text?.trim();
+              if (fullResp) {
+                const speakMatch = fullResp.match(/\[SPEAK_START\]([\s\S]*?)\[SPEAK_END\]/i);
+                const speechScript = speakMatch ? speakMatch[1].trim() : "";
+                const replyText = fullResp.replace(/\[SPEAK_START\][\s\S]*?\[SPEAK_END\]/gi, "").trim();
+
+                await this.sendHumanLikeMessage(replyJid, replyText, rawText, messageKey);
+
+                if (isVoiceRequested || targetLanguage) {
+                  try {
+                    const textToSpeak = speechScript || (targetLanguage ? `Yeh message ${targetLanguage} me keh raha hai: ${quotedMessage.text}` : quotedMessage.text);
+                    const speechRes = await voiceBridgeService.generateSpeech(textToSpeak);
+                    if (speechRes && speechRes.buffer.length > 0) {
+                      await this.sendVoiceMessage(replyJid, speechRes.buffer, messageKey, speechRes.mimeType);
+                    }
+                  } catch (vErr) {
+                    console.warn("[WhatsAppBot] Quoted text TTS error:", vErr);
+                  }
+                }
+                return true;
+              }
+            } catch {}
+          }
+        }
       }
     }
 
