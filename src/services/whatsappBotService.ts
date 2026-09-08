@@ -2216,6 +2216,7 @@ CRITICAL LANGUAGE & TONE MANDATE:
               replyJid,
               {
                 image: imgRes.buffer,
+                mimetype: imgRes.mimeType || "image/jpeg",
                 caption: `🎨 *Friday AI Image* 🚀\n\n✨ *Engine:* ${imgRes.model}\n📝 *Prompt:* _${imgPrompt}_`,
               },
               { quoted: messageKey }
@@ -3659,6 +3660,7 @@ ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` 
               groupJid,
               {
                 image: imgRes.buffer,
+                mimetype: imgRes.mimeType || "image/jpeg",
                 caption: `🎨 *Friday AI Image for ${senderName}* 🚀\n\n✨ *Engine:* ${imgRes.model}\n📝 *Prompt:* _${imgPrompt}_`,
               },
               { quoted: messageKey }

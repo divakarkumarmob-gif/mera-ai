@@ -16,15 +16,85 @@ export interface GeneratedImageResult {
   success: boolean;
   buffer?: Buffer;
   imageUrl?: string;
+  mimeType?: string;
   model: string;
   prompt: string;
   error?: string;
 }
 
+/**
+ * Validates and decodes image buffers, checking for JSON base64 envelopes
+ * and verifying magic bytes for JPEG, PNG, WebP, GIF.
+ */
+function extractValidImageBuffer(rawBuf: Buffer): { buffer: Buffer; mimeType: string } | null {
+  if (!rawBuf || rawBuf.length === 0) return null;
+
+  // 1. Check if the buffer is actually a JSON response with base64 encoded image
+  const strStart = rawBuf.toString("utf8", 0, Math.min(rawBuf.length, 60)).trim();
+  if (strStart.startsWith("{") || strStart.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(rawBuf.toString("utf8"));
+      const b64 =
+        parsed?.result?.image ||
+        parsed?.image ||
+        parsed?.result ||
+        parsed?.data?.[0]?.b64_json ||
+        parsed?.images?.[0] ||
+        parsed?.[0]?.image;
+
+      if (b64 && typeof b64 === "string") {
+        const cleanB64 = b64.replace(/^data:image\/\w+;base64,/, "").trim();
+        const decoded = Buffer.from(cleanB64, "base64");
+        return extractValidImageBuffer(decoded);
+      }
+    } catch {
+      // Not JSON or parse failure
+    }
+  }
+
+  // 2. Magic byte detection
+  // JPEG: FF D8 FF
+  if (rawBuf.length >= 3 && rawBuf[0] === 0xFF && rawBuf[1] === 0xD8 && rawBuf[2] === 0xFF) {
+    return { buffer: rawBuf, mimeType: "image/jpeg" };
+  }
+
+  // PNG: 89 50 4E 47 0D 0A 1A 0A
+  if (
+    rawBuf.length >= 4 &&
+    rawBuf[0] === 0x89 &&
+    rawBuf[1] === 0x50 &&
+    rawBuf[2] === 0x4E &&
+    rawBuf[3] === 0x47
+  ) {
+    return { buffer: rawBuf, mimeType: "image/png" };
+  }
+
+  // WebP: RIFF .... WEBP
+  if (
+    rawBuf.length >= 12 &&
+    rawBuf.toString("ascii", 0, 4) === "RIFF" &&
+    rawBuf.toString("ascii", 8, 12) === "WEBP"
+  ) {
+    return { buffer: rawBuf, mimeType: "image/webp" };
+  }
+
+  // GIF: GIF87a or GIF89a
+  if (rawBuf.length >= 6 && rawBuf.toString("ascii", 0, 3) === "GIF") {
+    return { buffer: rawBuf, mimeType: "image/gif" };
+  }
+
+  // Fallback for valid binary blobs without HTML/JSON wrappers
+  if (rawBuf.length > 5000 && !strStart.startsWith("<") && !strStart.startsWith("{")) {
+    return { buffer: rawBuf, mimeType: "image/jpeg" };
+  }
+
+  return null;
+}
+
 class ImageGenerationService {
   /**
    * Generates a photorealistic AI image from a text prompt.
-   * Returns a Buffer ready for direct WhatsApp / Telegram media upload.
+   * Returns a clean binary Buffer with verified magic bytes ready for WhatsApp media upload.
    */
   public async generateImage(
     prompt: string,
@@ -86,17 +156,23 @@ class ImageGenerationService {
 
           if (resp.ok) {
             const arrayBuf = await resp.arrayBuffer();
-            const buffer = Buffer.from(arrayBuf);
-            if (buffer.length > 2000) {
+            const rawBuf = Buffer.from(arrayBuf);
+            const validated = extractValidImageBuffer(rawBuf);
+            if (validated && validated.buffer.length > 2000) {
               console.log(
-                `[ImageGen] Successfully generated image via Cloudflare (${cfModel}) [${buffer.length} bytes]`
+                `[ImageGen] Successfully generated image via Cloudflare (${cfModel}) [${validated.buffer.length} bytes, ${validated.mimeType}]`
               );
               return {
                 success: true,
-                buffer,
+                buffer: validated.buffer,
+                mimeType: validated.mimeType,
                 model: `Cloudflare (${cfModel.split("/").pop()})`,
                 prompt: rawPrompt,
               };
+            } else {
+              console.warn(
+                `[ImageGen] Cloudflare (${cfModel}) response was not a valid image binary (${rawBuf.length} bytes)`
+              );
             }
           } else {
             const errBody = await resp.text().catch(() => "");
@@ -150,14 +226,16 @@ class ImageGenerationService {
 
             if (resp.ok) {
               const arrayBuf = await resp.arrayBuffer();
-              const buffer = Buffer.from(arrayBuf);
-              if (buffer.length > 2000) {
+              const rawBuf = Buffer.from(arrayBuf);
+              const validated = extractValidImageBuffer(rawBuf);
+              if (validated && validated.buffer.length > 2000) {
                 console.log(
-                  `[ImageGen] Successfully generated image via Hugging Face (${modelName}) [${buffer.length} bytes]`
+                  `[ImageGen] Successfully generated image via Hugging Face (${modelName}) [${validated.buffer.length} bytes, ${validated.mimeType}]`
                 );
                 return {
                   success: true,
-                  buffer,
+                  buffer: validated.buffer,
+                  mimeType: validated.mimeType,
                   model: `Hugging Face (${modelName.split("/").pop()})`,
                   prompt: rawPrompt,
                 };
@@ -198,11 +276,13 @@ class ImageGenerationService {
 
           const imageBase64 = response?.generatedImages?.[0]?.image?.imageBytes;
           if (imageBase64) {
-            const buffer = Buffer.from(imageBase64, "base64");
-            console.log(`[ImageGen] Successfully generated image using Google ${modelName} (${buffer.length} bytes)`);
+            const rawBuffer = Buffer.from(imageBase64, "base64");
+            const validated = extractValidImageBuffer(rawBuffer) || { buffer: rawBuffer, mimeType: "image/jpeg" };
+            console.log(`[ImageGen] Successfully generated image using Google ${modelName} (${validated.buffer.length} bytes)`);
             return {
               success: true,
-              buffer,
+              buffer: validated.buffer,
+              mimeType: validated.mimeType,
               model: `Google ${modelName}`,
               prompt: rawPrompt,
             };
@@ -233,12 +313,16 @@ class ImageGenerationService {
 
       if (resp.ok) {
         const arrayBuf = await resp.arrayBuffer();
-        const buffer = Buffer.from(arrayBuf);
-        if (buffer.length > 1000) {
-          console.log(`[ImageGen] Successfully generated image using Pollinations Flux AI (${buffer.length} bytes)`);
+        const rawBuf = Buffer.from(arrayBuf);
+        const validated = extractValidImageBuffer(rawBuf) || { buffer: rawBuf, mimeType: "image/jpeg" };
+        if (validated && validated.buffer.length > 1000) {
+          console.log(
+            `[ImageGen] Successfully generated image using Pollinations Flux AI (${validated.buffer.length} bytes)`
+          );
           return {
             success: true,
-            buffer,
+            buffer: validated.buffer,
+            mimeType: validated.mimeType,
             imageUrl: pollinationsUrl,
             model: "Pollinations Flux AI",
             prompt: rawPrompt,
@@ -258,12 +342,16 @@ class ImageGenerationService {
       const resp = await fetch(turboUrl);
       if (resp.ok) {
         const arrayBuf = await resp.arrayBuffer();
-        const buffer = Buffer.from(arrayBuf);
-        if (buffer.length > 1000) {
-          console.log(`[ImageGen] Generated image using Pollinations Turbo (${buffer.length} bytes)`);
+        const rawBuf = Buffer.from(arrayBuf);
+        const validated = extractValidImageBuffer(rawBuf) || { buffer: rawBuf, mimeType: "image/jpeg" };
+        if (validated && validated.buffer.length > 1000) {
+          console.log(
+            `[ImageGen] Generated image using Pollinations Turbo (${validated.buffer.length} bytes)`
+          );
           return {
             success: true,
-            buffer,
+            buffer: validated.buffer,
+            mimeType: validated.mimeType,
             imageUrl: turboUrl,
             model: "Pollinations Turbo AI",
             prompt: rawPrompt,
