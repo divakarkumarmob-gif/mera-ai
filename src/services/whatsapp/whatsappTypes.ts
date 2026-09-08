@@ -33,6 +33,9 @@ export interface GirlfriendSession {
   durationMinutes: number;
   timer: NodeJS.Timeout;
   tempHistory: Array<{ role: "user" | "model"; text: string }>;
+  lastUserMsgTime?: number;
+  idleNudgeTimer?: NodeJS.Timeout | null;
+  idleNudgeCount?: number;
 }
 
 export interface ChatPhotoRecord {

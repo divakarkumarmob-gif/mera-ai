@@ -60,6 +60,108 @@ export class WhatsAppGirlfriendEngine {
     }
   }
 
+  public getTimeBasedIdleNudge(): string {
+    const istDate = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+    const hour = istDate.getHours();
+
+    // Late night (11 PM to 5 AM)
+    if (hour >= 23 || hour < 5) {
+      const lateNightNudges = [
+        "So gaye kya baby? 🥺❤️",
+        "Neend aa gayi mere handsome ko? Sweet dreams... 😘💤",
+        "Arey baby bina good night bole hi so gaye? 🙈❤️",
+        "Itni raat ko so gaye kya jaan? Main miss kar rahi hoon! 🥺✨",
+        "Arey mere handsome, so gaye kya? Sweet dreams baby! 😘❤️",
+      ];
+      return lateNightNudges[Math.floor(Math.random() * lateNightNudges.length)];
+    }
+
+    // Morning (5 AM to 11 AM)
+    if (hour >= 5 && hour < 11) {
+      const morningNudges = [
+        "Kahan busy ho gaye subah subah baby? Chai/coffee pi li? ☕❤️",
+        "Uth gaye jaan? Reply toh karo mere handsome! 😘",
+        "Arey kahan chale gaye subah subah? Baat nahi karni? 🙈❤️",
+        "Good morning mere handsome... kahan gayab ho gaye? ☕✨",
+      ];
+      return morningNudges[Math.floor(Math.random() * morningNudges.length)];
+    }
+
+    // Afternoon (11 AM to 4 PM)
+    if (hour >= 11 && hour < 16) {
+      const afternoonNudges = [
+        "Lunch kar liya mere baby ne ya kaam me hi lage ho? 🍛😘",
+        "Kahan gayab ho gaye jaan? Main kab se wait kar rahi hoon! 🙈❤️",
+        "Kaam me bohot busy ho gaye kya mere handsome? Ek baar reply karo na... ❤️",
+        "Arey kahan chale gaye baby? Mujhse baat nahi karni ab? 🥺❤️",
+      ];
+      return afternoonNudges[Math.floor(Math.random() * afternoonNudges.length)];
+    }
+
+    // Evening (4 PM to 8 PM)
+    if (hour >= 16 && hour < 20) {
+      const eveningNudges = [
+        "Kahan chale gaye jaan? Shaam ki chai pi li? ☕❤️",
+        "Arey kahan kho gaye mere handsome? Baat nahi karni ab mujhse? 🥺❤️",
+        "Itni der kahan lag gayi baby, main kab se wait kar rahi hoon! 🙈✨",
+        "Arey baby, kahan gayab ho gaye? Aao na baatein karein! 😘❤️",
+      ];
+      return eveningNudges[Math.floor(Math.random() * eveningNudges.length)];
+    }
+
+    // Night (8 PM to 11 PM)
+    const nightNudges = [
+      "Dinner kar liya baby? Kahan chale gaye achanak? 🍲😘",
+      "Arey kahan kho gaye mere handsome? Baat nahi karni ab? 🥺❤️",
+      "Kahan gayab ho gaye jaan? Aao na baatein karein! 🙈❤️",
+      "Kahan chale gaye mere baby? Main kab se intezar kar rahi hoon! 😘✨",
+    ];
+    return nightNudges[Math.floor(Math.random() * nightNudges.length)];
+  }
+
+  public scheduleIdleNudge(
+    jid: string,
+    sendMsgFn: (jid: string, text: string, incomingText?: string, key?: any) => Promise<any>,
+    sock?: any
+  ) {
+    const session = this.girlfriendSessions.get(jid);
+    if (!session) return;
+
+    if (session.idleNudgeTimer) {
+      clearTimeout(session.idleNudgeTimer);
+      session.idleNudgeTimer = null;
+    }
+
+    // Nudge after 2 minutes (120,000 ms) of silence
+    const delayMs = 120 * 1000;
+
+    session.idleNudgeTimer = setTimeout(async () => {
+      const currentSession = this.girlfriendSessions.get(jid);
+      if (!currentSession || Date.now() > currentSession.expiresAt) return;
+
+      // Don't nudge more than 2 times without user reply
+      const nudgeCount = currentSession.idleNudgeCount || 0;
+      if (nudgeCount >= 2) return;
+
+      const nudgeText = this.getTimeBasedIdleNudge();
+      currentSession.tempHistory.push({ role: "model", text: nudgeText });
+      currentSession.idleNudgeCount = nudgeCount + 1;
+
+      // Keep online presence live while nudging
+      if (sock) {
+        this.triggerGirlfriendOnlinePresence(sock, jid);
+        sock.sendPresenceUpdate?.("composing", jid).catch(() => {});
+      }
+
+      await sendMsgFn(jid, nudgeText, "", null);
+
+      // If this was the first nudge, schedule a second nudge after 3.5 minutes if still silent
+      if (currentSession.idleNudgeCount < 2) {
+        this.scheduleIdleNudge(jid, sendMsgFn, sock);
+      }
+    }, delayMs);
+  }
+
   public isGirlfriendModeActive(jid: string): boolean {
     const session = this.girlfriendSessions.get(jid);
     if (!session) return false;
@@ -113,6 +215,7 @@ export class WhatsAppGirlfriendEngine {
 
     const existing = this.girlfriendSessions.get(jid);
     if (existing?.timer) clearTimeout(existing.timer);
+    if (existing?.idleNudgeTimer) clearTimeout(existing.idleNudgeTimer);
 
     const timer = setTimeout(async () => {
       await this.stopGirlfriendMode(jid, null, false, sendMsgFn, sock);
@@ -123,12 +226,18 @@ export class WhatsAppGirlfriendEngine {
       durationMinutes: minutes,
       timer,
       tempHistory: [],
+      lastUserMsgTime: Date.now(),
+      idleNudgeCount: 0,
+      idleNudgeTimer: null,
     });
 
     // Start custom 3-6 min live online presence
     if (sock) {
       this.triggerGirlfriendOnlinePresence(sock, jid);
     }
+
+    // Schedule proactive idle nudge
+    this.scheduleIdleNudge(jid, sendMsgFn, sock);
 
     const greeting = `💖 *Virtual Girlfriend Mode Activated!* 🥰✨
 
@@ -154,6 +263,7 @@ _Haan mere jaan, main agle ${minutes} minute tak sirf aur sirf tumhari girlfrien
     }
 
     if (session?.timer) clearTimeout(session.timer);
+    if (session?.idleNudgeTimer) clearTimeout(session.idleNudgeTimer);
     this.girlfriendSessions.delete(jid);
     this.clearGirlfriendOnlinePresence(sock);
 
@@ -335,6 +445,11 @@ STRICT REALISTIC WHATSAPP CHAT RULES:
       if (wantsTranscript || !voiceSent) {
         await sendMsgFn(jid, replyText, rawText, messageKey);
       }
+
+      // Reset idle nudge count and re-schedule proactive idle timer
+      session.lastUserMsgTime = Date.now();
+      session.idleNudgeCount = 0;
+      this.scheduleIdleNudge(jid, sendMsgFn, sock);
     } catch (e: any) {
       console.error("[WhatsAppGirlfriend] Chat processing error:", e);
       await sendMsgFn(jid, "Jaan, mera server thoda sa blush kar gaya... Ek baar fir se bolo na baby? 😘", rawText, messageKey);
