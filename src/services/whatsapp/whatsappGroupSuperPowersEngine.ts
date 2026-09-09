@@ -1797,6 +1797,14 @@ Bhagwan aapko lambi umar, beshumar khushiyan, aur bohot saari success de! ðŸš€ðŸ
       }
     }
 
+    // 22.1. Song Details Follow-Up ("Singer kaun hai", "Movie name", "Album", "Lyrics", etc.)
+    if (whatsappFeatureEngine.isSongDetailsQuery(rawText, quotedMessage?.text)) {
+      const detailsReply = whatsappFeatureEngine.handleSongDetailsQuery(groupJid, rawText, quotedMessage?.text);
+      if (detailsReply) {
+        return { handled: true, replyText: detailsReply };
+      }
+    }
+
     // 22.5. Next Song in Playlist Follow-Up ("Agla gaana" / "Next")
     if (whatsappFeatureEngine.isNextSongRequest(rawText)) {
       const nextRes = await whatsappFeatureEngine.handleNextSongInPlaylist(groupJid, senderName);

@@ -413,7 +413,19 @@ OUTPUT FORMAT:
   private chatLastSongMap: Map<string, { title: string; artist: string; ytUrl: string; spotifyUrl: string; timestamp: number }> = new Map();
   private chatPlaylistMap: Map<string, { playlist: Array<{ title: string; artist: string; year: string; ytUrl: string; previewAudioUrl?: string }>; currentIndex: number; categoryName: string; timestamp: number }> = new Map();
 
-  public recordLastSong(chatId: string, song: { title: string; artist: string; ytUrl: string; spotifyUrl: string }) {
+  public recordLastSong(
+    chatId: string,
+    song: {
+      title: string;
+      artist: string;
+      ytUrl: string;
+      spotifyUrl?: string;
+      album?: string;
+      year?: string;
+      genre?: string;
+      lyrics?: string;
+    }
+  ) {
     if (!chatId) return;
     this.chatLastSongMap.set(chatId, { ...song, timestamp: Date.now() });
   }
@@ -427,6 +439,23 @@ OUTPUT FORMAT:
     const clean = (text || "").toLowerCase().trim();
     const quoted = (quotedText || "").toLowerCase();
 
+    if (
+      clean === "link" ||
+      clean === "@link" ||
+      clean === "/link" ||
+      clean === "link do" ||
+      clean === "link de" ||
+      clean === "link bhejo" ||
+      clean === "youtube link" ||
+      clean === "yt link" ||
+      clean === "video link" ||
+      clean === "full song link" ||
+      clean === "pura gaana link" ||
+      clean === "pura gana"
+    ) {
+      return true;
+    }
+
     const isLinkIntent =
       /^(?:(?:is\s*ka|iska|us\s*ka|uska|iss\s*ka|isska|gaane\s*ka|song\s*ka)?\s*(?:bhi\s*)?(?:youtube\s*)?(?:link|video|url)\s*(?:do|de|bhejo|share|chahiye|send|dedo|bhej|de\s*na|plz|batao)?|(?:youtube|yt)\s*link|full\s*(?:song|gaana)|pura\s*(?:song|gaana)|link\s*(?:do|de|bhejo|share)|link|(\d+)(?:st|nd|rd|th)?\s*(?:ka|number)?\s*link)\b/i.test(clean) ||
       /\b(?:iska\s*link|link\s*bhejo|link\s*do|youtube\s*link|full\s*song\s*link|pura\s*gaana\s*link|\d+\s*(?:ka|wala)\s*link)\b/i.test(clean);
@@ -435,11 +464,35 @@ OUTPUT FORMAT:
       quoted.includes("song radar") ||
       quoted.includes("audio preview") ||
       quoted.includes("recommendations") ||
+      quoted.includes("music:") ||
       quoted.includes("track:") ||
-      quoted.includes("singer") ||
-      quoted.includes("streaming link");
+      quoted.includes("singer");
 
-    return isLinkIntent && (isReferencingSong || clean.includes("link") || clean.includes("youtube"));
+    return isLinkIntent && (isReferencingSong || clean.includes("link") || clean.includes("youtube") || clean === "link");
+  }
+
+  public isSongDetailsQuery(text: string, quotedText?: string): boolean {
+    const clean = (text || "").toLowerCase().trim();
+    const isDetailsIntent =
+      /\b(?:singer|artist|kisne\s*gaya|gayak|movie\s*name|album\s*name|kis\s*film|kis\s*movie|genre|lyrics|bol|details?|gaane\s*ke\s*baare\s*me)\b/i.test(clean);
+    return isDetailsIntent;
+  }
+
+  public handleSongDetailsQuery(chatId: string, text: string, quotedText?: string): string | null {
+    const cached = this.getLastSong(chatId);
+    if (!cached || Date.now() - cached.timestamp > 3600000) return null;
+
+    const detailsLines: string[] = [
+      `🎶 *Music:* ${cached.title}`,
+      cached.artist ? `🎙️ *Singer(s):* ${cached.artist}` : "",
+      cached.album ? `🎬 *Movie / Album:* ${cached.album}` : "",
+      cached.year ? `📅 *Year:* ${cached.year}` : "",
+      cached.genre ? `🏷️ *Genre:* ${cached.genre}` : "",
+    ].filter(Boolean);
+
+    const lyricsBlock = cached.lyrics ? `\n\n📝 *Hook Lyrics:*\n_"${cached.lyrics}"_` : "";
+
+    return `📋 *SONG DETAILS* 🎶✨\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n${detailsLines.join("\n")}${lyricsBlock}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n▶️ *YouTube Link:*\n${cached.ytUrl}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n🎧 _Enjoy! Volume UP!_ 🔊🔥`;
   }
 
   public isNextSongRequest(text: string): boolean {
@@ -485,22 +538,22 @@ OUTPUT FORMAT:
       console.warn("[WhatsAppFeatureEngine] Next song audio fetch warning:", e);
     }
 
-    this.recordLastSong(chatId, { title: current.title, artist: current.artist, ytUrl: current.ytUrl, spotifyUrl: `https://open.spotify.com/search/${encodeURIComponent(current.title + " " + current.artist)}` });
+    this.recordLastSong(chatId, {
+      title: current.title,
+      artist: current.artist,
+      ytUrl: current.ytUrl,
+      spotifyUrl: `https://open.spotify.com/search/${encodeURIComponent(current.title + " " + current.artist)}`,
+      year: current.year || "",
+    });
 
-    const replyText = `🎧 *PLAYING PREVIEW #${songNum}/${total}:* *${current.title}* 🔊✨
+    const replyText = `🎧 *FRIDAY AUDIO PREVIEW (#${songNum}/${total})* 🔊✨
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
-🎶 *Track:* ${current.title}
-🎙️ *Singer:* ${current.artist} ${current.year ? `(${current.year})` : ""}
-🎬 *Category:* ${session.categoryName}
+🎶 *Music:* ${current.title}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
-▶️ *YouTube Full Song Link:*
-${current.ytUrl}
+💡 _Pura gaana sunne ke liye type karein "link"_
+👉 _Agla preview sunne ke liye type karein "next"_ (${songNum === total ? "1st gaana wapas aayega" : `#${songNum + 1} gaana`})
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
-💬 *Agla option:*
-👉 *Pasand aaya?* Likhien _"link do"_
-👉 *Agla preview sunna hai?* Likhien _"agla gaana"_ / _"next"_ (${songNum === total ? "1st gaane par wapas jayenge" : `#${songNum + 1} gaana`})
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-🎧 _Enjoy the music ${requesterName}! Volume UP!_ 🔊🔥`;
+🎧 _Volume UP ${requesterName}!_ 🔊🔥`;
 
     return {
       handled: true,
@@ -525,15 +578,15 @@ ${current.ytUrl}
         const idx = parseInt(specificNumberMatch[1], 10) - 1;
         if (idx >= 0 && idx < session.playlist.length) {
           const s = session.playlist[idx];
-          return `🔴 *YOUTUBE FULL SONG LINK (#${idx + 1}):* 🎬🎧\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n🎶 *Track:* ${s.title}\n🎙️ *Singer:* ${s.artist} ${s.year ? `(${s.year})` : ""}\n\n▶️ *Watch & Listen on YouTube:*\n${s.ytUrl}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n🎧 _Pura gaana suniye aur vibe kijiye! Volume UP!_ 🔊🔥`;
+          return `🔴 *YOUTUBE LINK (#${idx + 1}):* 🎬🎧\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n🎶 *Music:* ${s.title}\n\n▶️ *YouTube Link:*\n${s.ytUrl}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n🎧 _Pura gaana suniye aur vibe kijiye! Volume UP!_ 🔊🔥`;
         }
       }
     }
 
     // 1. Try to extract from quoted message
     if (quotedText) {
-      const trackMatch = quotedText.match(/Track:\s*([^\n\r*]+)/i) || quotedText.match(/AUDIO PREVIEW:\s*\*([^*]+)\*/i) || quotedText.match(/PREVIEW\s*#\d+\/\d+:\s*\*([^*]+)\*/i);
-      const artistMatch = quotedText.match(/Singer(?:\(s\))?:\s*([^\n\r*]+)/i) || quotedText.match(/-\s*\*([^*]+)\*\s*🎵/i);
+      const trackMatch = quotedText.match(/Music:\s*\*?([^\n\r*]+)\*?/i) || quotedText.match(/Track:\s*\*?([^\n\r*]+)\*?/i) || quotedText.match(/AUDIO PREVIEW:\s*\*([^*]+)\*/i) || quotedText.match(/PREVIEW\s*#\d+\/\d+:\s*\*([^*]+)\*/i);
+      const artistMatch = quotedText.match(/Singer(?:\(s\))?:\s*\*?([^\n\r*]+)\*?/i);
       if (trackMatch && trackMatch[1]) targetTitle = trackMatch[1].trim();
       if (artistMatch && artistMatch[1]) targetArtist = artistMatch[1].trim();
     }
@@ -555,7 +608,7 @@ ${current.ytUrl}
       ytUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(searchTarget + " official song")}`;
     }
 
-    return `🔴 *YOUTUBE OFFICIAL SONG LINK* 🎬🎧\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n🎶 *Track:* ${targetTitle}\n🎙️ *Singer:* ${targetArtist || "Official Artist"}\n\n▶️ *Watch & Listen on YouTube:*\n${ytUrl}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n🎧 _Pura gaana suniye aur vibe kijiye! Volume UP!_ 🔊🔥`;
+    return `🔴 *YOUTUBE LINK* 🎬🎧\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n🎶 *Music:* ${targetTitle}\n\n▶️ *YouTube Link:*\n${ytUrl}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n🎧 _Pura gaana suniye aur vibe kijiye! Volume UP!_ 🔊🔥`;
   }
 
   public isCategorySongQuery(query: string): boolean {
@@ -685,20 +738,15 @@ Respond ONLY with valid JSON in this exact structure:
             const playlistLines = compiledPlaylist.map((s: any, idx: number) => {
               const isFirst = idx === 0;
               const previewTag = isFirst && (isPreviewReq || audioBuffer) ? " 🔊 _[PLAYING 30s PREVIEW]_" : "";
-              return `${idx + 1}️⃣ *${s.title}* - ${s.artist} ${s.year ? `(${s.year})` : ""}${previewTag}`;
+              return `${idx + 1}️⃣ *${s.title}*${previewTag}`;
             }).join("\n");
 
-            const card = `🎧 *FRIDAY TOP 5 HIT RECOMMENDATIONS: ${categoryName.toUpperCase()}* 🎵🔥
+            const card = `🎧 *FRIDAY TOP 5 RECOMMENDATIONS: ${categoryName.toUpperCase()}* 🎵✨
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 ${playlistLines}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
-▶️ *1st Song YouTube Link:*
-${compiledPlaylist[0].ytUrl}
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-💬 *Options:*
-👉 *Pasand aaya?* Likhien _"link do"_ (Full YouTube Link)
-👉 *Agla gaana sunna hai?* Likhien _"agla gaana"_ ya _"next"_ (2nd gaane ka preview sunne ke liye)
-👉 *Specific number ka link?* Likhien _"3rd ka link do"_
+💡 _Pura gaana sunne ke liye type karein "link"_
+👉 _Agla gaana sunne ke liye type karein "next"_
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 🎧 _Gaana suniye aur vibe kijiye ${requesterName}! Volume UP!_ 🔊🔥`;
 
@@ -793,22 +841,22 @@ Respond ONLY with valid JSON in this exact structure:
     }
 
     // Step 3: Platform Intent Detection (YouTube is DEFAULT Priority)
-    const isSpotifyReq = /\b(?:spotify|spoty)\b/i.test(lowerQuery);
-    const isJioSaavnReq = /\b(?:jiosaavn|jioseven|saavn|jiotunes|jio\s*saavn)\b/i.test(lowerQuery);
-    const isAppleMusicReq = /\b(?:apple\s*music|itunes|apple)\b/i.test(lowerQuery);
-    const isWynkReq = /\b(?:wynk|airtel)\b/i.test(lowerQuery);
-    const isAllReq = /\b(?:all\s*links?|sab\s*link|sare\s*link|har\s*jagah|all\s*platforms?)\b/i.test(lowerQuery);
-
     const searchTarget = `${trackTitle} ${artistName}`.trim();
     const ytSearchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(searchTarget + " official song")}`;
-    const ytMusicUrl = `https://music.youtube.com/search?q=${encodeURIComponent(searchTarget)}`;
     const spotifyUrl = `https://open.spotify.com/search/${encodeURIComponent(searchTarget)}`;
-    const jioSaavnUrl = `https://www.jiosaavn.com/search/${encodeURIComponent(searchTarget)}`;
-    const wynkUrl = `https://wynk.in/music/search/${encodeURIComponent(searchTarget)}`;
 
     // Record last song into chat memory
     if (chatId) {
-      this.recordLastSong(chatId, { title: trackTitle, artist: artistName, ytUrl: ytSearchUrl, spotifyUrl });
+      this.recordLastSong(chatId, {
+        title: trackTitle,
+        artist: artistName,
+        ytUrl: ytSearchUrl,
+        spotifyUrl,
+        album: albumName,
+        year: releaseYear,
+        genre,
+        lyrics: lyricsSnippet,
+      });
     }
 
     // Fetch Audio Preview Buffer if preview requested
@@ -825,61 +873,37 @@ Respond ONLY with valid JSON in this exact structure:
       }
     }
 
-    const detailsBlock = [
-      `🎶 *Track:* ${trackTitle}`,
-      `🎙️ *Singer(s):* ${artistName}`,
-      albumName ? `🎬 *Movie / Album:* ${albumName}${releaseYear ? ` (${releaseYear})` : ""}` : (releaseYear ? `📅 *Year:* ${releaseYear}` : ""),
-      genre ? `🏷️ *Genre:* ${genre}` : "",
-    ]
-      .filter(Boolean)
-      .join("\n");
+    if (isPreviewReq || audioBuffer) {
+      const previewCard = `🎧 *FRIDAY AUDIO PREVIEW* 🔊✨
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎶 *Music:* ${trackTitle}
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+💡 _Pura gaana sunne ke liye type karein "link"_
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎧 _Gaana suniye aur vibe kijiye ${requesterName}! Volume UP!_ 🔊🔥`;
 
-    const lyricsBlock = lyricsSnippet
-      ? `\n\n📝 *Hook Lyrics:*\n_"${lyricsSnippet}"_`
-      : "";
-
-    // Build focused links block based on user's preference
-    const linksList: string[] = [];
-
-    if (isAllReq) {
-      linksList.push(`▶️ *YouTube:* ${ytSearchUrl}`);
-      linksList.push(`🔴 *YT Music:* ${ytMusicUrl}`);
-      linksList.push(`🟢 *Spotify:* ${spotifyUrl}`);
-      linksList.push(`🎵 *JioSaavn:* ${jioSaavnUrl}`);
-      if (appleMusicUrl) linksList.push(`🍎 *Apple Music:* ${appleMusicUrl}`);
-      linksList.push(`🌐 *Wynk:* ${wynkUrl}`);
-    } else if (isSpotifyReq) {
-      linksList.push(`🟢 *Spotify Link:* ${spotifyUrl}`);
-      linksList.push(`▶️ *YouTube Link:* ${ytSearchUrl}`);
-    } else if (isJioSaavnReq) {
-      linksList.push(`🎵 *JioSaavn Link:* ${jioSaavnUrl}`);
-      linksList.push(`▶️ *YouTube Link:* ${ytSearchUrl}`);
-    } else if (isAppleMusicReq) {
-      linksList.push(appleMusicUrl ? `🍎 *Apple Music Link:* ${appleMusicUrl}` : `▶️ *YouTube Link:* ${ytSearchUrl}`);
-    } else if (isWynkReq) {
-      linksList.push(`🌐 *Wynk Music Link:* ${wynkUrl}`);
-      linksList.push(`▶️ *YouTube Link:* ${ytSearchUrl}`);
-    } else {
-      // 🌟 DEFAULT: YouTube ONLY (Main Priority)
-      linksList.push(`▶️ *YouTube Link:*\n${ytSearchUrl}`);
-      linksList.push(`\n🔴 *YouTube Music:*\n${ytMusicUrl}`);
+      return {
+        replyText: previewCard,
+        trackTitle,
+        artistName,
+        ytUrl: ytSearchUrl,
+        spotifyUrl,
+        previewAudioUrl,
+        audioBuffer,
+        isPreviewRequested: true,
+        isPlaylist: false,
+      };
     }
 
-    const platformTip = !isAllReq && !isSpotifyReq && !isJioSaavnReq && !isAppleMusicReq && !isWynkReq
-      ? `\n💡 _(Pura gaana sunne ke liye reply karein: "iska link do" | Spotify ke liye: "@song ${trackTitle} spotify")_\n`
-      : "";
-
-    const header = isPreviewReq
-      ? `🎧 *FRIDAY SONG AUDIO PREVIEW* 🔊✨`
-      : `🎵 *FRIDAY AI INSTANT SONG RADAR* 🎧✨`;
-
-    const card = `${header}
+    // Default Direct Search (YouTube Link only)
+    const card = `🎵 *FRIDAY AI SONG RADAR* 🎬🎧
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
-${detailsBlock}${lyricsBlock}
+🎶 *Music:* ${trackTitle}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
-⚡ *STREAMING LINK:*
-${linksList.join("\n")}
-━━━━━━━━━━━━━━━━━━━━━━━━━━${platformTip}
+▶️ *YouTube Link:*
+${ytSearchUrl}
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+💡 _(Preview sunne ke liye type karein: "@song ${trackTitle} preview")_
 🎧 _Gaana suniye aur vibe kijiye ${requesterName}! Volume UP!_ 🔊🔥`;
 
     return {
@@ -890,7 +914,7 @@ ${linksList.join("\n")}
       spotifyUrl,
       previewAudioUrl,
       audioBuffer,
-      isPreviewRequested: isPreviewReq,
+      isPreviewRequested: false,
       isPlaylist: false,
     };
   }
@@ -912,6 +936,9 @@ ${linksList.join("\n")}
     const apiKey = process.env.GEMINI_API_KEY;
     let trackTitle = "Identified Song";
     let artistName = "Original Artist";
+    let albumName = "";
+    let releaseYear = "";
+    let genre = "Music";
     let confidence = "High (94%)";
     let identifiedSnippet = "";
 
@@ -946,6 +973,7 @@ Respond ONLY with valid JSON in this exact structure:
         const json = JSON.parse(aiRes.text?.trim() || "{}");
         if (json.trackTitle) trackTitle = json.trackTitle;
         if (json.artists) artistName = json.artists;
+        if (json.albumOrMovie) albumName = json.albumOrMovie;
         if (json.confidence) confidence = json.confidence;
         if (json.lyricsSnippet) identifiedSnippet = json.lyricsSnippet;
       } catch (humErr) {
@@ -955,12 +983,20 @@ Respond ONLY with valid JSON in this exact structure:
 
     const searchTarget = `${trackTitle} ${artistName}`.trim();
     const ytSearchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(searchTarget + " official song")}`;
-    const ytMusicUrl = `https://music.youtube.com/search?q=${encodeURIComponent(searchTarget)}`;
     const spotifyUrl = `https://open.spotify.com/search/${encodeURIComponent(searchTarget)}`;
 
     // Record last song into chat memory
     if (chatId) {
-      this.recordLastSong(chatId, { title: trackTitle, artist: artistName, ytUrl: ytSearchUrl, spotifyUrl });
+      this.recordLastSong(chatId, {
+        title: trackTitle,
+        artist: artistName,
+        ytUrl: ytSearchUrl,
+        spotifyUrl,
+        album: albumName,
+        year: releaseYear,
+        genre,
+        lyrics: identifiedSnippet,
+      });
       this.recordGroupSongPlay(chatId, trackTitle, artistName, requesterName);
     }
 
@@ -985,22 +1021,13 @@ Respond ONLY with valid JSON in this exact structure:
       console.warn("[WhatsAppFeatureEngine] iTunes preview fetch warning:", itErr);
     }
 
-    const lyricsBlock = identifiedSnippet ? `\n\n📝 *Matched Lyrics:*\n_"${identifiedSnippet}"_` : "";
-
     const card = `🎙️ *FRIDAY AI SHAZAM & HUMMING RADAR* 🎧✨
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
-🎯 *Match Accuracy:* ${confidence} ✅
-🎶 *Identified Track:* ${trackTitle}
-🎙️ *Singer(s):* ${artistName}${lyricsBlock}
+🎶 *Music:* ${trackTitle}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
-▶️ *YouTube Official Song Link:*
-${ytSearchUrl}
-
-🔴 *YouTube Music:*
-${ytMusicUrl}
+💡 _Pura gaana sunne ke liye type karein "link"_
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
-🔊 _Aapke gungunane / humming se gaana match ho gaya hai!_
-🎧 _Volume UP ${requesterName}! Enjoy the track!_ 🔊🔥`;
+🎧 _Volume UP ${requesterName}! Enjoy the preview!_ 🔊🔥`;
 
     return {
       replyText: card,
@@ -1031,6 +1058,9 @@ ${ytMusicUrl}
     const apiKey = process.env.GEMINI_API_KEY;
     let trackTitle = "Trending Reel Track";
     let artistName = "Viral Audio Artist";
+    let albumName = "";
+    let releaseYear = "";
+    let genre = "Music";
     let vibe = "Viral Trending BGM";
     let iconicDrop = "";
 
@@ -1046,6 +1076,7 @@ Respond ONLY with valid JSON in this exact structure:
 {
   "trackTitle": "Exact Song Name",
   "artists": "Singer / Music Producer",
+  "albumOrMovie": "Movie or Album Name",
   "vibe": "Trending Instagram Reel Audio / Slowed+Reverb / Bass Boosted",
   "iconicDrop": "Key hook line or beat drop description"
 }`;
@@ -1059,6 +1090,7 @@ Respond ONLY with valid JSON in this exact structure:
         const json = JSON.parse(aiRes.text?.trim() || "{}");
         if (json.trackTitle) trackTitle = json.trackTitle;
         if (json.artists) artistName = json.artists;
+        if (json.albumOrMovie) albumName = json.albumOrMovie;
         if (json.vibe) vibe = json.vibe;
         if (json.iconicDrop) iconicDrop = json.iconicDrop;
       } catch (reelErr) {
@@ -1068,10 +1100,18 @@ Respond ONLY with valid JSON in this exact structure:
 
     const searchTarget = `${trackTitle} ${artistName}`.trim();
     const ytSearchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(searchTarget + " official song")}`;
-    const ytMusicUrl = `https://music.youtube.com/search?q=${encodeURIComponent(searchTarget)}`;
 
     if (chatId) {
-      this.recordLastSong(chatId, { title: trackTitle, artist: artistName, ytUrl: ytSearchUrl, spotifyUrl: `https://open.spotify.com/search/${encodeURIComponent(searchTarget)}` });
+      this.recordLastSong(chatId, {
+        title: trackTitle,
+        artist: artistName,
+        ytUrl: ytSearchUrl,
+        spotifyUrl: `https://open.spotify.com/search/${encodeURIComponent(searchTarget)}`,
+        album: albumName,
+        year: releaseYear,
+        genre,
+        lyrics: iconicDrop,
+      });
       this.recordGroupSongPlay(chatId, trackTitle, artistName, requesterName);
     }
 
@@ -1098,19 +1138,12 @@ Respond ONLY with valid JSON in this exact structure:
 
     const dropBlock = iconicDrop ? `\n\n⚡ *Beat / Hook:* _"${iconicDrop}"_` : "";
 
-    const card = `🎬 *REEL & SHORTS BACKGROUND SONG EXTRACTOR* 📱🎧
+    const card = `🎬 *REEL & SHORTS BACKGROUND SONG* 📱🎧
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
-🎶 *Track:* ${trackTitle}
-🎙️ *Artist:* ${artistName}
-🏷️ *Vibe:* ${vibe}${dropBlock}
+🎶 *Music:* ${trackTitle}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
-▶️ *YouTube Official Full Song:*
-${ytSearchUrl}
-
-🔴 *YouTube Music:*
-${ytMusicUrl}
+💡 _Pura gaana sunne ke liye type karein "link"_
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
-💡 _(Full song sunne ke liye upar diye link par tap karein!)_
 🎧 _Vibe kijiye ${requesterName}! Volume UP!_ 🔊🔥`;
 
     return {
