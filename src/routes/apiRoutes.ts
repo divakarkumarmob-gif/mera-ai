@@ -2554,10 +2554,13 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     try {
       const { perchanceService } = require("../services/perchanceService");
       const execPath = perchanceService.getExecutablePath();
+      const isCloud = !!(process.env.BROWSER_WS_ENDPOINT || process.env.BROWSERLESS_API_KEY);
       res.json({
         ok: true,
-        isAvailable: !!execPath,
-        executablePath: execPath || null,
+        isAvailable: isCloud || !!execPath,
+        isCloud,
+        engineType: isCloud ? "Cloud Browserless.io (0MB RAM)" : "Local Headless Chrome",
+        executablePath: isCloud ? "Cloud WebSocket Gateway" : (execPath || null),
         os: process.platform,
       });
     } catch (e: any) {

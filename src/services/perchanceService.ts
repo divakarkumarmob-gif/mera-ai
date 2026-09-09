@@ -235,37 +235,52 @@ export class PerchanceService {
       return { success: false, prompt: promptText, error: "Prompt cannot be empty", logs };
     }
 
-    pushLog("info", "Browser Initialization", "Scanning OS environment for Chrome / Chromium binary...");
-    const execPath = this.getExecutablePath();
-    if (!execPath) {
-      pushLog("error", "Browser Initialization", "Chrome/Chromium executable not found on server.");
-      return {
-        success: false,
-        prompt: cleanPrompt,
-        error: "Chrome/Chromium browser executable not found on server.",
-        logs,
-      };
-    }
+    pushLog("info", "Browser Initialization", "Checking browser engine configuration (Cloud Browserless vs Local Chrome)...");
+    const cloudWsUrl =
+      process.env.BROWSER_WS_ENDPOINT ||
+      (process.env.BROWSERLESS_API_KEY
+        ? `wss://chrome.browserless.io?token=${process.env.BROWSERLESS_API_KEY}`
+        : null);
 
-    pushLog("info", "Browser Initialization", `Found browser engine: ${execPath}`);
     const startTime = Date.now();
     let browser: any = null;
 
     try {
-      pushLog("info", "Browser Launch", "Launching headless Chrome with stealth & anti-detection flags...");
-      browser = await (puppeteerExtra as any).launch({
-        executablePath: execPath,
-        headless: "new",
-        args: [
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-dev-shm-usage",
-          "--disable-accelerated-2d-canvas",
-          "--disable-gpu",
-          "--disable-blink-features=AutomationControlled",
-          "--window-size=1280,900",
-        ],
-      });
+      if (cloudWsUrl) {
+        const maskedUrl = cloudWsUrl.replace(/token=([^&]+)/, "token=***");
+        pushLog("info", "Cloud Browser Connect", `Connecting to Remote Cloud Chrome (${maskedUrl})... [0MB Render RAM used]`);
+        browser = await (puppeteerExtra as any).connect({
+          browserWSEndpoint: cloudWsUrl,
+        });
+        pushLog("info", "Cloud Browser Connect", "Connected to remote Cloud Chrome engine successfully!");
+      } else {
+        const execPath = this.getExecutablePath();
+        if (!execPath) {
+          pushLog("error", "Browser Initialization", "Chrome/Chromium executable not found on server. (Tip: Set BROWSERLESS_API_KEY in Render env for instant cloud execution)");
+          return {
+            success: false,
+            prompt: cleanPrompt,
+            error: "Chrome/Chromium browser executable not found on server. Please set BROWSERLESS_API_KEY.",
+            logs,
+          };
+        }
+
+        pushLog("info", "Browser Initialization", `Found local browser engine: ${execPath}`);
+        pushLog("info", "Browser Launch", "Launching headless Chrome with stealth & anti-detection flags...");
+        browser = await (puppeteerExtra as any).launch({
+          executablePath: execPath,
+          headless: "new",
+          args: [
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-accelerated-2d-canvas",
+            "--disable-gpu",
+            "--disable-blink-features=AutomationControlled",
+            "--window-size=1280,900",
+          ],
+        });
+      }
 
       const page = await browser.newPage();
       await page.setViewport({ width: 1280, height: 900 });
