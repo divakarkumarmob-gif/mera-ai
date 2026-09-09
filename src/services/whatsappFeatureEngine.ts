@@ -410,8 +410,17 @@ OUTPUT FORMAT:
 
   // ── 9. 🎵 Music & Song Finder (@song / @music) ───────────────────────────
 
-  private chatLastSongMap: Map<string, { title: string; artist: string; ytUrl: string; spotifyUrl: string; timestamp: number }> = new Map();
+  private chatLastSongMap: Map<string, { title: string; artist: string; ytUrl: string; spotifyUrl: string; timestamp: number; album?: string; year?: string; genre?: string; lyrics?: string }> = new Map();
   private chatPlaylistMap: Map<string, { playlist: Array<{ title: string; artist: string; year: string; ytUrl: string; previewAudioUrl?: string }>; currentIndex: number; categoryName: string; timestamp: number }> = new Map();
+  private chatSongSearchSessionMap: Map<
+    string,
+    {
+      originalQuery: string;
+      seenSongs: Array<{ title: string; artist: string; ytUrl: string }>;
+      attemptCount: number;
+      timestamp: number;
+    }
+  > = new Map();
 
   public recordLastSong(
     chatId: string,
@@ -433,6 +442,147 @@ OUTPUT FORMAT:
   public getLastSong(chatId: string) {
     if (!chatId) return null;
     return this.chatLastSongMap.get(chatId) || null;
+  }
+
+  public isWrongSongFeedback(text: string, quotedText?: string): boolean {
+    const clean = (text || "").toLowerCase().trim();
+
+    const isWrongIntent =
+      /^(?:ye\s*(?:bhi\s*)?(?:nahi|nhi|galat|wrong|alag|dusra|change)|wrong\s*song|galat\s*gaana|not\s*this|not\s*this\s*one|ye\s*wala\s*nahi|ye\s*nahi\s*hai|ye\s*nhi\s*h|ye\s*nahi\s*h|ye\s*to\s*dusra|dusra\s*dhundo|dusra\s*bhejo|koi\s*aur|alag\s*wala|change\s*karo|dusra\s*gana|dusra\s*song|ye\s*bhi\s*nahi|ye\s*nhi\s*dusra|ye\s*nahi\s*dusra)$/i.test(clean) ||
+      /\b(?:ye\s*(?:bhi\s*)?(?:nahi|nhi)\s*(?:hai|h|tha)?|galat\s*gaana|wrong\s*song|ye\s*wala\s*(?:nahi|nhi)|not\s*this\s*one|dusra\s*(?:wala|gaana|song|dhundo|bhejo)|koi\s*aur\s*(?:gana|song|wala)|alag\s*gaana|ye\s*nhi\s*h)\b/i.test(clean);
+
+    return isWrongIntent;
+  }
+
+  public async handleWrongSongAlternative(
+    chatId: string,
+    requesterName = "Boss"
+  ): Promise<{
+    handled: boolean;
+    replyText?: string;
+    audioBuffer?: Buffer | null;
+    trackTitle?: string;
+  }> {
+    const session = this.chatSongSearchSessionMap.get(chatId);
+    const lastSong = this.getLastSong(chatId);
+    const query = session?.originalQuery || lastSong?.title || "Bollywood song";
+    const seenList = session?.seenSongs || (lastSong ? [{ title: lastSong.title, artist: lastSong.artist, ytUrl: lastSong.ytUrl }] : []);
+    const attempt = (session?.attemptCount || 1) + 1;
+
+    let trackTitle = `${query} (Alternative)`;
+    let artistName = "Alternative Artist";
+    let albumName = "";
+    let releaseYear = "";
+    let genre = "Music";
+    let lyricsSnippet = "";
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (apiKey) {
+      try {
+        const { GoogleGenAI } = await import("@google/genai");
+        const ai = new GoogleGenAI({ apiKey });
+        const rejectedStr = seenList.map((s, i) => `${i + 1}. "${s.title}" by ${s.artist}`).join("\n");
+
+        const prompt = `You are an elite music DJ & song identification engine for Friday AI.
+User originally searched for song: "${query}".
+User stated that the following previously suggested track(s) were INCORRECT / NOT the one they were searching for:
+${rejectedStr}
+
+Identify a DIFFERENT, alternative canonical song or version that matches user query "${query}".
+For example:
+- Original vintage version vs modern remake/cover vs remix
+- Different movie/album track with the same title or hook line
+- Different iconic artist's version
+- Another high-confidence semantic song match
+
+Respond ONLY with valid JSON in this exact structure:
+{
+  "trackTitle": "Different Exact Song Name",
+  "artists": "Singer(s), Music Composer",
+  "albumOrMovie": "Movie / Album Name",
+  "year": "YYYY",
+  "genre": "Genre",
+  "lyricsSnippet": "Famous 2-line hook lyrics..."
+}`;
+
+        const aiRes = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: prompt,
+          config: { responseMimeType: "application/json" },
+        });
+
+        const json = JSON.parse(aiRes.text?.trim() || "{}");
+        if (json.trackTitle) trackTitle = json.trackTitle;
+        if (json.artists) artistName = json.artists;
+        if (json.albumOrMovie) albumName = json.albumOrMovie;
+        if (json.year) releaseYear = json.year;
+        if (json.genre) genre = json.genre;
+        if (json.lyricsSnippet) lyricsSnippet = json.lyricsSnippet;
+      } catch (aiErr) {
+        console.warn("[WhatsAppFeatureEngine] Alternative song AI error:", aiErr);
+      }
+    }
+
+    const searchTarget = `${trackTitle} ${artistName}`.trim();
+    const ytSearchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(searchTarget + " official song")}`;
+    const spotifyUrl = `https://open.spotify.com/search/${encodeURIComponent(searchTarget)}`;
+
+    // Update seen list and session
+    seenList.push({ title: trackTitle, artist: artistName, ytUrl: ytSearchUrl });
+    this.chatSongSearchSessionMap.set(chatId, {
+      originalQuery: query,
+      seenSongs: seenList,
+      attemptCount: attempt,
+      timestamp: Date.now(),
+    });
+
+    this.recordLastSong(chatId, {
+      title: trackTitle,
+      artist: artistName,
+      ytUrl: ytSearchUrl,
+      spotifyUrl,
+      album: albumName,
+      year: releaseYear,
+      genre,
+      lyrics: lyricsSnippet,
+    });
+
+    // Fetch 30-sec official audio preview from iTunes
+    let audioBuffer: Buffer | null = null;
+    try {
+      const itunesRes = await fetch(
+        `https://itunes.apple.com/search?term=${encodeURIComponent(searchTarget)}&media=music&entity=song&limit=1`,
+        { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(3500) }
+      );
+      if (itunesRes.ok) {
+        const itunesData: any = await itunesRes.json();
+        const previewUrl = itunesData.results?.[0]?.previewUrl;
+        if (previewUrl) {
+          const audioFetch = await fetch(previewUrl, { signal: AbortSignal.timeout(8000) });
+          if (audioFetch.ok) {
+            audioBuffer = Buffer.from(await audioFetch.arrayBuffer());
+          }
+        }
+      }
+    } catch (itErr) {
+      console.warn("[WhatsAppFeatureEngine] Alternative song iTunes preview warning:", itErr);
+    }
+
+    const card = `🎧 *FRIDAY AUDIO PREVIEW (ALTERNATE MATCH #${attempt})* 🔊✨
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎶 *Music:* ${trackTitle}
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+💡 _Pura gaana sunne ke liye type karein "link"_
+👉 _Agar ye bhi nahi hai to bolen: "ye bhi nahi"_
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎧 _Volume UP ${requesterName}! Enjoy the preview!_ 🔊🔥`;
+
+    return {
+      handled: true,
+      replyText: card,
+      audioBuffer,
+      trackTitle,
+    };
   }
 
   public isSongLinkFollowUp(text: string, quotedText?: string): boolean {
@@ -845,7 +995,7 @@ Respond ONLY with valid JSON in this exact structure:
     const ytSearchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(searchTarget + " official song")}`;
     const spotifyUrl = `https://open.spotify.com/search/${encodeURIComponent(searchTarget)}`;
 
-    // Record last song into chat memory
+    // Record last song into chat memory & search session
     if (chatId) {
       this.recordLastSong(chatId, {
         title: trackTitle,
@@ -856,6 +1006,19 @@ Respond ONLY with valid JSON in this exact structure:
         year: releaseYear,
         genre,
         lyrics: lyricsSnippet,
+      });
+
+      const existingSession = this.chatSongSearchSessionMap.get(chatId);
+      const isSameQuery = existingSession && existingSession.originalQuery.toLowerCase().trim() === searchClean.toLowerCase().trim();
+      const seen = isSameQuery ? existingSession.seenSongs : [];
+      if (!seen.some((s) => s.title.toLowerCase() === trackTitle.toLowerCase())) {
+        seen.push({ title: trackTitle, artist: artistName, ytUrl: ytSearchUrl });
+      }
+      this.chatSongSearchSessionMap.set(chatId, {
+        originalQuery: searchClean,
+        seenSongs: seen,
+        attemptCount: isSameQuery ? existingSession.attemptCount + 1 : 1,
+        timestamp: Date.now(),
       });
     }
 

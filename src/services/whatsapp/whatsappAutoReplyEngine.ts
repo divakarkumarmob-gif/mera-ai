@@ -722,6 +722,15 @@ TONE & STYLE:
       }
     }
 
+    // Follow-up "Ye nahi hai" / "Ye wala nahi" / "Dusra dhundo"
+    if (whatsappFeatureEngine.isWrongSongFeedback(text, quotedMessage?.text)) {
+      const altRes = await whatsappFeatureEngine.handleWrongSongAlternative(groupJid, senderName);
+      if (altRes.handled && altRes.replyText) {
+        await sendMsgFn(groupJid, altRes.replyText, text, messageKey);
+        return;
+      }
+    }
+
     if (/^(?:@song|@music|@gaana|\/song|\/music|\/gaana)\b/i.test(cleanText)) {
       const songRes = await whatsappFeatureEngine.searchMusicWithLyrics(cleanText, senderName, groupJid);
       await sendMsgFn(groupJid, songRes.replyText, text, messageKey);

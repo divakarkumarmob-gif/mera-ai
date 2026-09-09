@@ -1805,6 +1805,23 @@ Bhagwan aapko lambi umar, beshumar khushiyan, aur bohot saari success de! ðŸš€ðŸ
       }
     }
 
+    // 22.2. Wrong Song / Alternate Version Request ("Ye nahi hai" / "Ye wala nahi" / "Dusra dhundo")
+    if (whatsappFeatureEngine.isWrongSongFeedback(rawText, quotedMessage?.text)) {
+      const altRes = await whatsappFeatureEngine.handleWrongSongAlternative(groupJid, senderName);
+      if (altRes.handled && altRes.replyText) {
+        if (altRes.audioBuffer && sock) {
+          try {
+            await sock.sendMessage(groupJid, {
+              audio: altRes.audioBuffer,
+              mimetype: "audio/mp4",
+              ptt: false,
+            });
+          } catch (e) {}
+        }
+        return { handled: true, replyText: altRes.replyText };
+      }
+    }
+
     // 22.5. Next Song in Playlist Follow-Up ("Agla gaana" / "Next")
     if (whatsappFeatureEngine.isNextSongRequest(rawText)) {
       const nextRes = await whatsappFeatureEngine.handleNextSongInPlaylist(groupJid, senderName);
