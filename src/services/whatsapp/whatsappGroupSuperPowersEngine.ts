@@ -105,7 +105,19 @@ export class WhatsAppGroupSuperPowersEngine {
       clean.startsWith("/birthday") ||
       clean.startsWith("@bday") ||
       clean.startsWith("/bday") ||
-      /^(?:tag\s*all|everyone|fact\s*check|ai\s*judge|roast\s*me|start\s*quiz|split\s*bill|group\s*decision|group\s*birthday)/i.test(clean)
+      clean.startsWith("@meme") ||
+      clean.startsWith("/meme") ||
+      clean.startsWith("@poll") ||
+      clean.startsWith("/poll") ||
+      clean.startsWith("@translate") ||
+      clean.startsWith("/translate") ||
+      clean.startsWith("@vibe") ||
+      clean.startsWith("/vibe") ||
+      clean.startsWith("@icebreaker") ||
+      clean.startsWith("/icebreaker") ||
+      clean.startsWith("@joke") ||
+      clean.startsWith("/joke") ||
+      /^(?:tag\s*all|everyone|fact\s*check|ai\s*judge|roast\s*me|start\s*quiz|split\s*bill|group\s*decision|group\s*birthday|make\s*meme|create\s*poll|translate\s*to|group\s*vibe|tell\s*joke)/i.test(clean)
     );
   }
 
@@ -178,6 +190,33 @@ export class WhatsAppGroupSuperPowersEngine {
     // 7. @birthday / @bday Auto-Celebrator
     if (clean.startsWith("@birthday") || clean.startsWith("/birthday") || clean.startsWith("@bday") || clean.startsWith("/bday")) {
       return await this.handleBirthdayManager(groupJid, groupName, rawText, senderName, senderPhone, quotedMessage);
+    }
+
+    // 8. @meme AI Meme & Sticker Generator
+    if (clean.startsWith("@meme") || clean.startsWith("/meme") || clean.startsWith("meme")) {
+      return await this.handleMemeGenerator(sock, groupJid, rawText, senderName, quotedMessage);
+    }
+
+    // 9. @poll WhatsApp Interactive Poll Creator
+    if (clean.startsWith("@poll") || clean.startsWith("/poll") || clean.startsWith("poll")) {
+      return await this.handlePollCreator(sock, groupJid, rawText, senderName);
+    }
+
+    // 10. @translate Multi-Language Live Translator
+    if (clean.startsWith("@translate") || clean.startsWith("/translate") || clean.startsWith("translate")) {
+      return await this.handleLiveTranslator(rawText, quotedMessage, senderName);
+    }
+
+    // 11. @vibe / @icebreaker / @joke Group Mood & Icebreaker
+    if (
+      clean.startsWith("@vibe") ||
+      clean.startsWith("/vibe") ||
+      clean.startsWith("@icebreaker") ||
+      clean.startsWith("/icebreaker") ||
+      clean.startsWith("@joke") ||
+      clean.startsWith("/joke")
+    ) {
+      return await this.handleVibeRadarAndIcebreaker(groupJid, groupName, rawText, senderName);
     }
 
     return { handled: false };
@@ -764,7 +803,222 @@ ${customPoem}
     };
   }
 
-  // ── 8. Midnight Birthday Cron Worker ──────────────────────────────────────
+  // ── 8. @meme AI Meme & Sticker Generator ──────────────────────────────────
+
+  public async handleMemeGenerator(
+    sock: any,
+    groupJid: string,
+    rawText: string,
+    senderName: string,
+    quotedMessage?: QuotedMessageContext | null
+  ): Promise<{ handled: boolean; replyText?: string }> {
+    const topic = rawText
+      .replace(/^(?:@meme|\/meme|meme\s*banao|meme)\s*[:=-]?\s*/i, "")
+      .trim();
+
+    const target = topic || (quotedMessage ? quotedMessage.text : "Indian College Friends & Relatable Life");
+    const apiKey = process.env.GEMINI_API_KEY;
+
+    let memePrompt = `Funny Indian relatable meme about ${target}`;
+    let memeCaption = `😂 *FRIDAY AI MEME CORNER* 🎭\n\n"${target}"`;
+
+    if (apiKey) {
+      try {
+        const ai = new GoogleGenAI({ apiKey });
+        const res = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: `Create a super funny, relatable Indian Hinglish meme punchline about: "${target}".
+Format:
+Caption: [1-2 line funny punchline]
+ImagePrompt: [Visual description for 3D animated or photorealistic funny meme scene]`,
+        });
+        const full = res.text?.trim() || "";
+        const capMatch = full.match(/Caption:\s*([\s\S]*?)(?:ImagePrompt:|$)/i);
+        const promptMatch = full.match(/ImagePrompt:\s*([\s\S]*)/i);
+        if (capMatch) memeCaption = `😂 *FRIDAY AI MEME CORNER* 🎭\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n${capMatch[1].trim()}\n━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+        if (promptMatch) memePrompt = promptMatch[1].trim();
+      } catch {}
+    }
+
+    try {
+      const { imageGenerationService } = await import("../imageGenerationService");
+      const genRes = await imageGenerationService.generateImage(memePrompt, { aspectRatio: "1:1" });
+      if (genRes.success && genRes.buffer && sock) {
+        await sock.sendMessage(groupJid, {
+          image: genRes.buffer,
+          caption: memeCaption,
+        });
+        return { handled: true };
+      }
+    } catch (imgErr) {
+      console.warn("[GroupSuperPowers] Meme image generation fallback:", imgErr);
+    }
+
+    return {
+      handled: true,
+      replyText: `${memeCaption}\n\n🖼️ _(Meme Scene: ${memePrompt})_`,
+    };
+  }
+
+  // ── 9. @poll WhatsApp Native Interactive Poll Creator ─────────────────────
+
+  public async handlePollCreator(
+    sock: any,
+    groupJid: string,
+    rawText: string,
+    senderName: string
+  ): Promise<{ handled: boolean; replyText?: string }> {
+    const clean = rawText.replace(/^(?:@poll|\/poll|poll\s*banao|poll)\s*[:=-]?\s*/i, "").trim();
+
+    let question = "Aapka kya vote hai?";
+    let options: string[] = ["Haan / Yes 👍", "Nahi / No 👎", "Dekhte hain 🤔"];
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (apiKey) {
+      try {
+        const ai = new GoogleGenAI({ apiKey });
+        const prompt = `Extract a clear poll question and 2 to 6 crisp poll options from this user request for a WhatsApp group poll.
+Input: "${clean || "Sunday Cricket match"}"
+
+Output STRICT JSON ONLY:
+{
+  "question": "Clear poll title / question",
+  "options": ["Option 1", "Option 2", "Option 3"]
+}`;
+        const resp = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: prompt,
+          config: { responseMimeType: "application/json" },
+        });
+        const json = JSON.parse(resp.text?.trim() || "{}");
+        if (json.question && Array.isArray(json.options) && json.options.length >= 2) {
+          question = json.question.slice(0, 250);
+          options = json.options.map((o: any) => String(o).slice(0, 100)).slice(0, 12);
+        }
+      } catch (e) {
+        console.warn("[GroupSuperPowers] Poll AI parse error:", e);
+      }
+    }
+
+    if (sock) {
+      try {
+        await sock.sendMessage(groupJid, {
+          poll: {
+            name: `📊 ${question}`,
+            values: options,
+            selectableCount: 1,
+          },
+        });
+        return { handled: true };
+      } catch (pollErr: any) {
+        console.warn("[GroupSuperPowers] WhatsApp native poll send failed:", pollErr);
+      }
+    }
+
+    const optionsList = options.map((opt, i) => `${i + 1}️⃣ ${opt}`).join("\n");
+    return {
+      handled: true,
+      replyText: `📊 *GROUP LIVE POLL: ${question}* 🗳️\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n${optionsList}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n_Apna option chunein!_`,
+    };
+  }
+
+  // ── 10. @translate Multi-Language Live Translator ─────────────────────────
+
+  public async handleLiveTranslator(
+    rawText: string,
+    quotedMessage?: QuotedMessageContext | null,
+    senderName = "Member"
+  ): Promise<{ handled: boolean; replyText?: string }> {
+    const clean = rawText.replace(/^(?:@translate|\/translate|@tarjuma|translate|anuvad)\s*[:=-]?\s*/i, "").trim();
+
+    const targetLangMatch = clean.match(/\b(?:in|to|me|mein|language)?\s*(hindi|english|bengali|bangla|marathi|gujarati|punjabi|urdu|tamil|telugu|kannada|malayalam|french|spanish|german|japanese|russian|arabic|chinese|italian|portuguese|korean)\b/i);
+    const targetLanguage = targetLangMatch ? targetLangMatch[1].trim() : "Hindi";
+
+    const textToTranslate = quotedMessage ? quotedMessage.text : clean.replace(/\b(?:in|to|me|mein|language)?\s*(hindi|english|bengali|bangla|marathi|gujarati|punjabi|urdu|tamil|telugu|kannada|malayalam|french|spanish|german|japanese|russian|arabic|chinese|italian|portuguese|korean)\b/gi, "").trim();
+
+    if (!textToTranslate) {
+      return {
+        handled: true,
+        replyText: `🌐 *Language Translator:* Kripya kisi message par swipe karke \`@translate [Language]\` likhein ya text ke sath language batayein (Jaise: \`@translate in Bengali "Hello how are you"\`).`,
+      };
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (apiKey) {
+      try {
+        const ai = new GoogleGenAI({ apiKey });
+        const prompt = `Translate the following message into ${targetLanguage} accurately and naturally.
+Original Text: "${textToTranslate}"
+Requested by: ${senderName}
+
+Format Output:
+🌐 *FRIDAY LANGUAGE TRANSLATOR* ⚡
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+📝 *Original:* "${textToTranslate}"
+🎯 *${targetLanguage} Translation:*
+"[Accurate, natural translation in ${targetLanguage}]"
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+💡 _Translation accurate and context-aware!_`;
+
+        const resp = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: prompt });
+        const text = resp.text?.trim();
+        if (text) return { handled: true, replyText: text };
+      } catch (e: any) {
+        return { handled: true, replyText: `⚠️ Translation error: ${e?.message || e}` };
+      }
+    }
+
+    return {
+      handled: true,
+      replyText: `🌐 *Translation (${targetLanguage}):*\n"${textToTranslate}"`,
+    };
+  }
+
+  // ── 11. @vibe / @icebreaker Group Mood & Fight Cooler ─────────────────────
+
+  public async handleVibeRadarAndIcebreaker(
+    groupJid: string,
+    groupName: string,
+    rawText: string,
+    senderName: string
+  ): Promise<{ handled: boolean; replyText?: string }> {
+    const isJoke = /\b(joke|chutkula|hasao|funny)\b/i.test(rawText);
+    const isFightCooler = /\b(ladai|fight|gussa|shant|cool|jhagda)\b/i.test(rawText);
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return {
+        handled: true,
+        replyText: `🌟 *Group Vibe Check:* Group ka mahaul 100% positive and energetic hai! Sab log chill karein! 😎✨`,
+      };
+    }
+
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+      const prompt = isJoke
+        ? `Tell 1 super fresh, hilarious, modern Indian stand-up style Hindi/Hinglish comedy joke for a WhatsApp group. Keep it clean, clever, and extremely funny. 3-4 lines.`
+        : isFightCooler
+        ? `Two people or members are arguing in this WhatsApp group. Write a hilarious, witty, lighthearted intervention that immediately diffuses the tension and makes everyone laugh. Use Bollywood punchlines or relatable banter.`
+        : `You are Friday AI, checking the vibe of WhatsApp group "${groupName}".
+Drop an irresistible, hilarious, ultra-engaging icebreaker question or "Would You Rather" scenario that forces all silent group members to reply and start chatting! Use emojis.`;
+
+      const resp = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: prompt });
+      const text = resp.text?.trim();
+      if (text) {
+        const title = isJoke ? `😂 *FRIDAY JOKE OF THE DAY* 🎤` : isFightCooler ? `🕊️ *FRIDAY PEACE & CHILL RADAR* 🧊` : `⚡ *FRIDAY GROUP VIBE CHECK & ICEBREAKER* 🎯`;
+        return {
+          handled: true,
+          replyText: `${title}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n${text}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n_Mahaul set hai, sab log participate karein!_ 🔥`,
+        };
+      }
+    } catch (e: any) {
+      return { handled: true, replyText: `⚠️ Vibe check error: ${e?.message || e}` };
+    }
+
+    return { handled: true, replyText: `✨ Group vibe is awesome today! 🚀` };
+  }
+
+  // ── 12. Midnight Birthday Cron Worker ─────────────────────────────────────
 
   public async checkAndTriggerMidnightBirthdays(sock: any): Promise<number> {
     if (!sock) return 0;
@@ -902,6 +1156,26 @@ Bhagwan aapko lambi umar, beshumar khushiyan, aur bohot saari success de! 🚀�
     if (/(?:voice\s*notes?|audio)\s*(?:transcription?)\s*(?:band|off|disable)/i.test(clean)) {
       const msg = await whatsappGroupSafetyEngine.toggleAutoTranscribeVoice(groupJid, false);
       return { handled: true, replyText: msg };
+    }
+
+    // 11. Meme & Sticker Generator Intent
+    if (/(?:meme\s*banao|koi\s*meme|funny\s*meme|meme\s*create|roast\s*meme|meme\s*dikhao)/i.test(clean)) {
+      return await this.handleMemeGenerator(sock, groupJid, rawText, senderName, quotedMessage);
+    }
+
+    // 12. Poll Creator Intent
+    if (/(?:poll\s*banao|voting\s*start|kisi\s*baat\s*ka\s*poll|poll\s*create|poll\s*dalo)/i.test(clean)) {
+      return await this.handlePollCreator(sock, groupJid, rawText, senderName);
+    }
+
+    // 13. Live Translator Intent
+    if (/(?:translate\s*karo|anuvad\s*karo|isko\s*hindi\s*me|isko\s*english\s*me|isko\s*bengali\s*me|isko\s*marathi\s*me|isko\s*tamil\s*me|isko\s*telugu\s*me)/i.test(clean)) {
+      return await this.handleLiveTranslator(rawText, quotedMessage, senderName);
+    }
+
+    // 14. Vibe Radar, Icebreaker & Joke Intent
+    if (/(?:vibe\s*check|icebreaker|joke\s*sunao|chutkula\s*sunao|group\s*ka\s*mahaul|ladai\s*rok|jhagda\s*rok|bore\s*ho\s*raha)/i.test(clean)) {
+      return await this.handleVibeRadarAndIcebreaker(groupJid, groupName, rawText, senderName);
     }
 
     // ── Phase 2: Suspicious / Ambiguous Intent Classifier (Gemini AI Powered) ─
