@@ -241,6 +241,54 @@ export class WhatsAppBossAiEngine {
         },
       },
       {
+        name: "kick_group_member",
+        description: "Remove / kick a member from a WhatsApp Group if Friday is Admin. Use when Boss says 'Avengers group se Ram/91xxxx ko kick kar do'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            groupName: { type: "STRING", description: "Name of the target group" },
+            memberPhoneOrName: { type: "STRING", description: "Phone number or name of the member to kick" },
+          },
+          required: ["groupName", "memberPhoneOrName"],
+        },
+      },
+      {
+        name: "toggle_group_welcome",
+        description: "Enable or disable welcome greeting cards for new members in a WhatsApp Group.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            groupName: { type: "STRING", description: "Name of the group" },
+            enable: { type: "BOOLEAN", description: "true to enable welcome card, false to disable" },
+          },
+          required: ["groupName", "enable"],
+        },
+      },
+      {
+        name: "toggle_group_quiet_mode",
+        description: "Enable or disable night quiet mode (11PM - 6:30AM) for a WhatsApp group.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            groupName: { type: "STRING", description: "Name of the group" },
+            enable: { type: "BOOLEAN", description: "true to enable quiet mode, false to disable" },
+          },
+          required: ["groupName", "enable"],
+        },
+      },
+      {
+        name: "reset_group_strikes",
+        description: "Reset 3-strike violation count for all members or a specific member in a WhatsApp group.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            groupName: { type: "STRING", description: "Name of the group" },
+            memberPhone: { type: "STRING", description: "Optional specific member phone to reset" },
+          },
+          required: ["groupName"],
+        },
+      },
+      {
         name: "translate_text",
         description: "Translate any text or message accurately into any target language (e.g. English, Hindi, Spanish, French, German, Japanese).",
         parameters: {
@@ -856,6 +904,35 @@ COMMUNICATION STYLE:
             return { group: grp.groupName, status: stat };
           }
           const res = await whatsappGroupSafetyEngine.enableGroupSafety(grp.groupId, grp.groupName);
+          return res;
+        }
+        if (toolName === "kick_group_member") {
+          const { whatsappBotService } = await import("../whatsappBotService");
+          const res = await whatsappBotService.kickGroupMember(args.groupName, args.memberPhoneOrName);
+          return res;
+        }
+        if (toolName === "toggle_group_welcome") {
+          const { whatsappBotService } = await import("../whatsappBotService");
+          const { whatsappGroupSafetyEngine } = await import("./whatsappGroupSafetyEngine");
+          const grp = await whatsappBotService.findGroup(args.groupName);
+          if (!grp) return { success: false, message: `Group "${args.groupName}" nahi mila.` };
+          const msg = await whatsappGroupSafetyEngine.toggleWelcome(grp.groupId, Boolean(args.enable));
+          return { success: true, message: msg };
+        }
+        if (toolName === "toggle_group_quiet_mode") {
+          const { whatsappBotService } = await import("../whatsappBotService");
+          const { whatsappGroupSafetyEngine } = await import("./whatsappGroupSafetyEngine");
+          const grp = await whatsappBotService.findGroup(args.groupName);
+          if (!grp) return { success: false, message: `Group "${args.groupName}" nahi mila.` };
+          const msg = await whatsappGroupSafetyEngine.toggleQuietMode(grp.groupId, Boolean(args.enable));
+          return { success: true, message: msg };
+        }
+        if (toolName === "reset_group_strikes") {
+          const { whatsappBotService } = await import("../whatsappBotService");
+          const { whatsappGroupSafetyEngine } = await import("./whatsappGroupSafetyEngine");
+          const grp = await whatsappBotService.findGroup(args.groupName);
+          if (!grp) return { success: false, message: `Group "${args.groupName}" nahi mila.` };
+          const res = await whatsappGroupSafetyEngine.resetStrikes(grp.groupId, args.memberPhone);
           return res;
         }
         if (toolName === "get_messages_digest") {

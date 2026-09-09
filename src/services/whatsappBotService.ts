@@ -1148,6 +1148,15 @@ class WhatsAppBotService {
       this.sock.ev.on("creds.update", saveCreds);
       this.setupMessageListener();
 
+      this.sock.ev.on("group-participants.update", async (update: any) => {
+        try {
+          const groupName = await this.getGroupName(update.id);
+          await whatsappGroupSafetyEngine.handleGroupParticipantsUpdate(this.sock, update, groupName);
+        } catch (grpPartErr) {
+          console.warn("[WhatsAppBot] Group participants update error:", grpPartErr);
+        }
+      });
+
       this.sock.ev.on("connection.update", async (update: any) => {
         const { connection, lastDisconnect, qr } = update;
 
@@ -1583,20 +1592,22 @@ class WhatsAppBotService {
 👑 *Creator & Master:* DK Boss (Divakar Kumar)
 🛡️ *Privacy Shield:* Active (Strict Zero-Leak Protection)
 
-🛡️ *0. GROUP AUTO-MODERATOR & SAFETY (@block safe / @allow all):*
-• \`@block safe\` / \`@block safe on\` ➔ Gandi gaali, abusive text aur vulgar NSFW photos/videos ka instant auto-delete shield ON karein! (Friday Admin hona chahiye).
-• \`@allow all\` ➔ Saare filters & warnings OFF karein (Free chat allowed in group).
-• \`@block safe off\` ➔ Group safety guard pause karein.
-• \`@block safe status\` ➔ Safety status aur deleted offensive messages count dekhein.
-• \`@block safe delete\` ➔ Kisi bhi offensive message par quote karke likhein, use turant chat se delete kar dega.
+🛡️ *0. GROUP AUTO-MODERATOR, ANTI-SPAM & SAFETY:*
+• \`@block safe\` / \`@block safe on\` ➔ Gandi gaali, vulgar NSFW media, spam link auto-delete + 3-Strike Auto-Kick ON karein!
+• \`@allow all\` ➔ Saare filters & warnings OFF karein (Free chat allowed).
+• \`@welcome on/off\` ➔ Naye members aane par smart welcome card greeting toggle karein.
+• \`@quiet mode on/off\` ➔ Night quiet mode (11PM - 6:30AM) toggle karein.
+• \`@strike status\` / \`@strike reset\` ➔ 3-Strike warnings status check ya reset karein.
+• \`@block safe delete\` ➔ Quoted message ko chat se delete karein.
 
 🎨 *1. AI IMAGES & ART:*
 • \`@image <prompt>\` ➔ Instant Ultra-HD 4K AI Image generation.
 • \`@perchance <prompt>\` / \`@hot images <prompt>\` ➔ 4K Realistic AI Photo.
 • \`@sticker\` / \`@bgremove\` ➔ Kisi photo ko WhatsApp sticker me badlein.
 
-🔍 *2. SMART SUMMARY & KNOWLEDGE:*
-• \`@summary\` ➔ Photo, Document (PDF), ya Group Chat ki safe summary.
+🔍 *2. SMART SUMMARY, VOICE DECODER & KNOWLEDGE:*
+• \`@summary\` ➔ Photo, Document (PDF), Voice Note ya Group Chat ki safe summary.
+• \`@read\` ➔ Voice note par swipe karke transcription & 1-line summary padhein.
 • \`@web <query>\` ➔ Real-time web facts & information search.
 • \`@code <code>\` / \`@debug <code>\` ➔ Programming code explanation & bug fix.
 • \`@translate <lang>: <text>\` ➔ Multi-language translation.
@@ -1744,6 +1755,30 @@ class WhatsAppBotService {
         message: `Failed to send message to group ${group.groupName}: ${e?.message || e}`,
       };
     }
+  }
+
+  public async kickGroupMember(groupQuery: string, memberPhoneOrJid: string): Promise<{ success: boolean; message: string }> {
+    if (!this.sock || !this.isConnected) {
+      return { success: false, message: "WhatsApp bot is disconnected." };
+    }
+    const group = await this.findGroup(groupQuery);
+    if (!group) {
+      return { success: false, message: `Group "${groupQuery}" nahi mila.` };
+    }
+    let targetJid = memberPhoneOrJid;
+    if (!targetJid.includes("@")) {
+      let clean = memberPhoneOrJid.replace(/\D/g, "");
+      if (clean.length === 10) clean = `91${clean}`;
+      targetJid = `${clean}@s.whatsapp.net`;
+    }
+    const isAdm = await whatsappGroupSafetyEngine.isBotAdmin(this.sock, group.groupId, this.dedicatedPhone);
+    if (!isAdm) {
+      return { success: false, message: `Friday "${group.groupName}" group me Admin nahi hai. Kick karne ke liye Admin permissions chahiye.` };
+    }
+    const res = await whatsappGroupSafetyEngine.kickMember(this.sock, group.groupId, targetJid);
+    return res
+      ? { success: true, message: `Member @${memberPhoneOrJid} ko "${group.groupName}" group se remove kar diya gaya hai! ✅` }
+      : { success: false, message: `Failed to remove member from "${group.groupName}".` };
   }
 
   public getStatus(): WhatsAppStatus {
