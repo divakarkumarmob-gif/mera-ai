@@ -543,9 +543,9 @@ class WhatsAppBotService {
                 isOwner: isSenderOwner,
               });
 
-              if (modResult.intercepted && modResult.deleted) {
-                // Offending message deleted by Friday safety shield! Skip further processing.
-                console.log(`[WhatsAppBot] Deleted offensive message in ${groupName || remoteJid} from +${senderPhone}`);
+              if (modResult.intercepted) {
+                // Offending message detected and moderated (deleted/warned)! Skip further processing.
+                console.log(`[WhatsAppBot] Moderated offensive message in ${groupName || remoteJid} from +${senderPhone} (deleted: ${modResult.deleted})`);
                 continue;
               }
             } catch (modErr) {

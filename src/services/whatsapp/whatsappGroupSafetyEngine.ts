@@ -8,6 +8,7 @@ export interface GroupSafetyConfig {
   blockProfanity: boolean;
   blockNsfwMedia: boolean;
   deletedCount: number;
+  warnedCount: number;
   updatedAt: number;
   lastAction?: string;
 }
@@ -18,32 +19,52 @@ export class WhatsAppGroupSafetyEngine {
   private safetyCache: Map<string, GroupSafetyConfig> = new Map();
   private loaded = false;
 
-  // Comprehensive Regex for Gandi Gaali (Hindi, Hinglish, Bhojpuri, English) & Vulgarities
-  private static readonly PROFANITY_PATTERNS: RegExp[] = [
-    // Mother / Sister slurs & variants
-    /\b(?:m[a@4]d[a@4]r?ch[o0]d|m[a@4]d[a@4]r?ch[o0]de?|m[a@4]d[a@4]r?ch[o0]di|m\.?c\.?|m\s+c)\b/i,
-    /\b(?:bh[e3]nch[o0]d|b[e3]h[e3]nch[o0]d|b[e3]h[e3]n\s*ch[o0]d|b\.?c\.?|b\s+c|bhen\s*ke\s*l[o0]d[e3]|bkl)\b/i,
-    /\b(?:bh[o0]sd[i1]k[e3]|bh[o0]sd[i1]k[a@4]|bh[o0]sd[i1]|bsdk|b\.?s\.?d\.?k\.?)\b/i,
-    /\b(?:b[e3]t[i1]ch[o0]d|m[a@4][a@4]?ch[o0]d|m[a@4]\s*k[i1]\s*ch[u0]t|m[a@4]\s*k[a@4]\s*bh[o0]sd[a@4])\b/i,
-    
-    // Genitalia & Explicit Anatomy slurs
-    /\b(?:ch[u0]t|ch[o0][o0]t|ch[u0]t[i1]y[a@4]|ch[u0]t[i1]y[e3]|ch[u0]t[i1]y[e3]p[a@4]|ch[u0]tiye|ch[u0]tiya|ch\*tiya)\b/i,
-    /\b(?:l[u0]nd|l[a@4]ud[a@4]|l[a@4]ud[e3]|l[o0]d[a@4]|l[o0]d[e3]|l\*nd|l\s*u\s*n\s*d)\b/i,
-    /\b(?:g[a@4][a@4]?nd|g[a@4]nd[u0]|g[a@4]ndm[a@4]r[i1]|g\*\*nd|g\s*a\s*n\s*d)\b/i,
-    /\b(?:t[a@4]tt[e3]|ch[u0]ch[i1]|b[o0][o0]bs?|t[i1]ts?|d[i1]ck|p[u0]ssy|c[u0]nt|c[o0]ck)\b/i,
+  // ── 1. Comprehensive Indian & Global Profanity Words Set ─────────────────────
+  private static readonly PROFANITY_WORDS = new Set([
+    // Short acronyms & slang
+    "mc", "bc", "bkl", "bsdk", "mkc", "bkc", "tmkc", "tkl", "mkl", "gandu", "gaandu", "lodu", "jhatu", "jhaatu", "chutya", "chotya", "bhosad",
+    // Mother / Sister / Family Slurs
+    "madarchod", "maderchod", "madarchode", "madarchodi", "madarjaat", "madarchood", "maachod", "maarchod", "machod", "maachuda",
+    "bhenchod", "behenchod", "bhenchode", "behenchode", "bhnchod", "benchod", "behnchod", "betichod", "bhenchoda", "behenchoda",
+    // BSDK / Bhosda
+    "bhosdike", "bhosadike", "bhosdk", "bhosdi", "bhosda", "bhosada", "bhosdiwale", "bhosadiwale", "bhosri", "bhosrike", "bhosdika",
+    // Chut / Chutiya
+    "chutiya", "chutiye", "chutiyo", "chutiyapa", "chutiyagiri", "chootiya", "chootiye", "chut", "choot", "chute", "chutad", "chootad", "chutmarike", "chutmarani",
+    // Lund / Loda
+    "lund", "lauda", "laude", "loda", "lode", "lawda", "lawde", "louda", "loude", "lodu", "lnd", "l@uda", "l@ude",
+    // Gand / Gaand
+    "gand", "gaand", "gandu", "gaandu", "gandwe", "gandwa", "gandmarike", "gandmasti", "ganduon", "gandfat", "gandfatu",
+    // Randi / Raand
+    "randi", "raand", "raandi", "randwe", "randwa", "randibaaz", "randirona", "randiwaaz",
+    // Harami / Kamina / Insults
+    "harami", "haramzada", "haramzade", "haramzaada", "haramzadi", "haramkhor", "kamina", "kamine", "kamini",
+    "saale", "saali", "kutta", "kutte", "suar", "suwar", "bhadwe", "bhadwa", "dalaal", "dalla", "chakka", "hijra",
+    "jhat", "jhaat", "jhatu", "jhaatu", "jhant", "tatte", "tatton", "chuchi", "chuchiya",
+    // Sex / Chudai
+    "chudai", "chodunga", "chudega", "chudwa", "chodampatti", "chudakkad", "chudwao", "chodne", "chudne", "pelunga",
+    // English
+    "fuck", "fucking", "fucker", "motherfucker", "bitch", "slut", "whore", "bastard", "asshole", "cunt", "pussy", "dick", "porn", "nude", "naked", "nsfw", "xxx"
+  ]);
 
-    // Derogatory slurs, insults & sex acts
-    /\b(?:r[a@4]nd[i1]|r[a@4][a@4]nd|r[a@4]nd[i1]b[a@4][a@4]z|ch[u0]d[a@4][i1]|ch[o0]d|ch[u0]d|ch[u0]dw[a@4]|ch[u0]dd[u0])\b/i,
-    /\b(?:h[a@4]r[a@4]m[i1]|h[a@4]r[a@4]mz[a@4]d[e3]|h[a@4]r[a@4]mz[a@4]d[a@4]|k[a@4]m[i1]n[a@4]|k[a@4]m[i1]n[e3])\b/i,
-    /\b(?:bh[a@4]dw[e3]|bh[a@4]dw[a@4]|d[a@4]l[a@4][a@4]l|jh[a@4][a@4]t[u0]|jh[a@4]nt|l[o0]d[u0])\b/i,
-
-    // English Profanity & Vulgarities
-    /\b(?:f+u+c+k+|f+u+c+k+i+n+g+|m+o+t+h+e+r+f+u+c+k+e+r+|b+i+t+c+h+|s+l+u+t+|w+h+o+r+e+|b+a+s+t+a+r+d+)\b/i,
-    /\b(?:a+s+s+h+o+l+e+|d+i+c+k+h+e+a+d+|b+u+l+l+s+h+i+t+|p+o+r+n+|n+s+f+w+|x+x+x+|h+e+n+t+a+i+)\b/i,
-    /\b(?:gandi\s*galli|gandi\s*video|gandi\s*photo|nangi\s*photo|nangi\s*video|sex\s*video)\b/i,
+  // ── 2. Multi-Word Phrases & Devanagari Patterns ────────────────────────────
+  private static readonly PROFANITY_PHRASES: RegExp[] = [
+    /\b(?:teri\s+m[a@4]+(?:\s+k[i1]|\s+k[a@4])\b)/i,
+    /\b(?:m[a@4]+\s+k[i1]\s+ch[u0]t)\b/i,
+    /\b(?:m[a@4]+\s+k[a@4]\s+bh[o0]sd[a@4])\b/i,
+    /\b(?:bh[e3]n\s+k[e3]\s+l[o0]d[e3]|bh[e3]n\s+k\s+l[o0]d[e3]|b[e3]h[e3]n\s+k[e3]\s+l[o0]d[e3]|b[e3]h[a@4]n\s+k[e3]\s+l[o0]d[e3])\b/i,
+    /\b(?:bh[o0]sd[i1]\s+k[e3]|bh[o0]s[a@4]d[i1]\s+k[e3])\b/i,
+    /\b(?:g[a@4]+nd\s+(?:m[a@4]r|f[a@4]d|ch[u0]d|m[a@4]rw[a@4]|m[a@4]r[a@4]o|m[e3]\s+u))\b/i,
+    /\b(?:l[u0]nd\s+(?:l[e3]|m[e3]r[a@4]|p[e3]|ch[u0]s|d[e3]|f[e3]k))\b/i,
+    /\b(?:l[a@4]ud[e3]\s+l[a@4]g\s+g[a@4]y[e3]|l[o0]d[e3]\s+l[a@4]g\s+g[a@4]y[e3])\b/i,
+    /\b(?:r[a@4]nd[i1]\s+k[a@4]\s+b[a@4]ch[a@4]|r[a@4]nd[i1]\s+k[i1]\s+[a@4]ul[a@4]d|r[a@4]nd[i1]\s+r[o0]n[a@4])\b/i,
+    /\b(?:kutt[e3]\s+k[e3]\s+p[i1]ll[e3]|kutt[e3]\s+k[a@4]\s+p[i1]ll[a@4]|su[a@4]r\s+k[e3]\s+b[a@4]chh[e3])\b/i,
+    /\b(?:jh[a@4]+t\s+k[e3]\s+b[a@4]l|jh[a@4]+t\s+k[e3]\s+l[o0]d[e3])\b/i,
+    /\b(?:b\s*\.?\s*s\s*\.?\s*d\s*\.?\s*k|b\s*\.?\s*k\s*\.?\s*l|m\s*\.?\s*c|b\s*\.?\s*c|m\s*\.?\s*k\s*\.?\s*c|t\s*\.?\s*m\s*\.?\s*k\s*\.?\s*c)\b/i,
+    // Devanagari Hindi Regex
+    /(?:मादरचोद|मदरचोद|मादरचोद|बहनचोद|भेनचोद|भोसड़ीके|भोसडीके|भोसड़ा|गांड|गांडू|चूत|चूतिया|चूतिये|लौड़े|लौड़े|लौड़ा|लंड|रांड|रंडी|हरामी|कमीने|कुत्ता|सूअर|झांट|तत्ते|दल्ले|भाड़वे|चोद|चुदाई)/i,
   ];
 
-  // Media NSFW keywords
+  // ── 3. Media NSFW triggers ────────────────────────────────────────────────
   private static readonly MEDIA_NSFW_TRIGGERS = [
     "nude", "naked", "porn", "xxx", "sex", "boobs", "nsfw", "hentai", "strip", "leak", "mms",
     "gandi photo", "gandi video", "nangi photo", "nangi video", "sexy photo", "hot video 18+",
@@ -71,20 +92,13 @@ export class WhatsAppGroupSafetyEngine {
     }
   }
 
-  /**
-   * Check if safety guard (@block safe) is enabled for a group.
-   * By default, returns true if enabled in config or if group is active.
-   */
   public async isGroupSafetyEnabled(groupId: string): Promise<boolean> {
     if (!this.loaded) await this.preloadFromFirestore();
     const config = this.safetyCache.get(groupId);
-    if (!config) return true; // Default ON for protection when commanded
+    if (!config) return true; // Default ON for all groups
     return config.enabled !== false;
   }
 
-  /**
-   * Enable Group Safety Guard (@block safe)
-   */
   public async enableGroupSafety(groupId: string, groupName?: string): Promise<{ success: boolean; message: string }> {
     try {
       const current = this.safetyCache.get(groupId) || {
@@ -94,6 +108,7 @@ export class WhatsAppGroupSafetyEngine {
         blockProfanity: true,
         blockNsfwMedia: true,
         deletedCount: 0,
+        warnedCount: 0,
         updatedAt: Date.now(),
       };
 
@@ -109,7 +124,7 @@ export class WhatsAppGroupSafetyEngine {
 
       return {
         success: true,
-        message: `🛡️ *@block safe GUARD ACTIVATED!* ⚡\n\nAb is group me agar koi bhi:\n• ❌ Gandi gaali / Abusive slurs\n• ❌ Inappropriate NSFW / Vulgar photos & videos\nbheje ga, toh Friday Admin hone par use **chat se turant auto-delete** kar degi! 🚀`,
+        message: `🛡️ *@block safe GUARD ACTIVATED!* ⚡\n\nAb is group me agar koi bhi:\n• ❌ Gandi gaali / Abusive slurs\n• ❌ Inappropriate NSFW / Vulgar photos & videos\nbheje ga, toh Friday Admin hone par use **chat se turant auto-delete** kar degi aur warning de degi! 🚀`,
       };
     } catch (err: any) {
       console.error("[GroupSafetyEngine] Error enabling safety:", err);
@@ -117,9 +132,6 @@ export class WhatsAppGroupSafetyEngine {
     }
   }
 
-  /**
-   * Disable Group Safety Guard
-   */
   public async disableGroupSafety(groupId: string): Promise<{ success: boolean; message: string }> {
     try {
       const current = this.safetyCache.get(groupId) || {
@@ -128,6 +140,7 @@ export class WhatsAppGroupSafetyEngine {
         blockProfanity: false,
         blockNsfwMedia: false,
         deletedCount: 0,
+        warnedCount: 0,
         updatedAt: Date.now(),
       };
 
@@ -148,9 +161,6 @@ export class WhatsAppGroupSafetyEngine {
     }
   }
 
-  /**
-   * Get Safety Guard status for a group
-   */
   public async getGroupSafetyStatus(groupId: string): Promise<GroupSafetyConfig> {
     if (!this.loaded) await this.preloadFromFirestore();
     let config = this.safetyCache.get(groupId);
@@ -161,6 +171,7 @@ export class WhatsAppGroupSafetyEngine {
         blockProfanity: true,
         blockNsfwMedia: true,
         deletedCount: 0,
+        warnedCount: 0,
         updatedAt: Date.now(),
       };
       this.safetyCache.set(groupId, config);
@@ -168,18 +179,79 @@ export class WhatsAppGroupSafetyEngine {
     return config;
   }
 
+  private normalizeText(text: string): string {
+    if (!text) return "";
+    let s = text.toLowerCase();
+    s = s.replace(/0/g, "o")
+         .replace(/[@4]/g, "a")
+         .replace(/[1!|]/g, "i")
+         .replace(/[$5]/g, "s")
+         .replace(/3/g, "e")
+         .replace(/8/g, "b")
+         .replace(/\+/g, "t");
+    return s;
+  }
+
+  private collapseConsecutiveLetters(word: string): string {
+    return word.replace(/(.)\1+/g, "$1");
+  }
+
   /**
    * Check if a text message contains Gandi Gaali / Profanity
    */
-  public detectProfanity(text: string): { isProfane: boolean; matchedPattern?: string } {
-    if (!text || !text.trim()) return { isProfane: false };
-    const clean = text.trim();
+  public detectProfanity(rawText: string): { isProfane: boolean; reason?: string } {
+    if (!rawText || !rawText.trim()) return { isProfane: false };
 
-    for (const pattern of WhatsAppGroupSafetyEngine.PROFANITY_PATTERNS) {
-      if (pattern.test(clean)) {
-        return { isProfane: true, matchedPattern: pattern.source };
+    const rawLower = rawText.toLowerCase();
+
+    // 1. Check Multi-word Phrases & Devanagari & Regex
+    for (const phraseRegex of WhatsAppGroupSafetyEngine.PROFANITY_PHRASES) {
+      if (phraseRegex.test(rawLower)) {
+        return { isProfane: true, reason: "Gandi gaali / Abusive phrase detected" };
       }
     }
+
+    // 2. Normalize Text
+    const normalized = this.normalizeText(rawText);
+
+    // Check phrases on normalized text too
+    for (const phraseRegex of WhatsAppGroupSafetyEngine.PROFANITY_PHRASES) {
+      if (phraseRegex.test(normalized)) {
+        return { isProfane: true, reason: "Gandi gaali / Abusive phrase detected" };
+      }
+    }
+
+    // 3. Tokenize by whitespace and punctuation
+    const words = normalized.split(/[\s,.\-_:;!?*~#^&()\[\]{}|\\/+=<>`'"]+/).filter(Boolean);
+
+    for (const word of words) {
+      // Direct match
+      if (WhatsAppGroupSafetyEngine.PROFANITY_WORDS.has(word)) {
+        return { isProfane: true, reason: `Gandi gaali detected ("${word}")` };
+      }
+
+      // Collapsed repeat letters match (e.g., "chhuuuuuuttt" -> "chut")
+      const collapsed = this.collapseConsecutiveLetters(word);
+      if (WhatsAppGroupSafetyEngine.PROFANITY_WORDS.has(collapsed)) {
+        return { isProfane: true, reason: `Gandi gaali detected ("${collapsed}")` };
+      }
+
+      // Substring checks for compound gaalis (e.g. "madarchodo", "bhenchodon", "chutiyapa")
+      for (const root of WhatsAppGroupSafetyEngine.PROFANITY_WORDS) {
+        if (root.length >= 4 && (word.startsWith(root) || word.endsWith(root))) {
+          return { isProfane: true, reason: `Abusive word detected ("${word}")` };
+        }
+      }
+    }
+
+    // 4. Dot/space joined abbreviations check (e.g., "b.s.d.k", "b s d k", "m.c", "b.c", "m c", "b c")
+    const stripped = normalized.replace(/[^a-z0-9]/g, "");
+    for (const root of ["bsdk", "bkl", "mkc", "bkc", "tmkc", "madarchod", "bhenchod", "bhosdike", "chutiya", "randi"]) {
+      if (stripped.includes(root)) {
+        return { isProfane: true, reason: `Hidden abusive word detected ("${root}")` };
+      }
+    }
+
     return { isProfane: false };
   }
 
@@ -191,13 +263,13 @@ export class WhatsAppGroupSafetyEngine {
 
     for (const trigger of WhatsAppGroupSafetyEngine.MEDIA_NSFW_TRIGGERS) {
       if (combined.includes(trigger)) {
-        return { isUnsafe: true, reason: `Explicit keyword "${trigger}" detected` };
+        return { isUnsafe: true, reason: `Explicit NSFW media trigger "${trigger}"` };
       }
     }
 
     const profCheck = this.detectProfanity(caption);
     if (profCheck.isProfane) {
-      return { isUnsafe: true, reason: "Gandi gaali / abusive text in media caption" };
+      return { isUnsafe: true, reason: "Gandi gaali in media caption" };
     }
 
     return { isUnsafe: false };
@@ -213,13 +285,16 @@ export class WhatsAppGroupSafetyEngine {
       if (!meta || !Array.isArray(meta.participants)) return false;
 
       const botJid = sock.user?.id || "";
+      const botLid = sock.user?.lid || "";
       const botPhone = (dedicatedPhone || botJid.split(":")[0].split("@")[0] || "").replace(/\D/g, "");
       const botUserPrefix = botJid.split(":")[0];
+      const botLidPrefix = botLid ? botLid.split(":")[0] : "";
 
       const participant = meta.participants.find((p: any) => {
         const pPhone = (p.id || "").split("@")[0].split(":")[0].replace(/\D/g, "");
         if (botPhone && pPhone && pPhone === botPhone) return true;
         if (botUserPrefix && p.id.includes(botUserPrefix)) return true;
+        if (botLidPrefix && p.id.includes(botLidPrefix)) return true;
         return false;
       });
 
@@ -237,19 +312,14 @@ export class WhatsAppGroupSafetyEngine {
     if (!sock || !groupJid || !messageKey) return false;
     try {
       const cleanKey = messageKey.key || messageKey;
-      const id = cleanKey.id;
-      if (!id) return false;
+      const keyToDelete = {
+        remoteJid: cleanKey.remoteJid || groupJid,
+        fromMe: Boolean(cleanKey.fromMe),
+        id: cleanKey.id,
+        participant: cleanKey.participant || cleanKey.participantAlt || senderJid,
+      };
 
-      const participant = cleanKey.participant || cleanKey.participantAlt || senderJid;
-
-      await sock.sendMessage(groupJid, {
-        delete: {
-          remoteJid: groupJid,
-          fromMe: Boolean(cleanKey.fromMe),
-          id,
-          participant,
-        },
-      });
+      await sock.sendMessage(groupJid, { delete: keyToDelete });
 
       // Increment deleted counter
       const config = await this.getGroupSafetyStatus(groupJid);
@@ -258,7 +328,7 @@ export class WhatsAppGroupSafetyEngine {
       this.safetyCache.set(groupJid, config);
       safetyCol().doc(groupJid).set({ deletedCount: config.deletedCount, updatedAt: config.updatedAt }, { merge: true }).catch(() => {});
 
-      console.log(`[GroupSafetyEngine] Successfully deleted message ${id} in ${groupJid}`);
+      console.log(`[GroupSafetyEngine] Successfully deleted message ${cleanKey.id} in ${groupJid}`);
       return true;
     } catch (err) {
       console.error(`[GroupSafetyEngine] Failed to delete message in ${groupJid}:`, err);
@@ -301,10 +371,11 @@ export class WhatsAppGroupSafetyEngine {
     // 1. Quoted Message Delete Command (@block safe delete)
     if (/\b(?:delete|hatao|remove|del)\b/i.test(clean) && quotedMessage && quotedMessage.isReply) {
       const isAdm = await this.isBotAdmin(sock, groupJid);
+      const targetKey = quotedMessage.stanzaId
+        ? { id: quotedMessage.stanzaId, remoteJid: groupJid, participant: quotedMessage.senderPhone ? `${quotedMessage.senderPhone}@s.whatsapp.net` : undefined }
+        : messageKey;
+
       if (isAdm) {
-        const targetKey = quotedMessage.stanzaId
-          ? { id: quotedMessage.stanzaId, remoteJid: groupJid }
-          : messageKey;
         const deleted = await this.deleteMessage(sock, groupJid, targetKey, quotedMessage.senderPhone);
         if (deleted) {
           const senderTag = quotedMessage.senderPhone ? `@${quotedMessage.senderPhone}` : quotedMessage.sender;
@@ -314,9 +385,17 @@ export class WhatsAppGroupSafetyEngine {
           };
         }
       } else {
+        // Try deleting anyway in case admin cache was stale
+        const attempted = await this.deleteMessage(sock, groupJid, targetKey, quotedMessage.senderPhone);
+        if (attempted) {
+          return {
+            handled: true,
+            replyText: `🗑️ *Message Deleted!* Quoted message removed from the chat.`,
+          };
+        }
         return {
           handled: true,
-          replyText: `⚠️ *Friday Admin nahi hai!* Messages delete karne ke liye kripya Friday ko group admin banayein.`,
+          replyText: `⚠️ *Friday Admin nahi hai!* Group me dusro ke messages delete karne ke liye kripya Friday ko group admin banayein.`,
         };
       }
     }
@@ -377,7 +456,9 @@ export class WhatsAppGroupSafetyEngine {
 
   /**
    * Main Interceptor: Check incoming group message for offensive language/media.
-   * If detected and Bot is Admin, deletes message instantly and warns offender.
+   * If detected:
+   * 1. Attempts to delete message immediately from group.
+   * 2. Posts an immediate warning alert tagging the sender.
    */
   public async inspectAndModerateGroupMessage(params: {
     sock: any;
@@ -411,10 +492,10 @@ export class WhatsAppGroupSafetyEngine {
       isOwner,
     } = params;
 
-    // Do not delete Boss DK's messages
+    // Do not filter Boss DK's messages
     if (isOwner) return { intercepted: false };
 
-    // Check if safety is active
+    // Check if safety is active for this group
     const isEnabled = await this.isGroupSafetyEnabled(groupJid);
     if (!isEnabled) return { intercepted: false };
 
@@ -427,52 +508,57 @@ export class WhatsAppGroupSafetyEngine {
     }
 
     const reason = profResult.isProfane
-      ? "Gandi gaali / Abusive vulgar language"
+      ? (profResult.reason || "Gandi gaali / Abusive language")
       : (mediaUnsafe.reason || "Inappropriate / NSFW Media");
 
-    console.log(`[GroupSafetyEngine] Offensive message detected in ${groupName} from +${senderPhone}: ${reason}`);
+    console.log(`[GroupSafetyEngine] 🚨 Offensive message detected in ${groupName} from +${senderPhone}: "${text || mediaCaption}" (${reason})`);
 
-    // Check if Friday is Admin
-    const isAdm = await this.isBotAdmin(sock, groupJid, dedicatedPhone);
+    const cleanPhone = (senderPhone || "").replace(/\D/g, "");
+    const mentionJid = cleanPhone ? `${cleanPhone}@s.whatsapp.net` : senderJid;
+    const mentionsList = Array.from(new Set([mentionJid, senderJid])).filter(Boolean);
 
-    if (isAdm && sock) {
-      // 1. DELETE OFFENDING MESSAGE IMMEDIATELY FROM GROUP
-      const deleted = await this.deleteMessage(sock, groupJid, messageKey, senderJid);
+    // 2. Check Admin & Attempt Immediate Deletion
+    let deleted = false;
+    if (sock) {
+      try {
+        deleted = await this.deleteMessage(sock, groupJid, messageKey, senderJid);
+      } catch (delErr) {
+        console.warn("[GroupSafetyEngine] Direct delete attempt failed:", delErr);
+      }
+    }
 
-      // 2. SEND FIRM SAFETY WARNING IN GROUP
-      const mentionJid = senderJid.endsWith("@s.whatsapp.net") ? senderJid : `${senderPhone}@s.whatsapp.net`;
-      const cleanPhone = senderPhone.replace(/\D/g, "");
+    // 3. Increment Warning Count in Firestore
+    try {
+      const config = await this.getGroupSafetyStatus(groupJid);
+      config.warnedCount = (config.warnedCount || 0) + 1;
+      config.updatedAt = Date.now();
+      this.safetyCache.set(groupJid, config);
+      safetyCol().doc(groupJid).set({ warnedCount: config.warnedCount, updatedAt: config.updatedAt }, { merge: true }).catch(() => {});
+    } catch {}
 
-      const alertMessage = `🛡️ *FRIDAY GROUP AUTO-SHIELD (@block safe)* ⚡\n\n🚫 *Offensive Message Deleted!* 🗑️\n👤 *Sender:* @${cleanPhone || senderName}\n📌 *Wajah:* ${reason}\n\n_Group ke shishtachar, decency aur family safety ke liye ye message turant delete kar diya gaya hai. Kripya abusive words ya unsafe content share na karein._ 🙏`;
+    // 4. Send Clear & Distinct Warning Alert to Group
+    if (sock) {
+      const senderTag = cleanPhone ? `@${cleanPhone}` : (senderName || "Member");
+
+      let alertMessage = "";
+      if (deleted) {
+        alertMessage = `🛡️ *FRIDAY GROUP AUTO-SHIELD (@block safe)* ⚡\n\n🚫 *Abusive Message / Media Deleted!* 🗑️\n👤 *Member:* ${senderTag}\n📌 *Wajah:* ${reason}\n\n_Group ke shishtachar, decency aur family safety ke liye ye message turant delete kar diya gaya hai. Kripya abusive words ya unsafe content share na karein._ 🙏`;
+      } else {
+        alertMessage = `🛡️ *FRIDAY SAFETY WARNING (@block safe)* ⚡\n\n⚠️ *Gandi Gaali / Abusive Content Detected!*\n👤 *Member:* ${senderTag}\n📌 *Wajah:* ${reason}\n\n_Kripya group me aisi bhasha ya inappropriate content ka prayog na karein!_\n\n👑 _(Admin Notice: Friday ko Group Admin banayein taaki aisi abusive messages chat se automatically delete ho sakein.)_`;
+      }
 
       try {
         await sock.sendMessage(groupJid, {
           text: alertMessage,
-          mentions: [mentionJid, senderJid],
+          mentions: mentionsList,
         });
+        console.log(`[GroupSafetyEngine] Warning alert delivered to ${groupName}`);
       } catch (alertErr) {
-        console.warn("[GroupSafetyEngine] Failed to post delete warning:", alertErr);
+        console.error("[GroupSafetyEngine] Failed to send warning alert to group:", alertErr);
       }
-
-      return { intercepted: true, reason, deleted: true };
-    } else if (sock) {
-      // If not admin, send warning alert
-      const mentionJid = senderJid.endsWith("@s.whatsapp.net") ? senderJid : `${senderPhone}@s.whatsapp.net`;
-      const cleanPhone = senderPhone.replace(/\D/g, "");
-
-      const warningMessage = `⚠️ *Friday Safety Warning:* @${cleanPhone || senderName} kripya group me gandi gaali ya inappropriate content na bhejein!\n\nℹ️ _(Notice: Friday ko Group Admin banayein taaki aisi abusive messages chat se automatically delete ho sakein.)_`;
-
-      try {
-        await sock.sendMessage(groupJid, {
-          text: warningMessage,
-          mentions: [mentionJid, senderJid],
-        });
-      } catch {}
-
-      return { intercepted: true, reason, deleted: false };
     }
 
-    return { intercepted: true, reason, deleted: false };
+    return { intercepted: true, reason, deleted };
   }
 }
 
