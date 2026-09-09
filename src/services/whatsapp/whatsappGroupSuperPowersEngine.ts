@@ -1682,7 +1682,7 @@ Bhagwan aapko lambi umar, beshumar khushiyan, aur bohot saari success de! ðŸš€ðŸ
     const isPotentiallyCommandRelated =
       /(?:tag|mention|roast|tareef|quiz|khel|game|bill|hisab|split|sach|fact|faisla|decision|birthday|janamdin|filter|gaali|safety|voice|audio|quiet|welcome|commands?|rule|rules|lie|jhooth|rap|future|kismat|srk|tony|amitabh|modi|mimic|clone|movie|poster|commentary|song|gaana|music)/i.test(clean);
 
-    if (isPotentiallyCommandRelated && clean.includes("friday")) {
+    if (isPotentiallyCommandRelated && (clean.includes("friday") || clean.includes("@") || clean.startsWith("/") || clean.startsWith("#"))) {
       const apiKey = process.env.GEMINI_API_KEY;
       if (apiKey) {
         try {

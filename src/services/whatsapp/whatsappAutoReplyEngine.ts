@@ -186,6 +186,11 @@ export class WhatsAppAutoReplyEngine {
   ): boolean {
     const cleanText = (text || "").toLowerCase().trim();
 
+    // Any message containing '@' or starting with '/' or '#' indicates Friday / AI command trigger
+    if (cleanText.includes("@") || cleanText.startsWith("/") || cleanText.startsWith("#")) {
+      return true;
+    }
+
     const nameTriggers = [
       "friday",
       "@friday",
