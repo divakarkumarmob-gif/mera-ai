@@ -117,7 +117,37 @@ export class WhatsAppGroupSuperPowersEngine {
       clean.startsWith("/icebreaker") ||
       clean.startsWith("@joke") ||
       clean.startsWith("/joke") ||
-      /^(?:tag\s*all|everyone|fact\s*check|ai\s*judge|roast\s*me|start\s*quiz|split\s*bill|group\s*decision|group\s*birthday|make\s*meme|create\s*poll|translate\s*to|group\s*vibe|tell\s*joke)/i.test(clean)
+      clean.startsWith("@liedetector") ||
+      clean.startsWith("/liedetector") ||
+      clean.startsWith("@lie") ||
+      clean.startsWith("/lie") ||
+      clean.startsWith("@psychology") ||
+      clean.startsWith("@rap") ||
+      clean.startsWith("/rap") ||
+      clean.startsWith("@future") ||
+      clean.startsWith("/future") ||
+      clean.startsWith("@oracle") ||
+      clean.startsWith("/oracle") ||
+      clean.startsWith("@kismat") ||
+      clean.startsWith("@srk") ||
+      clean.startsWith("/srk") ||
+      clean.startsWith("@tonystark") ||
+      clean.startsWith("/tonystark") ||
+      clean.startsWith("@amitabh") ||
+      clean.startsWith("@modi") ||
+      clean.startsWith("@speakas") ||
+      clean.startsWith("/speakas") ||
+      clean.startsWith("@mimic") ||
+      clean.startsWith("/mimic") ||
+      clean.startsWith("@clone") ||
+      clean.startsWith("/clone") ||
+      clean.startsWith("@movie") ||
+      clean.startsWith("/movie") ||
+      clean.startsWith("@poster") ||
+      clean.startsWith("/poster") ||
+      clean.startsWith("@commentary") ||
+      clean.startsWith("/commentary") ||
+      /^(?:tag\s*all|everyone|fact\s*check|ai\s*judge|roast\s*me|start\s*quiz|split\s*bill|group\s*decision|group\s*birthday|make\s*meme|create\s*poll|translate\s*to|group\s*vibe|tell\s*joke|lie\s*detector|rap\s*banao|future\s*prediction|movie\s*cast|match\s*commentary)/i.test(clean)
     );
   }
 
@@ -217,6 +247,62 @@ export class WhatsAppGroupSuperPowersEngine {
       clean.startsWith("/joke")
     ) {
       return await this.handleVibeRadarAndIcebreaker(groupJid, groupName, rawText, senderName);
+    }
+
+    // 12. @liedetector / @psychology Polygraph & Lie Detector
+    if (
+      clean.startsWith("@liedetector") ||
+      clean.startsWith("/liedetector") ||
+      clean.startsWith("@lie") ||
+      clean.startsWith("/lie") ||
+      clean.startsWith("@psychology")
+    ) {
+      return await this.handleLieDetector(rawText, quotedMessage, senderName);
+    }
+
+    // 13. @rap Desi Hip-Hop Rap Generator
+    if (clean.startsWith("@rap") || clean.startsWith("/rap") || clean.startsWith("rap")) {
+      return await this.handleDesiRapGenerator(rawText, quotedMessage, senderName);
+    }
+
+    // 14. @future / @oracle Time-Machine Future Prediction
+    if (
+      clean.startsWith("@future") ||
+      clean.startsWith("/future") ||
+      clean.startsWith("@oracle") ||
+      clean.startsWith("/oracle") ||
+      clean.startsWith("@kismat")
+    ) {
+      return await this.handleFutureOracle(rawText, quotedMessage, senderName);
+    }
+
+    // 15. @srk / @tonystark / @amitabh / @modi / @speakas Celebrity Clone
+    if (
+      clean.startsWith("@srk") ||
+      clean.startsWith("/srk") ||
+      clean.startsWith("@tonystark") ||
+      clean.startsWith("/tonystark") ||
+      clean.startsWith("@amitabh") ||
+      clean.startsWith("@modi") ||
+      clean.startsWith("@speakas") ||
+      clean.startsWith("/speakas")
+    ) {
+      return await this.handleCelebrityClone(rawText, quotedMessage, senderName);
+    }
+
+    // 16. @mimic / @clone Member Doppelgänger
+    if (clean.startsWith("@mimic") || clean.startsWith("/mimic") || clean.startsWith("@clone") || clean.startsWith("/clone")) {
+      return await this.handleMemberMimic(rawText, quotedMessage, senderName);
+    }
+
+    // 17. @movie / @poster Movie Cast & Poster Generator
+    if (clean.startsWith("@movie") || clean.startsWith("/movie") || clean.startsWith("@poster") || clean.startsWith("/poster")) {
+      return await this.handleMovieCastPoster(sock, groupJid, rawText, senderName);
+    }
+
+    // 18. @commentary Bhojpuri & Sidhu Sports Commentary
+    if (clean.startsWith("@commentary") || clean.startsWith("/commentary") || clean.startsWith("commentary")) {
+      return await this.handleSportsCommentary(rawText, senderName);
     }
 
     return { handled: false };
@@ -1018,7 +1104,351 @@ Drop an irresistible, hilarious, ultra-engaging icebreaker question or "Would Yo
     return { handled: true, replyText: `✨ Group vibe is awesome today! 🚀` };
   }
 
-  // ── 12. Midnight Birthday Cron Worker ─────────────────────────────────────
+  // ── 12. @liedetector / @psychology Polygraph & Lie Detector ───────────────
+
+  public async handleLieDetector(
+    rawText: string,
+    quotedMessage?: QuotedMessageContext | null,
+    senderName = "Member"
+  ): Promise<{ handled: boolean; replyText?: string }> {
+    const claim = rawText
+      .replace(/^(?:@liedetector|@lie|@psychology|\/liedetector|\/lie|\/psychology|sach\s*ya\s*jhooth)\s*[:=-]?\s*/i, "")
+      .trim();
+
+    const targetText = quotedMessage ? quotedMessage.text : claim;
+    const targetSender = quotedMessage ? quotedMessage.sender : senderName;
+
+    if (!targetText) {
+      return {
+        handled: true,
+        replyText: `🕵️‍♂️ *AI Lie Detector:* Kripya kisi member ke message par swipe karke \`@liedetector\` likhein ya apna statement dein!`,
+      };
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return {
+        handled: true,
+        replyText: `🕵️‍♂️ *Polygraph Scan on ${targetSender}:* Statement appears 75% suspicious! 😂`,
+      };
+    }
+
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+      const prompt = `You are Friday AI running an ultra-cool, high-tech, cinematic Psychological Lie Detector & Polygraph scan on a statement in a WhatsApp group.
+Statement by ${targetSender}: "${targetText}"
+
+Your task:
+Analyze linguistic hedging, stress indicators, excessive justification, excuses, and psychological micro-cues with funny, witty, playful Indian detective humor.
+
+Structure output EXACTLY like this:
+🕵️‍♂️ *FRIDAY AI POLYGRAPH & LIE DETECTOR SCAN* 🔬
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+👤 *Target Subject:* ${targetSender}
+📜 *Analyzed Statement:* "${targetText}"
+📈 *Linguistic Stress Index:* [Random 75% to 96%] (HIGH)
+🧠 *Psychological Micro-Cue:* [Funny analysis of over-explanation or excuse pattern in Hinglish]
+🚨 *VERDICT:* [Declare whether it is 92% JHOOTH/CAP or 100% TRUTH with a hilarious, savage reality check]
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚖️ _Polygraph analysis completed by Friday AI!_`;
+
+      const resp = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: prompt });
+      const text = resp.text?.trim();
+      if (text) return { handled: true, replyText: text };
+    } catch (e: any) {
+      return { handled: true, replyText: `⚠️ Lie detector scan error: ${e?.message || e}` };
+    }
+
+    return { handled: true, replyText: `🕵️‍♂️ *Lie Detector:* Statement analyzed! High cap detected! 😂` };
+  }
+
+  // ── 13. @rap Desi Hip-Hop Rap Generator ───────────────────────────────────
+
+  public async handleDesiRapGenerator(
+    rawText: string,
+    quotedMessage?: QuotedMessageContext | null,
+    senderName = "Member"
+  ): Promise<{ handled: boolean; replyText?: string }> {
+    const target = rawText
+      .replace(/^(?:@rap|\/rap|rap\s*banao|rap)\s*[:=-]?\s*/i, "")
+      .trim();
+
+    const targetPerson = target || (quotedMessage ? quotedMessage.sender : senderName);
+    const apiKey = process.env.GEMINI_API_KEY;
+
+    if (!apiKey) {
+      return {
+        handled: true,
+        replyText: `🎤 *Gully Cypher:* ${targetPerson} bhai ka swag hard hai, baaki sab bantai card hai! 🔥`,
+      };
+    }
+
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+      const prompt = `Write a super fiery, hilarious, energetic 6 to 8-line Desi Hip-Hop / Gully Boy style Rap Cypher about "${targetPerson}" in a WhatsApp group.
+Include funny Indian references (chai, bike, late aana, excuses, swag, gaming, dosti).
+Rhymes must be tight and catchy in authentic Hinglish slang (hard, bantai, scene, boss).
+CRITICAL: No vulgar/abusive words. Keep it high vibe and purely for friendly laughter.`;
+
+      const resp = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: prompt });
+      const text = resp.text?.trim();
+      if (text) {
+        return {
+          handled: true,
+          replyText: `🎤 *FRIDAY DESI CYPHER & RAP ARENA* 🔥🎵\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n👑 *Featuring:* ${targetPerson}\n\n${text}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n🎧 _Drop the mic! Yo!_ 💥`,
+        };
+      }
+    } catch (e: any) {
+      return { handled: true, replyText: `⚠️ Rap generation error: ${e?.message || e}` };
+    }
+
+    return { handled: true, replyText: `🎤 Mic drop for ${targetPerson}! 🔥` };
+  }
+
+  // ── 14. @future / @oracle Time-Machine Future Prediction ──────────────────
+
+  public async handleFutureOracle(
+    rawText: string,
+    quotedMessage?: QuotedMessageContext | null,
+    senderName = "Member"
+  ): Promise<{ handled: boolean; replyText?: string }> {
+    const target = rawText
+      .replace(/^(?:@future|@oracle|@kismat|\/future|\/oracle|\/kismat)\s*[:=-]?\s*/i, "")
+      .trim();
+
+    const targetPerson = target || (quotedMessage ? quotedMessage.sender : senderName);
+    const apiKey = process.env.GEMINI_API_KEY;
+
+    if (!apiKey) {
+      return {
+        handled: true,
+        replyText: `⏳ *Year 2031 Prediction:* ${targetPerson} will be a billionaire drinking coconut water on a private yacht! 🚀`,
+      };
+    }
+
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+      const prompt = `You are Friday AI, looking through the cosmic time-machine 5 to 10 years into the future (Year 2031-2035).
+Create a hilarious, ultra-detailed, witty "Future Biography & Destiny Card" for "${targetPerson}" in their WhatsApp group.
+Predict their future career, hilarious habits (that never changed), relationship status, and wealth in funny Hinglish.
+Keep it positive, clever, and laugh-out-loud funny.`;
+
+      const resp = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: prompt });
+      const text = resp.text?.trim();
+      if (text) {
+        return {
+          handled: true,
+          replyText: `⏳ *FRIDAY TIME-MACHINE: YEAR 2031 DESTINY* 🔮✨\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n👤 *Subject:* ${targetPerson}\n\n${text}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n🌌 _Kismat locked in the blockchain of destiny!_ 🚀`,
+        };
+      }
+    } catch (e: any) {
+      return { handled: true, replyText: `⚠️ Future oracle error: ${e?.message || e}` };
+    }
+
+    return { handled: true, replyText: `🔮 Future looks legendary for ${targetPerson}! ✨` };
+  }
+
+  // ── 15. @srk / @tonystark / @amitabh / @speakas Celebrity Clone ────────────
+
+  public async handleCelebrityClone(
+    rawText: string,
+    quotedMessage?: QuotedMessageContext | null,
+    senderName = "Member"
+  ): Promise<{ handled: boolean; replyText?: string }> {
+    let celeb = "Shah Rukh Khan";
+    const clean = rawText.toLowerCase();
+
+    if (clean.includes("tony") || clean.includes("stark") || clean.includes("ironman")) celeb = "Tony Stark (Iron Man)";
+    else if (clean.includes("amitabh") || clean.includes("bachchan") || clean.includes("bigb")) celeb = "Amitabh Bachchan";
+    else if (clean.includes("modi") || clean.includes("narendra")) celeb = "Narendra Modi";
+    else if (clean.includes("salman") || clean.includes("bhai")) celeb = "Salman Khan";
+    else if (clean.includes("babu") || clean.includes("rao") || clean.includes("baburao")) celeb = "Babu Rao (Hera Pheri)";
+    else if (clean.includes("munna") || clean.includes("circuit")) celeb = "Munna Bhai & Circuit";
+    else if (clean.includes("srk") || clean.includes("shahrukh")) celeb = "Shah Rukh Khan";
+
+    const promptText = rawText
+      .replace(/^(?:@srk|@tonystark|@amitabh|@modi|@speakas|\/srk|\/tonystark|\/amitabh|\/modi|\/speakas)\s*[:=-]?\s*/i, "")
+      .trim();
+
+    const topic = promptText || (quotedMessage ? quotedMessage.text : "Sab log dhyan se suno");
+    const apiKey = process.env.GEMINI_API_KEY;
+
+    if (!apiKey) {
+      return {
+        handled: true,
+        replyText: `👑 *${celeb} Style:* Picture abhi baaki hai mere dost! ✨`,
+      };
+    }
+
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+      const prompt = `You are a legendary voice and persona impersonator of "${celeb}".
+Respond to this WhatsApp group topic: "${topic}".
+User speaking: ${senderName}.
+Use iconic catchphrases, dramatic pauses, signature dialogues, and authentic charisma of ${celeb} in natural Hindi/Hinglish.
+Keep it entertaining, 4-5 lines.`;
+
+      const resp = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: prompt });
+      const text = resp.text?.trim();
+      if (text) {
+        return {
+          handled: true,
+          replyText: `👑 *CELEBRITY PERSONA CLONE: ${celeb.toUpperCase()}* 🎬✨\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n${text}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n🌟 _Official Cinematic Voice Simulation!_ 🍿`,
+        };
+      }
+    } catch (e: any) {
+      return { handled: true, replyText: `⚠️ Celebrity clone error: ${e?.message || e}` };
+    }
+
+    return { handled: true, replyText: `🎬 Action! ${celeb} is in the house! ✨` };
+  }
+
+  // ── 16. @mimic / @clone Member Doppelgänger ───────────────────────────────
+
+  public async handleMemberMimic(
+    rawText: string,
+    quotedMessage?: QuotedMessageContext | null,
+    senderName = "Member"
+  ): Promise<{ handled: boolean; replyText?: string }> {
+    const target = rawText
+      .replace(/^(?:@mimic|@clone|\/mimic|\/clone)\s*[:=-]?\s*/i, "")
+      .trim();
+
+    const targetPerson = target || (quotedMessage ? quotedMessage.sender : senderName);
+    const apiKey = process.env.GEMINI_API_KEY;
+
+    if (!apiKey) {
+      return {
+        handled: true,
+        replyText: `🤖 *Simulating @${targetPerson}:* "Haan bhai 2 min me aata hoon..." 😅`,
+      };
+    }
+
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+      const prompt = `You are Friday AI doing a funny, hyper-accurate impersonation of a typical college/friend group member named "${targetPerson}".
+Context message / query: "${quotedMessage ? quotedMessage.text : rawText}".
+
+Task:
+Simulate EXACTLY how ${targetPerson} would reply in WhatsApp:
+- Their classic excuses ("so raha tha", "mummy ne kaam bol diya", "battery 2% hai", "traffic me hoon")
+- Overuse of their favorite emojis (😅, 😂, 🙏, 👍, 🔥)
+- Punctuation quirks and casual, lazy typing.
+Keep it 2-3 lines and wildly relatable.`;
+
+      const resp = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: prompt });
+      const text = resp.text?.trim();
+      if (text) {
+        return {
+          handled: true,
+          replyText: `🤖 *SIMULATING @${targetPerson.toUpperCase()}'S EXACT BRAIN* 👥⚡\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n${text}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n🤣 _(Pakka yehi bolte na? Sach batao!)_`,
+        };
+      }
+    } catch (e: any) {
+      return { handled: true, replyText: `⚠️ Mimic error: ${e?.message || e}` };
+    }
+
+    return { handled: true, replyText: `🤖 @${targetPerson} mode active! 😅` };
+  }
+
+  // ── 17. @movie / @poster Movie Cast & Poster Generator ────────────────────
+
+  public async handleMovieCastPoster(
+    sock: any,
+    groupJid: string,
+    rawText: string,
+    senderName: string
+  ): Promise<{ handled: boolean; replyText?: string }> {
+    const clean = rawText
+      .replace(/^(?:@movie|@poster|\/movie|\/poster|movie\s*cast)\s*[:=-]?\s*/i, "")
+      .trim();
+
+    const topic = clean || "Avengers Desi Edition with Group Members";
+    const apiKey = process.env.GEMINI_API_KEY;
+    let synopsisText = `🎬 *BLOCKBUSTER CASTING:* ${topic}`;
+    let imagePrompt = `Epic cinematic blockbuster movie poster of ${topic}, Bollywood Hollywood crossover, 8k resolution, dramatic lighting`;
+
+    if (apiKey) {
+      try {
+        const ai = new GoogleGenAI({ apiKey });
+        const res = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: `Create an epic Bollywood/Hollywood crossover blockbuster movie cast and plot synopsis for: "${topic}".
+Assign funny dramatic character roles (e.g. Mastermind Hero, Sarcastic Tech Guy, Emotional Friend, Main Villain).
+Format:
+Synopsis: [3-4 lines dramatic trailer script]
+PosterPrompt: [Visual description for Hollywood-grade cinematic movie poster]`,
+        });
+        const full = res.text?.trim() || "";
+        const synMatch = full.match(/Synopsis:\s*([\s\S]*?)(?:PosterPrompt:|$)/i);
+        const pMatch = full.match(/PosterPrompt:\s*([\s\S]*)/i);
+        if (synMatch) synopsisText = `🎬 *FRIDAY BLOCKBUSTER MOVIE CASTING* 🍿⚡\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n${synMatch[1].trim()}\n━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+        if (pMatch) imagePrompt = pMatch[1].trim();
+      } catch {}
+    }
+
+    try {
+      const { imageGenerationService } = await import("../imageGenerationService");
+      const genRes = await imageGenerationService.generateImage(imagePrompt, { aspectRatio: "16:9" });
+      if (genRes.success && genRes.buffer && sock) {
+        await sock.sendMessage(groupJid, {
+          image: genRes.buffer,
+          caption: synopsisText,
+        });
+        return { handled: true };
+      }
+    } catch (imgErr) {
+      console.warn("[GroupSuperPowers] Movie poster image error:", imgErr);
+    }
+
+    return {
+      handled: true,
+      replyText: `${synopsisText}\n\n🎟️ _In Cinemas Worldwide This Friday!_ 🌟`,
+    };
+  }
+
+  // ── 18. @commentary Bhojpuri & Sidhu Sports Commentary ────────────────────
+
+  public async handleSportsCommentary(
+    rawText: string,
+    senderName: string
+  ): Promise<{ handled: boolean; replyText?: string }> {
+    const clean = rawText
+      .replace(/^(?:@commentary|\/commentary|commentary)\s*[:=-]?\s*/i, "")
+      .trim();
+
+    const topic = clean || "Virat Kohli hitting iconic cover drive in death overs";
+    const apiKey = process.env.GEMINI_API_KEY;
+
+    if (!apiKey) {
+      return {
+        handled: true,
+        replyText: `🎙️ *Bhojpuri Commentary:* Ee dekhi bhaiya, ball gail boundary ke paar! Chauka! 💥🏏`,
+      };
+    }
+
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+      const prompt = `Write a high-voltage, laugh-out-loud funny cricket/sports live commentary for: "${topic}".
+Use authentic high-energy Bhojpuri & Sidhuisms punchlines ("Eee dekhi babua", "Thoko taali", "Dhuaan nikaal diye", "Gagan-chumbi chhakka").
+3-4 lines of pure adrenaline and entertainment.`;
+
+      const resp = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: prompt });
+      const text = resp.text?.trim();
+      if (text) {
+        return {
+          handled: true,
+          replyText: `🎙️ *FRIDAY LIVE DHAMAKA COMMENTARY* 🏏🔥\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n${text}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n⚡ _Thoko taali! Boundary paar!_ 💥`,
+        };
+      }
+    } catch (e: any) {
+      return { handled: true, replyText: `⚠️ Commentary error: ${e?.message || e}` };
+    }
+
+    return { handled: true, replyText: `🏏 Sixer! Ball stadium ke bahar! 💥` };
+  }
+
+  // ── 19. Midnight Birthday Cron Worker ─────────────────────────────────────
 
   public async checkAndTriggerMidnightBirthdays(sock: any): Promise<number> {
     if (!sock) return 0;
@@ -1173,14 +1603,50 @@ Bhagwan aapko lambi umar, beshumar khushiyan, aur bohot saari success de! 🚀�
       return await this.handleLiveTranslator(rawText, quotedMessage, senderName);
     }
 
+
     // 14. Vibe Radar, Icebreaker & Joke Intent
     if (/(?:vibe\s*check|icebreaker|joke\s*sunao|chutkula\s*sunao|group\s*ka\s*mahaul|ladai\s*rok|jhagda\s*rok|bore\s*ho\s*raha)/i.test(clean)) {
       return await this.handleVibeRadarAndIcebreaker(groupJid, groupName, rawText, senderName);
     }
 
+    // 15. AI Lie Detector & Cinematic Polygraph Intent
+    if (/(?:sach\s*ya\s*jhooth|jhooth\s*pakdo|jhooth\s*bol\s*raha|lie\s*detector|polygraph|psychology\s*test|stress\s*analysis)/i.test(clean)) {
+      return await this.handleLieDetector(rawText, quotedMessage, senderName);
+    }
+
+    // 16. AI Desi Hip-Hop / Gully Boy Rap Intent
+    if (/(?:rap\s*banao|desi\s*rap|gully\s*rap|cypher\s*banao|rap\s*sunao|diss\s*track)/i.test(clean)) {
+      return await this.handleDesiRapGenerator(rawText, quotedMessage, senderName);
+    }
+
+    // 17. Time-Machine Future Prediction / Oracle Intent
+    if (/(?:future\s*batao|5\s*saal\s*baad|kismat\s*batao|bhavishya\s*batao|future\s*prediction|oracle|kismat\s*khol)/i.test(clean)) {
+      return await this.handleFutureOracle(rawText, quotedMessage, senderName);
+    }
+
+    // 18. Celebrity Clone & SpeakAs Intent
+    if (/(?:srk\s*style|shahrukh\s*style|tony\s*stark\s*style|amitabh\s*style|modi\s*style|speakas|celebrity\s*style)/i.test(clean)) {
+      return await this.handleCelebrityClone(rawText, quotedMessage, senderName);
+    }
+
+    // 19. Member Doppelganger / Ghost Mimic Intent
+    if (/(?:mimic\s*karo|copy\s*karo|iski\s*tarah\s*bolo|clone\s*karo|acting\s*karo|doppelganger)/i.test(clean)) {
+      return await this.handleMemberMimic(rawText, quotedMessage, senderName);
+    }
+
+    // 20. Movie Cast, Script & Poster Intent
+    if (/(?:movie\s*cast|poster\s*banao|filmi\s*poster|film\s*banao|trailer\s*banao|blockbuster\s*movie)/i.test(clean)) {
+      return await this.handleMovieCastPoster(sock, groupJid, rawText, senderName);
+    }
+
+    // 21. High-Energy Cricket / Sports Commentary Intent
+    if (/(?:commentary\s*sunao|bhojpuri\s*commentary|cricket\s*commentary|sidhu\s*commentary|ipl\s*commentary)/i.test(clean)) {
+      return await this.handleSportsCommentary(rawText, senderName);
+    }
+
     // ── Phase 2: Suspicious / Ambiguous Intent Classifier (Gemini AI Powered) ─
     const isPotentiallyCommandRelated =
-      /(?:tag|mention|roast|tareef|quiz|khel|game|bill|hisab|split|sach|fact|faisla|decision|birthday|janamdin|filter|gaali|safety|voice|audio|quiet|welcome|commands?|rule|rules)/i.test(clean);
+      /(?:tag|mention|roast|tareef|quiz|khel|game|bill|hisab|split|sach|fact|faisla|decision|birthday|janamdin|filter|gaali|safety|voice|audio|quiet|welcome|commands?|rule|rules|lie|jhooth|rap|future|kismat|srk|tony|amitabh|modi|mimic|clone|movie|poster|commentary)/i.test(clean);
 
     if (isPotentiallyCommandRelated && clean.includes("friday")) {
       const apiKey = process.env.GEMINI_API_KEY;
@@ -1206,6 +1672,13 @@ Available Group Capabilities:
 11. "@birthday add [name] [date]" -> Saves member birthdays for 12:00 AM midnight celebration.
 12. "@quiet mode on/off" -> Night quiet mode between 11 PM and 6:30 AM.
 13. "@welcome on/off" -> Welcome greeting cards for new members.
+14. "@liedetector [claim]" -> AI Polygraph stress analyzer & truth rating.
+15. "@rap [name/topic]" -> Hardcore Desi Hip-Hop Gully Boy 8-bar rap.
+16. "@future [name]" -> Time machine 2031 hilarious destiny & lifestyle prophecy.
+17. "@srk" / "@tonystark" / "@amitabh" / "@modi" [dialogue] -> Celebrity dialogue & style generator.
+18. "@mimic [name]" -> Imitates the speaking style & catchphrases of a group member.
+19. "@movie [title]" -> Casts group members in a blockbuster film trailer and generates poster.
+20. "@commentary [scenario]" -> High-voltage Bhojpuri or Sidhu style live match commentary.
 
 Determine:
 1. "CONFIDENT_EXECUTE": If user clearly asked for one of these capabilities. Output: { "action": "EXECUTE", "command": "...", "args": "..." }
