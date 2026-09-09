@@ -806,7 +806,7 @@ class WhatsAppBotService {
                   quotedMessage,
                   (j, t, inT, k) => this.sendHumanLikeMessage(j, t, inT, k),
                   (j, img, cap, k) => this.sendPhotoMessage(j, img, cap, k),
-                  this.getMasterAllCommandsCard(),
+                  this.getGroupSafeCommandsCard(),
                   (j, rT, q, k) => this.handleQuotedMediaSummary(j, rT, q, k)
                 ).catch((e) => console.error("[WhatsAppBot] Group Mention AI error:", e));
               }
@@ -1503,6 +1503,34 @@ class WhatsAppBotService {
 
   public setAutoReply(enabled: boolean) {
     this.autoReplyEnabled = enabled;
+  }
+
+  public getGroupSafeCommandsCard(): string {
+    return `⚡ *FRIDAY AI — PUBLIC GROUP COMMANDS* 🚀
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+👑 *Creator & Master:* DK Boss (Divakar Kumar)
+🛡️ *Privacy Shield:* Active (Strict Zero-Leak Protection)
+
+🎨 *1. AI IMAGES & ART:*
+• \`@image <prompt>\` ➔ Instant Ultra-HD 4K AI Image generation.
+• \`@perchance <prompt>\` / \`@hot images <prompt>\` ➔ 4K Realistic AI Photo.
+• \`@sticker\` / \`@bgremove\` ➔ Kisi photo ko WhatsApp sticker me badlein.
+
+🔍 *2. SMART SUMMARY & KNOWLEDGE:*
+• \`@summary\` ➔ Photo, Document (PDF), ya Group Chat ki safe summary.
+• \`@web <query>\` ➔ Real-time web facts & information search.
+• \`@code <code>\` / \`@debug <code>\` ➔ Programming code explanation & bug fix.
+• \`@translate <lang>: <text>\` ➔ Multi-language translation.
+
+👥 *3. GROUP UTILITIES:*
+• \`@poll <question>\` ➔ WhatsApp interactive poll create karein.
+• \`@quiz <topic>\` ➔ Group trivia/quiz game start karein.
+• \`@safety <link>\` ➔ Phishing & scam link safety verification.
+
+💬 *4. CHAT WITH FRIDAY:*
+• \`@friday <sawal ya baat>\` ➔ Friday se direct group me baat karein.
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔒 *Security Notice:* Security aur privacy guidelines ke mutabik group me kisi ka personal number ya private vault data share nahi kiya jata hai.`;
   }
 
   public getMasterAllCommandsCard(): string {

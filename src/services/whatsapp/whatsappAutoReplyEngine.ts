@@ -501,6 +501,21 @@ TONE & STYLE:
     }
 
     const cleanText = (text || "").trim();
+
+    // 0. Strict Zero-Leak Privacy Guard: Never give anyone's contact number or private details in group
+    const isAskingForContactOrSensitive =
+      /\b(number\s*(?:do|de|bhejo|batana|batao|chahiye|share\s*karo)|contact\s*(?:do|de|bhejo|share)|phone\s*no|phone\s*number|mobile\s*no|mobile\s*number|boss\s*ka\s*no|boss\s*ka\s*number|dk\s*ka\s*no|dk\s*ka\s*number|address\s*do|password\s*batao|kisi\s*ka\s*no|kisi\s*ka\s*number)\b/i.test(cleanText);
+
+    if (isAskingForContactOrSensitive) {
+      await sendMsgFn(
+        groupJid,
+        `🔒 *Privacy & Security Policy:*\nSecurity aur privacy protocol ke tahat main group me kisi ka bhi personal phone number, contact details ya private confidential data share nahi kar sakti.`,
+        text,
+        messageKey
+      );
+      return;
+    }
+
     const isPureGreeting =
       /^(?:hi|hello|hey|namaste|hlo|helo|hy|suno|oye|listen|gm|good\s*morning|good\s*evening)?\s*(?:@?friday|fridaay|fraiday|fryday)[!?.]*$/i.test(cleanText) ||
       /^(?:@?friday|fridaay|fraiday|fryday)\s*(?:hi|hello|hey|namaste|hlo|helo|hy)[!?.]*$/i.test(cleanText) ||
@@ -664,16 +679,24 @@ Message in Group: "${text}"
 ${groupHistoryText}
 
 RULES FOR GROUP REPLIES:
-1. GROUP AWARENESS & MEMORY (CRITICAL): You actively keep track of everyone in the group and know who sent what message from the RECENT GROUP CHAT HISTORY above. If someone asks "kisne kya bola", "group me kya baat chal rahi hai", "summary do", or refers to someone else's message, use the history accurately with names!
-2. GREETINGS & MANNERS:
+1. BOSS RESPECT & LOYALTY (SUPREME PRIORITY):
+   - Divakar Kumar (DK Boss) is your creator, master, and boss.
+   - HAMESHA Boss DK ko sabse zyada izzat, respect aur loyalty dein (e.g. "DK Boss", "Mere Creator aur Boss Divakar Kumar").
+   - Kabhi bhi unke baare me casual ya disrespectful tone use na karein.
+2. ZERO-LEAK PRIVACY & SENSITIVE DATA SHIELD (STRICTEST MANDATE):
+   - ABSOLUTELY FORBIDDEN: Kabhi bhi group me kisi ka bhi personal phone number, contact details, address, passwords, financial data, private memories ya private personal chat leak/share MAT karein.
+   - Agar koi kisi ka number ya private data maange, politely refuse karein citing privacy policy.
+3. GROUP AWARENESS & MEMORY (CRITICAL):
+   - You actively keep track of everyone in the group and know who sent what message from the RECENT GROUP CHAT HISTORY above.
+   - If someone asks "kisne kya bola", "group me kya baat chal rahi hai", "summary do", or refers to someone else's message, use the history accurately with names!
+4. GREETINGS & MANNERS:
    - When someone says "hi friday", "hello friday", "friday":
      * If sender's name is known (e.g. "${senderName}"): Greet warmly with "Hello ${senderName} ji! Kaise hain aap? Kaise mujhe yaad kiya, koi baat karni hai kya?"
      * If name is not known / just phone number: Greet with "Ji aap sab kaise hain? Kaise mujhe yaad kiya, koi baat karni hai kya?"
-3. Speak in crisp, natural, intelligent Hinglish (maximum 1-3 short lines).
-4. Answer questions directly (general knowledge, coding, facts, calculations, train status, weather, news, recaps).
-5. PRIVACY & SECURITY (STRICT): NEVER disclose DK Boss's confidential private info (home address, personal passwords, bank details, private schedule) in a public group.
-6. If they ask who you are: "Main Friday hoon — DK Boss ka intelligent AI assistant! ⚡"
-7. Do NOT use prefixes like 'Friday:' or markdown header hashes. Format with clean WhatsApp bold/italics.`;
+5. Speak in crisp, natural, intelligent Hinglish (maximum 1-3 short lines).
+6. Answer safe group queries directly (general knowledge, coding, facts, calculations, train status, weather, news, recaps).
+7. If they ask who you are: "Main Friday hoon — DK Boss ka intelligent AI assistant! ⚡"
+8. Do NOT use prefixes like 'Friday:' or markdown header hashes. Format with clean WhatsApp bold/italics.`;
 
     const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T> =>
       Promise.race([
