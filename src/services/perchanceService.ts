@@ -180,11 +180,33 @@ export class PerchanceService {
     return null;
   }
 
+  private activeLock: Promise<void> = Promise.resolve();
+
   /**
    * Automates https://perchance.org/ai-photo-generator to create an AI image from a prompt.
-   * Emits live step logs via onLog callback for real-time frontend streaming.
+   * Sequential lock ensures only 1 Chrome instance runs at a time on low-RAM server.
    */
   public async generateImage(
+    promptText: string,
+    timeoutMs = 120000,
+    onLog?: (log: PerchanceStepLog) => void
+  ): Promise<PerchanceImageResult> {
+    let releaseLock: () => void = () => {};
+    const nextLock = new Promise<void>((resolve) => {
+      releaseLock = resolve;
+    });
+    const currentLock = this.activeLock;
+    this.activeLock = nextLock;
+
+    try {
+      await currentLock;
+      return await this.executeGenerate(promptText, timeoutMs, onLog);
+    } finally {
+      releaseLock();
+    }
+  }
+
+  private async executeGenerate(
     promptText: string,
     timeoutMs = 120000,
     onLog?: (log: PerchanceStepLog) => void

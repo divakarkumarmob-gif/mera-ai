@@ -67,6 +67,16 @@ export default function PerchanceStudioModal({ onClose }: { onClose: () => void 
   const eventSourceRef = useRef<EventSource | null>(null);
   const timerRef = useRef<any>(null);
 
+  // Cleanup EventSource on component unmount
+  useEffect(() => {
+    return () => {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
+    };
+  }, []);
+
   // Check server Chrome engine status on mount
   useEffect(() => {
     fetch(getApiUrl("/api/perchance/status"))
