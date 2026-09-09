@@ -1,18 +1,23 @@
 import React from 'react';
 import { motion } from 'motion/react';
 
+export type AgentFaceReaction = 'success' | 'photo' | 'happy' | 'winking' | null;
+
 interface AgentFaceProps {
   status: string;
   volume: number;
   size?: number;
   colorIndex: number;
+  reaction?: AgentFaceReaction;
   onDoubleClick?: () => void;
 }
 
-const AgentFace: React.FC<AgentFaceProps> = ({ status, volume, size = 120, colorIndex, onDoubleClick }) => {
+const AgentFace: React.FC<AgentFaceProps> = ({ status, volume, size = 120, colorIndex, reaction, onDoubleClick }) => {
   const isListening = status === "Listening...";
   const isSpeaking = status === "Speaking...";
   const isThinking = status === "Thinking...";
+  const isHappy = reaction === 'happy' || reaction === 'success' || reaction === 'photo' || reaction === 'winking';
+  const isWinking = reaction === 'winking' || reaction === 'photo';
   const lastTapRef = React.useRef<number>(0);
 
   const handleTouchEnd = (e: React.TouchEvent) => {
@@ -27,13 +32,54 @@ const AgentFace: React.FC<AgentFaceProps> = ({ status, volume, size = 120, color
   };
   
   const colors = ["#3b82f6", "#ef4444", "#22c55e", "#f59e0b", "#a855f7", "#ec4899", "#06b6d4", "#f97316", "#84cc16", "#d946ef", "#14b8a6", "#e11d48"];
-  const color = colors[colorIndex % colors.length];
+  const baseColor = colors[colorIndex % colors.length];
+  const color = reaction === 'success' ? '#10b981' : reaction === 'photo' ? '#c084fc' : baseColor;
 
-  // Simple face expression mapping
+  // Face Expression Mapping: Thinking vs Winking vs Happy vs Speaking vs Idle
   const eyes = isThinking ? (
     <>
       <motion.ellipse cx="40" cy="40" rx="4" ry="6" fill={color} animate={{ scaleY: [1, 0.1, 1] }} transition={{ repeat: Infinity, duration: 0.2, repeatDelay: 1.1 }} />
       <motion.ellipse cx="80" cy="40" rx="4" ry="6" fill={color} animate={{ scaleY: [1, 0.1, 1] }} transition={{ repeat: Infinity, duration: 0.2, repeatDelay: 1.1 }} />
+    </>
+  ) : isWinking ? (
+    <>
+      {/* Left Eye: Joyful upward curve */}
+      <motion.path
+        d="M 32 42 Q 40 33 48 42"
+        stroke={color}
+        strokeWidth="3.5"
+        strokeLinecap="round"
+        fill="transparent"
+        animate={{ scale: [1, 1.1, 1] }}
+        transition={{ duration: 0.6, repeat: Infinity }}
+      />
+      {/* Right Eye: Big open spark */}
+      <motion.circle
+        cx="80"
+        cy="40"
+        r="6"
+        fill={color}
+        animate={{ scale: [1, 1.2, 1] }}
+        transition={{ duration: 0.6, repeat: Infinity }}
+      />
+    </>
+  ) : isHappy ? (
+    <>
+      {/* Both Eyes: Joyful smiling curves */}
+      <motion.path
+        d="M 32 42 Q 40 33 48 42"
+        stroke={color}
+        strokeWidth="3.5"
+        strokeLinecap="round"
+        fill="transparent"
+      />
+      <motion.path
+        d="M 72 42 Q 80 33 88 42"
+        stroke={color}
+        strokeWidth="3.5"
+        strokeLinecap="round"
+        fill="transparent"
+      />
     </>
   ) : (
     <>
@@ -68,7 +114,15 @@ const AgentFace: React.FC<AgentFaceProps> = ({ status, volume, size = 120, color
     </>
   );
 
-  const eyebrows = (
+  const eyebrows = isHappy ? (
+    <motion.g
+      animate={{ y: [-2, -5, -2] }}
+      transition={{ repeat: Infinity, duration: 1 }}
+    >
+      <path d="M 28 22 L 46 25" stroke={color} strokeWidth="2.5" strokeLinecap="round" />
+      <path d="M 74 25 L 92 22" stroke={color} strokeWidth="2.5" strokeLinecap="round" />
+    </motion.g>
+  ) : (
     <motion.g
         animate={{ y: [0, 0, 0, -5, -5, 0] }}
         transition={{
@@ -84,6 +138,16 @@ const AgentFace: React.FC<AgentFaceProps> = ({ status, volume, size = 120, color
 
   const mouth = isThinking ? (
     <path d="M 40 80 Q 60 70 80 80" stroke={color} strokeWidth="4" fill="transparent" />
+  ) : isHappy ? (
+    <motion.path
+      d="M 35 68 Q 60 95 85 68"
+      stroke={color}
+      strokeWidth="4.5"
+      strokeLinecap="round"
+      fill="transparent"
+      animate={{ scale: [1, 1.06, 1] }}
+      transition={{ repeat: Infinity, duration: 0.8 }}
+    />
   ) : isSpeaking ? (
     <motion.path
       d="M 40 80 Q 60 95 80 80"
@@ -99,6 +163,23 @@ const AgentFace: React.FC<AgentFaceProps> = ({ status, volume, size = 120, color
 
   return (
     <motion.div className="relative flex items-center justify-center agent-face" style={{ width: size, height: size, perspective: 1000 }}>
+      {/* Dynamic Action Success Reaction Flare */}
+      {reaction && (
+        <motion.div
+          initial={{ scale: 0.8, opacity: 0 }}
+          animate={{ scale: [1, 1.5, 1.2], opacity: [0.9, 0.4, 0] }}
+          transition={{ duration: 1.4, repeat: Infinity }}
+          className="absolute rounded-full pointer-events-none z-0"
+          style={{
+            width: size * 1.6,
+            height: size * 1.6,
+            background: reaction === 'success'
+              ? 'radial-gradient(circle, rgba(16,185,129,0.5) 0%, rgba(16,185,129,0.15) 50%, transparent 75%)'
+              : 'radial-gradient(circle, rgba(168,85,247,0.5) 0%, rgba(168,85,247,0.15) 50%, transparent 75%)',
+          }}
+        />
+      )}
+
       {/* Outer Glowing Neon Ring 1 */}
       <motion.div
         className="absolute rounded-full pointer-events-none"

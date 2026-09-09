@@ -53,6 +53,30 @@ const rawFunctionDeclarations: any[] = [
     }
   },
   {
+    "name": "edit_ai_photo",
+    "description": "Modify, re-edit, or transform the existing / last generated AI photo using natural language instructions (e.g., 'is ladki ka dress red kar do', 'background me barish add karo', 'make it cyberpunk / anime style'). Automatically updates the dashboard left popup and optionally sends to Boss on WhatsApp.",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {
+        "editInstructions": {
+          "type": "STRING",
+          "description": "Specific visual changes or style transformations to apply to the photo"
+        },
+        "sendToWhatsApp": {
+          "type": "BOOLEAN",
+          "description": "Set to true to dispatch the edited version to Boss on WhatsApp"
+        },
+        "targetRecipient": {
+          "type": "STRING",
+          "description": "Recipient contact name or phone ('boss', 'dk')"
+        }
+      },
+      "required": [
+        "editInstructions"
+      ]
+    }
+  },
+  {
     "name": "start_background_task",
     "description": "Start a background task (e.g. weather update, live cricket score check, product deal search, security scan, codebase audit, or custom background operation). Friday immediately acknowledges in conversation that the task has started in background, and when it finishes, it will be reported at the end of a turn or when DK asks.",
     "parameters": {

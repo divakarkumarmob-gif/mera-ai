@@ -599,6 +599,10 @@ class ToolsEngine {
       whatsappMessage = sendRes.message;
     }
 
+    let lastImageBuffer: Buffer | null = genRes.buffer || null;
+    (this as any)._lastGeneratedImageBuffer = lastImageBuffer;
+    (this as any)._lastGeneratedImagePrompt = genRes.prompt;
+
     return {
       success: true,
       imageUrl: dataUrl,
@@ -610,6 +614,65 @@ class ToolsEngine {
       recipient: recipientName,
       message: `4K AI Portrait generated successfully using ${genRes.model}!${whatsappSent ? ` Delivered to ${recipientName} on WhatsApp.` : ''}`,
     };
+  }
+
+  /**
+   * Intelligently modify or transform the last generated AI photo with natural language edit instructions
+   */
+  public async editAiPhoto(
+    editInstructions: string,
+    options: {
+      sendToWhatsApp?: boolean;
+      targetRecipient?: string;
+    } = {}
+  ) {
+    const { imageGenerationService } = await import("./imageGenerationService");
+    const lastBuf = (this as any)._lastGeneratedImageBuffer as Buffer | undefined;
+    const lastPrompt = (this as any)._lastGeneratedImagePrompt || "photo";
+
+    let compositePrompt = `${lastPrompt}, modified: ${editInstructions}, 4k ultra-hd portrait, cinematic natural lighting, 8k uhd`;
+    if (lastBuf) {
+      const editRes = await imageGenerationService.editImageWithAI(lastBuf, editInstructions);
+      if (editRes.success && editRes.buffer) {
+        (this as any)._lastGeneratedImageBuffer = editRes.buffer;
+        (this as any)._lastGeneratedImagePrompt = editRes.prompt;
+
+        const mime = editRes.mimeType || "image/jpeg";
+        const dataUrl = `data:${mime};base64,${editRes.buffer.toString("base64")}`;
+
+        let whatsappSent = false;
+        let recipientName = options.targetRecipient || "DK (Boss)";
+
+        if (options.sendToWhatsApp) {
+          const { contactsService } = await import("./contactsService");
+          const { whatsappBotService } = await import("./whatsappBotService");
+          const contact = await contactsService.findContact(options.targetRecipient || "boss");
+          const targetPhone = contact ? contact.phone : (options.targetRecipient || "boss");
+          recipientName = contact ? contact.name : "Boss";
+
+          const caption = `🎨 *4K AI Photo Modified by Friday*\n_${editInstructions}_\n\n⚡ *Model:* ${editRes.model}`;
+          const sendRes = await whatsappBotService.sendPhotoMessage(targetPhone, editRes.buffer, caption);
+          whatsappSent = sendRes.success;
+        }
+
+        return {
+          success: true,
+          imageUrl: dataUrl,
+          prompt: editRes.prompt,
+          model: editRes.model,
+          whatsappSent,
+          recipient: recipientName,
+          message: `Photo modified successfully with instructions "${editInstructions}" using ${editRes.model}!${whatsappSent ? ` Sent to ${recipientName} on WhatsApp.` : ''}`,
+        };
+      }
+    }
+
+    // Fallback if buffer not stored
+    return await this.generateAiPhoto(compositePrompt, {
+      aspectRatio: "9:16",
+      sendToWhatsApp: options.sendToWhatsApp,
+      targetRecipient: options.targetRecipient,
+    });
   }
 
   /**
@@ -627,8 +690,14 @@ class ToolsEngine {
     const targetPhone = contact ? contact.phone : (targetNameOrPhone || "boss");
     const name = contact ? contact.name : "Boss";
 
+    let payload: string | Buffer = imageSource;
+    if (imageSource === "last_generated") {
+      const lastBuf = (this as any)._lastGeneratedImageBuffer;
+      if (lastBuf) payload = lastBuf;
+    }
+
     const cleanCaption = caption || "📸 Photo sent by Friday AI";
-    const res = await whatsappBotService.sendPhotoMessage(targetPhone, imageSource, cleanCaption);
+    const res = await whatsappBotService.sendPhotoMessage(targetPhone, payload, cleanCaption);
 
     return {
       success: res.success,

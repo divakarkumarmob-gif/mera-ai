@@ -174,6 +174,36 @@ export async function dispatchLiveToolCall(call: any, context: ToolDispatchConte
                       })
                     );
                   }
+                } else if (call.name === "edit_ai_photo") {
+                  const { editInstructions, sendToWhatsApp, targetRecipient } = call.args || {};
+                  const editRes = await toolsEngine.editAiPhoto(editInstructions, {
+                    sendToWhatsApp: !!sendToWhatsApp || !!targetRecipient,
+                    targetRecipient: targetRecipient || "boss",
+                  });
+                  result = editRes;
+                  if (editRes.success) {
+                    clientWs.send(
+                      JSON.stringify({
+                        type: "image_generated",
+                        prompt: editRes.prompt,
+                        model: editRes.model,
+                        imageUrl: editRes.imageUrl,
+                        aspectRatio: "9:16",
+                        whatsappSent: editRes.whatsappSent,
+                        recipient: editRes.recipient,
+                        message: editRes.message,
+                      })
+                    );
+                    if (editRes.whatsappSent) {
+                      clientWs.send(
+                        JSON.stringify({
+                          type: "photo_sent_whatsapp",
+                          recipient: editRes.recipient,
+                          prompt: editRes.prompt,
+                        })
+                      );
+                    }
+                  }
                 } else if (call.name === "save_contact") {
                   const { contactName, phoneNumber, relation } = call.args || {};
                   const entry = await contactsService.saveContact(contactName, phoneNumber, relation);

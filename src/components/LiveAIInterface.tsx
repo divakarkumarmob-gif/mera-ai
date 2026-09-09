@@ -949,6 +949,92 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
     const [isPhotoFullScreen, setIsPhotoFullScreen] = useState(false);
     const [isSendingPhotoWhatsApp, setIsSendingPhotoWhatsApp] = useState(false);
 
+    // ── 🖼️ Recent AI Creations Gallery Reel State ───────────────────────────
+    const [recentPhotos, setRecentPhotos] = useState<Array<{
+        id: string;
+        url: string;
+        prompt: string;
+        model: string;
+        timestamp: number;
+        whatsappSent?: boolean;
+    }>>(() => {
+        try {
+            const saved = localStorage.getItem('recent_ai_photos');
+            return saved ? JSON.parse(saved) : [];
+        } catch {
+            return [];
+        }
+    });
+
+    const [showRecentGallery, setShowRecentGallery] = useState(false);
+
+    // ── 😊 Dynamic AgentFace Emotional Reactions & Neon Flares ───────────────
+    const [faceReaction, setFaceReaction] = useState<'success' | 'photo' | 'happy' | 'winking' | null>(null);
+    const faceReactionTimerRef = useRef<any>(null);
+
+    const triggerFaceReaction = useCallback((reactionType: 'success' | 'photo' | 'happy' | 'winking') => {
+        if (faceReactionTimerRef.current) clearTimeout(faceReactionTimerRef.current);
+        setFaceReaction(reactionType);
+        faceReactionTimerRef.current = setTimeout(() => {
+            setFaceReaction(null);
+        }, 3200);
+    }, []);
+
+    // ── 🔊 Futuristic JARVIS Sci-Fi Audio Synthesizer (Web Audio API) ────────
+    const playJarvisChime = useCallback((type: 'success' | 'photo' | 'alert' | 'notify' = 'success') => {
+        try {
+            // 📳 Mobile Haptic Vibration
+            if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+                try { navigator.vibrate([25, 20, 35]); } catch {}
+            }
+
+            const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+            if (!AudioCtx) return;
+            const ctx = new AudioCtx();
+            const now = ctx.currentTime;
+
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+
+            if (type === 'photo') {
+                // High-tech sci-fi shimmer / crystal chord (4K image created)
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(587.33, now); // D5
+                osc.frequency.exponentialRampToValueAtTime(880, now + 0.08); // A5
+                osc.frequency.exponentialRampToValueAtTime(1174.66, now + 0.18); // D6
+                gain.gain.setValueAtTime(0.01, now);
+                gain.gain.linearRampToValueAtTime(0.2, now + 0.04);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+                osc.start(now);
+                osc.stop(now + 0.36);
+            } else if (type === 'success') {
+                // Iron Man HUD confirm chime (message sent, contact saved)
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(523.25, now); // C5
+                osc.frequency.exponentialRampToValueAtTime(1046.5, now + 0.12); // C6
+                gain.gain.setValueAtTime(0.01, now);
+                gain.gain.linearRampToValueAtTime(0.22, now + 0.03);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+                osc.start(now);
+                osc.stop(now + 0.31);
+            } else {
+                // Subtle high-tech blip
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(440, now);
+                osc.frequency.exponentialRampToValueAtTime(880, now + 0.08);
+                gain.gain.setValueAtTime(0.01, now);
+                gain.gain.linearRampToValueAtTime(0.18, now + 0.02);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+                osc.start(now);
+                osc.stop(now + 0.23);
+            }
+        } catch (e) {
+            console.warn('[AudioSynth] HUD chime error:', e);
+        }
+    }, []);
+
     // ── 🔔 Verified Action Face Message Toast State (Rendered above AgentFace) ──
     const [faceToast, setFaceToast] = useState<{
         id: string;
@@ -962,6 +1048,16 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
 
     const triggerFaceToast = useCallback((icon: string, title: string, subtitle?: string, color: 'emerald' | 'purple' | 'cyan' | 'blue' | 'amber' | 'rose' = 'emerald') => {
         if (faceToastTimerRef.current) clearTimeout(faceToastTimerRef.current);
+        
+        // Trigger Sci-Fi HUD sound & haptics
+        if (color === 'purple') {
+            playJarvisChime('photo');
+            triggerFaceReaction('photo');
+        } else {
+            playJarvisChime('success');
+            triggerFaceReaction('success');
+        }
+
         setFaceToast({
             id: Math.random().toString(36).substring(2, 9),
             icon,
@@ -973,7 +1069,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
         faceToastTimerRef.current = setTimeout(() => {
             setFaceToast(null);
         }, 4500);
-    }, []);
+    }, [playJarvisChime, triggerFaceReaction]);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
     const captionBoxRef = useRef<HTMLDivElement>(null);
@@ -2448,7 +2544,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                     if (status !== "Speaking...") isAiSpeaking.current = false;
                 } else if (msg.type === 'image_generated') {
                     if (msg.imageUrl) {
-                        setGeneratedPhoto({
+                        const newPhotoItem = {
                             id: Math.random().toString(36).substring(2, 9),
                             url: msg.imageUrl,
                             prompt: msg.prompt || '4K AI Portrait',
@@ -2457,11 +2553,18 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                             whatsappSent: !!msg.whatsappSent,
                             recipient: msg.recipient || 'Boss',
                             timestamp: Date.now(),
+                        };
+                        setGeneratedPhoto(newPhotoItem);
+                        setRecentPhotos(prev => {
+                            const updated = [newPhotoItem, ...prev.filter(p => p.url !== msg.imageUrl)].slice(0, 15);
+                            try { localStorage.setItem('recent_ai_photos', JSON.stringify(updated)); } catch {}
+                            return updated;
                         });
                         triggerFaceToast('📸', 'Photo Generated', '4K Cloudflare Portrait Ready', 'purple');
                     }
                 } else if (msg.type === 'photo_sent_whatsapp') {
                     setGeneratedPhoto(prev => prev ? { ...prev, whatsappSent: true, recipient: msg.recipient || 'DK (Boss)' } : prev);
+                    setRecentPhotos(prev => prev.map(p => p.url === generatedPhoto?.url ? { ...p, whatsappSent: true } : p));
                     triggerFaceToast('📲', 'Photo Sent to Boss', `Delivered to ${msg.recipient || 'Boss'} on WhatsApp`, 'emerald');
                 } else if (msg.type === 'whatsapp_contact_sent') {
                     if (msg.success) {
@@ -3095,7 +3198,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                         </AnimatePresence>
                     </div>
 
-                    <AgentFace status={status} volume={volume} size={160} colorIndex={colorIndex} onDoubleClick={handleFaceDoubleTap} />
+                    <AgentFace status={status} volume={volume} size={160} colorIndex={colorIndex} reaction={faceReaction} onDoubleClick={handleFaceDoubleTap} />
                     <p className="text-slate-300 text-sm font-medium">{status}</p>
 
                     {!isRecording && wakeWordActive && (
@@ -4007,6 +4110,44 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                                     <span>Download</span>
                                 </a>
                             </div>
+
+                            {/* ── 🖼️ Recent AI Creations Gallery Reel Strip ── */}
+                            {recentPhotos.length > 1 && (
+                                <div className="pt-2 mt-1 border-t border-white/10 flex flex-col gap-1.5">
+                                    <div className="flex items-center justify-between text-[10px]">
+                                        <span className="font-bold uppercase tracking-wider text-purple-300 flex items-center gap-1">
+                                            <span>🖼️</span> Recent Gallery ({recentPhotos.length})
+                                        </span>
+                                        <span className="text-[9px] text-slate-400">Tap to load</span>
+                                    </div>
+                                    <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1">
+                                        {recentPhotos.map((photo) => (
+                                            <div
+                                                key={photo.id}
+                                                onClick={() => {
+                                                    setGeneratedPhoto({
+                                                        id: photo.id,
+                                                        url: photo.url,
+                                                        prompt: photo.prompt,
+                                                        model: photo.model,
+                                                        whatsappSent: photo.whatsappSent,
+                                                        timestamp: photo.timestamp,
+                                                    });
+                                                }}
+                                                className={`relative w-12 h-12 rounded-xl overflow-hidden border cursor-pointer shrink-0 transition-all active:scale-95 hover:scale-105 ${
+                                                    generatedPhoto?.url === photo.url ? 'border-purple-400 shadow-[0_0_12px_rgba(168,85,247,0.6)]' : 'border-white/10 opacity-70 hover:opacity-100'
+                                                }`}
+                                                title={photo.prompt}
+                                            >
+                                                <img src={photo.url} alt={photo.prompt} className="w-full h-full object-cover" />
+                                                {photo.whatsappSent && (
+                                                    <span className="absolute bottom-0.5 right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 border border-black/80" />
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </motion.div>
                 )}
