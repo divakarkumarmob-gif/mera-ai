@@ -3,7 +3,9 @@ import StealthPlugin from "puppeteer-extra-plugin-stealth";
 import fs from "fs";
 import path from "path";
 
-puppeteerExtra.use(StealthPlugin());
+const stealth = StealthPlugin();
+stealth.enabledEvasions.delete("iframe.contentWindow");
+puppeteerExtra.use(stealth);
 
 export interface PerchanceStepLog {
   level: "info" | "warn" | "error" | "success";
