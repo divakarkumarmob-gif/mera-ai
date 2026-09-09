@@ -14,6 +14,7 @@ import { whatsappGirlfriendEngine } from "./whatsapp/whatsappGirlfriendEngine";
 import { whatsappBossAiEngine } from "./whatsapp/whatsappBossAiEngine";
 import { whatsappAutoReplyEngine } from "./whatsapp/whatsappAutoReplyEngine";
 import { whatsappMediaRouter } from "./whatsapp/whatsappMediaRouter";
+import { whatsappGroupSafetyEngine } from "./whatsapp/whatsappGroupSafetyEngine";
 
 export type { QuotedMessageContext, IncomingMessage, WhatsAppStatus };
 
@@ -485,6 +486,72 @@ class WhatsAppBotService {
 
           whatsappHistoryEngine.unshiftMessage(incoming);
           whatsappHistoryEngine.saveToFirestore(incoming).catch(() => {});
+
+          // ── GROUP AUTO-MODERATION & @block safe SHIELD ────────────────────────
+          if (isGroup && this.sock) {
+            // 1. Check if user is issuing a safety command (@block safe, @block safe on/off, etc.)
+            if (whatsappGroupSafetyEngine.isSafetyCommand(text)) {
+              try {
+                const safetyRes = await whatsappGroupSafetyEngine.handleSafetyCommand(
+                  this.sock,
+                  remoteJid,
+                  groupName || "WhatsApp Group",
+                  text,
+                  senderName,
+                  senderPhone,
+                  msg.key,
+                  quotedMessage,
+                  isSenderOwner
+                );
+                if (safetyRes.handled && safetyRes.replyText) {
+                  await this.sendHumanLikeMessage(remoteJid, safetyRes.replyText, text, msg.key);
+                  continue;
+                }
+              } catch (safetyCmdErr) {
+                console.warn("[WhatsAppBot] Group safety command error:", safetyCmdErr);
+              }
+            }
+
+            // 2. Check if message contains Gandi Gaali / Profanity / Abusive words or NSFW media
+            const hasMediaCheck = !!(
+              msg.message?.imageMessage ||
+              msg.message?.documentMessage ||
+              msg.message?.videoMessage ||
+              msg.message?.audioMessage
+            );
+            const mediaCaption =
+              msg.message?.imageMessage?.caption ||
+              msg.message?.documentMessage?.caption ||
+              msg.message?.videoMessage?.caption ||
+              "";
+            const fileName = msg.message?.documentMessage?.fileName || "";
+
+            try {
+              const modResult = await whatsappGroupSafetyEngine.inspectAndModerateGroupMessage({
+                sock: this.sock,
+                groupJid: remoteJid,
+                groupName: groupName || "WhatsApp Group",
+                senderName,
+                senderPhone,
+                senderJid,
+                text,
+                messageKey: msg.key,
+                hasMedia: hasMediaCheck,
+                mediaCaption,
+                fileName,
+                dedicatedPhone: this.dedicatedPhone,
+                isOwner: isSenderOwner,
+              });
+
+              if (modResult.intercepted && modResult.deleted) {
+                // Offending message deleted by Friday safety shield! Skip further processing.
+                console.log(`[WhatsAppBot] Deleted offensive message in ${groupName || remoteJid} from +${senderPhone}`);
+                continue;
+              }
+            } catch (modErr) {
+              console.warn("[WhatsAppBot] Group safety moderation error:", modErr);
+            }
+          }
 
           if (text && text.trim().length > 5) {
             import("./humanComprehensionEngine")
@@ -1515,6 +1582,12 @@ class WhatsAppBotService {
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 👑 *Creator & Master:* DK Boss (Divakar Kumar)
 🛡️ *Privacy Shield:* Active (Strict Zero-Leak Protection)
+
+🛡️ *0. GROUP AUTO-MODERATOR & SAFETY (@block safe):*
+• \`@block safe\` / \`@block safe on\` ➔ Gandi gaali, abusive text aur vulgar NSFW photos/videos ka instant auto-delete shield ON karein! (Friday Admin hona chahiye).
+• \`@block safe off\` ➔ Group safety guard pause karein.
+• \`@block safe status\` ➔ Safety status aur deleted offensive messages count dekhein.
+• \`@block safe delete\` ➔ Kisi bhi offensive message par quote karke likhein, use turant chat se delete kar dega.
 
 🎨 *1. AI IMAGES & ART:*
 • \`@image <prompt>\` ➔ Instant Ultra-HD 4K AI Image generation.

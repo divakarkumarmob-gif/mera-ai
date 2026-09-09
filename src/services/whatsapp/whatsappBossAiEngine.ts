@@ -217,6 +217,30 @@ export class WhatsAppBossAiEngine {
         },
       },
       {
+        name: "toggle_group_block_safe",
+        description: "Enable, disable, or check @block safe auto-moderation status for a WhatsApp group. When enabled and Friday is Admin, any gandi gaali, abusive words, or NSFW vulgar media sent by members is instantly auto-deleted from the chat.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            groupName: { type: "STRING", description: "Name of the group (e.g. 'AVENGERS', 'Script talk')" },
+            action: { type: "STRING", description: "'on' to enable, 'off' to disable, or 'status' to check" },
+          },
+          required: ["groupName", "action"],
+        },
+      },
+      {
+        name: "delete_group_message",
+        description: "Delete an offensive or abusive message from a WhatsApp Group if Friday is Admin.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            groupName: { type: "STRING", description: "Name of target group" },
+            reason: { type: "STRING", description: "Reason for deletion (e.g. 'Gandi gaali', 'Abusive language')" },
+          },
+          required: ["groupName"],
+        },
+      },
+      {
         name: "translate_text",
         description: "Translate any text or message accurately into any target language (e.g. English, Hindi, Spanish, French, German, Japanese).",
         parameters: {
@@ -813,6 +837,25 @@ COMMUNICATION STYLE:
             args.groupName || args.groupNameOrJid,
             args.messageText
           );
+          return res;
+        }
+        if (toolName === "toggle_group_block_safe") {
+          const { whatsappBotService } = await import("../whatsappBotService");
+          const { whatsappGroupSafetyEngine } = await import("./whatsappGroupSafetyEngine");
+          const grp = await whatsappBotService.findGroup(args.groupName);
+          if (!grp) {
+            return { success: false, message: `Group "${args.groupName}" nahi mila.` };
+          }
+          const action = (args.action || "on").toLowerCase();
+          if (action === "off" || action === "disable") {
+            const res = await whatsappGroupSafetyEngine.disableGroupSafety(grp.groupId);
+            return res;
+          }
+          if (action === "status") {
+            const stat = await whatsappGroupSafetyEngine.getGroupSafetyStatus(grp.groupId);
+            return { group: grp.groupName, status: stat };
+          }
+          const res = await whatsappGroupSafetyEngine.enableGroupSafety(grp.groupId, grp.groupName);
           return res;
         }
         if (toolName === "get_messages_digest") {
