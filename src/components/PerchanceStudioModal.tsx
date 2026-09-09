@@ -332,15 +332,15 @@ export default function PerchanceStudioModal({ onClose }: { onClose: () => void 
 
         {/* ── Studio Body ─────────────────────────────────────────────────── */}
         {studioMode === "manual" ? (
-          /* 🖐️ MODE 2: BY MANUAL (Interactive Live Web Iframe + Quick Prompt Builder) */
-          <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 overflow-hidden p-3 sm:p-4 md:p-5 gap-4">
-            {/* Left Column (4 cols): Prompt Builder, Presets & 1-Click Copy */}
-            <div className="lg:col-span-4 flex flex-col gap-3 overflow-y-auto pr-1">
+          /* 🖐️ MODE 2: BY MANUAL (Interactive Companion + 1-Click Popup Studio Launcher) */
+          <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 overflow-y-auto p-4 sm:p-6 gap-6">
+            {/* Left Column (5 cols): Prompt Builder, Enhancers & Presets */}
+            <div className="lg:col-span-5 flex flex-col gap-4">
               <div className="p-4 rounded-2xl bg-slate-900/80 border border-cyan-500/30 shadow-lg flex flex-col gap-3">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-bold text-cyan-300 uppercase tracking-wider flex items-center gap-1.5">
                     <Zap className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>Prompt Builder (Manual)</span>
+                    <span>Prompt Builder (Manual Mode)</span>
                   </label>
                   <span className="text-[10px] text-slate-400 font-mono">{prompt.length} chars</span>
                 </div>
@@ -350,17 +350,32 @@ export default function PerchanceStudioModal({ onClose }: { onClose: () => void 
                   onChange={(e) => setPrompt(e.target.value)}
                   placeholder="Type your prompt here..."
                   rows={3}
-                  className="w-full p-3 rounded-xl bg-slate-950 border border-slate-700 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 text-sm text-slate-100 placeholder-slate-500 resize-none outline-none transition-all leading-relaxed"
+                  className="w-full p-3 rounded-xl bg-slate-950 border border-slate-700 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 text-sm text-slate-100 placeholder-slate-500 resize-none outline-none transition-all leading-relaxed font-sans"
                 />
 
-                {/* 1-Click Copy Prompt Button */}
-                <button
-                  onClick={copyPromptOnly}
-                  className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(6,182,212,0.35)] transition-all cursor-pointer active:scale-98"
-                >
-                  {copiedPrompt ? <Check className="w-4 h-4 text-white" /> : <Copy className="w-4 h-4" />}
-                  <span>{copiedPrompt ? "✓ Prompt Copied to Clipboard!" : "📋 1-Click Copy Prompt"}</span>
-                </button>
+                {/* 1-Click Copy & Open Generator Button */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    onClick={copyPromptOnly}
+                    className="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold text-xs flex items-center justify-center gap-1.5 border border-white/10 transition-all cursor-pointer active:scale-98"
+                  >
+                    {copiedPrompt ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4 text-cyan-400" />}
+                    <span>{copiedPrompt ? "Copied Prompt!" : "📋 Copy Prompt"}</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(prompt.trim());
+                      setCopiedPrompt(true);
+                      setTimeout(() => setCopiedPrompt(false), 2000);
+                      window.open("https://perchance.org/ai-photo-generator", "_blank", "noopener,noreferrer");
+                    }}
+                    className="py-2.5 px-3 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-[0_0_20px_rgba(6,182,212,0.35)] transition-all cursor-pointer active:scale-98"
+                  >
+                    <Globe className="w-4 h-4" />
+                    <span>🚀 Open Generator</span>
+                  </button>
+                </div>
 
                 {/* Quick Style Enhancer Tags */}
                 <div>
@@ -385,12 +400,12 @@ export default function PerchanceStudioModal({ onClose }: { onClose: () => void 
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
                     Preset Inspirations:
                   </span>
-                  <div className="flex flex-col gap-1.5 max-h-[160px] overflow-y-auto">
+                  <div className="grid grid-cols-1 gap-1.5 max-h-[180px] overflow-y-auto">
                     {PRESET_PROMPTS.map((item) => (
                       <button
                         key={item.label}
                         onClick={() => setPrompt(item.text)}
-                        className="text-left text-[11px] p-2 rounded-xl bg-slate-950/60 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 hover:border-cyan-500/40 transition-all cursor-pointer truncate"
+                        className="text-left text-[11px] p-2.5 rounded-xl bg-slate-950/70 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 hover:border-cyan-500/40 transition-all cursor-pointer truncate"
                       >
                         {item.label}
                       </button>
@@ -399,77 +414,117 @@ export default function PerchanceStudioModal({ onClose }: { onClose: () => void 
                 </div>
               </div>
 
-              {/* Instructions Card */}
-              <div className="p-3.5 rounded-2xl bg-cyan-950/30 border border-cyan-500/20 text-xs text-slate-300 space-y-2">
-                <div className="font-bold text-cyan-300 flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4 text-cyan-400" />
-                  <span>Kaise use karein (Manual Mode):</span>
-                </div>
-                <ol className="list-decimal list-inside space-y-1 text-[11px] text-slate-300 leading-relaxed">
-                  <li>
-                    Upar <b>"📋 1-Click Copy Prompt"</b> dabayein.
-                  </li>
-                  <li>
-                    Right side wale <b>Live Web View</b> me prompt paste karein (Ctrl+V).
-                  </li>
-                  <li>
-                    Wahi page par <b>"generate"</b> button click karein aur 6 photos live dekhein!
-                  </li>
-                </ol>
-              </div>
-
               {/* WhatsApp Command Card */}
-              <div className="p-3 rounded-2xl bg-emerald-950/30 border border-emerald-500/20 text-xs text-emerald-200 flex items-center justify-between">
-                <span className="font-mono text-[11px] truncate mr-2">@hot image {prompt.substring(0, 25)}...</span>
-                <button
-                  onClick={copyWhatsAppCmd}
-                  className="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-[10px] font-bold shrink-0 transition-all"
-                >
-                  {copiedCommand ? "Copied" : "Copy @hot"}
-                </button>
+              <div className="p-3.5 rounded-2xl bg-emerald-950/40 border border-emerald-500/30 text-xs text-emerald-200 space-y-1.5">
+                <div className="font-bold text-emerald-300 flex items-center justify-between">
+                  <span>📲 WhatsApp Bot Direct Trigger:</span>
+                  <button
+                    onClick={copyWhatsAppCmd}
+                    className="px-2.5 py-0.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-[10px] font-bold transition-all"
+                  >
+                    {copiedCommand ? "Copied!" : "Copy @hot"}
+                  </button>
+                </div>
+                <div className="p-2 rounded-xl bg-black/60 border border-emerald-500/20 font-mono text-[11px] text-emerald-300 truncate">
+                  @hot image {prompt.substring(0, 35)}...
+                </div>
               </div>
             </div>
 
-            {/* Right Column (8 cols): Interactive Live Web Frame */}
-            <div className="lg:col-span-8 flex flex-col rounded-2xl bg-slate-900 border border-cyan-500/30 overflow-hidden shadow-2xl">
-              {/* Frame Control Bar */}
-              <div className="px-4 py-2 bg-slate-950 border-b border-white/10 flex items-center justify-between shrink-0">
-                <div className="flex items-center gap-2 text-xs font-mono text-slate-400 truncate">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-                  <span className="text-cyan-300 font-bold">Live Web View:</span>
-                  <span className="text-slate-400 truncate">https://perchance.org/ai-photo-generator</span>
+            {/* Right Column (7 cols): Visual 3-Step Action Center & Direct Portal */}
+            <div className="lg:col-span-7 flex flex-col gap-4">
+              {/* Generator Action Portal Card */}
+              <div className="p-6 rounded-3xl bg-gradient-to-br from-slate-900 via-slate-900 to-cyan-950/40 border border-cyan-500/30 shadow-2xl flex flex-col justify-between gap-6">
+                <div className="space-y-2">
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-xs font-semibold">
+                    <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+                    <span>Perchance AI Official Web Studio</span>
+                  </div>
+                  <h3 className="text-xl font-black text-white tracking-wide">
+                    Live Photo Generation (6 Photos at once)
+                  </h3>
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    Perchance website security (SameOrigin CSP) ki wajah se external frame block rehta hai. Isliye 1-Click me direct live generator open karein aur prompt paste karke 6 realistic photos paayein:
+                  </p>
                 </div>
-                <div className="flex items-center gap-2">
+
+                {/* 3 Step Interactive Visual Cards */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-white/5 flex flex-col gap-1.5">
+                    <div className="w-7 h-7 rounded-xl bg-cyan-500/20 text-cyan-300 font-mono font-bold text-xs flex items-center justify-center">
+                      1
+                    </div>
+                    <div className="text-xs font-bold text-slate-200">Copy Prompt</div>
+                    <p className="text-[11px] text-slate-400 leading-normal">
+                      Left side prompt banayein aur "Copy Prompt" click karein.
+                    </p>
+                  </div>
+
+                  <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-white/5 flex flex-col gap-1.5">
+                    <div className="w-7 h-7 rounded-xl bg-pink-500/20 text-pink-300 font-mono font-bold text-xs flex items-center justify-center">
+                      2
+                    </div>
+                    <div className="text-xs font-bold text-slate-200">Open Generator</div>
+                    <p className="text-[11px] text-slate-400 leading-normal">
+                      Niche diya button dabayein — official studio new tab me load ho jayega.
+                    </p>
+                  </div>
+
+                  <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-white/5 flex flex-col gap-1.5">
+                    <div className="w-7 h-7 rounded-xl bg-emerald-500/20 text-emerald-300 font-mono font-bold text-xs flex items-center justify-center">
+                      3
+                    </div>
+                    <div className="text-xs font-bold text-slate-200">Paste & Generate</div>
+                    <p className="text-[11px] text-slate-400 leading-normal">
+                      Prompt box me <kbd className="px-1 py-0.5 rounded bg-slate-800 font-mono text-[10px]">Ctrl+V</kbd> karein aur <b>"generate"</b> dabayein!
+                    </p>
+                  </div>
+                </div>
+
+                {/* Big Action Buttons */}
+                <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
                   <button
-                    onClick={() => setIframeKey((k) => k + 1)}
-                    className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs flex items-center gap-1.5 transition-all cursor-pointer border border-white/5"
-                    title="Reload Web Page"
+                    onClick={() => {
+                      navigator.clipboard.writeText(prompt.trim());
+                      setCopiedPrompt(true);
+                      setTimeout(() => setCopiedPrompt(false), 2000);
+                      window.open("https://perchance.org/ai-photo-generator", "_blank", "noopener,noreferrer");
+                    }}
+                    className="w-full sm:flex-1 py-3.5 px-6 rounded-2xl bg-gradient-to-r from-cyan-500 via-blue-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white font-extrabold text-sm flex items-center justify-center gap-2.5 shadow-[0_0_30px_rgba(6,182,212,0.4)] transition-all cursor-pointer active:scale-98"
                   >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">Reload Frame</span>
+                    <Sparkles className="w-5 h-5 text-cyan-200 animate-pulse" />
+                    <span>Copy Prompt & Launch Perchance Studio 🚀</span>
                   </button>
+
                   <a
                     href="https://perchance.org/ai-photo-generator"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="px-2.5 py-1 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 text-xs flex items-center gap-1.5 transition-all border border-cyan-500/30 font-bold"
+                    className="w-full sm:w-auto py-3.5 px-5 rounded-2xl bg-slate-800/80 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-2 border border-white/10 transition-all"
                   >
-                    <Eye className="w-3.5 h-3.5" />
-                    <span>Open in Full Tab</span>
+                    <Eye className="w-4 h-4" />
+                    <span>Direct Web Link</span>
                   </a>
                 </div>
               </div>
 
-              {/* Embedded Web Frame */}
-              <div className="flex-1 w-full h-full bg-white relative">
-                <iframe
-                  key={iframeKey}
-                  src="https://perchance.org/ai-photo-generator"
-                  title="Perchance AI Photo Generator Live"
-                  className="w-full h-full border-0 min-h-[480px]"
-                  allow="clipboard-read; clipboard-write; fullscreen"
-                  loading="lazy"
-                />
+              {/* Bot Mode Switch Suggestion */}
+              <div className="p-4 rounded-2xl bg-slate-900/60 border border-white/5 flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <div className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                    <Cpu className="w-3.5 h-3.5 text-pink-400" />
+                    <span>Automated Bot Generation Chahiye?</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    Agar aap chahte hain bot khud browser chalaye, toh "🤖 By Bot" switch karein.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setStudioMode("bot")}
+                  className="px-3.5 py-2 rounded-xl bg-pink-500/20 hover:bg-pink-500/30 text-pink-300 font-bold text-xs border border-pink-500/30 transition-all cursor-pointer shrink-0"
+                >
+                  Switch to Bot 🤖
+                </button>
               </div>
             </div>
           </div>
