@@ -491,7 +491,14 @@ Respond ONLY with valid JSON in this exact structure:
       }
     }
 
-    // Step 3: Build Canonical Streaming & Playback Links
+    // Step 3: Platform Intent Detection (YouTube is DEFAULT Priority)
+    const lowerQuery = (query || "").toLowerCase();
+    const isSpotifyReq = /\b(?:spotify|spoty)\b/i.test(lowerQuery);
+    const isJioSaavnReq = /\b(?:jiosaavn|jioseven|saavn|jiotunes|jio\s*saavn)\b/i.test(lowerQuery);
+    const isAppleMusicReq = /\b(?:apple\s*music|itunes|apple)\b/i.test(lowerQuery);
+    const isWynkReq = /\b(?:wynk|airtel)\b/i.test(lowerQuery);
+    const isAllReq = /\b(?:all\s*links?|sab\s*link|sare\s*link|har\s*jagah|all\s*platforms?)\b/i.test(lowerQuery);
+
     const searchTarget = `${trackTitle} ${artistName}`.trim();
     const ytSearchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(searchTarget + " official song")}`;
     const ytMusicUrl = `https://music.youtube.com/search?q=${encodeURIComponent(searchTarget)}`;
@@ -512,24 +519,48 @@ Respond ONLY with valid JSON in this exact structure:
       ? `\n\n📝 *Hook Lyrics:*\n_"${lyricsSnippet}"_`
       : "";
 
-    const linksBlock = [
-      `🔴 *YouTube:* ${ytSearchUrl}`,
-      `🟢 *Spotify:* ${spotifyUrl}`,
-      `🔴 *YT Music:* ${ytMusicUrl}`,
-      `🎵 *JioSaavn:* ${jioSaavnUrl}`,
-      appleMusicUrl ? `🍎 *Apple Music:* ${appleMusicUrl}` : `🌐 *Wynk Music:* ${wynkUrl}`,
-      previewAudioUrl ? `\n🔊 *30s Audio Preview:* ${previewAudioUrl}` : "",
-    ]
-      .filter(Boolean)
-      .join("\n");
+    // Build focused links block based on user's preference
+    const linksList: string[] = [];
+
+    if (isAllReq) {
+      linksList.push(`▶️ *YouTube:* ${ytSearchUrl}`);
+      linksList.push(`🔴 *YT Music:* ${ytMusicUrl}`);
+      linksList.push(`🟢 *Spotify:* ${spotifyUrl}`);
+      linksList.push(`🎵 *JioSaavn:* ${jioSaavnUrl}`);
+      if (appleMusicUrl) linksList.push(`🍎 *Apple Music:* ${appleMusicUrl}`);
+      linksList.push(`🌐 *Wynk:* ${wynkUrl}`);
+    } else if (isSpotifyReq) {
+      linksList.push(`🟢 *Spotify Link:* ${spotifyUrl}`);
+      linksList.push(`▶️ *YouTube Link:* ${ytSearchUrl}`);
+    } else if (isJioSaavnReq) {
+      linksList.push(`🎵 *JioSaavn Link:* ${jioSaavnUrl}`);
+      linksList.push(`▶️ *YouTube Link:* ${ytSearchUrl}`);
+    } else if (isAppleMusicReq) {
+      linksList.push(appleMusicUrl ? `🍎 *Apple Music Link:* ${appleMusicUrl}` : `▶️ *YouTube Link:* ${ytSearchUrl}`);
+    } else if (isWynkReq) {
+      linksList.push(`🌐 *Wynk Music Link:* ${wynkUrl}`);
+      linksList.push(`▶️ *YouTube Link:* ${ytSearchUrl}`);
+    } else {
+      // 🌟 DEFAULT: YouTube ONLY (Main Priority)
+      linksList.push(`▶️ *YouTube Link:*\n${ytSearchUrl}`);
+      linksList.push(`\n🔴 *YouTube Music:*\n${ytMusicUrl}`);
+    }
+
+    if (previewAudioUrl && (isAppleMusicReq || isAllReq)) {
+      linksList.push(`\n🔊 *30s Audio Preview:* ${previewAudioUrl}`);
+    }
+
+    const platformTip = !isAllReq && !isSpotifyReq && !isJioSaavnReq && !isAppleMusicReq && !isWynkReq
+      ? `\n💡 _(Spotify ya JioSaavn ke liye mention karein: "@song ${trackTitle} spotify")_\n`
+      : "";
 
     return `🎵 *FRIDAY AI INSTANT SONG RADAR* 🎧✨
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 ${detailsBlock}${lyricsBlock}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
-⚡ *INSTANT STREAMING & PLAY LINKS:*
-${linksBlock}
-━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚡ *STREAMING LINK:*
+${linksList.join("\n")}
+━━━━━━━━━━━━━━━━━━━━━━━━━━${platformTip}
 🎧 _Gaana suniye aur vibe kijiye ${requesterName}! Volume UP!_ 🔊🔥`;
   }
 
