@@ -201,14 +201,7 @@ export class PerchanceService {
           "--disable-dev-shm-usage",
           "--disable-accelerated-2d-canvas",
           "--disable-gpu",
-          "--no-first-run",
-          "--no-zygote",
-          "--single-process",
-          "--disable-background-networking",
-          "--disable-default-apps",
-          "--disable-extensions",
-          "--disable-sync",
-          "--disable-translate",
+          "--disable-blink-features=AutomationControlled",
           "--window-size=1280,900",
         ],
       });
@@ -219,36 +212,13 @@ export class PerchanceService {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
       );
 
-      // Block heavy ad networks & analytics to make navigation instant (<1s) and avoid network timeouts
-      await page.setRequestInterception(true);
-      page.on("request", (req: any) => {
-        const u = req.url().toLowerCase();
-        if (
-          u.includes("doubleclick") ||
-          u.includes("google-analytics") ||
-          u.includes("googletagservices") ||
-          u.includes("smartadserver") ||
-          u.includes("adnxs") ||
-          u.includes("rubiconproject") ||
-          u.includes("amazon-adsystem") ||
-          u.includes("criteo") ||
-          u.includes("openx") ||
-          u.includes("taboola") ||
-          u.includes("outbrain")
-        ) {
-          req.abort();
-        } else {
-          req.continue();
-        }
-      });
-
       let imageBuffer: Buffer | null = null;
       let resolveImage: ((buf: Buffer) => void) | null = null;
       const imagePromise = new Promise<Buffer>((resolve) => {
         resolveImage = resolve;
       });
 
-      // Intercept network response for generated image
+      // Intercept network response for generated image (both proxy and direct endpoints)
       page.on("response", async (res: any) => {
         try {
           const url: string = res.url();
@@ -256,12 +226,13 @@ export class PerchanceService {
 
           if (
             url.includes("downloadTemporaryImage") ||
+            url.includes("downloadTemporaryImageViaProxy") ||
             url.includes("user-generated-asset.perchance.org") ||
             (contentType.startsWith("image/") && (url.includes("perchance") || url.includes("image-generation")))
           ) {
             const buf = await res.buffer();
             if (buf && buf.length > 5000) {
-              console.log(`[PerchanceService] 📸 Intercepted network image buffer (${buf.length} bytes)`);
+              console.log(`[PerchanceService] 📸 Intercepted network image buffer (${buf.length} bytes) from ${url.substring(0, 80)}`);
               imageBuffer = buf;
               if (resolveImage) resolveImage(buf);
             }
@@ -273,34 +244,32 @@ export class PerchanceService {
       const navT0 = Date.now();
       await page.goto("https://perchance.org/ai-photo-generator", {
         waitUntil: "domcontentloaded",
-        timeout: 90000,
+        timeout: 60000,
       });
       console.log(`[PerchanceService] ⚡ Page DOM loaded in ${Date.now() - navT0}ms! Accessing generator iframe...`);
-
-      // Find generator iframe
+      // Wait for output generator iframe and its content
       const iframeHandle = await page.waitForSelector("iframe#outputIframeEl", { timeout: 45000 });
       if (!iframeHandle) throw new Error("Could not find generator iframe on Perchance page");
       const frame = await iframeHandle.contentFrame();
       if (!frame) throw new Error("Could not access generator content frame");
 
       // Wait for prompt textarea
-      await frame.waitForSelector("textarea", { timeout: 45000 });
+      await frame.waitForSelector("textarea", { timeout: 30000 });
       const textareas = await frame.$$("textarea");
-      const promptInput = textareas.length > 1 ? textareas[1] : textareas[0];
+      const promptInput = textareas[1] || textareas[0];
 
-      // Set prompt value both through DOM and typing for maximum compatibility
-      await promptInput.click();
-      await frame.evaluate((el: any, val: string) => {
-        el.value = val;
-        el.dispatchEvent(new Event("input", { bubbles: true }));
-        el.dispatchEvent(new Event("change", { bubbles: true }));
-      }, promptInput, cleanPrompt);
+      console.log("[PerchanceService] 🎯 Found generator frame & prompt input. Typing prompt...");
 
-      console.log("[PerchanceService] ✍️ Prompt filled. Clicking ✨ generate button...");
-      const genBtn = await frame.waitForSelector("#generateButtonEl", { timeout: 30000 });
+      // Focus, clear, and type prompt with keyboard events for 100% reactivity
+      await promptInput.click({ clickCount: 3 });
+      await promptInput.press("Backspace");
+      await promptInput.type(cleanPrompt, { delay: 10 });
+
+      console.log("[PerchanceService] ✍️ Prompt typed. Clicking ✨ generate button...");
+      const genBtn = await frame.waitForSelector("#generateButtonEl", { timeout: 20000 });
       if (!genBtn) throw new Error("Could not find #generateButtonEl on Perchance");
       await genBtn.click();
-      console.log(`[PerchanceService] ⏳ Generate clicked! Waiting for AI image output (up to ${Math.round(timeoutMs / 60000)} minutes)...`);
+      console.log(`[PerchanceService] ⏳ Generate clicked! Waiting for AI image output...`);
 
       // Poll frames in parallel with network interception
       const pollingPromise = (async () => {
