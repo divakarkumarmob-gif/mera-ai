@@ -121,6 +121,7 @@ export default function PerchanceStudioModal({ onClose }: { onClose: () => void 
     setIsGenerating(true);
     setErrorMessage(null);
     setGeneratedImage(null);
+    setLivePreview(null);
     setImageMeta(null);
     setGenerationLogs([]);
     setCurrentStepIndex(1);
@@ -166,8 +167,16 @@ export default function PerchanceStudioModal({ onClose }: { onClose: () => void 
           } catch {}
 
           if (statusData && statusData.ok) {
+            if (statusData.livePreview) {
+              setLivePreview(statusData.livePreview);
+            }
             if (statusData.logs && statusData.logs.length > 0) {
               setGenerationLogs(statusData.logs);
+              const lastWithScreen = [...statusData.logs].reverse().find((l: any) => l.screenshot);
+              if (lastWithScreen?.screenshot) {
+                setLivePreview(lastWithScreen.screenshot);
+              }
+
               const lastLog = statusData.logs[statusData.logs.length - 1];
               const stepName = (lastLog.step || "").toLowerCase();
               const msg = (lastLog.message || "").toLowerCase();
@@ -175,7 +184,7 @@ export default function PerchanceStudioModal({ onClose }: { onClose: () => void 
               if (stepName.includes("browser") || msg.includes("chrome")) setCurrentStepIndex(1);
               else if (stepName.includes("navigation") || stepName.includes("dom")) setCurrentStepIndex(2);
               else if (stepName.includes("prompt") || stepName.includes("action") || stepName.includes("trigger")) setCurrentStepIndex(3);
-              else if (stepName.includes("network") || stepName.includes("frame") || msg.includes("intercept")) setCurrentStepIndex(4);
+              else if (stepName.includes("network") || stepName.includes("frame") || msg.includes("intercept") || stepName.includes("render")) setCurrentStepIndex(4);
               else if (stepName.includes("complete")) setCurrentStepIndex(5);
             }
 
