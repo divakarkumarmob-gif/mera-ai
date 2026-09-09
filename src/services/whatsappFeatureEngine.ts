@@ -13,6 +13,7 @@
  * 9. 🎵 Music & Lyrics Finder (@music)
  */
 
+import crypto from "crypto";
 import { GoogleGenAI } from "@google/genai";
 import { db } from "./firebaseAdmin";
 import { contactsService } from "./contactsService";
@@ -442,6 +443,176 @@ OUTPUT FORMAT:
   public getLastSong(chatId: string) {
     if (!chatId) return null;
     return this.chatLastSongMap.get(chatId) || null;
+  }
+
+  public decryptJioSaavnMediaUrl(encryptedUrl: string): string | null {
+    if (!encryptedUrl) return null;
+    try {
+      const key = Buffer.from("38346591", "utf8");
+      const decipher = crypto.createDecipheriv("des-ecb", key, "");
+      decipher.setAutoPadding(true);
+      let decrypted = decipher.update(encryptedUrl, "base64", "utf8");
+      decrypted += decipher.final("utf8");
+      return decrypted.replace(/_96\.(mp4|m4a|aac|mp3)/, "_320.$1").replace(/_96\./, "_320.");
+    } catch (e) {
+      return null;
+    }
+  }
+
+  public async fetchJioSaavnFullSongAudio(searchTarget: string): Promise<{
+    audioBuffer: Buffer | null;
+    mediaUrl: string | null;
+    songTitle?: string;
+    artist?: string;
+  }> {
+    try {
+      const searchRes = await fetch(
+        `https://www.jiosaavn.com/api.php?__call=search.getResults&_format=json&n=5&p=1&q=${encodeURIComponent(searchTarget)}&_marker=0&ctx=android&api_version=4`,
+        {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json",
+          },
+          signal: AbortSignal.timeout(6000),
+        }
+      );
+
+      if (searchRes.ok) {
+        const text = await searchRes.text();
+        const startIdx = text.indexOf("{");
+        const endIdx = text.lastIndexOf("}");
+        if (startIdx !== -1 && endIdx !== -1) {
+          const cleanJsonStr = text.substring(startIdx, endIdx + 1);
+          const data = JSON.parse(cleanJsonStr);
+          const results = data.results || (Array.isArray(data) ? data : []);
+          const first = results[0];
+
+          if (first) {
+            const encUrl = first.more_info?.encrypted_media_url || first.encrypted_media_url;
+            if (encUrl) {
+              const directUrl = this.decryptJioSaavnMediaUrl(encUrl);
+              if (directUrl) {
+                const audioRes = await fetch(directUrl, {
+                  headers: { "User-Agent": "Mozilla/5.0" },
+                  signal: AbortSignal.timeout(15000),
+                });
+                if (audioRes.ok) {
+                  const ab = await audioRes.arrayBuffer();
+                  if (ab.byteLength > 100000) { // at least 100KB full song
+                    return {
+                      audioBuffer: Buffer.from(ab),
+                      mediaUrl: directUrl,
+                      songTitle: first.title || first.song,
+                      artist: first.more_info?.primary_artists || first.primary_artists,
+                    };
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch (jioErr) {
+      console.warn("[WhatsAppFeatureEngine] JioSaavn full audio fetch error:", jioErr);
+    }
+    return { audioBuffer: null, mediaUrl: null };
+  }
+
+  public isFullSongRequest(text: string, quotedText?: string): boolean {
+    const clean = (text || "").toLowerCase().trim();
+    return (
+      clean === "full song" ||
+      clean === "full gaana" ||
+      clean === "full gana" ||
+      clean === "full track" ||
+      clean === "full music" ||
+      clean === "pura song" ||
+      clean === "pura gaana" ||
+      clean === "pura gana" ||
+      clean === "pura track" ||
+      clean === "pura music" ||
+      clean === "@fullsong" ||
+      clean === "/fullsong" ||
+      clean === "full audio" ||
+      clean === "pura audio" ||
+      clean === "jiosaavn song" ||
+      clean === "jio seven song" ||
+      clean === "jio saavn song" ||
+      /^(?:full\s*(?:song|gaana|gana|track|audio|music)|pura\s*(?:song|gaana|gana|track|audio|music))\b/i.test(clean) ||
+      /\b(?:full\s*song\s*(?:bhejo|do|chalao|send|download)|pura\s*gaana\s*(?:bhejo|do|chalao|send|download)|jio\s*saavn\s*se\s*gaana|jio\s*seven\s*se\s*gaana|full\s*song)\b/i.test(clean)
+    );
+  }
+
+  public async handleFullSongRequest(
+    chatId: string,
+    rawText: string,
+    requesterName = "Boss"
+  ): Promise<{
+    handled: boolean;
+    replyText: string;
+    audioBuffer?: Buffer | null;
+    trackTitle?: string;
+  }> {
+    const lastSong = this.getLastSong(chatId);
+    let targetTitle = lastSong?.title || "";
+    let targetArtist = lastSong?.artist || "";
+    let ytUrl = lastSong?.ytUrl || "";
+
+    // If query has specific song name e.g. "full song Kesariya"
+    const specificClean = rawText
+      .replace(/^(?:full\s*(?:song|gaana|gana|track|audio|music)|pura\s*(?:song|gaana|gana|track|audio|music)|@fullsong|\/fullsong)\s*/i, "")
+      .trim();
+
+    if (specificClean && specificClean.length > 2) {
+      targetTitle = specificClean;
+    }
+
+    if (!targetTitle) {
+      return {
+        handled: true,
+        replyText: `⚠️ Boss, pehle koi gaana search ya preview kijiye, phir "full song" likhiye! 👍`,
+      };
+    }
+
+    const searchTarget = `${targetTitle} ${targetArtist}`.trim();
+    if (!ytUrl) {
+      ytUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(searchTarget + " official song")}`;
+    }
+
+    // Try fetching full song from JioSaavn
+    const jioResult = await this.fetchJioSaavnFullSongAudio(searchTarget);
+
+    if (jioResult.audioBuffer && jioResult.audioBuffer.length > 0) {
+      const successCard = `🎵 *FRIDAY FULL SONG PLAYER* 🎧✨
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎶 *Music:* ${targetTitle}
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎧 _Pura gaana JioSaavn se download karke bhej diya gaya hai! Enjoy ${requesterName}!_ 🔊🔥`;
+
+      return {
+        handled: true,
+        replyText: successCard,
+        audioBuffer: jioResult.audioBuffer,
+        trackTitle: targetTitle,
+      };
+    }
+
+    // If JioSaavn full audio is not available or download failed:
+    const fallbackCard = `🔴 *YOUTUBE FULL SONG* 🎬🎧
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎶 *Music:* ${targetTitle}
+
+▶️ *Watch on YouTube:*
+${ytUrl}
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️ _Sorry ${requesterName}, full audio track download nahi mil paya. Aap direct YouTube par suniye!_ 👍`;
+
+    return {
+      handled: true,
+      replyText: fallbackCard,
+      audioBuffer: null,
+      trackTitle: targetTitle,
+    };
   }
 
   public isWrongSongFeedback(text: string, quotedText?: string): boolean {

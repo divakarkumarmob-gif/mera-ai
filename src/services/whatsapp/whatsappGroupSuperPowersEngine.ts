@@ -1822,6 +1822,23 @@ Bhagwan aapko lambi umar, beshumar khushiyan, aur bohot saari success de! ðŸš€ðŸ
       }
     }
 
+    // 22.3. Full Song Request ("Full song" / "Pura gaana" from JioSaavn)
+    if (whatsappFeatureEngine.isFullSongRequest(rawText, quotedMessage?.text)) {
+      const fullRes = await whatsappFeatureEngine.handleFullSongRequest(groupJid, rawText, senderName);
+      if (fullRes.handled && fullRes.replyText) {
+        if (fullRes.audioBuffer && sock) {
+          try {
+            await sock.sendMessage(groupJid, {
+              audio: fullRes.audioBuffer,
+              mimetype: "audio/mp4",
+              ptt: false,
+            });
+          } catch (e) {}
+        }
+        return { handled: true, replyText: fullRes.replyText };
+      }
+    }
+
     // 22.5. Next Song in Playlist Follow-Up ("Agla gaana" / "Next")
     if (whatsappFeatureEngine.isNextSongRequest(rawText)) {
       const nextRes = await whatsappFeatureEngine.handleNextSongInPlaylist(groupJid, senderName);

@@ -731,6 +731,15 @@ TONE & STYLE:
       }
     }
 
+    // Follow-up "Full song" / "Pura gaana" from JioSaavn
+    if (whatsappFeatureEngine.isFullSongRequest(text, quotedMessage?.text)) {
+      const fullRes = await whatsappFeatureEngine.handleFullSongRequest(groupJid, text, senderName);
+      if (fullRes.handled && fullRes.replyText) {
+        await sendMsgFn(groupJid, fullRes.replyText, text, messageKey);
+        return;
+      }
+    }
+
     if (/^(?:@song|@music|@gaana|\/song|\/music|\/gaana)\b/i.test(cleanText)) {
       const songRes = await whatsappFeatureEngine.searchMusicWithLyrics(cleanText, senderName, groupJid);
       await sendMsgFn(groupJid, songRes.replyText, text, messageKey);
