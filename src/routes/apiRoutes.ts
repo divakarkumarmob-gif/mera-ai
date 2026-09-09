@@ -2549,6 +2549,114 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
+  // ── 🔥 Perchance AI Photo Studio & Diagnostics Endpoints ──────────────────
+  app.get("/api/perchance/status", (_req, res) => {
+    try {
+      const { perchanceService } = require("../services/perchanceService");
+      const execPath = perchanceService.getExecutablePath();
+      res.json({
+        ok: true,
+        isAvailable: !!execPath,
+        executablePath: execPath || null,
+        os: process.platform,
+      });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
+    }
+  });
+
+  app.post("/api/perchance/generate", async (req, res) => {
+    try {
+      const prompt = String(req.body?.prompt || "").trim();
+      const timeoutMs = Number(req.body?.timeoutMs) || 120000;
+      if (!prompt) {
+        return res.status(400).json({ ok: false, error: "Prompt is required" });
+      }
+
+      const { perchanceService } = await import("../services/perchanceService");
+      const result = await perchanceService.generateImage(prompt, timeoutMs);
+
+      if (result.success && result.buffer) {
+        return res.json({
+          ok: true,
+          success: true,
+          image: `data:${result.mimeType || "image/jpeg"};base64,${result.buffer.toString("base64")}`,
+          bytes: result.buffer.length,
+          mimeType: result.mimeType || "image/jpeg",
+          prompt: result.prompt,
+          durationMs: result.durationMs,
+          logs: result.logs || [],
+        });
+      } else {
+        return res.status(500).json({
+          ok: false,
+          success: false,
+          error: result.error || "Generation failed",
+          prompt,
+          durationMs: result.durationMs,
+          logs: result.logs || [],
+        });
+      }
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "Internal server error" });
+    }
+  });
+
+  app.get("/api/perchance/generate-stream", async (req, res) => {
+    const prompt = String(req.query.prompt || "").trim();
+    const timeoutMs = Number(req.query.timeoutMs) || 120000;
+
+    if (!prompt) {
+      return res.status(400).json({ ok: false, error: "Prompt is required" });
+    }
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    (res as any).flushHeaders?.();
+
+    const sendEvent = (event: string, data: any) => {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+
+    sendEvent("log", {
+      level: "info",
+      step: "Request Received",
+      message: `Received generation request for prompt: "${prompt}"`,
+      timestamp: new Date().toLocaleTimeString(),
+    });
+
+    try {
+      const { perchanceService } = await import("../services/perchanceService");
+      const result = await perchanceService.generateImage(prompt, timeoutMs, (stepLog) => {
+        sendEvent("log", stepLog);
+      });
+
+      if (result.success && result.buffer) {
+        sendEvent("complete", {
+          success: true,
+          image: `data:${result.mimeType || "image/jpeg"};base64,${result.buffer.toString("base64")}`,
+          bytes: result.buffer.length,
+          durationMs: result.durationMs,
+          logs: result.logs,
+        });
+      } else {
+        sendEvent("error", {
+          success: false,
+          error: result.error || "Generation failed",
+          durationMs: result.durationMs,
+          logs: result.logs,
+        });
+      }
+    } catch (err: any) {
+      sendEvent("error", {
+        success: false,
+        error: err?.message || "Unexpected execution error",
+      });
+    } finally {
+      res.end();
+    }
+  });
 
   return router;
 }

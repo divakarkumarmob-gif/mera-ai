@@ -6,3 +6,4 @@ data/
 *.log
 .cache/
 scratch/
+chrome/

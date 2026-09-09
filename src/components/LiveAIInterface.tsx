@@ -6,6 +6,7 @@ import ChatHistoryModal from './ChatHistoryModal';
 import WhatsAppPairModal from './WhatsAppPairModal';
 import CodeAgentPage from './CodeAgentPage';
 import WebCrawlerStudioModal from './WebCrawlerStudioModal';
+import PerchanceStudioModal from './PerchanceStudioModal';
 import { YouTubeStudioModal } from './YouTubeStudioModal';
 import MemoryBackupModal from './MemoryBackupModal';
 import WifiRadarModal from './WifiRadarModal';
@@ -923,6 +924,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
     const [showBackupModal, setShowBackupModal] = useState(false);
     const [showWifiRadar, setShowWifiRadar] = useState(false);
     const [showMusicStudio, setShowMusicStudio] = useState(false);
+    const [showPerchanceStudio, setShowPerchanceStudio] = useState(false);
     const [showHologramLab, setShowHologramLab] = useState(false);
     const [hologramInitialModel, setHologramInitialModel] = useState('arc_reactor');
     const [showSongPreviewModal, setShowSongPreviewModal] = useState(false);
@@ -2635,6 +2637,16 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                             <span>Wi-Fi Radar</span>
                         </button>
 
+                        {/* 🔥 0. Perchance AI Photo Studio Capsule */}
+                        <button
+                            onClick={() => setShowPerchanceStudio(true)}
+                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-gradient-to-r from-pink-500/25 via-rose-500/25 to-amber-500/25 hover:from-pink-500/40 hover:to-amber-500/40 border border-pink-400/60 text-pink-200 text-xs font-bold shadow-[0_0_20px_rgba(244,63,94,0.35)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95 hover:scale-105"
+                            title="🔥 Perchance AI Photo Generator & Live Diagnostics Studio"
+                        >
+                            <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-spin" style={{ animationDuration: '4s' }} />
+                            <span>🔥 Perchance Studio</span>
+                        </button>
+
                         {/* 2. Memory Backup & Download Capsule */}
                         <button
                             onClick={() => setShowBackupModal(true)}
@@ -3578,6 +3590,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
             {showChatHistory && <ChatHistoryModal onClose={() => setShowChatHistory(false)} />}
             {showCodeAgent && <CodeAgentPage onClose={() => setShowCodeAgent(false)} />}
             {showWebCrawler && <WebCrawlerStudioModal onClose={() => setShowWebCrawler(false)} />}
+            {showPerchanceStudio && <PerchanceStudioModal onClose={() => setShowPerchanceStudio(false)} />}
             <YouTubeStudioModal isOpen={showYouTubeStudio} onClose={() => setShowYouTubeStudio(false)} />
             <WhatsAppPairModal isOpen={showWhatsAppModal} onClose={() => setShowWhatsAppModal(false)} />
             {showBackupModal && <MemoryBackupModal onClose={() => setShowBackupModal(false)} />}

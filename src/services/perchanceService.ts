@@ -5,6 +5,13 @@ import path from "path";
 
 puppeteerExtra.use(StealthPlugin());
 
+export interface PerchanceStepLog {
+  level: "info" | "warn" | "error" | "success";
+  step: string;
+  message: string;
+  timestamp: string;
+}
+
 export interface PerchanceImageResult {
   success: boolean;
   buffer?: Buffer;
@@ -12,6 +19,7 @@ export interface PerchanceImageResult {
   prompt: string;
   error?: string;
   durationMs?: number;
+  logs?: PerchanceStepLog[];
 }
 
 export class PerchanceService {
@@ -169,29 +177,55 @@ export class PerchanceService {
 
   /**
    * Automates https://perchance.org/ai-photo-generator to create an AI image from a prompt.
-   * Enters the prompt, clicks generate, captures the generated image buffer, and returns it.
+   * Emits live step logs via onLog callback for real-time frontend streaming.
    */
-  public async generateImage(promptText: string, timeoutMs = 300000): Promise<PerchanceImageResult> {
+  public async generateImage(
+    promptText: string,
+    timeoutMs = 120000,
+    onLog?: (log: PerchanceStepLog) => void
+  ): Promise<PerchanceImageResult> {
     const cleanPrompt = (promptText || "").trim();
+    const logs: PerchanceStepLog[] = [];
+
+    const pushLog = (level: PerchanceStepLog["level"], step: string, message: string) => {
+      const now = new Date();
+      const timeStr = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}:${now.getSeconds().toString().padStart(2, "0")}`;
+      const logItem: PerchanceStepLog = { level, step, message, timestamp: timeStr };
+      logs.push(logItem);
+      if (level === "error") console.error(`[PerchanceService] [${step}] ❌ ${message}`);
+      else if (level === "warn") console.warn(`[PerchanceService] [${step}] ⚠️ ${message}`);
+      else console.log(`[PerchanceService] [${step}] ℹ️ ${message}`);
+
+      if (onLog) {
+        try {
+          onLog(logItem);
+        } catch {}
+      }
+    };
+
     if (!cleanPrompt) {
-      return { success: false, prompt: promptText, error: "Prompt cannot be empty" };
+      pushLog("error", "Validation", "Prompt cannot be empty");
+      return { success: false, prompt: promptText, error: "Prompt cannot be empty", logs };
     }
 
+    pushLog("info", "Browser Initialization", "Scanning OS environment for Chrome / Chromium binary...");
     const execPath = this.getExecutablePath();
     if (!execPath) {
+      pushLog("error", "Browser Initialization", "Chrome/Chromium executable not found on server.");
       return {
         success: false,
         prompt: cleanPrompt,
         error: "Chrome/Chromium browser executable not found on server.",
+        logs,
       };
     }
 
+    pushLog("info", "Browser Initialization", `Found browser engine: ${execPath}`);
     const startTime = Date.now();
-    console.log(`[PerchanceService] 🚀 Starting generation for: "${cleanPrompt}" using ${execPath} (Timeout: ${timeoutMs / 1000}s / ${Math.round(timeoutMs / 60000)} min)`);
-
     let browser: any = null;
 
     try {
+      pushLog("info", "Browser Launch", "Launching headless Chrome with stealth & anti-detection flags...");
       browser = await (puppeteerExtra as any).launch({
         executablePath: execPath,
         headless: "new",
@@ -232,7 +266,7 @@ export class PerchanceService {
           ) {
             const buf = await res.buffer();
             if (buf && buf.length > 5000) {
-              console.log(`[PerchanceService] 📸 Intercepted network image buffer (${buf.length} bytes) from ${url.substring(0, 80)}`);
+              pushLog("success", "Network Stream", `Intercepted generated image buffer (${buf.length} bytes, ${(buf.length / 1024).toFixed(1)} KB)`);
               imageBuffer = buf;
               if (resolveImage) resolveImage(buf);
             }
@@ -240,36 +274,40 @@ export class PerchanceService {
         } catch {}
       });
 
-      console.log("[PerchanceService] Navigating to https://perchance.org/ai-photo-generator...");
+      pushLog("info", "Navigation", "Navigating to https://perchance.org/ai-photo-generator...");
       const navT0 = Date.now();
       await page.goto("https://perchance.org/ai-photo-generator", {
         waitUntil: "domcontentloaded",
         timeout: 60000,
       });
-      console.log(`[PerchanceService] ⚡ Page DOM loaded in ${Date.now() - navT0}ms! Accessing generator iframe...`);
+      const domTime = Date.now() - navT0;
+      pushLog("info", "DOM Ready", `Page DOM loaded successfully in ${domTime}ms! Accessing generator iframe...`);
+
       // Wait for output generator iframe and its content
       const iframeHandle = await page.waitForSelector("iframe#outputIframeEl", { timeout: 45000 });
       if (!iframeHandle) throw new Error("Could not find generator iframe on Perchance page");
       const frame = await iframeHandle.contentFrame();
       if (!frame) throw new Error("Could not access generator content frame");
 
+      pushLog("info", "Iframe Inspection", "Found #outputIframeEl frame. Locating prompt textarea...");
+
       // Wait for prompt textarea
       await frame.waitForSelector("textarea", { timeout: 30000 });
       const textareas = await frame.$$("textarea");
-      const promptInput = textareas[1] || textareas[0];
+      const promptInput = textareas.length > 1 ? textareas[1] : textareas[0];
 
-      console.log("[PerchanceService] 🎯 Found generator frame & prompt input. Typing prompt...");
+      pushLog("info", "Prompt Entry", `Typing prompt: "${cleanPrompt}" with virtual keyboard emulation...`);
 
       // Focus, clear, and type prompt with keyboard events for 100% reactivity
       await promptInput.click({ clickCount: 3 });
       await promptInput.press("Backspace");
       await promptInput.type(cleanPrompt, { delay: 10 });
 
-      console.log("[PerchanceService] ✍️ Prompt typed. Clicking ✨ generate button...");
+      pushLog("info", "Action Trigger", "Prompt filled into generator. Clicking ✨ generate button...");
       const genBtn = await frame.waitForSelector("#generateButtonEl", { timeout: 20000 });
       if (!genBtn) throw new Error("Could not find #generateButtonEl on Perchance");
       await genBtn.click();
-      console.log(`[PerchanceService] ⏳ Generate clicked! Waiting for AI image output...`);
+      pushLog("info", "AI Generation", "Generate button triggered! Listening on network streams and polling frame canvas...");
 
       // Poll frames in parallel with network interception
       const pollingPromise = (async () => {
@@ -298,7 +336,7 @@ export class PerchanceService {
 
               if (frameImg) {
                 if (frameImg.type === "data") {
-                  console.log("[PerchanceService] 🖼️ Found data:image/jpeg in child frame");
+                  pushLog("success", "DOM Frame", "Extracted data:image/jpeg from child frame element");
                   const buf = Buffer.from(frameImg.src.split(",")[1], "base64");
                   if (buf.length > 5000) {
                     imageBuffer = buf;
@@ -318,6 +356,7 @@ export class PerchanceService {
                   if (base64 && typeof base64 === "string" && base64.includes(",")) {
                     const buf = Buffer.from(base64.split(",")[1], "base64");
                     if (buf.length > 5000) {
+                      pushLog("success", "DOM Fetch", `Extracted image blob from URL: ${frameImg.src.substring(0, 60)}...`);
                       imageBuffer = buf;
                       return buf;
                     }
@@ -327,7 +366,7 @@ export class PerchanceService {
             } catch {}
           }
 
-          await new Promise((r) => setTimeout(r, 1500));
+          await new Promise((r) => setTimeout(r, 1200));
         }
         return null;
       })();
@@ -343,7 +382,7 @@ export class PerchanceService {
       }
 
       const durationMs = Date.now() - startTime;
-      console.log(`[PerchanceService] ✅ Image generated successfully in ${(durationMs / 1000).toFixed(1)}s (${finalBuf.length} bytes)`);
+      pushLog("success", "Complete", `Image generation completed in ${(durationMs / 1000).toFixed(1)}s (${(finalBuf.length / 1024).toFixed(1)} KB)!`);
 
       return {
         success: true,
@@ -351,20 +390,23 @@ export class PerchanceService {
         mimeType: "image/jpeg",
         prompt: cleanPrompt,
         durationMs,
+        logs,
       };
     } catch (err: any) {
       const durationMs = Date.now() - startTime;
-      console.error("[PerchanceService] ❌ Image generation error:", err?.message || err);
+      pushLog("error", "Execution Failure", err?.message || "Unknown error occurred during generation");
       return {
         success: false,
         prompt: cleanPrompt,
         error: err?.message || "Unknown error generating image on Perchance",
         durationMs,
+        logs,
       };
     } finally {
       if (browser) {
         try {
           await browser.close();
+          pushLog("info", "Cleanup", "Headless browser session closed cleanly.");
         } catch {}
       }
     }
@@ -372,3 +414,4 @@ export class PerchanceService {
 }
 
 export const perchanceService = PerchanceService.getInstance();
+
