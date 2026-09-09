@@ -560,9 +560,34 @@ TONE & STYLE:
             messageKey
           );
           return;
+        } else {
+          const { imageGenerationService } = await import("../imageGenerationService");
+          const genRes = await imageGenerationService.generateImage(prompt);
+          if (genRes.success && (genRes.buffer || genRes.imageUrl)) {
+            await sendPhotoFn(
+              groupJid,
+              genRes.buffer || genRes.imageUrl!,
+              `✨ *AI Generated Image for ${senderName}*\n📌 *Prompt:* _"${prompt}"_\n🤖 *Engine:* _${genRes.model}_`,
+              messageKey
+            );
+            return;
+          }
         }
       } catch (perchanceErr) {
         console.error("[WhatsAppAutoReply] Group perchance generation error:", perchanceErr);
+        try {
+          const { imageGenerationService } = await import("../imageGenerationService");
+          const genRes = await imageGenerationService.generateImage(prompt);
+          if (genRes.success && (genRes.buffer || genRes.imageUrl)) {
+            await sendPhotoFn(
+              groupJid,
+              genRes.buffer || genRes.imageUrl!,
+              `✨ *AI Generated Image for ${senderName}*\n📌 *Prompt:* _"${prompt}"_\n🤖 *Engine:* _${genRes.model}_`,
+              messageKey
+            );
+            return;
+          }
+        } catch {}
       }
     }
 

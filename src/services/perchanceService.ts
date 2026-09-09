@@ -24,39 +24,100 @@ export class PerchanceService {
     return PerchanceService.instance;
   }
 
+  private findBinaryInDir(dir: string): string | null {
+    try {
+      if (!fs.existsSync(dir)) return null;
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const e of entries) {
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) {
+          const res = this.findBinaryInDir(full);
+          if (res) return res;
+        } else if (e.isFile()) {
+          const lower = e.name.toLowerCase();
+          if (lower === "chrome.exe" || lower === "msedge.exe" || lower === "chrome" || lower === "chromium") {
+            return full;
+          }
+        }
+      }
+    } catch {}
+    return null;
+  }
+
   /**
-   * Finds the Chrome / Chromium / Edge executable path across OS environments.
+   * Finds the Chrome / Chromium / Edge executable path across OS environments (Windows, Linux, Docker, Render, macOS).
    */
   public getExecutablePath(): string | null {
-    if (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) {
-      return process.env.PUPPETEER_EXECUTABLE_PATH;
-    }
-    if (process.env.CHROME_PATH && fs.existsSync(process.env.CHROME_PATH)) {
-      return process.env.CHROME_PATH;
+    // 1. Environment variables
+    const envVars = [
+      process.env.PUPPETEER_EXECUTABLE_PATH,
+      process.env.CHROME_PATH,
+      process.env.CHROMIUM_PATH,
+      process.env.CHROME_BIN,
+    ];
+    for (const v of envVars) {
+      if (v && fs.existsSync(v)) return v;
     }
 
+    // 2. Dynamic 'which' or 'where' resolution
+    try {
+      const isWin = process.platform === "win32";
+      const cmd = isWin ? "where" : "which";
+      const bins = isWin
+        ? ["chrome", "msedge", "brave"]
+        : ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "chrome"];
+
+      const { execSync } = require("child_process");
+      for (const b of bins) {
+        try {
+          const out = execSync(`${cmd} ${b}`, { encoding: "utf8", stdio: ["pipe", "pipe", "ignore"] }).trim();
+          const first = out.split("\n")[0]?.trim();
+          if (first && fs.existsSync(first)) return first;
+        } catch {}
+      }
+    } catch {}
+
+    // 3. Multi-OS Candidate paths
+    const homeDir = process.env.HOME || process.env.USERPROFILE || "";
     const candidates = [
       // Windows
       "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
       "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
       "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
       "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
-      // Linux / Docker / Render
+      homeDir ? path.join(homeDir, "AppData\\Local\\Google\\Chrome\\Application\\chrome.exe") : "",
+      // Linux / Render / Docker / Ubuntu / Debian
       "/usr/bin/google-chrome",
       "/usr/bin/google-chrome-stable",
       "/usr/bin/chromium",
       "/usr/bin/chromium-browser",
       "/snap/bin/chromium",
       "/usr/lib/chromium/chromium",
+      "/usr/lib/chromium-browser/chromium-browser",
       "/usr/bin/chrome",
+      "/opt/google/chrome/chrome",
+      "/opt/google/chrome/google-chrome",
+      // Puppeteer cache directories (.cache/puppeteer)
+      homeDir ? path.join(homeDir, ".cache", "puppeteer") : "",
+      "/root/.cache/puppeteer",
       // macOS
       "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
       "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
       "/Applications/Chromium.app/Contents/MacOS/Chromium",
-    ];
+    ].filter(Boolean);
 
     for (const p of candidates) {
-      if (fs.existsSync(p)) return p;
+      if (fs.existsSync(p)) {
+        try {
+          const st = fs.statSync(p);
+          if (st.isDirectory()) {
+            const found = this.findBinaryInDir(p);
+            if (found) return found;
+          } else {
+            return p;
+          }
+        } catch {}
+      }
     }
     return null;
   }

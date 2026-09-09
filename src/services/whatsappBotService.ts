@@ -947,15 +947,40 @@ class WhatsAppBotService {
           );
           return;
         } else {
+          console.warn("[WhatsAppBot] Perchance generation failed, activating AI Backup Studio:", res.error);
+          const { imageGenerationService } = await import("./imageGenerationService");
+          const fallbackRes = await imageGenerationService.generateImage(prompt);
+          if (fallbackRes.success && (fallbackRes.buffer || fallbackRes.imageUrl)) {
+            await this.sendPhotoMessage(
+              replyJid,
+              fallbackRes.buffer || fallbackRes.imageUrl!,
+              `✨ *AI Photo Generated!* 🔥\n\n📌 *Prompt:* _"${prompt}"_\n🤖 *Engine:* ${fallbackRes.model || "FLUX.1-schnell Ultra-HD"}\n💡 _(Perchance server standby me tha, Friday ne instant backup se generate kiya!)_`,
+              messageKey
+            );
+            return;
+          }
           await this.sendHumanLikeMessage(
             replyJid,
-            `⚠️ *Perchance image generation failed:* ${res.error || "Unknown error"}\n_Friday backup engine se try kar rahi hai..._`,
+            `⚠️ *Photo generation failed:* ${res.error || "Generation error"}\nKripya thodi der baad dobara try karein.`,
             rawText,
             messageKey
           );
         }
       } catch (err: any) {
         console.error("[WhatsAppBot] Perchance generation error:", err);
+        try {
+          const { imageGenerationService } = await import("./imageGenerationService");
+          const fallbackRes = await imageGenerationService.generateImage(prompt);
+          if (fallbackRes.success && (fallbackRes.buffer || fallbackRes.imageUrl)) {
+            await this.sendPhotoMessage(
+              replyJid,
+              fallbackRes.buffer || fallbackRes.imageUrl!,
+              `✨ *AI Photo Generated!* 🔥\n\n📌 *Prompt:* _"${prompt}"_\n🤖 *Engine:* ${fallbackRes.model || "FLUX.1-schnell Ultra-HD"}`,
+              messageKey
+            );
+            return;
+          }
+        } catch {}
         await this.sendHumanLikeMessage(
           replyJid,
           `⚠️ *Error:* ${err?.message || "Perchance generator execution error"}`,
