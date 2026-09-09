@@ -48,6 +48,17 @@ export class PerchanceService {
    * Finds the Chrome / Chromium / Edge executable path across OS environments (Windows, Linux, Docker, Render, macOS).
    */
   public getExecutablePath(): string | null {
+    // 0. Puppeteer Bundled Chrome (Auto-downloaded on Render/Linux during npm install)
+    try {
+      const puppeteerPkg = require("puppeteer");
+      if (puppeteerPkg && typeof puppeteerPkg.executablePath === "function") {
+        const pPath = puppeteerPkg.executablePath();
+        if (pPath && typeof pPath === "string" && fs.existsSync(pPath)) {
+          return pPath;
+        }
+      }
+    } catch {}
+
     // 1. Environment variables
     const envVars = [
       process.env.PUPPETEER_EXECUTABLE_PATH,
