@@ -2565,40 +2565,115 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/perchance/generate", async (req, res) => {
+  // ── 🔥 Perchance AI Photo Studio Async Background Job Manager ────────────
+  interface PerchanceJob {
+    id: string;
+    prompt: string;
+    status: "queued" | "running" | "completed" | "failed";
+    image?: string;
+    bytes?: number;
+    durationMs?: number;
+    logs: any[];
+    error?: string;
+    createdAt: number;
+  }
+
+  const perchanceJobs = new Map<string, PerchanceJob>();
+
+  // Cleanup old jobs after 15 mins
+  setInterval(() => {
+    const now = Date.now();
+    for (const [id, job] of perchanceJobs.entries()) {
+      if (now - job.createdAt > 15 * 60 * 1000) {
+        perchanceJobs.delete(id);
+      }
+    }
+  }, 60 * 1000);
+
+  app.post("/api/perchance/jobs/create", async (req, res) => {
     try {
       const prompt = String(req.body?.prompt || "").trim();
-      const timeoutMs = Number(req.body?.timeoutMs) || 120000;
+      const timeoutMs = Number(req.body?.timeoutMs) || 150000;
       if (!prompt) {
         return res.status(400).json({ ok: false, error: "Prompt is required" });
       }
 
-      const { perchanceService } = await import("../services/perchanceService");
-      const result = await perchanceService.generateImage(prompt, timeoutMs);
+      const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const job: PerchanceJob = {
+        id: jobId,
+        prompt,
+        status: "running",
+        logs: [
+          {
+            level: "info",
+            step: "Job Queue",
+            message: `Created asynchronous generation task [${jobId}] for prompt: "${prompt}"`,
+            timestamp: new Date().toLocaleTimeString(),
+          },
+        ],
+        createdAt: Date.now(),
+      };
 
-      if (result.success && result.buffer) {
-        return res.json({
-          ok: true,
-          success: true,
-          image: `data:${result.mimeType || "image/jpeg"};base64,${result.buffer.toString("base64")}`,
-          bytes: result.buffer.length,
-          mimeType: result.mimeType || "image/jpeg",
-          prompt: result.prompt,
-          durationMs: result.durationMs,
-          logs: result.logs || [],
-        });
-      } else {
-        return res.status(500).json({
-          ok: false,
-          success: false,
-          error: result.error || "Generation failed",
-          prompt,
-          durationMs: result.durationMs,
-          logs: result.logs || [],
-        });
-      }
+      perchanceJobs.set(jobId, job);
+
+      // Launch async generation worker in background (non-blocking for HTTP gateway)
+      (async () => {
+        try {
+          const { perchanceService } = await import("../services/perchanceService");
+          const result = await perchanceService.generateImage(prompt, timeoutMs, (stepLog) => {
+            job.logs.push(stepLog);
+          });
+
+          if (result.success && result.buffer) {
+            job.status = "completed";
+            job.image = `data:${result.mimeType || "image/jpeg"};base64,${result.buffer.toString("base64")}`;
+            job.bytes = result.buffer.length;
+            job.durationMs = result.durationMs;
+            if (result.logs && result.logs.length > 0) {
+              job.logs = result.logs;
+            }
+          } else {
+            job.status = "failed";
+            job.error = result.error || "Generation failed on server";
+            job.durationMs = result.durationMs;
+            if (result.logs && result.logs.length > 0) {
+              job.logs = result.logs;
+            }
+          }
+        } catch (jobErr: any) {
+          job.status = "failed";
+          job.error = jobErr?.message || "Unexpected task execution error";
+        }
+      })();
+
+      // Return instant 200 OK with jobId (takes 5ms — zero 502 timeout risk)
+      res.json({ ok: true, jobId, status: "running" });
     } catch (e: any) {
-      res.status(500).json({ ok: false, error: e?.message || "Internal server error" });
+      res.status(500).json({ ok: false, error: e?.message });
+    }
+  });
+
+  app.get("/api/perchance/jobs/:jobId/status", (req, res) => {
+    try {
+      const jobId = req.params.jobId;
+      const job = perchanceJobs.get(jobId);
+      if (!job) {
+        return res.status(404).json({ ok: false, error: "Job not found or expired" });
+      }
+
+      res.json({
+        ok: true,
+        jobId: job.id,
+        status: job.status,
+        prompt: job.prompt,
+        image: job.image,
+        bytes: job.bytes,
+        durationMs: job.durationMs,
+        logs: job.logs,
+        error: job.error,
+      });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
     }
   });
 

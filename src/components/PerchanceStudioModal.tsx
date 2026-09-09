@@ -118,76 +118,75 @@ export default function PerchanceStudioModal({ onClose }: { onClose: () => void 
     setGenerationLogs([]);
     setCurrentStepIndex(1);
 
-    const nowStr = () => {
-      const now = new Date();
-      return `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}:${now.getSeconds().toString().padStart(2, "0")}`;
-    };
-
-    const addLocalLog = (level: StepLog["level"], step: string, message: string) => {
-      setGenerationLogs((prev) => [...prev, { level, step, message, timestamp: nowStr() }]);
-    };
-
-    addLocalLog("info", "Browser Initialization", "Scanning OS environment & launching headless Chrome engine...");
-
-    const stepInterval = setInterval(() => {
-      setTimerSeconds((sec) => {
-        if (sec === 3) {
-          setCurrentStepIndex(2);
-          addLocalLog("info", "Page Navigation", "Navigating to https://perchance.org/ai-photo-generator (DOM loading)...");
-        } else if (sec === 7) {
-          setCurrentStepIndex(3);
-          addLocalLog("info", "Prompt & Action", `Targeting generator iframe & typing prompt: "${cleanPrompt}"...`);
-        } else if (sec === 11) {
-          setCurrentStepIndex(4);
-          addLocalLog("info", "Network Stream", "✨ Generate triggered! Intercepting temporary image response stream...");
-        }
-        return sec;
-      });
-    }, 1000);
-
     const token = getAppToken() || "";
 
     try {
-      const res = await fetch(getApiUrl("/api/perchance/generate"), {
+      // 1. Create Background Job (returns immediately in <10ms - zero 502 gateway timeout risk)
+      const createRes = await fetch(getApiUrl("/api/perchance/jobs/create"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "x-app-key-token": token,
         },
-        body: JSON.stringify({ prompt: cleanPrompt, timeoutMs: 120000 }),
+        body: JSON.stringify({ prompt: cleanPrompt, timeoutMs: 150000 }),
       });
 
-      clearInterval(stepInterval);
-
-      const rawText = await res.text();
-      let data: any = null;
+      const createRaw = await createRes.text();
+      let createData: any = null;
       try {
-        data = rawText ? JSON.parse(rawText) : null;
-      } catch {
-        data = null;
+        createData = createRaw ? JSON.parse(createRaw) : null;
+      } catch {}
+
+      if (!createData || !createData.ok || !createData.jobId) {
+        throw new Error(createData?.error || "Failed to initialize server background worker");
       }
 
-      if (data && data.ok && data.image) {
-        if (data.logs && data.logs.length > 0) {
-          setGenerationLogs(data.logs);
-        } else {
-          addLocalLog("success", "Complete", `Image generated successfully (${((data.bytes || 0) / 1024).toFixed(1)} KB)!`);
-        }
-        setGeneratedImage(data.image);
-        setImageMeta({ bytes: data.bytes || 0, durationMs: data.durationMs || 0 });
-        setCurrentStepIndex(5);
-      } else {
-        const errMsg = data?.error || (res.status !== 200 ? `Server returned HTTP ${res.status}` : "Generation failed on server");
-        addLocalLog("error", "Execution Failure", errMsg);
-        setErrorMessage(errMsg);
+      const jobId = createData.jobId;
+
+      // 2. Poll status every 2 seconds until complete or failed
+      const pollStart = Date.now();
+      while (Date.now() - pollStart < 180000) {
+        await new Promise((r) => setTimeout(r, 2000));
+
+        try {
+          const statusRes = await fetch(getApiUrl(`/api/perchance/jobs/${jobId}/status`), {
+            headers: { "x-app-key-token": token },
+          });
+          const statusRaw = await statusRes.text();
+          let statusData: any = null;
+          try {
+            statusData = statusRaw ? JSON.parse(statusRaw) : null;
+          } catch {}
+
+          if (statusData && statusData.ok) {
+            if (statusData.logs && statusData.logs.length > 0) {
+              setGenerationLogs(statusData.logs);
+              const lastLog = statusData.logs[statusData.logs.length - 1];
+              const stepName = (lastLog.step || "").toLowerCase();
+              const msg = (lastLog.message || "").toLowerCase();
+
+              if (stepName.includes("browser") || msg.includes("chrome")) setCurrentStepIndex(1);
+              else if (stepName.includes("navigation") || stepName.includes("dom")) setCurrentStepIndex(2);
+              else if (stepName.includes("prompt") || stepName.includes("action") || stepName.includes("trigger")) setCurrentStepIndex(3);
+              else if (stepName.includes("network") || stepName.includes("frame") || msg.includes("intercept")) setCurrentStepIndex(4);
+              else if (stepName.includes("complete")) setCurrentStepIndex(5);
+            }
+
+            if (statusData.status === "completed" && statusData.image) {
+              setGeneratedImage(statusData.image);
+              setImageMeta({ bytes: statusData.bytes || 0, durationMs: statusData.durationMs || 0 });
+              setCurrentStepIndex(5);
+              break;
+            } else if (statusData.status === "failed") {
+              setErrorMessage(statusData.error || "Generation failed on server");
+              break;
+            }
+          }
+        } catch {}
       }
     } catch (err: any) {
-      clearInterval(stepInterval);
-      const errMsg = err?.message || "Network connection error";
-      addLocalLog("error", "Connection Error", errMsg);
-      setErrorMessage(errMsg);
+      setErrorMessage(err?.message || "Connection error initializing background task");
     } finally {
-      clearInterval(stepInterval);
       setIsGenerating(false);
     }
   };
