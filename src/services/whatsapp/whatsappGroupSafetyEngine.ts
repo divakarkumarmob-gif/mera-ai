@@ -185,15 +185,17 @@ export class WhatsAppGroupSafetyEngine {
       };
 
       current.enabled = false;
+      current.blockProfanity = false;
+      current.blockNsfwMedia = false;
       current.updatedAt = Date.now();
-      current.lastAction = "Disabled safety protection";
+      current.lastAction = "Activated @allow all (Disabled safety protection)";
 
       this.safetyCache.set(groupId, current);
       await safetyCol().doc(groupId).set(current, { merge: true });
 
       return {
         success: true,
-        message: `🔓 *@block safe GUARD DISABLED.* Group safety auto-moderation abhi pause kar di gayi hai.`,
+        message: `🔓 *@allow all MODE ACTIVATED!* ⚡\n\nAb is group me Gaali Filter aur Safety Warnings completely **OFF** kar di gayi hain! Sabhi messages bina kisi restriction ya warning ke allow hain. 👍\n\n_(Tip: Dobara protection on karne ke liye \`@block safe\` likhein.)_`,
       };
     } catch (err: any) {
       console.error("[GroupSafetyEngine] Error disabling safety:", err);
@@ -410,7 +412,7 @@ export class WhatsAppGroupSafetyEngine {
   }
 
   /**
-   * Check if a command is a Safety Command (@block safe, @safety on, etc.)
+   * Check if a command is a Safety Command (@block safe, @allow all, @safety on, etc.)
    */
   public isSafetyCommand(text: string): boolean {
     const clean = (text || "").toLowerCase().trim();
@@ -419,14 +421,19 @@ export class WhatsAppGroupSafetyEngine {
       clean.startsWith("/block safe") ||
       clean.startsWith("@blocksafe") ||
       clean.startsWith("/blocksafe") ||
+      clean.startsWith("@allow all") ||
+      clean.startsWith("/allow all") ||
+      clean.startsWith("@allowall") ||
+      clean.startsWith("/allowall") ||
+      clean === "allow all" ||
       clean.startsWith("@safety") ||
       clean.startsWith("/safety") ||
-      /^(?:block\s*safe|safety\s*mode|group\s*safety|gandi\s*galli\s*delete|auto\s*delete\s*gaali)/i.test(clean)
+      /^(?:block\s*safe|allow\s*all|safety\s*mode|group\s*safety|gandi\s*galli\s*delete|auto\s*delete\s*gaali)/i.test(clean)
     );
   }
 
   /**
-   * Handle direct @block safe commands
+   * Handle direct @block safe and @allow all commands
    */
   public async handleSafetyCommand(
     sock: any,
@@ -440,6 +447,29 @@ export class WhatsAppGroupSafetyEngine {
     isOwner = false
   ): Promise<{ handled: boolean; replyText?: string }> {
     const clean = (text || "").toLowerCase().trim();
+
+    // 0. Allow All Command (@allow all / /allow all / @allowall) -> Completely disable safety & warnings for this group
+    const isAllowAllCmd =
+      clean.startsWith("@allow all") ||
+      clean.startsWith("/allow all") ||
+      clean.startsWith("@allowall") ||
+      clean.startsWith("/allowall") ||
+      clean === "allow all" ||
+      /^(?:allow\s*all|unblock\s*all|no\s*filter|free\s*chat|disable\s*filter)$/i.test(clean);
+
+    if (isAllowAllCmd) {
+      const res = await this.disableGroupSafety(groupJid);
+      return {
+        handled: true,
+        replyText: `🔓 *@allow all MODE ACTIVATED!* ⚡
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+👥 *Group:* ${groupName}
+🛡️ *Gaali Filter & Warning Status:* ❌ COMPLETELY OFF (Disabled)
+💬 *Notice:* Ab is group me kisi bhi gaali par koi warning ya auto-delete action nahi hoga. Full free chat allowed hai! 👍
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+ℹ️ _(Dobara safety shield on karne ke liye \`@block safe\` likhein.)_`,
+      };
+    }
 
     // 1. Quoted Message Delete Command (@block safe delete)
     if (/\b(?:delete|hatao|remove|del)\b/i.test(clean) && quotedMessage && quotedMessage.isReply) {
@@ -511,15 +541,16 @@ export class WhatsAppGroupSafetyEngine {
         replyText: `🛡️ *FRIDAY GROUP SAFETY STATUS (@block safe)* ⚡
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 👥 *Group:* ${groupName}
-🔒 *Protection:* ${status.enabled !== false ? "✅ ACTIVE (Enabled)" : "❌ INACTIVE (Disabled)"}
+🔒 *Protection Status:* ${status.enabled !== false ? "✅ ACTIVE (Enabled)" : "❌ DISABLED (@allow all active)"}
 🚫 *Gandi Gaali Auto-Delete:* ${status.blockProfanity !== false ? "✅ Active" : "❌ Disabled"}
 🔞 *NSFW / Unsafe Media Auto-Delete:* ${status.blockNsfwMedia !== false ? "✅ Active" : "❌ Disabled"}
 👑 *Friday Admin Status:* ${isAdm ? "✅ Admin (Can Delete Messages)" : "⚠️ Not Admin (Cannot Delete without Admin rights)"}
 📊 *Total Offensive Messages Deleted:* ${status.deletedCount || 0}
+⚠️ *Total Warnings Issued:* ${status.warnedCount || 0}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 💡 *Commands:*
-• \`@block safe on\` ➔ Guard activate karein.
-• \`@block safe off\` ➔ Guard disable karein.
+• \`@block safe\` ➔ Guard activate karein (Auto-delete & Warnings ON).
+• \`@allow all\` ➔ Saare filters & warnings OFF karein (Free chat allowed).
 • \`@block safe delete\` ➔ Quoted message delete karein.`,
       };
     }

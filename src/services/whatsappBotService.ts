@@ -1583,8 +1583,9 @@ class WhatsAppBotService {
 👑 *Creator & Master:* DK Boss (Divakar Kumar)
 🛡️ *Privacy Shield:* Active (Strict Zero-Leak Protection)
 
-🛡️ *0. GROUP AUTO-MODERATOR & SAFETY (@block safe):*
+🛡️ *0. GROUP AUTO-MODERATOR & SAFETY (@block safe / @allow all):*
 • \`@block safe\` / \`@block safe on\` ➔ Gandi gaali, abusive text aur vulgar NSFW photos/videos ka instant auto-delete shield ON karein! (Friday Admin hona chahiye).
+• \`@allow all\` ➔ Saare filters & warnings OFF karein (Free chat allowed in group).
 • \`@block safe off\` ➔ Group safety guard pause karein.
 • \`@block safe status\` ➔ Safety status aur deleted offensive messages count dekhein.
 • \`@block safe delete\` ➔ Kisi bhi offensive message par quote karke likhein, use turant chat se delete kar dega.
