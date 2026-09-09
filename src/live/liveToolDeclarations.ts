@@ -77,6 +77,19 @@ const rawFunctionDeclarations: any[] = [
     }
   },
   {
+    "name": "check_last_generated_photo",
+    "description": "Check the status and details of the most recently generated or edited AI photo. Call this whenever DK asks 'photo ban gaya kya?', 'kya photo ban gayi?', 'photo kahan hai?', 'photo ka status kya hai?', 'photo bani ki nahi?' to verify if a photo is already created and visible on the dashboard.",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {
+        "reason": {
+          "type": "STRING",
+          "description": "Optional reason for checking photo status, e.g. 'user_query'"
+        }
+      }
+    }
+  },
+  {
     "name": "start_background_task",
     "description": "Start a background task (e.g. weather update, live cricket score check, product deal search, security scan, codebase audit, or custom background operation). Friday immediately acknowledges in conversation that the task has started in background, and when it finishes, it will be reported at the end of a turn or when DK asks.",
     "parameters": {

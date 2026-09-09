@@ -401,6 +401,13 @@ async function startServer() {
                   setBaileysEnabled: (v) => { baileysEnabled = v; },
                 });
                 functionResponses.push({ id: call.id, name: call.name, response: { output: toolOutput } });
+                if ((call.name === "generate_ai_photo" || call.name === "edit_ai_photo") && toolOutput?.success) {
+                  memoryEngine.recordMessage(
+                    sessionId,
+                    "ai",
+                    `[SYSTEM STATE]: Photo was generated and is visible in the dashboard left popup. WhatsApp sent: ${toolOutput.whatsappSent}. Confirmation: "${toolOutput.message}"`
+                  );
+                }
               }
 
               try {

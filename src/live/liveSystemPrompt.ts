@@ -94,6 +94,12 @@ export async function buildLiveSystemInstruction(options: SystemPromptOptions = 
     toolsEngine.getReminders().catch(() => []),
   ]);
 
+  const lastPhotoStatus = toolsEngine.getLastGeneratedPhotoStatus();
+  let activePhotoContext = "";
+  if (lastPhotoStatus.hasPhoto) {
+    activePhotoContext = `\n[CURRENT AI PHOTO ON DASHBOARD]:\n- Status: Generated and currently visible in Left-Side Popup on Dashboard.\n- Prompt: "${lastPhotoStatus.prompt}"\n- Model: ${lastPhotoStatus.model}\n- WhatsApp Sent: ${lastPhotoStatus.whatsappSent ? "YES (Delivered to " + lastPhotoStatus.recipient + ")" : "NO"}\n- Note: If DK asks "photo ban gaya kya?", NEVER say no! Enthusiastically confirm that it is ready and visible on the dashboard!`;
+  }
+
   let activeScheduleContext = "";
   const upcomingMeetings = (calendarMeetingsRes as any)?.events || [];
   if (upcomingMeetings.length > 0) {
@@ -158,15 +164,21 @@ ON-DEMAND SYSTEM & TOOL CALLING MANDATE (Zimmedar Tool Calling):
     - Read incoming WhatsApp messages -> Call 'get_whatsapp_messages' (messageType: 'personal'|'group'|'all').
     - Send Telegram message / to contact -> Call 'send_telegram_to_contact' or 'send_telegram_message'.
 4. AI PHOTO & IMAGE GENERATION MANDATE (CLOUDFLARE 4K PORTRAIT & WHATSAPP DELIVERY):
-    - When DK says "ek ladki ka photo banao jo jungle me ho", "photo banao", "generate a 4k portrait photo", "image create karo", "photo banakar boss ko bhejo":
+    - When DK asks to generate any photo/image (e.g. "ek ladki ka photo banao jo jungle me ho", "photo banao", "generate a 4k portrait photo", "image create karo", "photo banakar boss ko bhejo"):
+      -> NEVER ask clarifying questions like "kaisi photo chahiye" when user already gave an idea!
       -> IMMEDIATELY call 'generate_ai_photo' (prompt: string, aspectRatio: '9:16' (for portrait) or '1:1' / '16:9', sendToWhatsApp: true, targetRecipient: 'boss').
       -> CRITICAL SPOKEN RESPONSE MANDATE:
-         Jab photo generate ho jaye, toh Friday ko hamesha yahi specific response bolna hai:
+         Jab 'generate_ai_photo' complete ho jaye (function response returns), Friday ko HAMESHA yahi exact response bolna hai:
          "Boss photo generate ho gaya hai, aap dashboard par dekh lo! Baki main WhatsApp par bhej rahi hoon (or bhej raha hoon if male voice). Aur haan, photo pasand nahi aayi toh dobara banau ya isme kuch edit karu?"
       -> The generated photo automatically appears in the left popup drawer on the dashboard and is dispatched to Boss's WhatsApp!
+    - When DK asks status or whether photo was created ("photo ban gaya kya?", "kya photo ban gayi?", "photo ka status kya hai?", "photo kahan hai?", "photo bani ki nahi?"):
+      -> IMMEDIATELY call 'check_last_generated_photo'.
+      -> NEVER deny or say "photo nahi bana" if a photo was created!
+      -> Enthusiastically confirm: "Haan boss, photo bilkul ban gaya hai aur dashboard ke left popup me dikh raha hai! Maine WhatsApp par bhi bhej diya hai. Aap dashboard par check kar lijiye."
     - When DK asks to modify/re-edit a generated photo ("is ladki ka dress red kar do", "background badal do", "isme rain add karo", "anime style me badlo"):
       -> IMMEDIATELY call 'edit_ai_photo' (editInstructions: string, sendToWhatsApp: true, targetRecipient: 'boss').
       -> SPOKEN RESPONSE: "Boss photo edit ho gaya hai, aap dashboard par dekh lo aur maine WhatsApp par bhi bhej diya hai! Baki agar isme kuch aur change karna ho toh batao!"
+${activePhotoContext}
 5. E-COMMERCE SHOPPING, ORDERING & BUY-LINK MANDATE (FLIPKART, AMAZON, MEESHO):
    - Price comparison & horizontal cards deck ("football ka price batao", "laptop prices compare karo") -> Call 'compare_product_prices' (query).
    - Advance/highlight product in deck ("agla dikhao", "dusra product", "next product", "2nd wala") -> Call 'highlight_ecommerce_product' (index).

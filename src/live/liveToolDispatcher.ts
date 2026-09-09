@@ -204,6 +204,23 @@ export async function dispatchLiveToolCall(call: any, context: ToolDispatchConte
                       );
                     }
                   }
+                } else if (call.name === "check_last_generated_photo") {
+                  const photoStatus = toolsEngine.getLastGeneratedPhotoStatus();
+                  result = photoStatus;
+                  if (photoStatus.hasPhoto && photoStatus.imageUrl) {
+                    clientWs.send(
+                      JSON.stringify({
+                        type: "image_generated",
+                        prompt: photoStatus.prompt,
+                        model: photoStatus.model,
+                        imageUrl: photoStatus.imageUrl,
+                        aspectRatio: photoStatus.aspectRatio || "9:16",
+                        whatsappSent: photoStatus.whatsappSent,
+                        recipient: photoStatus.recipient,
+                        message: photoStatus.message,
+                      })
+                    );
+                  }
                 } else if (call.name === "save_contact") {
                   const { contactName, phoneNumber, relation } = call.args || {};
                   const entry = await contactsService.saveContact(contactName, phoneNumber, relation);

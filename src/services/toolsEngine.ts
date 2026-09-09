@@ -602,6 +602,17 @@ class ToolsEngine {
     let lastImageBuffer: Buffer | null = genRes.buffer || null;
     (this as any)._lastGeneratedImageBuffer = lastImageBuffer;
     (this as any)._lastGeneratedImagePrompt = genRes.prompt;
+    (this as any)._lastGeneratedPhotoMeta = {
+      hasPhoto: true,
+      success: true,
+      imageUrl: dataUrl,
+      prompt: genRes.prompt,
+      model: genRes.model,
+      aspectRatio: options.aspectRatio || "9:16",
+      whatsappSent,
+      recipient: recipientName,
+      timestamp: new Date().toISOString(),
+    };
 
     return {
       success: true,
@@ -613,6 +624,32 @@ class ToolsEngine {
       whatsappMessage,
       recipient: recipientName,
       message: `Boss photo generate ho gaya hai, aap dashboard par dekh lo, baki main WhatsApp par bhej rahi hoon! Aur haan, photo pasand nahi aayi toh dobara banau ya isme kuch edit karu?`,
+    };
+  }
+
+  /**
+   * Get Last Generated AI Photo Status & Details
+   */
+  public getLastGeneratedPhotoStatus() {
+    const meta = (this as any)._lastGeneratedPhotoMeta;
+    if (meta && meta.imageUrl) {
+      return {
+        hasPhoto: true,
+        success: true,
+        prompt: meta.prompt,
+        model: meta.model || "Cloudflare 4K Portrait AI",
+        imageUrl: meta.imageUrl,
+        aspectRatio: meta.aspectRatio || "9:16",
+        whatsappSent: meta.whatsappSent,
+        recipient: meta.recipient,
+        timestamp: meta.timestamp,
+        message: `Haan boss, photo bilkul ban gaya hai aur dashboard ke left popup me dikh raha hai! Prompt: "${meta.prompt}". Maine WhatsApp par bhi bhej diya hai.`,
+      };
+    }
+    return {
+      hasPhoto: false,
+      success: false,
+      message: "Abhi tak koi photo generate nahi hui hai. Aap prompt batayein toh main abhi 4K AI portrait generate kar sakti hoon.",
     };
   }
 
@@ -654,6 +691,18 @@ class ToolsEngine {
           const sendRes = await whatsappBotService.sendPhotoMessage(targetPhone, editRes.buffer, caption);
           whatsappSent = sendRes.success;
         }
+
+        (this as any)._lastGeneratedPhotoMeta = {
+          hasPhoto: true,
+          success: true,
+          imageUrl: dataUrl,
+          prompt: editRes.prompt,
+          model: editRes.model,
+          aspectRatio: "9:16",
+          whatsappSent,
+          recipient: recipientName,
+          timestamp: new Date().toISOString(),
+        };
 
         return {
           success: true,
