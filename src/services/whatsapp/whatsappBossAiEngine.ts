@@ -582,6 +582,30 @@ export class WhatsAppBossAiEngine {
           required: ["groupName", "enable"],
         },
       },
+      {
+        name: "broadcast_group_announcement",
+        description: "Send an @everyone / @tagall announcement message to a WhatsApp group, tagging all participants.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            groupName: { type: "STRING", description: "The WhatsApp group name" },
+            announcementText: { type: "STRING", description: "The announcement text message" },
+          },
+          required: ["groupName", "announcementText"],
+        },
+      },
+      {
+        name: "trigger_group_superpower",
+        description: "Trigger a group superpower remotely (e.g. '@quiz start', '@roast [Name]', '@decision', '@factcheck [Claim]', '@split [Amount]') in a WhatsApp group.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            groupName: { type: "STRING", description: "The WhatsApp group name" },
+            commandText: { type: "STRING", description: "The superpower command, e.g. '@quiz start cricket', '@roast Aman', '@decision', '@factcheck who won world cup 2011'" },
+          },
+          required: ["groupName", "commandText"],
+        },
+      },
     ];
 
     const systemInstruction = `YOU ARE FRIDAY: DK's (Divakar Kumar) ultra-intelligent, loyal, warm, witty, and deeply caring AI companion and chief executive assistant.
@@ -954,6 +978,58 @@ COMMUNICATION STYLE:
           if (!grp) return { success: false, message: `Group "${args.groupName}" nahi mila.` };
           const res = await whatsappGroupSafetyEngine.resetStrikes(grp.groupId, args.memberPhone);
           return res;
+        }
+        if (toolName === "broadcast_group_announcement") {
+          const { whatsappBotService } = await import("../whatsappBotService");
+          const { whatsappGroupSuperPowersEngine } = await import("./whatsappGroupSuperPowersEngine");
+          const grp = await whatsappBotService.findGroup(args.groupName);
+          if (!grp) return { success: false, message: `Group "${args.groupName}" nahi mila.` };
+          const sock = (whatsappBotService as any).sock;
+          const res = await whatsappGroupSuperPowersEngine.handleSuperPowerCommand(
+            sock,
+            grp.groupId,
+            grp.groupName,
+            `@everyone ${args.announcementText}`,
+            "DK (Boss)",
+            "Boss",
+            "boss@s.whatsapp.net",
+            {},
+            null,
+            true
+          );
+          if (res.handled && res.replyText && sock) {
+            await sock.sendMessage(grp.groupId, { text: res.replyText, mentions: res.mentions });
+            return { success: true, message: `Announcement broadcasted to "${grp.groupName}" with ${res.mentions?.length || 0} mentions!` };
+          }
+          return { success: false, message: "Announcement broadcast failed." };
+        }
+        if (toolName === "trigger_group_superpower") {
+          const { whatsappBotService } = await import("../whatsappBotService");
+          const { whatsappGroupSuperPowersEngine } = await import("./whatsappGroupSuperPowersEngine");
+          const grp = await whatsappBotService.findGroup(args.groupName);
+          if (!grp) return { success: false, message: `Group "${args.groupName}" nahi mila.` };
+          const sock = (whatsappBotService as any).sock;
+          const res = await whatsappGroupSuperPowersEngine.handleSuperPowerCommand(
+            sock,
+            grp.groupId,
+            grp.groupName,
+            args.commandText,
+            "DK (Boss)",
+            "Boss",
+            "boss@s.whatsapp.net",
+            {},
+            null,
+            true
+          );
+          if (res.handled && res.replyText && sock) {
+            if (res.mentions && res.mentions.length > 0) {
+              await sock.sendMessage(grp.groupId, { text: res.replyText, mentions: res.mentions });
+            } else {
+              await sock.sendMessage(grp.groupId, { text: res.replyText });
+            }
+            return { success: true, message: `Superpower "${args.commandText}" triggered successfully in "${grp.groupName}"!` };
+          }
+          return { success: false, message: "Superpower execution failed." };
         }
         if (toolName === "get_messages_digest") {
           if (args.groupName) {

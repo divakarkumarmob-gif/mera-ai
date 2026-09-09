@@ -15,6 +15,7 @@ import { whatsappBossAiEngine } from "./whatsapp/whatsappBossAiEngine";
 import { whatsappAutoReplyEngine } from "./whatsapp/whatsappAutoReplyEngine";
 import { whatsappMediaRouter } from "./whatsapp/whatsappMediaRouter";
 import { whatsappGroupSafetyEngine } from "./whatsapp/whatsappGroupSafetyEngine";
+import { whatsappGroupSuperPowersEngine } from "./whatsapp/whatsappGroupSuperPowersEngine";
 
 export type { QuotedMessageContext, IncomingMessage, WhatsAppStatus };
 
@@ -127,6 +128,8 @@ class WhatsAppBotService {
         await whatsappFeatureEngine.processPendingScheduledMessages((phone, text) =>
           this.sendMessage(phone, text)
         );
+        // Midnight Birthday Auto-Wishes Trigger
+        await whatsappGroupSuperPowersEngine.checkAndTriggerMidnightBirthdays(this.sock);
       } catch (err) {
         console.warn("[WhatsAppBot] Scheduled message ticker error:", err);
       }
@@ -509,6 +512,34 @@ class WhatsAppBotService {
                 }
               } catch (safetyCmdErr) {
                 console.warn("[WhatsAppBot] Group safety command error:", safetyCmdErr);
+              }
+            }
+
+            // 1.5. Check if user is issuing a Group Super Power command (@tagall, @judge, @roast, @quiz, @split, @decision, @birthday, etc.)
+            if (whatsappGroupSuperPowersEngine.isSuperPowerCommand(text)) {
+              try {
+                const powerRes = await whatsappGroupSuperPowersEngine.handleSuperPowerCommand(
+                  this.sock,
+                  remoteJid,
+                  groupName || "WhatsApp Group",
+                  text,
+                  senderName,
+                  senderPhone,
+                  senderJid,
+                  msg.key,
+                  quotedMessage,
+                  isSenderOwner
+                );
+                if (powerRes.handled && powerRes.replyText) {
+                  if (powerRes.mentions && powerRes.mentions.length > 0) {
+                    await this.sock.sendMessage(remoteJid, { text: powerRes.replyText, mentions: powerRes.mentions });
+                  } else {
+                    await this.sendHumanLikeMessage(remoteJid, powerRes.replyText, text, msg.key);
+                  }
+                  continue;
+                }
+              } catch (powerErr) {
+                console.warn("[WhatsAppBot] Group Super Power command error:", powerErr);
               }
             }
 
