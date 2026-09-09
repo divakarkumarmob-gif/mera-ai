@@ -23,6 +23,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { getApiUrl } from "@/utils/api";
+import { getAppToken } from "@/utils/appSecurityClient";
 
 interface StepLog {
   level: "info" | "warn" | "error" | "success";
@@ -64,18 +65,7 @@ export default function PerchanceStudioModal({ onClose }: { onClose: () => void 
   const [timerSeconds, setTimerSeconds] = useState(0);
 
   const logsEndRef = useRef<HTMLDivElement>(null);
-  const eventSourceRef = useRef<EventSource | null>(null);
   const timerRef = useRef<any>(null);
-
-  // Cleanup EventSource on component unmount
-  useEffect(() => {
-    return () => {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-        eventSourceRef.current = null;
-      }
-    };
-  }, []);
 
   // Check server Chrome engine status on mount
   useEffect(() => {
@@ -128,110 +118,122 @@ export default function PerchanceStudioModal({ onClose }: { onClose: () => void 
     setGenerationLogs([]);
     setCurrentStepIndex(1);
 
-    // Close any previous EventSource
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
-    }
+    const token = getAppToken() || "";
 
     try {
       const streamUrl = getApiUrl(
-        `/api/perchance/generate-stream?prompt=${encodeURIComponent(cleanPrompt)}&timeoutMs=120000`
+        `/api/perchance/generate-stream?prompt=${encodeURIComponent(cleanPrompt)}&timeoutMs=120000&token=${encodeURIComponent(token)}`
       );
 
-      const es = new EventSource(streamUrl);
-      eventSourceRef.current = es;
-
-      es.addEventListener("log", (e: MessageEvent) => {
-        try {
-          const logData = JSON.parse(e.data);
-          setGenerationLogs((prev) => [...prev, logData]);
-
-          const msg = (logData.message || "").toLowerCase();
-          const stepName = (logData.step || "").toLowerCase();
-
-          if (stepName.includes("browser") || msg.includes("chrome")) setCurrentStepIndex(1);
-          else if (stepName.includes("navigation") || stepName.includes("dom")) setCurrentStepIndex(2);
-          else if (stepName.includes("prompt") || stepName.includes("trigger") || stepName.includes("action")) setCurrentStepIndex(3);
-          else if (stepName.includes("network") || stepName.includes("frame") || msg.includes("intercept")) setCurrentStepIndex(4);
-          else if (stepName.includes("complete")) setCurrentStepIndex(5);
-        } catch {}
+      const res = await fetch(streamUrl, {
+        headers: {
+          "x-app-key-token": token,
+        },
       });
 
-      let receivedResult = false;
+      if (!res.ok || !res.body) {
+        throw new Error(`Server returned HTTP ${res.status}`);
+      }
 
-      es.addEventListener("complete", (e: MessageEvent) => {
-        receivedResult = true;
-        try {
-          const data = JSON.parse(e.data);
-          if (data.image) {
-            setGeneratedImage(data.image);
-            setImageMeta({ bytes: data.bytes || 0, durationMs: data.durationMs || 0 });
-            setCurrentStepIndex(5);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let buffer = "";
+      let receivedComplete = false;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() || "";
+
+        for (const rawEvent of events) {
+          if (!rawEvent.trim() || rawEvent.startsWith(":")) continue;
+
+          let eventName = "message";
+          let dataStr = "";
+
+          const lines = rawEvent.split("\n");
+          for (const line of lines) {
+            if (line.startsWith("event:")) {
+              eventName = line.replace("event:", "").trim();
+            } else if (line.startsWith("data:")) {
+              dataStr += line.replace("data:", "").trim();
+            }
           }
-        } catch {}
-        setIsGenerating(false);
-        es.close();
-      });
 
-      es.addEventListener("error", async (e: MessageEvent) => {
-        let errText = "";
-        try {
-          if (e.data) {
-            const parsed = JSON.parse(e.data);
-            errText = parsed.error || "";
-          }
-        } catch {}
+          if (!dataStr) continue;
 
-        if (!receivedResult) {
-          // Attempt instant REST fallback so user request never fails
           try {
-            setGenerationLogs((prev) => [
-              ...prev,
-              {
-                level: "info",
-                step: "Direct Sync",
-                message: "Syncing final image payload directly via high-speed API...",
-                timestamp: new Date().toLocaleTimeString(),
-              },
-            ]);
-
-            const restRes = await fetch(getApiUrl("/api/perchance/generate"), {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ prompt: cleanPrompt, timeoutMs: 120000 }),
-            });
-            const restData = await restRes.json();
-
-            if (restData.ok && restData.image) {
-              setGeneratedImage(restData.image);
-              setImageMeta({ bytes: restData.bytes || 0, durationMs: restData.durationMs || 0 });
-              if (restData.logs && restData.logs.length > 0) {
-                setGenerationLogs(restData.logs);
-              }
+            const data = JSON.parse(dataStr);
+            if (eventName === "log" || data.level) {
+              setGenerationLogs((prev) => [...prev, data]);
+              const msg = (data.message || "").toLowerCase();
+              const stepName = (data.step || "").toLowerCase();
+              if (stepName.includes("browser") || msg.includes("chrome")) setCurrentStepIndex(1);
+              else if (stepName.includes("navigation") || stepName.includes("dom")) setCurrentStepIndex(2);
+              else if (stepName.includes("prompt") || stepName.includes("trigger") || stepName.includes("action")) setCurrentStepIndex(3);
+              else if (stepName.includes("network") || stepName.includes("frame") || msg.includes("intercept")) setCurrentStepIndex(4);
+              else if (stepName.includes("complete")) setCurrentStepIndex(5);
+            } else if (eventName === "complete" || data.image) {
+              receivedComplete = true;
+              setGeneratedImage(data.image);
+              setImageMeta({ bytes: data.bytes || 0, durationMs: data.durationMs || 0 });
               setCurrentStepIndex(5);
-              setIsGenerating(false);
-              es.close();
-              return;
+            } else if (eventName === "error" || data.error) {
+              setErrorMessage(data.error || "Generation error on server");
             }
           } catch {}
         }
+      }
 
-        if (errText) {
-          setErrorMessage(errText);
+      if (!receivedComplete) {
+        // Direct REST fallback if stream closed without payload
+        const restRes = await fetch(getApiUrl("/api/perchance/generate"), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-app-key-token": token,
+          },
+          body: JSON.stringify({ prompt: cleanPrompt, timeoutMs: 120000 }),
+        });
+        const restData = await restRes.json();
+        if (restData.ok && restData.image) {
+          setGeneratedImage(restData.image);
+          setImageMeta({ bytes: restData.bytes || 0, durationMs: restData.durationMs || 0 });
+          if (restData.logs && restData.logs.length > 0) {
+            setGenerationLogs(restData.logs);
+          }
+          setCurrentStepIndex(5);
+        } else if (!generatedImage) {
+          setErrorMessage(restData.error || "Generation failed on server");
         }
-        setIsGenerating(false);
-        es.close();
-      });
-
-      es.onerror = () => {
-        // EventSource will auto-reconnect or error event will handle fallback
-        if (es.readyState === EventSource.CLOSED && !receivedResult) {
-          setIsGenerating(false);
-        }
-      };
+      }
     } catch (err: any) {
-      setErrorMessage(err?.message || "Failed to initiate generation stream");
+      // Direct REST fallback on network exception
+      try {
+        const restRes = await fetch(getApiUrl("/api/perchance/generate"), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-app-key-token": token,
+          },
+          body: JSON.stringify({ prompt: cleanPrompt, timeoutMs: 120000 }),
+        });
+        const restData = await restRes.json();
+        if (restData.ok && restData.image) {
+          setGeneratedImage(restData.image);
+          setImageMeta({ bytes: restData.bytes || 0, durationMs: restData.durationMs || 0 });
+          if (restData.logs && restData.logs.length > 0) {
+            setGenerationLogs(restData.logs);
+          }
+          setCurrentStepIndex(5);
+          return;
+        }
+      } catch {}
+      setErrorMessage(err?.message || "Failed to connect to generation stream");
+    } finally {
       setIsGenerating(false);
     }
   };
