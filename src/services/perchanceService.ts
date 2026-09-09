@@ -365,10 +365,10 @@ export class PerchanceService {
       await genBtn.click();
       pushLog("info", "AI Generation", "Generate button triggered! Listening on network streams and polling frame canvas...");
 
-      // Poll frames in parallel with network interception
+      // Poll frames in parallel with network interception (giving Perchance full time to render)
       const pollingPromise = (async () => {
         const pollStart = Date.now();
-        while (Date.now() - pollStart < 40000) {
+        while (Date.now() - pollStart < 80000) {
           if (imageBuffer && imageBuffer.length > 5000) return imageBuffer;
 
           for (const f of page.frames()) {
@@ -381,7 +381,7 @@ export class PerchanceService {
                   }
                   if (
                     img.src &&
-                    (img.src.includes("downloadTemporaryImage") || img.src.includes("perchance")) &&
+                    (img.src.includes("downloadTemporaryImage") || img.src.includes("downloadTemporaryImageViaProxy") || img.src.includes("perchance") || img.src.includes("user-generated-asset")) &&
                     (img.naturalWidth > 150 || img.width > 150)
                   ) {
                     return { type: "url", src: img.src };
@@ -428,13 +428,13 @@ export class PerchanceService {
       })();
 
       const timeoutPromise = new Promise<null>((_, reject) =>
-        setTimeout(() => reject(new Error(`Perchance generation response stream timed out`)), 45000)
+        setTimeout(() => reject(new Error(`Perchance generation timed out after 85s`)), 85000)
       );
 
       const finalBuf = await Promise.race([imagePromise, pollingPromise, timeoutPromise]);
 
       if (!finalBuf || finalBuf.length < 2000) {
-        throw new Error("Perchance website image stream unavailable");
+        throw new Error("No valid image buffer received from Perchance generator");
       }
 
       const durationMs = Date.now() - startTime;
@@ -449,28 +449,8 @@ export class PerchanceService {
         logs,
       };
     } catch (err: any) {
-      pushLog("warn", "Engine Standby", `Perchance site anti-bot notice (${err?.message || "stream closed"}). Activating Ultra-HD FLUX.1 Engine fallback...`);
-      try {
-        const { imageGenerationService } = await import("./imageGenerationService");
-        const fallbackRes = await imageGenerationService.generateImage(cleanPrompt);
-        if (fallbackRes.success && fallbackRes.buffer) {
-          const durationMs = Date.now() - startTime;
-          pushLog("success", "Complete", `Photorealistic HD Photo rendered successfully via ${fallbackRes.model || "FLUX.1 Ultra-HD"} in ${(durationMs / 1000).toFixed(1)}s!`);
-          return {
-            success: true,
-            buffer: fallbackRes.buffer,
-            mimeType: fallbackRes.mimeType || "image/jpeg",
-            prompt: cleanPrompt,
-            durationMs,
-            logs,
-          };
-        }
-      } catch (fallbackErr: any) {
-        pushLog("error", "Fallback Failure", fallbackErr?.message || "Backup engine error");
-      }
-
       const durationMs = Date.now() - startTime;
-      pushLog("error", "Execution Failure", err?.message || "Unknown error occurred during generation");
+      pushLog("error", "Execution Failure", err?.message || "Unknown error occurred during Perchance generation");
       return {
         success: false,
         prompt: cleanPrompt,
