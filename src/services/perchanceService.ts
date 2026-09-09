@@ -213,6 +213,29 @@ export class PerchanceService {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
       );
 
+      // Block heavy ad networks & analytics to make navigation instant (<1s) and avoid network timeouts
+      await page.setRequestInterception(true);
+      page.on("request", (req: any) => {
+        const u = req.url().toLowerCase();
+        if (
+          u.includes("doubleclick") ||
+          u.includes("google-analytics") ||
+          u.includes("googletagservices") ||
+          u.includes("smartadserver") ||
+          u.includes("adnxs") ||
+          u.includes("rubiconproject") ||
+          u.includes("amazon-adsystem") ||
+          u.includes("criteo") ||
+          u.includes("openx") ||
+          u.includes("taboola") ||
+          u.includes("outbrain")
+        ) {
+          req.abort();
+        } else {
+          req.continue();
+        }
+      });
+
       let imageBuffer: Buffer | null = null;
       let resolveImage: ((buf: Buffer) => void) | null = null;
       const imagePromise = new Promise<Buffer>((resolve) => {
@@ -242,18 +265,18 @@ export class PerchanceService {
 
       console.log("[PerchanceService] Navigating to https://perchance.org/ai-photo-generator...");
       await page.goto("https://perchance.org/ai-photo-generator", {
-        waitUntil: "networkidle2",
-        timeout: 35000,
+        waitUntil: "domcontentloaded",
+        timeout: 45000,
       });
 
       // Find generator iframe
-      const iframeHandle = await page.waitForSelector("iframe#outputIframeEl", { timeout: 20000 });
+      const iframeHandle = await page.waitForSelector("iframe#outputIframeEl", { timeout: 25000 });
       if (!iframeHandle) throw new Error("Could not find generator iframe on Perchance page");
       const frame = await iframeHandle.contentFrame();
       if (!frame) throw new Error("Could not access generator content frame");
 
       // Wait for prompt textarea
-      await frame.waitForSelector("textarea", { timeout: 20000 });
+      await frame.waitForSelector("textarea", { timeout: 25000 });
       const textareas = await frame.$$("textarea");
       const promptInput = textareas.length > 1 ? textareas[1] : textareas[0];
 
