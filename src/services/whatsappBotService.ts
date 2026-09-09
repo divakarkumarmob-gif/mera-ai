@@ -929,7 +929,7 @@ class WhatsAppBotService {
       const prompt = perchanceMatch[1].trim();
       await this.sendHumanLikeMessage(
         replyJid,
-        `🔥 *Perchance AI Photo Generator start ho gaya hai Boss DK!* ⚡\n\n📌 *Prompt:* _"${prompt}"_\n🌐 *Website:* https://perchance.org/ai-photo-generator\n⏳ _Browser background me website par prompt fill karke realistic HD photo generate kar raha hai... Kripya 30-90 second wait karein._`,
+        `🔥 *Perchance AI Photo Generator start ho gaya hai Boss DK!* ⚡\n\n📌 *Prompt:* _"${prompt}"_\n🌐 *Website:* https://perchance.org/ai-photo-generator\n⏳ _Browser background me website par prompt fill karke realistic HD photo generate kar raha hai... Kripya thoda wait karein (up to 3-5 min)._`,
         rawText,
         messageKey
       );
