@@ -235,6 +235,22 @@ export class WhatsAppAutoReplyEngine {
       "gaana dhundo",
       "song sunao",
       "gaana sunao",
+      "@hum",
+      "/hum",
+      "@shazam",
+      "/shazam",
+      "@reel",
+      "/reel",
+      "@bgm",
+      "/bgm",
+      "@short",
+      "/short",
+      "@groupchart",
+      "/groupchart",
+      "@topchart",
+      "/topchart",
+      "@chart",
+      "/chart",
       "@safety",
       "/safety",
       "@block safe",
@@ -709,6 +725,25 @@ TONE & STYLE:
     if (/^(?:@song|@music|@gaana|\/song|\/music|\/gaana)\b/i.test(cleanText)) {
       const songRes = await whatsappFeatureEngine.searchMusicWithLyrics(cleanText, senderName, groupJid);
       await sendMsgFn(groupJid, songRes.replyText, text, messageKey);
+      return;
+    }
+
+    if (/^(?:@hum|@shazam|\/hum|\/shazam)\b/i.test(cleanText)) {
+      const humQuery = cleanText.replace(/^(?:@hum|@shazam|\/hum|\/shazam)\s*/i, "").trim();
+      const humRes = await whatsappFeatureEngine.searchMusicWithLyrics(humQuery || "humming track", senderName, groupJid);
+      await sendMsgFn(groupJid, humRes.replyText, text, messageKey);
+      return;
+    }
+
+    if (/^(?:@reel|@bgm|@short|@shorts|\/reel|\/bgm|\/short|\/shorts)\b/i.test(cleanText)) {
+      const reelRes = await whatsappFeatureEngine.extractReelBackgroundSong(cleanText, senderName, groupJid);
+      await sendMsgFn(groupJid, reelRes.replyText, text, messageKey);
+      return;
+    }
+
+    if (/^(?:@groupchart|@topchart|@chart|\/groupchart|\/topchart|\/chart)\b/i.test(cleanText)) {
+      const chartCard = whatsappFeatureEngine.getGroupMusicChart(groupJid, groupName, senderName);
+      await sendMsgFn(groupJid, chartCard, text, messageKey);
       return;
     }
 

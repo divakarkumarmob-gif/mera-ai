@@ -153,7 +153,23 @@ export class WhatsAppGroupSuperPowersEngine {
       clean.startsWith("/gaana") ||
       clean.startsWith("@music") ||
       clean.startsWith("/music") ||
-      /^(?:tag\s*all|everyone|fact\s*check|ai\s*judge|roast\s*me|start\s*quiz|split\s*bill|group\s*decision|group\s*birthday|make\s*meme|create\s*poll|translate\s*to|group\s*vibe|tell\s*joke|lie\s*detector|rap\s*banao|future\s*prediction|movie\s*cast|match\s*commentary|find\s*song|song\s*dhundo)/i.test(clean)
+      clean.startsWith("@hum") ||
+      clean.startsWith("/hum") ||
+      clean.startsWith("@shazam") ||
+      clean.startsWith("/shazam") ||
+      clean.startsWith("@reel") ||
+      clean.startsWith("/reel") ||
+      clean.startsWith("@bgm") ||
+      clean.startsWith("/bgm") ||
+      clean.startsWith("@short") ||
+      clean.startsWith("/short") ||
+      clean.startsWith("@groupchart") ||
+      clean.startsWith("/groupchart") ||
+      clean.startsWith("@topchart") ||
+      clean.startsWith("/topchart") ||
+      clean.startsWith("@chart") ||
+      clean.startsWith("/chart") ||
+      /^(?:tag\s*all|everyone|fact\s*check|ai\s*judge|roast\s*me|start\s*quiz|split\s*bill|group\s*decision|group\s*birthday|make\s*meme|create\s*poll|translate\s*to|group\s*vibe|tell\s*joke|lie\s*detector|rap\s*banao|future\s*prediction|movie\s*cast|match\s*commentary|find\s*song|song\s*dhundo|group\s*chart|shazam|humming)/i.test(clean)
     );
   }
 
@@ -321,6 +337,21 @@ export class WhatsAppGroupSuperPowersEngine {
       clean.startsWith("/music")
     ) {
       return await this.handleSongFinder(sock, groupJid, rawText, senderName, messageKey);
+    }
+
+    // 20. @hum / @shazam Voice Humming & Audio Song Identifier
+    if (clean.startsWith("@hum") || clean.startsWith("/hum") || clean.startsWith("@shazam") || clean.startsWith("/shazam")) {
+      return await this.handleHummingShazam(sock, groupJid, rawText, senderName, quotedMessage, messageKey);
+    }
+
+    // 21. @reel / @bgm Reel & Shorts Background Music Extractor
+    if (clean.startsWith("@reel") || clean.startsWith("/reel") || clean.startsWith("@bgm") || clean.startsWith("/bgm") || clean.startsWith("@short")) {
+      return await this.handleReelBgmExtractor(sock, groupJid, rawText, senderName, messageKey);
+    }
+
+    // 22. @groupchart / @topchart Weekly Group Billboard Chart
+    if (clean.startsWith("@groupchart") || clean.startsWith("/groupchart") || clean.startsWith("@topchart") || clean.startsWith("/topchart") || clean.startsWith("@chart")) {
+      return await this.handleGroupMusicChart(groupJid, groupName, senderName);
     }
 
     return { handled: false };
@@ -1494,7 +1525,74 @@ Use authentic high-energy Bhojpuri & Sidhuisms punchlines ("Eee dekhi babua", "T
     return { handled: true, replyText: res.replyText };
   }
 
-  // ── 20. Midnight Birthday Cron Worker ─────────────────────────────────────
+  // ── 20. @hum / @shazam Voice Humming & Audio Song Identifier ─────────────
+
+  public async handleHummingShazam(
+    sock: any,
+    groupJid: string,
+    rawText: string,
+    senderName = "Member",
+    quotedMessage?: QuotedMessageContext | null,
+    messageKey?: any
+  ): Promise<{ handled: boolean; replyText?: string }> {
+    const { whatsappFeatureEngine } = await import("../whatsappFeatureEngine");
+
+    // If quoted audio exists, or if text provides humming query
+    let dummyAudio: Buffer | null = null;
+    if (quotedMessage && quotedMessage.text) {
+      const res = await whatsappFeatureEngine.searchMusicWithLyrics(quotedMessage.text, senderName, groupJid);
+      if (res.audioBuffer && sock && groupJid) {
+        try {
+          await sock.sendMessage(groupJid, { audio: res.audioBuffer, mimetype: "audio/mp4", ptt: false });
+        } catch {}
+      }
+      return { handled: true, replyText: res.replyText };
+    }
+
+    const cleanQuery = rawText.replace(/^(?:@hum|@shazam|\/hum|\/shazam)\s*/i, "").trim() || "humming song";
+    const res = await whatsappFeatureEngine.searchMusicWithLyrics(cleanQuery, senderName, groupJid);
+    if (res.audioBuffer && sock && groupJid) {
+      try {
+        await sock.sendMessage(groupJid, { audio: res.audioBuffer, mimetype: "audio/mp4", ptt: false });
+      } catch {}
+    }
+    return { handled: true, replyText: res.replyText };
+  }
+
+  // ── 21. @reel / @bgm Reel & Shorts Background Music Extractor ─────────────
+
+  public async handleReelBgmExtractor(
+    sock: any,
+    groupJid: string,
+    rawText: string,
+    senderName = "Member",
+    messageKey?: any
+  ): Promise<{ handled: boolean; replyText?: string }> {
+    const { whatsappFeatureEngine } = await import("../whatsappFeatureEngine");
+    const res = await whatsappFeatureEngine.extractReelBackgroundSong(rawText, senderName, groupJid);
+
+    if (res.audioBuffer && sock && groupJid) {
+      try {
+        await sock.sendMessage(groupJid, { audio: res.audioBuffer, mimetype: "audio/mp4", ptt: false });
+      } catch {}
+    }
+
+    return { handled: true, replyText: res.replyText };
+  }
+
+  // ── 22. @groupchart / @topchart Weekly Group Billboard Chart ──────────────
+
+  public async handleGroupMusicChart(
+    groupJid: string,
+    groupName = "Group",
+    senderName = "Member"
+  ): Promise<{ handled: boolean; replyText?: string }> {
+    const { whatsappFeatureEngine } = await import("../whatsappFeatureEngine");
+    const card = whatsappFeatureEngine.getGroupMusicChart(groupJid, groupName, senderName);
+    return { handled: true, replyText: card };
+  }
+
+  // ── 23. Midnight Birthday Cron Worker ─────────────────────────────────────
 
   public async checkAndTriggerMidnightBirthdays(sock: any): Promise<number> {
     if (!sock) return 0;
@@ -1721,9 +1819,24 @@ Bhagwan aapko lambi umar, beshumar khushiyan, aur bohot saari success de! 🚀�
       return await this.handleSongFinder(sock, groupJid, rawText, senderName, messageKey);
     }
 
+    // 24. AI Shazam & Humming Intent
+    if (/(?:ye\s*kaun\s*sa\s*gaana|shazam|humming|gunguna|audio\s*pehchano)/i.test(clean)) {
+      return await this.handleHummingShazam(sock, groupJid, rawText, senderName, quotedMessage, messageKey);
+    }
+
+    // 25. Reel & Shorts BGM Intent
+    if (/(?:reel\s*ka\s*gaana|background\s*music|bgm\s*batao|shorts?\s*ka\s*gaana|reel\s*audio)/i.test(clean)) {
+      return await this.handleReelBgmExtractor(sock, groupJid, rawText, senderName, messageKey);
+    }
+
+    // 26. Group Billboard Chart Intent
+    if (/(?:group\s*chart|top\s*chart|billboard\s*chart|sabse\s*zyada\s*kaun\s*sa\s*gaana|group\s*ka\s*top\s*song)/i.test(clean)) {
+      return await this.handleGroupMusicChart(groupJid, groupName, senderName);
+    }
+
     // ── Phase 2: Suspicious / Ambiguous Intent Classifier (Gemini AI Powered) ─
     const isPotentiallyCommandRelated =
-      /(?:tag|mention|roast|tareef|quiz|khel|game|bill|hisab|split|sach|fact|faisla|decision|birthday|janamdin|filter|gaali|safety|voice|audio|quiet|welcome|commands?|rule|rules|lie|jhooth|rap|future|kismat|srk|tony|amitabh|modi|mimic|clone|movie|poster|commentary|song|gaana|music)/i.test(clean);
+      /(?:tag|mention|roast|tareef|quiz|khel|game|bill|hisab|split|sach|fact|faisla|decision|birthday|janamdin|filter|gaali|safety|voice|audio|quiet|welcome|commands?|rule|rules|lie|jhooth|rap|future|kismat|srk|tony|amitabh|modi|mimic|clone|movie|poster|commentary|song|gaana|music|hum|shazam|reel|bgm|chart)/i.test(clean);
 
     if (isPotentiallyCommandRelated && (clean.includes("friday") || clean.includes("@") || clean.startsWith("/") || clean.startsWith("#"))) {
       const apiKey = process.env.GEMINI_API_KEY;

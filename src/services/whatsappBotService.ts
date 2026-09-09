@@ -514,41 +514,43 @@ class WhatsAppBotService {
                 console.warn("[WhatsAppBot] Group safety command error:", safetyCmdErr);
               }
             }
+          }
 
-            // 1.5. Check if user is issuing a Group Super Power command (@tagall, @judge, @roast, @quiz, @split, @decision, @birthday, etc.)
-            if (whatsappGroupSuperPowersEngine.isSuperPowerCommand(text)) {
-              try {
-                const powerRes = await whatsappGroupSuperPowersEngine.handleSuperPowerCommand(
-                  this.sock,
-                  remoteJid,
-                  groupName || "WhatsApp Group",
-                  text,
-                  senderName,
-                  senderPhone,
-                  senderJid,
-                  msg.key,
-                  quotedMessage,
-                  isSenderOwner
-                );
-                if (powerRes.handled && powerRes.replyText) {
-                  if (powerRes.mentions && powerRes.mentions.length > 0) {
-                    await this.sock.sendMessage(remoteJid, { text: powerRes.replyText, mentions: powerRes.mentions });
-                  } else {
-                    await this.sendHumanLikeMessage(remoteJid, powerRes.replyText, text, msg.key);
-                  }
-                  continue;
+          // ── SUPER POWER COMMANDS (@song, @hum, @shazam, @reel, @bgm, @groupchart, @quiz, @judge, etc.) ──
+          if (this.sock && whatsappGroupSuperPowersEngine.isSuperPowerCommand(text)) {
+            try {
+              const powerRes = await whatsappGroupSuperPowersEngine.handleSuperPowerCommand(
+                this.sock,
+                replyJid,
+                groupName || "Direct Chat",
+                text,
+                senderName,
+                senderPhone,
+                senderJid,
+                msg.key,
+                quotedMessage,
+                isSenderOwner
+              );
+              if (powerRes.handled && powerRes.replyText) {
+                if (powerRes.mentions && powerRes.mentions.length > 0) {
+                  await this.sock.sendMessage(replyJid, { text: powerRes.replyText, mentions: powerRes.mentions });
+                } else {
+                  await this.sendHumanLikeMessage(replyJid, powerRes.replyText, text, msg.key);
                 }
-              } catch (powerErr) {
-                console.warn("[WhatsAppBot] Group Super Power command error:", powerErr);
+                continue;
               }
+            } catch (powerErr) {
+              console.warn("[WhatsAppBot] Super Power command error:", powerErr);
             }
+          }
 
-            // 1.8. Natural Language Command Intent Resolver & Smart Suggestion Engine
+          // ── NATURAL LANGUAGE COMMAND INTENT RESOLVER & MUSIC FOLLOW-UPS ────────
+          if (this.sock) {
             try {
               const naturalRes = await whatsappGroupSuperPowersEngine.detectAndResolveNaturalCommand(
                 this.sock,
-                remoteJid,
-                groupName || "WhatsApp Group",
+                replyJid,
+                groupName || "Direct Chat",
                 text,
                 senderName,
                 senderPhone,
@@ -559,16 +561,18 @@ class WhatsAppBotService {
               );
               if (naturalRes.handled && naturalRes.replyText) {
                 if (naturalRes.mentions && naturalRes.mentions.length > 0) {
-                  await this.sock.sendMessage(remoteJid, { text: naturalRes.replyText, mentions: naturalRes.mentions });
+                  await this.sock.sendMessage(replyJid, { text: naturalRes.replyText, mentions: naturalRes.mentions });
                 } else {
-                  await this.sendHumanLikeMessage(remoteJid, naturalRes.replyText, text, msg.key);
+                  await this.sendHumanLikeMessage(replyJid, naturalRes.replyText, text, msg.key);
                 }
                 continue;
               }
             } catch (naturalErr) {
               console.warn("[WhatsAppBot] Natural command resolution error:", naturalErr);
             }
+          }
 
+          if (isGroup && this.sock) {
             // 2. Check if message contains Gandi Gaali / Profanity / Abusive words or NSFW media
             const hasMediaCheck = !!(
               msg.message?.imageMessage ||
@@ -699,6 +703,27 @@ class WhatsAppBotService {
                       const { voiceBridgeService } = await import("./voiceBridgeService");
                       const transcribed = await voiceBridgeService.transcribeAudio(buffer, mimeType, fileName || "voice.ogg");
                       if (transcribed && transcribed.trim()) {
+                        // 0. AI Shazam & Humming Song Identifier (Voice Note with song/humming request)
+                        const isHummingOrSongVoice =
+                          /\b(?:ye\s*kaun\s*sa\s*(?:gana|gaana|song)|kaun\s*sa\s*(?:gana|gaana|song)|song\s*identify|shazam|humming|gunguna|gana\s*pehchano|gaana\s*batao|song\s*dhundo|konsa\s*gana)\b/i.test(transcribed);
+                        if (isHummingOrSongVoice) {
+                          try {
+                            const { whatsappFeatureEngine } = await import("./whatsappFeatureEngine");
+                            const humRes = await whatsappFeatureEngine.identifySongFromHumming(buffer, mimeType, senderName, replyJid);
+                            if (humRes.audioBuffer && this.sock) {
+                              await this.sock.sendMessage(replyJid, {
+                                audio: humRes.audioBuffer,
+                                mimetype: "audio/mp4",
+                                ptt: false,
+                              });
+                            }
+                            await this.sendHumanLikeMessage(replyJid, humRes.replyText, transcribed, msg.key);
+                            continue;
+                          } catch (humErr) {
+                            console.warn("[WhatsAppBot] Voice humming song error:", humErr);
+                          }
+                        }
+
                         // 1. Group Voice Handling (Profanity Filter + Wake Word "Friday" + @voicenote Auto-Transcribe)
                         if (isGroup) {
                           // A. Spoken Profanity / Gaali Check in Voice Note
