@@ -637,54 +637,129 @@ class WhatsAppBotService {
                   const fileName = msg.message?.documentMessage?.fileName;
                   const { visionMemoryService } = await import("./visionMemoryService");
 
-                  if (isVoice && isFromOwner) {
+                  if (isVoice) {
                     try {
                       const { voiceBridgeService } = await import("./voiceBridgeService");
                       const transcribed = await voiceBridgeService.transcribeAudio(buffer, mimeType, fileName || "voice.ogg");
                       if (transcribed && transcribed.trim()) {
-                        // Check if an existing voice debounce timer is running for this chat
-                        const existingPending = this.pendingVoiceDebounce.get(replyJid);
-                        let finalTranscribed = transcribed;
-                        if (existingPending) {
-                          clearTimeout(existingPending.timer);
-                          finalTranscribed = `${existingPending.transcribed} ${transcribed}`;
-                        }
+                        // 1. Group Voice Handling (Profanity Filter + Wake Word "Friday" + @voicenote Auto-Transcribe)
+                        if (isGroup) {
+                          // A. Spoken Profanity / Gaali Check in Voice Note
+                          const isSafetyOn = await whatsappGroupSafetyEngine.isGroupSafetyEnabled(replyJid);
+                          const profCheck = whatsappGroupSafetyEngine.detectProfanity(transcribed);
 
-                        // 5-second buffer: wait 5s to see if user sends follow-up text or requests transcription
-                        const timer = setTimeout(async () => {
-                          const pending = this.pendingVoiceDebounce.get(replyJid);
-                          this.pendingVoiceDebounce.delete(replyJid);
-                          if (!pending) return;
-
-                          const wantsTranscriptNotice = /\b(transcript|transcribe|likh\s*ke|text|text\s*bhi|likho|transcript\s*\+\s*voice|voice\s*\+\s*transcript|dono)\b/i.test(pending.transcribed);
-                          if (wantsTranscriptNotice) {
-                            await this.sendHumanLikeMessage(pending.replyJid, `🎙️ *Aapki Aawaz (Transcription):*\n_"${pending.transcribed}"_`, "", pending.messageKey);
+                          if (profCheck.isProfane && isSafetyOn) {
+                            const isAdm = await whatsappGroupSafetyEngine.isBotAdmin(this.sock, replyJid, this.dedicatedPhone);
+                            if (isAdm) {
+                              await whatsappGroupSafetyEngine.deleteMessage(this.sock, replyJid, msg.key, senderPhone);
+                            }
+                            const strikes = await whatsappGroupSafetyEngine.recordStrike(replyJid, senderPhone);
+                            if (strikes >= 3 && isAdm) {
+                              await whatsappGroupSafetyEngine.kickMember(this.sock, replyJid, msg.key.participant || msg.key.remoteJid || senderJid);
+                              await this.sendHumanLikeMessage(
+                                replyJid,
+                                `🚨 *@block safe AUTO-KICK ALERT!* ⚡\n\n👤 *Member:* @${senderPhone}\n🚫 *Audio Violation:* Voice Note me abusive/gandi gaali payi gayi.\n🥊 *Strike Count:* 3/3 (Max Reached)\n⛔ *Action:* Member ko group se permanently remove kar diya gaya hai.`,
+                                "",
+                                msg.key
+                              );
+                            } else {
+                              await this.sendHumanLikeMessage(
+                                replyJid,
+                                `⚠️ *@block safe VOICE ABUSE DETECTED!* ⚡\n\n👤 *Sender:* @${senderPhone}\n🚫 *Audio Violation:* Voice Note me gandi gaali payi gayi.\n🗑️ *Action:* ${isAdm ? "Voice message delete kar diya gaya hai." : "Kripya group me shishtachar banaye rakhein."}\n🥊 *Strike:* ${strikes}/3 Warning. (3 strikes par auto-kick ho jayenge)`,
+                                "",
+                                msg.key
+                              );
+                            }
+                            continue;
                           }
 
-                          await this.handleOwnerWhatsAppMessage(
-                            pending.senderName,
-                            pending.senderPhone,
-                            pending.transcribed,
-                            pending.replyJid,
-                            pending.messageKey,
-                            pending.quotedMessage,
-                            true
-                          );
-                        }, 5000);
+                          // B. Spoken "Friday" Wake-word / Mention Detection
+                          const isSpokenFridayMention = /\b(?:@?friday|fridaay|fryday|fraiday|frieday)\b/i.test(transcribed);
+                          if (isSpokenFridayMention) {
+                            if (isSenderOwner) {
+                              await this.handleOwnerWhatsAppMessage(
+                                senderName,
+                                senderPhone,
+                                transcribed,
+                                replyJid,
+                                msg.key,
+                                quotedMessage,
+                                true
+                              );
+                            } else {
+                              await whatsappAutoReplyEngine.handleGroupMentionAutoReply(
+                                senderName,
+                                senderPhone,
+                                transcribed,
+                                replyJid,
+                                groupName || "Group",
+                                msg.key,
+                                quotedMessage,
+                                (j, t, inT, k) => this.sendHumanLikeMessage(j, t, inT, k),
+                                (j, img, cap, k) => this.sendPhotoMessage(j, img, cap, k),
+                                this.getGroupSafeCommandsCard(),
+                                (j, rT, q, k) => this.handleQuotedMediaSummary(j, rT, q, k)
+                              );
+                            }
+                            continue;
+                          }
 
-                        this.pendingVoiceDebounce.set(replyJid, {
-                          timer,
-                          senderName,
-                          senderPhone,
-                          transcribed: finalTranscribed,
-                          replyJid,
-                          messageKey: msg.key,
-                          quotedMessage,
-                        });
-                        continue;
+                          // C. Group Auto-Transcribe Mode (@voicenote on)
+                          const isAutoTranscribe = await whatsappGroupSafetyEngine.isAutoTranscribeVoiceEnabled(replyJid);
+                          if (isAutoTranscribe) {
+                            await this.sendHumanLikeMessage(
+                              replyJid,
+                              `🎙️ *Voice Note Transcribed (@${senderPhone || senderName}):*\n_"${transcribed}"_`,
+                              "",
+                              msg.key
+                            );
+                            continue;
+                          }
+                        } else if (isFromOwner) {
+                          // 2. Owner 1-on-1 Chat Voice Debounce
+                          const existingPending = this.pendingVoiceDebounce.get(replyJid);
+                          let finalTranscribed = transcribed;
+                          if (existingPending) {
+                            clearTimeout(existingPending.timer);
+                            finalTranscribed = `${existingPending.transcribed} ${transcribed}`;
+                          }
+
+                          // 5-second buffer: wait 5s to see if user sends follow-up text or requests transcription
+                          const timer = setTimeout(async () => {
+                            const pending = this.pendingVoiceDebounce.get(replyJid);
+                            this.pendingVoiceDebounce.delete(replyJid);
+                            if (!pending) return;
+
+                            const wantsTranscriptNotice = /\b(transcript|transcribe|likh\s*ke|text|text\s*bhi|likho|transcript\s*\+\s*voice|voice\s*\+\s*transcript|dono)\b/i.test(pending.transcribed);
+                            if (wantsTranscriptNotice) {
+                              await this.sendHumanLikeMessage(pending.replyJid, `🎙️ *Aapki Aawaz (Transcription):*\n_"${pending.transcribed}"_`, "", pending.messageKey);
+                            }
+
+                            await this.handleOwnerWhatsAppMessage(
+                              pending.senderName,
+                              pending.senderPhone,
+                              pending.transcribed,
+                              pending.replyJid,
+                              pending.messageKey,
+                              pending.quotedMessage,
+                              true
+                            );
+                          }, 5000);
+
+                          this.pendingVoiceDebounce.set(replyJid, {
+                            timer,
+                            senderName,
+                            senderPhone,
+                            transcribed: finalTranscribed,
+                            replyJid,
+                            messageKey: msg.key,
+                            quotedMessage,
+                          });
+                          continue;
+                        }
                       }
                     } catch (sttErr) {
-                      console.error("[WhatsAppBot] STT error on Boss voice note:", sttErr);
+                      console.error("[WhatsAppBot] STT error on voice note:", sttErr);
                     }
                   }
 

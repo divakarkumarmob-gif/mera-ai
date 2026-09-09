@@ -10,6 +10,7 @@ export interface GroupSafetyConfig {
   blockSpam: boolean;
   welcomeEnabled: boolean;
   quietModeEnabled: boolean;
+  autoTranscribeVoice?: boolean; // @voicenote on/off: auto-transcribe all group voice notes
   quietStartHour?: number; // default 23 (11 PM)
   quietEndHour?: number;   // default 6  (6 AM)
   deletedCount: number;
@@ -409,6 +410,25 @@ Enjoy your time here! 😊`;
     return false;
   }
 
+  // ── Voice Note Auto-Transcribe Manager ────────────────────────────────────
+
+  public async isAutoTranscribeVoiceEnabled(groupId: string): Promise<boolean> {
+    if (!this.loaded) await this.preloadFromFirestore();
+    const config = this.safetyCache.get(groupId);
+    return Boolean(config?.autoTranscribeVoice);
+  }
+
+  public async toggleAutoTranscribeVoice(groupId: string, enable: boolean): Promise<string> {
+    const config = await this.getGroupSafetyStatus(groupId);
+    config.autoTranscribeVoice = enable;
+    config.updatedAt = Date.now();
+    this.safetyCache.set(groupId, config);
+    await safetyCol().doc(groupId).set({ autoTranscribeVoice: enable, updatedAt: config.updatedAt }, { merge: true });
+    return enable
+      ? `🎙️ *@voicenote AUTO-TRANSCRIBE ON!* ⚡\n\nAb is group me aane wale sabhi voice messages ko Friday automatic transcribe karke unka text transcript card post karegi, taaki bina audio play kiye sab padh sakein!`
+      : `🎙️ *@voicenote AUTO-TRANSCRIBE OFF!* ⚡\n\nAb voice notes par automatic text card nahi aayega (Zero API cost mode). Kisi bhi voice note ko sunne/transcribe karne ke liye uspe \`?\` ya \`friday\` se swipe-reply karein!`;
+  }
+
   // ── Profanity Normalization & Detection ───────────────────────────────────
 
   private normalizeText(text: string): string {
@@ -590,6 +610,11 @@ Enjoy your time here! 😊`;
       clean.startsWith("@allowall") ||
       clean.startsWith("/allowall") ||
       clean === "allow all" ||
+      clean.startsWith("@voicenote") ||
+      clean.startsWith("/voicenote") ||
+      clean.startsWith("@vn") ||
+      clean.startsWith("/vn") ||
+      clean.startsWith("@voicetranscribe") ||
       clean.startsWith("@welcome") ||
       clean.startsWith("/welcome") ||
       clean.startsWith("@quiet") ||
@@ -598,7 +623,7 @@ Enjoy your time here! 😊`;
       clean.startsWith("/strike") ||
       clean.startsWith("@safety") ||
       clean.startsWith("/safety") ||
-      /^(?:block\s*safe|allow\s*all|welcome\s*on|welcome\s*off|quiet\s*mode|strike\s*status|strike\s*reset|safety\s*mode|group\s*safety)/i.test(clean)
+      /^(?:block\s*safe|allow\s*all|voicenote\s*on|voicenote\s*off|vn\s*on|vn\s*off|welcome\s*on|welcome\s*off|quiet\s*mode|strike\s*status|strike\s*reset|safety\s*mode|group\s*safety)/i.test(clean)
     );
   }
 
@@ -645,6 +670,24 @@ Enjoy your time here! 😊`;
         return { handled: true, replyText: msg };
       }
       const msg = await this.toggleWelcome(groupJid, true);
+      return { handled: true, replyText: msg };
+    }
+
+    // 1.5 Voice Note Auto-Transcribe Toggle (@voicenote on / @voicenote off / @vn on / @vn off)
+    if (
+      clean.startsWith("@voicenote") ||
+      clean.startsWith("/voicenote") ||
+      clean.startsWith("voicenote") ||
+      clean.startsWith("@vn") ||
+      clean.startsWith("/vn") ||
+      clean.startsWith("vn") ||
+      clean.startsWith("@voicetranscribe")
+    ) {
+      if (clean.includes("off") || clean.includes("disable") || clean.includes("band")) {
+        const msg = await this.toggleAutoTranscribeVoice(groupJid, false);
+        return { handled: true, replyText: msg };
+      }
+      const msg = await this.toggleAutoTranscribeVoice(groupJid, true);
       return { handled: true, replyText: msg };
     }
 
@@ -756,6 +799,7 @@ Enjoy your time here! 😊`;
 🚫 *Gandi Gaali Auto-Delete:* ${status.blockProfanity !== false ? "✅ Active" : "❌ Disabled"}
 🔞 *NSFW Media Auto-Delete:* ${status.blockNsfwMedia !== false ? "✅ Active" : "❌ Disabled"}
 🚫 *Anti-Spam Shield:* ${status.blockSpam !== false ? "✅ Active" : "❌ Disabled"}
+🎙️ *Voice Note Auto-Transcribe:* ${status.autoTranscribeVoice ? "✅ Active (@voicenote on)" : "❌ Disabled (Swipe '?' to transcribe)"}
 👋 *New Member Welcome:* ${status.welcomeEnabled !== false ? "✅ Active" : "❌ Disabled"}
 🌙 *Night Quiet Mode:* ${status.quietModeEnabled ? "✅ Active (11PM - 6:30AM)" : "❌ Disabled"}
 👑 *Friday Admin Status:* ${isAdm ? "✅ Admin (Can Delete & Kick)" : "⚠️ Not Admin"}
@@ -764,6 +808,7 @@ Enjoy your time here! 😊`;
 💡 *Commands:*
 • \`@block safe\` ➔ Guard & 3-Strike Auto-Kick ON karein.
 • \`@allow all\` ➔ Saare filters & warnings OFF karein.
+• \`@voicenote on/off\` ➔ Voice note automatic transcription.
 • \`@welcome on/off\` ➔ New member welcome greeting.
 • \`@quiet mode on/off\` ➔ Night quiet mode.
 • \`@block safe delete\` ➔ Quoted message delete karein.`,

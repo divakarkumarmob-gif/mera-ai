@@ -570,6 +570,18 @@ export class WhatsAppBossAiEngine {
           required: [],
         },
       },
+      {
+        name: "toggle_group_voicenote_transcribe",
+        description: "Enable or disable automatic voice note transcription card mode in a WhatsApp group.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            groupName: { type: "STRING", description: "The WhatsApp group name" },
+            enable: { type: "BOOLEAN", description: "true to enable auto-transcription, false to disable" },
+          },
+          required: ["groupName", "enable"],
+        },
+      },
     ];
 
     const systemInstruction = `YOU ARE FRIDAY: DK's (Divakar Kumar) ultra-intelligent, loyal, warm, witty, and deeply caring AI companion and chief executive assistant.
@@ -925,6 +937,14 @@ COMMUNICATION STYLE:
           const grp = await whatsappBotService.findGroup(args.groupName);
           if (!grp) return { success: false, message: `Group "${args.groupName}" nahi mila.` };
           const msg = await whatsappGroupSafetyEngine.toggleQuietMode(grp.groupId, Boolean(args.enable));
+          return { success: true, message: msg };
+        }
+        if (toolName === "toggle_group_voicenote_transcribe") {
+          const { whatsappBotService } = await import("../whatsappBotService");
+          const { whatsappGroupSafetyEngine } = await import("./whatsappGroupSafetyEngine");
+          const grp = await whatsappBotService.findGroup(args.groupName);
+          if (!grp) return { success: false, message: `Group "${args.groupName}" nahi mila.` };
+          const msg = await whatsappGroupSafetyEngine.toggleAutoTranscribeVoice(grp.groupId, Boolean(args.enable));
           return { success: true, message: msg };
         }
         if (toolName === "reset_group_strikes") {

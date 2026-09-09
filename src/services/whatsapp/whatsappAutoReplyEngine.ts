@@ -292,6 +292,18 @@ export class WhatsAppAutoReplyEngine {
       ) {
         return true;
       }
+
+      // Swipe-to-transcribe on Voice Note / Audio
+      if (quotedMessage.mediaType === "audio" || !!quotedMessage.rawQuotedMessage?.audioMessage) {
+        const isVoiceQuestionIntent =
+          /^(?:\?+|\.+|kya\s*bola|kya\s*hai|batao|transcribe|read|padho|sunao|summary|explain|voice|audio|suno|kya\s*bol\s*raha|batao\s*kya|translate|dekho)/i.test(cleanText) ||
+          cleanText.length <= 25 ||
+          cleanText.includes("friday") ||
+          cleanText.includes("summary");
+        if (isVoiceQuestionIntent) {
+          return true;
+        }
+      }
     }
 
     return false;
