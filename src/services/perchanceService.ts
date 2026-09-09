@@ -12,6 +12,7 @@ export interface PerchanceStepLog {
   step: string;
   message: string;
   timestamp: string;
+  screenshot?: string;
 }
 
 export interface PerchanceImageResult {
@@ -22,6 +23,7 @@ export interface PerchanceImageResult {
   error?: string;
   durationMs?: number;
   logs?: PerchanceStepLog[];
+  livePreview?: string;
 }
 
 export class PerchanceService {
@@ -220,11 +222,36 @@ export class PerchanceService {
   ): Promise<PerchanceImageResult> {
     const cleanPrompt = (promptText || "").trim();
     const logs: PerchanceStepLog[] = [];
+    let page: any = null;
+    let latestScreenshot: string | undefined = undefined;
 
-    const pushLog = (level: PerchanceStepLog["level"], step: string, message: string) => {
+    const pushLog = async (
+      level: PerchanceStepLog["level"],
+      step: string,
+      message: string,
+      captureScreen = false
+    ) => {
       const now = new Date();
       const timeStr = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}:${now.getSeconds().toString().padStart(2, "0")}`;
-      const logItem: PerchanceStepLog = { level, step, message, timestamp: timeStr };
+      let screenshot: string | undefined = undefined;
+
+      if (captureScreen && page) {
+        try {
+          const shotBuf = await page.screenshot({ type: "jpeg", quality: 45 });
+          if (shotBuf && shotBuf.length > 0) {
+            screenshot = `data:image/jpeg;base64,${shotBuf.toString("base64")}`;
+            latestScreenshot = screenshot;
+          }
+        } catch {}
+      }
+
+      const logItem: PerchanceStepLog = {
+        level,
+        step,
+        message,
+        timestamp: timeStr,
+        screenshot: screenshot || latestScreenshot,
+      };
       logs.push(logItem);
       if (level === "error") console.error(`[PerchanceService] [${step}] ❌ ${message}`);
       else if (level === "warn") console.warn(`[PerchanceService] [${step}] ⚠️ ${message}`);
@@ -238,11 +265,11 @@ export class PerchanceService {
     };
 
     if (!cleanPrompt) {
-      pushLog("error", "Validation", "Prompt cannot be empty");
+      await pushLog("error", "Validation", "Prompt cannot be empty");
       return { success: false, prompt: promptText, error: "Prompt cannot be empty", logs };
     }
 
-    pushLog("info", "Browser Initialization", "Checking browser engine configuration (Cloud Browserless vs Local Chrome)...");
+    await pushLog("info", "Browser Initialization", "Checking browser engine configuration (Cloud Browserless vs Local Chrome)...");
     const cloudWsUrl =
       process.env.BROWSER_WS_ENDPOINT ||
       (process.env.BROWSERLESS_API_KEY
@@ -255,33 +282,25 @@ export class PerchanceService {
     try {
       if (cloudWsUrl) {
         const maskedUrl = cloudWsUrl.replace(/token=([^&]+)/, "token=***");
-        pushLog("info", "Cloud Browser Connect", `Connecting to Remote Cloud Chrome (${maskedUrl})... [0MB Render RAM used]`);
+        await pushLog("info", "Cloud Browser Connect", `Connecting to Remote Cloud Chrome (${maskedUrl})... [0MB Render RAM used]`);
         browser = await (puppeteerExtra as any).connect({
           browserWSEndpoint: cloudWsUrl,
         });
-        pushLog("info", "Cloud Browser Connect", "Connected to remote Cloud Chrome engine successfully!");
+        await pushLog("info", "Cloud Browser Connect", "Connected to remote Cloud Chrome engine successfully!");
       } else {
         const execPath = this.getExecutablePath();
         if (!execPath) {
-          pushLog("warn", "Browser Notice", "No local Chrome binary found. Switching directly to Ultra-HD FLUX.1 studio engine...");
-          const { imageGenerationService } = await import("./imageGenerationService");
-          const fallback = await imageGenerationService.generateImage(cleanPrompt);
-          if (fallback.success && fallback.buffer) {
-            pushLog("success", "Complete", `Image generated via FLUX.1 Photorealistic Engine (${(fallback.buffer.length / 1024).toFixed(1)} KB)!`);
-            return {
-              success: true,
-              buffer: fallback.buffer,
-              mimeType: fallback.mimeType || "image/jpeg",
-              prompt: cleanPrompt,
-              durationMs: Date.now() - startTime,
-              logs,
-            };
-          }
-          throw new Error(fallback.error || "No browser executable found");
+          await pushLog("error", "Browser Initialization", "Chrome/Chromium executable not found on server. Please set BROWSERLESS_API_KEY.");
+          return {
+            success: false,
+            prompt: cleanPrompt,
+            error: "Chrome/Chromium browser executable not found on server. Please set BROWSERLESS_API_KEY.",
+            logs,
+          };
         }
 
-        pushLog("info", "Browser Initialization", `Found local browser engine: ${execPath}`);
-        pushLog("info", "Browser Launch", "Launching headless Chrome with stealth & anti-detection flags...");
+        await pushLog("info", "Browser Initialization", `Found local browser engine: ${execPath}`);
+        await pushLog("info", "Browser Launch", "Launching headless Chrome with stealth & anti-detection flags...");
         browser = await (puppeteerExtra as any).launch({
           executablePath: execPath,
           headless: "new",
@@ -298,7 +317,7 @@ export class PerchanceService {
         });
       }
 
-      const page = await browser.newPage();
+      page = await browser.newPage();
       await page.setViewport({ width: 1280, height: 900 });
       await page.setUserAgent(
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -324,7 +343,7 @@ export class PerchanceService {
           ) {
             const buf = await res.buffer();
             if (buf && buf.length > 5000) {
-              pushLog("success", "Network Stream", `Intercepted generated image buffer (${buf.length} bytes, ${(buf.length / 1024).toFixed(1)} KB)`);
+              await pushLog("success", "Network Stream", `Intercepted generated image buffer (${buf.length} bytes, ${(buf.length / 1024).toFixed(1)} KB)`);
               imageBuffer = buf;
               if (resolveImage) resolveImage(buf);
             }
@@ -332,14 +351,14 @@ export class PerchanceService {
         } catch {}
       });
 
-      pushLog("info", "Navigation", "Navigating to https://perchance.org/ai-photo-generator...");
+      await pushLog("info", "Navigation", "Navigating to https://perchance.org/ai-photo-generator...");
       const navT0 = Date.now();
       await page.goto("https://perchance.org/ai-photo-generator", {
         waitUntil: "domcontentloaded",
         timeout: 45000,
       });
       const domTime = Date.now() - navT0;
-      pushLog("info", "DOM Ready", `Page DOM loaded successfully in ${domTime}ms! Accessing generator iframe...`);
+      await pushLog("info", "DOM Ready", `Page DOM loaded successfully in ${domTime}ms! Accessing generator iframe...`, true);
 
       // Wait for output generator iframe and its content
       const iframeHandle = await page.waitForSelector("iframe#outputIframeEl", { timeout: 35000 });
@@ -347,14 +366,14 @@ export class PerchanceService {
       const frame = await iframeHandle.contentFrame();
       if (!frame) throw new Error("Could not access generator content frame");
 
-      pushLog("info", "Iframe Inspection", "Found #outputIframeEl frame. Locating prompt textarea...");
+      await pushLog("info", "Iframe Inspection", "Found #outputIframeEl frame. Locating prompt textarea...");
 
       // Wait for prompt textarea
       await frame.waitForSelector("textarea", { timeout: 30000 });
       const textareas = await frame.$$("textarea");
       const promptInput = textareas.length > 1 ? textareas[1] : textareas[0];
 
-      pushLog("info", "Prompt Entry", `Filling prompt: "${cleanPrompt}" into generator...`);
+      await pushLog("info", "Prompt Entry", `Filling prompt: "${cleanPrompt}" into generator...`);
 
       // Instant DOM value update with full event dispatching
       await promptInput.click();
@@ -364,17 +383,24 @@ export class PerchanceService {
         el.dispatchEvent(new Event("change", { bubbles: true }));
       }, promptInput, cleanPrompt);
 
-      pushLog("info", "Action Trigger", "Prompt injected into generator. Triggering ✨ generate button...");
+      await pushLog("info", "Action Trigger", "Prompt injected into generator. Triggering ✨ generate button...", true);
       const genBtn = await frame.waitForSelector("#generateButtonEl", { timeout: 20000 });
       if (!genBtn) throw new Error("Could not find #generateButtonEl on Perchance");
       await frame.evaluate((b: any) => b.click(), genBtn);
-      pushLog("info", "AI Generation", "Generate button triggered! Listening on network streams and polling frame canvas...");
+      await pushLog("info", "AI Generation", "Generate button triggered! Listening on network streams and polling frame canvas...", true);
 
       // Poll frames in parallel with network interception (giving Perchance full time to render)
       const pollingPromise = (async () => {
         const pollStart = Date.now();
+        let lastScreenTime = 0;
         while (Date.now() - pollStart < 80000) {
           if (imageBuffer && imageBuffer.length > 5000) return imageBuffer;
+
+          // Capture live screen every 4 seconds during generation
+          if (Date.now() - lastScreenTime > 4000) {
+            lastScreenTime = Date.now();
+            await pushLog("info", "Live Rendering", `Monitoring generation progress (${Math.round((Date.now() - pollStart) / 1000)}s)...`, true);
+          }
 
           for (const f of page.frames()) {
             try {
@@ -397,7 +423,7 @@ export class PerchanceService {
 
               if (frameImg) {
                 if (frameImg.type === "data") {
-                  pushLog("success", "DOM Frame", "Extracted data:image/jpeg from child frame element");
+                  await pushLog("success", "DOM Frame", "Extracted data:image/jpeg from child frame element");
                   const buf = Buffer.from(frameImg.src.split(",")[1], "base64");
                   if (buf.length > 5000) {
                     imageBuffer = buf;
@@ -417,7 +443,7 @@ export class PerchanceService {
                   if (base64 && typeof base64 === "string" && base64.includes(",")) {
                     const buf = Buffer.from(base64.split(",")[1], "base64");
                     if (buf.length > 5000) {
-                      pushLog("success", "DOM Fetch", `Extracted image blob from URL: ${frameImg.src.substring(0, 60)}...`);
+                      await pushLog("success", "DOM Fetch", `Extracted image blob from URL: ${frameImg.src.substring(0, 60)}...`);
                       imageBuffer = buf;
                       return buf;
                     }
@@ -443,7 +469,7 @@ export class PerchanceService {
       }
 
       const durationMs = Date.now() - startTime;
-      pushLog("success", "Complete", `Image generation completed in ${(durationMs / 1000).toFixed(1)}s (${(finalBuf.length / 1024).toFixed(1)} KB)!`);
+      await pushLog("success", "Complete", `Image generation completed in ${(durationMs / 1000).toFixed(1)}s (${(finalBuf.length / 1024).toFixed(1)} KB)!`, true);
 
       return {
         success: true,
@@ -452,22 +478,24 @@ export class PerchanceService {
         prompt: cleanPrompt,
         durationMs,
         logs,
+        livePreview: latestScreenshot,
       };
     } catch (err: any) {
       const durationMs = Date.now() - startTime;
-      pushLog("error", "Execution Failure", err?.message || "Unknown error occurred during Perchance generation");
+      await pushLog("error", "Execution Failure", err?.message || "Unknown error occurred during Perchance generation", true);
       return {
         success: false,
         prompt: cleanPrompt,
         error: err?.message || "Unknown error generating image on Perchance",
         durationMs,
         logs,
+        livePreview: latestScreenshot,
       };
     } finally {
       if (browser) {
         try {
           await browser.close();
-          pushLog("info", "Cleanup", "Headless browser session closed cleanly.");
+          await pushLog("info", "Cleanup", "Headless browser session closed cleanly.");
         } catch {}
       }
     }

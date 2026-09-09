@@ -55,6 +55,8 @@ export default function PerchanceStudioModal({ onClose }: { onClose: () => void 
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationLogs, setGenerationLogs] = useState<StepLog[]>([]);
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
+  const [livePreview, setLivePreview] = useState<string | null>(null);
+  const [activeInspectorTab, setActiveInspectorTab] = useState<"monitor" | "terminal">("monitor");
   const [imageMeta, setImageMeta] = useState<{ bytes: number; durationMs: number } | null>(null);
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -414,76 +416,179 @@ export default function PerchanceStudioModal({ onClose }: { onClose: () => void 
               </div>
             </div>
 
-            {/* 3. Live Diagnostic Terminal Console */}
-            <div className="flex-1 min-h-[220px] max-h-[320px] rounded-2xl bg-black/90 border border-slate-800 shadow-inner flex flex-col overflow-hidden">
-              <div className="px-4 py-2 bg-slate-950 border-b border-white/5 flex items-center justify-between shrink-0">
-                <div className="flex items-center gap-2">
-                  <Terminal className="w-4 h-4 text-pink-400" />
-                  <span className="text-xs font-mono font-bold text-slate-300">Live Step-by-Step Inspector</span>
+            {/* 3. Dual-Mode Inspector: 📺 Live Browser Screen Display + 📟 Terminal Logs */}
+            <div className="flex-1 min-h-[280px] rounded-2xl bg-black/90 border border-slate-800 shadow-inner flex flex-col overflow-hidden">
+              {/* Tab Header */}
+              <div className="px-3 py-2 bg-slate-950 border-b border-white/5 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-1.5 p-0.5 rounded-xl bg-slate-900 border border-white/10 text-xs">
+                  <button
+                    onClick={() => setActiveInspectorTab("monitor")}
+                    className={`px-3 py-1 rounded-lg font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
+                      activeInspectorTab === "monitor"
+                        ? "bg-gradient-to-r from-pink-500/20 to-purple-500/20 text-pink-300 border border-pink-500/40 shadow-sm"
+                        : "text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    <span className="font-semibold text-[11px]">📺 Live Screen Monitor</span>
+                    {livePreview && (
+                      <span className="text-[9px] px-1 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-mono">LIVE</span>
+                    )}
+                  </button>
+
+                  <button
+                    onClick={() => setActiveInspectorTab("terminal")}
+                    className={`px-3 py-1 rounded-lg font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
+                      activeInspectorTab === "terminal"
+                        ? "bg-gradient-to-r from-pink-500/20 to-purple-500/20 text-pink-300 border border-pink-500/40 shadow-sm"
+                        : "text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    <Terminal className="w-3.5 h-3.5 text-pink-400" />
+                    <span className="font-semibold text-[11px]">📟 Terminal Logs ({generationLogs.length})</span>
+                  </button>
                 </div>
+
                 <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => {
-                      const text = generationLogs.map((l) => `[${l.timestamp}] [${l.step}] ${l.message}`).join("\n");
-                      navigator.clipboard.writeText(text);
-                      setCopiedLink(true);
-                      setTimeout(() => setCopiedLink(false), 1500);
-                    }}
-                    className="text-[10px] px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-white/10 flex items-center gap-1 transition-all"
-                  >
-                    {copiedLink ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                    <span>{copiedLink ? "Copied" : "Copy Logs"}</span>
-                  </button>
-                  <button
-                    onClick={() => setGenerationLogs([])}
-                    className="text-[10px] px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-white/10"
-                  >
-                    Clear
-                  </button>
+                  {activeInspectorTab === "terminal" && (
+                    <button
+                      onClick={() => {
+                        const text = generationLogs.map((l) => `[${l.timestamp}] [${l.step}] ${l.message}`).join("\n");
+                        navigator.clipboard.writeText(text);
+                        setCopiedLink(true);
+                        setTimeout(() => setCopiedLink(false), 1500);
+                      }}
+                      className="text-[10px] px-2 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-white/10 flex items-center gap-1 transition-all"
+                    >
+                      {copiedLink ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                      <span>{copiedLink ? "Copied" : "Copy"}</span>
+                    </button>
+                  )}
+                  {isGenerating && (
+                    <div className="flex items-center gap-1 text-[10px] text-pink-400 font-mono bg-pink-500/10 px-2 py-0.5 rounded border border-pink-500/20 animate-pulse">
+                      <span>BOT ACTIVE</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
-              <div className="flex-1 p-3 overflow-y-auto font-mono text-xs space-y-1.5 text-slate-300 select-text">
-                {generationLogs.length === 0 ? (
-                  <div className="h-full flex flex-col items-center justify-center text-slate-600 text-[11px] italic gap-1">
-                    <span>Terminal standby... Prompt daal kar 'Generate Photo' click karein.</span>
-                    <span>Har browser action aur network packet live yaha render hoga.</span>
+              {/* Tab 1: 📺 Live Browser Screen Monitor */}
+              {activeInspectorTab === "monitor" && (
+                <div className="flex-1 flex flex-col p-3 gap-2 bg-slate-950/60">
+                  {/* Mock Browser URL Bar */}
+                  <div className="px-3 py-1.5 rounded-xl bg-slate-900/90 border border-white/5 flex items-center justify-between text-[11px] font-mono text-slate-400 shrink-0">
+                    <div className="flex items-center gap-2 truncate">
+                      <div className="flex items-center gap-1 text-emerald-400 shrink-0">
+                        <ShieldCheck className="w-3.5 h-3.5" />
+                        <span className="text-[10px] uppercase font-bold tracking-wider">SSL Secure</span>
+                      </div>
+                      <span className="text-slate-600">|</span>
+                      <span className="truncate text-slate-300">https://perchance.org/ai-photo-generator</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                      <span className="text-[10px] text-emerald-300 font-bold">1280x900</span>
+                    </div>
                   </div>
-                ) : (
-                  generationLogs.map((log, idx) => (
-                    <div key={idx} className="flex items-start gap-2 leading-relaxed">
-                      <span className="text-slate-500 shrink-0 select-none">[{log.timestamp}]</span>
-                      <span
-                        className={`px-1.5 py-0.2 rounded text-[10px] font-bold uppercase shrink-0 ${
-                          log.level === "success"
-                            ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
-                            : log.level === "error"
-                            ? "bg-red-500/20 text-red-300 border border-red-500/30"
-                            : log.level === "warn"
-                            ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
-                            : "bg-blue-500/20 text-blue-300 border border-blue-500/30"
-                        }`}
-                      >
-                        {log.step}
-                      </span>
-                      <span
-                        className={`break-all ${
-                          log.level === "success"
-                            ? "text-emerald-200"
-                            : log.level === "error"
-                            ? "text-red-300 font-semibold"
-                            : log.level === "warn"
-                            ? "text-amber-200"
-                            : "text-slate-300"
-                        }`}
-                      >
-                        {log.message}
+
+                  {/* Browser Viewport Window */}
+                  <div className="flex-1 min-h-[200px] max-h-[320px] rounded-xl bg-slate-950 border border-slate-800 relative overflow-hidden flex items-center justify-center group shadow-inner">
+                    {livePreview ? (
+                      <div className="relative w-full h-full flex items-center justify-center bg-black">
+                        <img
+                          src={livePreview}
+                          alt="Live Headless Browser Screen"
+                          className="w-full h-full object-contain max-h-[300px] transition-all duration-300"
+                        />
+                        {/* Live CCTV HUD Overlay */}
+                        <div className="absolute top-2 left-2 px-2 py-0.5 rounded bg-black/80 backdrop-blur border border-emerald-500/40 text-[10px] font-mono text-emerald-300 flex items-center gap-1.5 shadow-lg">
+                          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                          <span>LIVE BROWSER STREAM</span>
+                        </div>
+                        {isGenerating && (
+                          <div className="absolute bottom-2 right-2 px-2.5 py-1 rounded bg-black/80 backdrop-blur border border-pink-500/40 text-[10px] font-mono text-pink-300 shadow-lg">
+                            ⏱️ {timerSeconds}s
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center p-6 text-center text-slate-500 gap-3">
+                        <div className="w-12 h-12 rounded-2xl bg-slate-900 border border-white/5 flex items-center justify-center text-slate-600">
+                          <Globe className="w-6 h-6 animate-pulse text-pink-400/60" />
+                        </div>
+                        <div className="space-y-1">
+                          <div className="text-xs font-semibold text-slate-300">Live Browser Display Standby</div>
+                          <p className="text-[11px] text-slate-500 max-w-sm">
+                            Jaise hi aap "✨ Generate Photo" click karenge, bot ka live Chrome screen (typing, clicking & 6-photo grid render) yaha real-time stream hoga.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Quick 1-line latest log ticker */}
+                  {generationLogs.length > 0 && (
+                    <div className="px-3 py-1.5 rounded-xl bg-slate-900/60 border border-white/5 flex items-center justify-between text-[11px] font-mono shrink-0">
+                      <div className="flex items-center gap-2 truncate">
+                        <span className="text-pink-400 font-bold shrink-0">
+                          [{generationLogs[generationLogs.length - 1].step}]:
+                        </span>
+                        <span className="truncate text-slate-300">
+                          {generationLogs[generationLogs.length - 1].message}
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-slate-500 shrink-0 font-mono">
+                        {generationLogs[generationLogs.length - 1].timestamp}
                       </span>
                     </div>
-                  ))
-                )}
-                <div ref={logsEndRef} />
-              </div>
+                  )}
+                </div>
+              )}
+
+              {/* Tab 2: 📟 Terminal Logs */}
+              {activeInspectorTab === "terminal" && (
+                <div className="flex-1 p-3 overflow-y-auto font-mono text-xs space-y-1.5 text-slate-300 select-text max-h-[320px]">
+                  {generationLogs.length === 0 ? (
+                    <div className="h-full flex flex-col items-center justify-center text-slate-600 text-[11px] italic gap-1">
+                      <span>Terminal standby... Prompt daal kar 'Generate Photo' click karein.</span>
+                      <span>Har browser action aur network packet live yaha render hoga.</span>
+                    </div>
+                  ) : (
+                    generationLogs.map((log, idx) => (
+                      <div key={idx} className="flex items-start gap-2 leading-relaxed">
+                        <span className="text-slate-500 shrink-0 select-none">[{log.timestamp}]</span>
+                        <span
+                          className={`px-1.5 py-0.2 rounded text-[10px] font-bold uppercase shrink-0 ${
+                            log.level === "success"
+                              ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                              : log.level === "error"
+                              ? "bg-red-500/20 text-red-300 border border-red-500/30"
+                              : log.level === "warn"
+                              ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                              : "bg-blue-500/20 text-blue-300 border border-blue-500/30"
+                          }`}
+                        >
+                          {log.step}
+                        </span>
+                        <span
+                          className={`break-all ${
+                            log.level === "success"
+                              ? "text-emerald-200"
+                              : log.level === "error"
+                              ? "text-red-300 font-semibold"
+                              : log.level === "warn"
+                              ? "text-amber-200"
+                              : "text-slate-300"
+                          }`}
+                        >
+                          {log.message}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                  <div ref={logsEndRef} />
+                </div>
+              )}
             </div>
 
             {/* Error Diagnosis Banner if generation fails */}

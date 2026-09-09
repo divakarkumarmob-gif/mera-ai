@@ -2577,6 +2577,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     bytes?: number;
     durationMs?: number;
     logs: any[];
+    livePreview?: string;
     error?: string;
     createdAt: number;
   }
@@ -2625,6 +2626,9 @@ export function createApiRouter(context: ApiRoutesContext): Router {
           const { perchanceService } = await import("../services/perchanceService");
           const result = await perchanceService.generateImage(prompt, timeoutMs, (stepLog) => {
             job.logs.push(stepLog);
+            if (stepLog.screenshot) {
+              job.livePreview = stepLog.screenshot;
+            }
           });
 
           if (result.success && result.buffer) {
@@ -2632,6 +2636,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
             job.image = `data:${result.mimeType || "image/jpeg"};base64,${result.buffer.toString("base64")}`;
             job.bytes = result.buffer.length;
             job.durationMs = result.durationMs;
+            if (result.livePreview) job.livePreview = result.livePreview;
             if (result.logs && result.logs.length > 0) {
               job.logs = result.logs;
             }
@@ -2639,6 +2644,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
             job.status = "failed";
             job.error = result.error || "Generation failed on server";
             job.durationMs = result.durationMs;
+            if (result.livePreview) job.livePreview = result.livePreview;
             if (result.logs && result.logs.length > 0) {
               job.logs = result.logs;
             }
@@ -2673,6 +2679,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
         bytes: job.bytes,
         durationMs: job.durationMs,
         logs: job.logs,
+        livePreview: job.livePreview,
         error: job.error,
       });
     } catch (e: any) {
