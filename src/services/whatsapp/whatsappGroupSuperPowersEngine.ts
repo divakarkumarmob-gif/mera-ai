@@ -320,7 +320,7 @@ export class WhatsAppGroupSuperPowersEngine {
       clean.startsWith("@music") ||
       clean.startsWith("/music")
     ) {
-      return await this.handleSongFinder(rawText, senderName);
+      return await this.handleSongFinder(sock, groupJid, rawText, senderName, messageKey);
     }
 
     return { handled: false };
@@ -1469,12 +1469,29 @@ Use authentic high-energy Bhojpuri & Sidhuisms punchlines ("Eee dekhi babua", "T
   // ── 19. @song / @gaana / @music Instant Song Radar & Streaming Links ──────
 
   public async handleSongFinder(
+    sock: any,
+    groupJid: string,
     rawText: string,
-    senderName = "Member"
+    senderName = "Member",
+    messageKey?: any
   ): Promise<{ handled: boolean; replyText?: string }> {
     const { whatsappFeatureEngine } = await import("../whatsappFeatureEngine");
-    const reply = await whatsappFeatureEngine.searchMusicWithLyrics(rawText, senderName);
-    return { handled: true, replyText: reply };
+    const res = await whatsappFeatureEngine.searchMusicWithLyrics(rawText, senderName, groupJid);
+
+    // If 30-sec audio preview is requested and buffer downloaded, send audio message directly to group
+    if (res.audioBuffer && sock && groupJid) {
+      try {
+        await sock.sendMessage(groupJid, {
+          audio: res.audioBuffer,
+          mimetype: "audio/mp4",
+          ptt: false,
+        });
+      } catch (audioErr) {
+        console.warn("[GroupSuperPowers] Failed to send preview audio:", audioErr);
+      }
+    }
+
+    return { handled: true, replyText: res.replyText };
   }
 
   // ── 20. Midnight Birthday Cron Worker ─────────────────────────────────────
@@ -1673,9 +1690,18 @@ Bhagwan aapko lambi umar, beshumar khushiyan, aur bohot saari success de! 🚀�
       return await this.handleSportsCommentary(rawText, senderName);
     }
 
-    // 22. Instant Song & Music Radar Intent
-    if (/(?:(?:koi\s+)?(?:song|gaana|music)\s+(?:dhundo|sunao|chalao|ka\s*link|bhejo|play\s*karo)|(?:ye\s+)?kaun\s*sa\s*(?:song|gaana)\s*hai)/i.test(clean)) {
-      return await this.handleSongFinder(rawText, senderName);
+    // 22. Follow-Up "Iska link do" / "Link bhejo" for Songs
+    const { whatsappFeatureEngine } = await import("../whatsappFeatureEngine");
+    if (whatsappFeatureEngine.isSongLinkFollowUp(rawText, quotedMessage?.text)) {
+      const linkReply = whatsappFeatureEngine.handleSongLinkFollowUp(groupJid, rawText, quotedMessage?.text);
+      if (linkReply) {
+        return { handled: true, replyText: linkReply };
+      }
+    }
+
+    // 23. Instant Song & Music Radar Intent
+    if (/(?:(?:koi\s+)?(?:song|gaana|music)\s+(?:dhundo|sunao|chalao|ka\s*link|bhejo|play\s*karo|preview)|(?:ye\s+)?kaun\s*sa\s*(?:song|gaana)\s*hai)/i.test(clean)) {
+      return await this.handleSongFinder(sock, groupJid, rawText, senderName, messageKey);
     }
 
     // ── Phase 2: Suspicious / Ambiguous Intent Classifier (Gemini AI Powered) ─

@@ -572,11 +572,21 @@ TONE & STYLE:
       const handledByGf = await girlfriendCheckFn(text, replyJid, senderName, messageKey);
       if (handledByGf) return;
 
+      const { whatsappFeatureEngine } = await import("../whatsappFeatureEngine");
+
+      // 1v1 Follow-Up "Iska link do" / "Link bhejo" for Songs
+      if (whatsappFeatureEngine.isSongLinkFollowUp(text, quotedMessage?.text)) {
+        const linkReply = whatsappFeatureEngine.handleSongLinkFollowUp(replyJid, text, quotedMessage?.text);
+        if (linkReply) {
+          await sendMsgFn(replyJid, linkReply, text, messageKey);
+          return;
+        }
+      }
+
       // 1v1 Instant Song Radar (@song / @music / @gaana)
       if (/^(?:@song|@music|@gaana|\/song|\/music|\/gaana)\b/i.test(text.trim())) {
-        const { whatsappFeatureEngine } = await import("../whatsappFeatureEngine");
-        const songCard = await whatsappFeatureEngine.searchMusicWithLyrics(text, senderName);
-        await sendMsgFn(replyJid, songCard, text, messageKey);
+        const songRes = await whatsappFeatureEngine.searchMusicWithLyrics(text, senderName, replyJid);
+        await sendMsgFn(replyJid, songRes.replyText, text, messageKey);
         return;
       }
 
@@ -669,9 +679,18 @@ TONE & STYLE:
       if (handledQuoted) return;
     }
 
+    // Follow-up "Iska link do" in Group
+    if (whatsappFeatureEngine.isSongLinkFollowUp(text, quotedMessage?.text)) {
+      const linkReply = whatsappFeatureEngine.handleSongLinkFollowUp(groupJid, text, quotedMessage?.text);
+      if (linkReply) {
+        await sendMsgFn(groupJid, linkReply, text, messageKey);
+        return;
+      }
+    }
+
     if (/^(?:@song|@music|@gaana|\/song|\/music|\/gaana)\b/i.test(cleanText)) {
-      const songCard = await whatsappFeatureEngine.searchMusicWithLyrics(cleanText, senderName);
-      await sendMsgFn(groupJid, songCard, text, messageKey);
+      const songRes = await whatsappFeatureEngine.searchMusicWithLyrics(cleanText, senderName, groupJid);
+      await sendMsgFn(groupJid, songRes.replyText, text, messageKey);
       return;
     }
 

@@ -28,9 +28,16 @@ export class WhatsAppBossAiEngine {
 
     const { whatsappFeatureEngine } = await import("../whatsappFeatureEngine");
 
+    // Fast direct intercept for follow-up "Iska link do" / "Link bhejo"
+    if (whatsappFeatureEngine.isSongLinkFollowUp(messageText, quotedMessage?.text)) {
+      const followUp = whatsappFeatureEngine.handleSongLinkFollowUp(replyJid, messageText, quotedMessage?.text);
+      if (followUp) return followUp;
+    }
+
     // Fast direct intercept for @song / @music / @gaana queries
     if (/^(?:@song|@music|@gaana|\/song|\/music|\/gaana)\b/i.test(messageText.trim())) {
-      return await whatsappFeatureEngine.searchMusicWithLyrics(messageText, senderName);
+      const songRes = await whatsappFeatureEngine.searchMusicWithLyrics(messageText, senderName, replyJid);
+      return songRes.replyText;
     }
 
     const { memoryEngine } = await import("../memoryEngine");
