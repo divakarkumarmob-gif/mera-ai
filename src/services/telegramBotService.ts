@@ -1622,11 +1622,34 @@ ${
     }
 
     // 2. Handle /start, "start bot", and greeting commands
+    const cleanText = (text || "").trim();
+    const isPureGreeting =
+      /^(?:hi|hello|hey|namaste|hlo|helo|hy|suno|oye|listen|gm|good\s*morning|good\s*evening)?\s*(?:@?friday|fridaay|fraiday|fryday)[!?.]*$/i.test(cleanText) ||
+      /^(?:@?friday|fridaay|fraiday|fryday)\s*(?:hi|hello|hey|namaste|hlo|helo|hy)[!?.]*$/i.test(cleanText) ||
+      /^(?:hi|hello|hey|namaste|hlo|helo|hy)\s+@?friday\b[!?.]*$/i.test(cleanText);
+
+    if (isPureGreeting) {
+      const isKnownName =
+        senderName &&
+        senderName.trim().length > 0 &&
+        !senderName.startsWith("+") &&
+        senderName.toLowerCase() !== "unknown" &&
+        senderName.toLowerCase() !== "anonymous" &&
+        senderName.replace(/\D/g, "").length < 6;
+
+      const greetingReply = isKnownName
+        ? `Hello ${senderName} ji! 😊 Kaise hain aap? Kaise mujhe yaad kiya, koi baat karni hai kya? ✨`
+        : `Ji aap sab kaise hain? 😊 Kaise mujhe yaad kiya, koi baat karni hai kya? ✨`;
+
+      await this.sendMessage(chatId, greetingReply);
+      return;
+    }
+
     // 2. Handle /start, "start bot", menu commands and interactive selector
     const isStartCmd =
       text === "/start" ||
       text === "/help" ||
-      /^(\/start@|start\s*bot|hi\s*friday|hello\s*friday)/i.test(text);
+      /^(\/start@|start\s*bot)/i.test(text);
 
     const getMasterMenuMarkup = (targetChatId: number) => ({
       inline_keyboard: [

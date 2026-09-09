@@ -31,6 +31,17 @@ export class WhatsAppHistoryEngine {
   }
 
   /**
+   * Returns recent messages from a specific group in chronological order
+   */
+  public getRecentGroupMessages(groupJid: string, limit: number = 25): IncomingMessage[] {
+    const cleanJid = (groupJid || "").trim();
+    return this.messageCache
+      .filter((m) => m.isGroup && (m.groupId === cleanJid || m.replyJid === cleanJid))
+      .slice(0, limit)
+      .reverse();
+  }
+
+  /**
    * Cleans an IncomingMessage (or nested object) so it can be safely written to Firestore.
    * Firestore rejects JavaScript objects with custom prototypes (e.g. Baileys Proto Message instances),
    * Buffers, functions, symbols, or undefined properties.

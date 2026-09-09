@@ -500,6 +500,28 @@ TONE & STYLE:
       return;
     }
 
+    const cleanText = (text || "").trim();
+    const isPureGreeting =
+      /^(?:hi|hello|hey|namaste|hlo|helo|hy|suno|oye|listen|gm|good\s*morning|good\s*evening)?\s*(?:@?friday|fridaay|fraiday|fryday)[!?.]*$/i.test(cleanText) ||
+      /^(?:@?friday|fridaay|fraiday|fryday)\s*(?:hi|hello|hey|namaste|hlo|helo|hy)[!?.]*$/i.test(cleanText) ||
+      /^(?:hi|hello|hey|namaste|hlo|helo|hy)\s+@?friday\b[!?.]*$/i.test(cleanText);
+
+    if (isPureGreeting) {
+      const isKnownName =
+        senderName &&
+        senderName.trim().length > 0 &&
+        !senderName.startsWith("+") &&
+        senderName.toLowerCase() !== "unknown" &&
+        senderName.replace(/\D/g, "").length < 6;
+
+      const greetingReply = isKnownName
+        ? `Hello ${senderName} ji! 😊 Kaise hain aap? Kaise mujhe yaad kiya, koi baat karni hai kya? ✨`
+        : `Ji aap sab kaise hain? 😊 Kaise mujhe yaad kiya, koi baat karni hai kya? ✨`;
+
+      await sendMsgFn(groupJid, greetingReply, text, messageKey);
+      return;
+    }
+
     if (quotedMessage && quotedMessage.isReply) {
       const handledQuoted = await handleQuotedFn(groupJid, text, quotedMessage, messageKey);
       if (handledQuoted) return;
@@ -626,17 +648,32 @@ TONE & STYLE:
       ? `\n- PREVIOUS QUOTED MESSAGE IN GROUP (From: ${quotedMessage.sender}, Type: ${quotedMessage.mediaType}): "${quotedMessage.text}"`
       : "";
 
-    const prompt = `You are Friday, the ultra-smart, witty and polite AI assistant of DK (Divakar Kumar).
+    const recentGroupMsgs = whatsappHistoryEngine.getRecentGroupMessages(groupJid, 25);
+    const groupHistoryText = recentGroupMsgs.length > 0
+      ? `\nRECENT GROUP CHAT HISTORY (Who said what in this group):\n` +
+        recentGroupMsgs
+          .map((m) => `• [${m.dateStr || "Recent"}] ${m.senderName} (${m.senderPhone ? "+" + m.senderPhone : "Member"}): "${m.text}"`)
+          .join("\n")
+      : "\nNo prior recent group messages recorded in cache.";
+
+    const prompt = `You are Friday, the ultra-smart, witty, warm and polite AI assistant of DK (Divakar Kumar).
 You have been tagged or mentioned in a WhatsApp Group named "${groupName}".
 Message Sender: "${senderName}" (+${senderPhone})${quotedSnippet}
 Message in Group: "${text}"
 
+${groupHistoryText}
+
 RULES FOR GROUP REPLIES:
-1. Speak in crisp, natural, intelligent Hinglish (maximum 1-3 short lines).
-2. Answer their question or request directly (if they ask for general knowledge, coding help, calculations, facts, train status, weather, or greetings).
-3. PRIVACY & SECURITY (STRICT): NEVER disclose DK Boss's confidential private information (home address, personal passwords, bank details, private schedule) in a public group.
-4. If they ask who you are: "Main Friday hoon — DK Boss ka intelligent AI assistant! ⚡"
-5. Do NOT use prefixes like 'Friday:' or markdown header hashes. Format with clean WhatsApp bold/italics.`;
+1. GROUP AWARENESS & MEMORY (CRITICAL): You actively keep track of everyone in the group and know who sent what message from the RECENT GROUP CHAT HISTORY above. If someone asks "kisne kya bola", "group me kya baat chal rahi hai", "summary do", or refers to someone else's message, use the history accurately with names!
+2. GREETINGS & MANNERS:
+   - When someone says "hi friday", "hello friday", "friday":
+     * If sender's name is known (e.g. "${senderName}"): Greet warmly with "Hello ${senderName} ji! Kaise hain aap? Kaise mujhe yaad kiya, koi baat karni hai kya?"
+     * If name is not known / just phone number: Greet with "Ji aap sab kaise hain? Kaise mujhe yaad kiya, koi baat karni hai kya?"
+3. Speak in crisp, natural, intelligent Hinglish (maximum 1-3 short lines).
+4. Answer questions directly (general knowledge, coding, facts, calculations, train status, weather, news, recaps).
+5. PRIVACY & SECURITY (STRICT): NEVER disclose DK Boss's confidential private info (home address, personal passwords, bank details, private schedule) in a public group.
+6. If they ask who you are: "Main Friday hoon — DK Boss ka intelligent AI assistant! ⚡"
+7. Do NOT use prefixes like 'Friday:' or markdown header hashes. Format with clean WhatsApp bold/italics.`;
 
     const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T> =>
       Promise.race([
