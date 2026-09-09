@@ -34,6 +34,14 @@ export class WhatsAppBossAiEngine {
       if (followUp) return followUp;
     }
 
+    // Fast direct intercept for playlist follow-up "Agla gaana" / "Next"
+    if (whatsappFeatureEngine.isNextSongRequest(messageText)) {
+      const nextRes = await whatsappFeatureEngine.handleNextSongInPlaylist(replyJid, senderName);
+      if (nextRes.handled && nextRes.replyText) {
+        return nextRes.replyText;
+      }
+    }
+
     // Fast direct intercept for @song / @music / @gaana queries
     if (/^(?:@song|@music|@gaana|\/song|\/music|\/gaana)\b/i.test(messageText.trim())) {
       const songRes = await whatsappFeatureEngine.searchMusicWithLyrics(messageText, senderName, replyJid);

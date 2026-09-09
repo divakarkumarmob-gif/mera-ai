@@ -583,6 +583,15 @@ TONE & STYLE:
         }
       }
 
+      // 1v1 Next Song in Playlist ("Agla gaana" / "Next")
+      if (whatsappFeatureEngine.isNextSongRequest(text)) {
+        const nextRes = await whatsappFeatureEngine.handleNextSongInPlaylist(replyJid, senderName);
+        if (nextRes.handled && nextRes.replyText) {
+          await sendMsgFn(replyJid, nextRes.replyText, text, messageKey);
+          return;
+        }
+      }
+
       // 1v1 Instant Song Radar (@song / @music / @gaana)
       if (/^(?:@song|@music|@gaana|\/song|\/music|\/gaana)\b/i.test(text.trim())) {
         const songRes = await whatsappFeatureEngine.searchMusicWithLyrics(text, senderName, replyJid);
@@ -684,6 +693,15 @@ TONE & STYLE:
       const linkReply = whatsappFeatureEngine.handleSongLinkFollowUp(groupJid, text, quotedMessage?.text);
       if (linkReply) {
         await sendMsgFn(groupJid, linkReply, text, messageKey);
+        return;
+      }
+    }
+
+    // Follow-up "Agla gaana" / "Next song" in Group
+    if (whatsappFeatureEngine.isNextSongRequest(text)) {
+      const nextRes = await whatsappFeatureEngine.handleNextSongInPlaylist(groupJid, senderName);
+      if (nextRes.handled && nextRes.replyText) {
+        await sendMsgFn(groupJid, nextRes.replyText, text, messageKey);
         return;
       }
     }

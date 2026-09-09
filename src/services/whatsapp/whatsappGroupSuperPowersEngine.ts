@@ -1699,6 +1699,23 @@ Bhagwan aapko lambi umar, beshumar khushiyan, aur bohot saari success de! ðŸš€ðŸ
       }
     }
 
+    // 22.5. Next Song in Playlist Follow-Up ("Agla gaana" / "Next")
+    if (whatsappFeatureEngine.isNextSongRequest(rawText)) {
+      const nextRes = await whatsappFeatureEngine.handleNextSongInPlaylist(groupJid, senderName);
+      if (nextRes.handled && nextRes.replyText) {
+        if (nextRes.audioBuffer && sock) {
+          try {
+            await sock.sendMessage(groupJid, {
+              audio: nextRes.audioBuffer,
+              mimetype: "audio/mp4",
+              ptt: false,
+            });
+          } catch (e) {}
+        }
+        return { handled: true, replyText: nextRes.replyText };
+      }
+    }
+
     // 23. Instant Song & Music Radar Intent
     if (/(?:(?:koi\s+)?(?:song|gaana|music)\s+(?:dhundo|sunao|chalao|ka\s*link|bhejo|play\s*karo|preview)|(?:ye\s+)?kaun\s*sa\s*(?:song|gaana)\s*hai)/i.test(clean)) {
       return await this.handleSongFinder(sock, groupJid, rawText, senderName, messageKey);
