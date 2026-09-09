@@ -934,6 +934,47 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
     const [ecommerceDeckProducts, setEcommerceDeckProducts] = useState<EcomProduct[]>([]);
     const [ecommerceActiveIndex, setEcommerceActiveIndex] = useState<number>(0);
     const [ecommerceQuery, setEcommerceQuery] = useState<string>('');
+
+    // ── 📸 4K AI Photo Generation & Left-Side Dashboard Popup State ─────────
+    const [generatedPhoto, setGeneratedPhoto] = useState<{
+        id: string;
+        url: string;
+        prompt: string;
+        model: string;
+        aspectRatio?: string;
+        whatsappSent?: boolean;
+        recipient?: string;
+        timestamp: number;
+    } | null>(null);
+    const [isPhotoFullScreen, setIsPhotoFullScreen] = useState(false);
+    const [isSendingPhotoWhatsApp, setIsSendingPhotoWhatsApp] = useState(false);
+
+    // ── 🔔 Verified Action Face Message Toast State (Rendered above AgentFace) ──
+    const [faceToast, setFaceToast] = useState<{
+        id: string;
+        icon: string;
+        title: string;
+        subtitle?: string;
+        color: 'emerald' | 'purple' | 'cyan' | 'blue' | 'amber' | 'rose';
+        timestamp: number;
+    } | null>(null);
+    const faceToastTimerRef = useRef<any>(null);
+
+    const triggerFaceToast = useCallback((icon: string, title: string, subtitle?: string, color: 'emerald' | 'purple' | 'cyan' | 'blue' | 'amber' | 'rose' = 'emerald') => {
+        if (faceToastTimerRef.current) clearTimeout(faceToastTimerRef.current);
+        setFaceToast({
+            id: Math.random().toString(36).substring(2, 9),
+            icon,
+            title,
+            subtitle,
+            color,
+            timestamp: Date.now(),
+        });
+        faceToastTimerRef.current = setTimeout(() => {
+            setFaceToast(null);
+        }, 4500);
+    }, []);
+
     const fileInputRef = useRef<HTMLInputElement>(null);
     const captionBoxRef = useRef<HTMLDivElement>(null);
     const userScrolledUpRef = useRef(false);
@@ -2405,6 +2446,37 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                 } else if (msg.imageAck) {
                     setSelectedImages(prev => prev.map(img => img.id === msg.imageId ? { ...img, status: 'uploaded' } : img));
                     if (status !== "Speaking...") isAiSpeaking.current = false;
+                } else if (msg.type === 'image_generated') {
+                    if (msg.imageUrl) {
+                        setGeneratedPhoto({
+                            id: Math.random().toString(36).substring(2, 9),
+                            url: msg.imageUrl,
+                            prompt: msg.prompt || '4K AI Portrait',
+                            model: msg.model || 'Cloudflare FLUX 4K',
+                            aspectRatio: msg.aspectRatio || '9:16',
+                            whatsappSent: !!msg.whatsappSent,
+                            recipient: msg.recipient || 'Boss',
+                            timestamp: Date.now(),
+                        });
+                        triggerFaceToast('📸', 'Photo Generated', '4K Cloudflare Portrait Ready', 'purple');
+                    }
+                } else if (msg.type === 'photo_sent_whatsapp') {
+                    setGeneratedPhoto(prev => prev ? { ...prev, whatsappSent: true, recipient: msg.recipient || 'DK (Boss)' } : prev);
+                    triggerFaceToast('📲', 'Photo Sent to Boss', `Delivered to ${msg.recipient || 'Boss'} on WhatsApp`, 'emerald');
+                } else if (msg.type === 'whatsapp_contact_sent') {
+                    if (msg.success) {
+                        triggerFaceToast('✅', 'Message Sent', msg.targetPhone ? `Sent to ${msg.targetPhone}` : 'Delivered on WhatsApp', 'emerald');
+                    }
+                } else if (msg.type === 'contact_saved') {
+                    triggerFaceToast('👤', 'Contact Saved', msg.contact?.name || 'Contact updated', 'blue');
+                } else if (msg.type === 'contact_deleted') {
+                    triggerFaceToast('🗑️', 'Contact Deleted', msg.message || 'Contact removed', 'rose');
+                } else if (msg.type === 'reminder_created') {
+                    triggerFaceToast('⏰', 'Reminder Set', msg.reminder?.title || 'Reminder scheduled', 'amber');
+                } else if (msg.type === 'note_saved') {
+                    triggerFaceToast('📝', 'Note Saved', msg.note?.title || 'Quick note recorded', 'cyan');
+                } else if (msg.type === 'daily_update_saved') {
+                    triggerFaceToast('📊', 'Daily Update Saved', msg.date || 'Update logged', 'emerald');
                 } else if (msg.type === 'pairing_code_ready' && msg.pairingCode) {
                     setPairingCode(msg.pairingCode);
                 } else if (msg.type === 'reminder_due' && msg.reminder) {
@@ -2439,6 +2511,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                                 name: task.name,
                                 resultSummary: task.resultSummary || 'Completed successfully',
                             });
+                            triggerFaceToast('⚡', 'Task Completed', task.name, 'emerald');
                             clearTimeout(completedBgTaskTimerRef.current);
                             completedBgTaskTimerRef.current = setTimeout(() => {
                                 setCompletedBgTask(null);
@@ -2974,12 +3047,54 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                     )}
                 </AnimatePresence>
 
-                <div className="flex-1 flex flex-col items-center justify-center gap-6 overflow-hidden">
+                <div className="flex-1 flex flex-col items-center justify-center gap-4 overflow-hidden relative">
                     <div className="text-center">
                         <span className="text-2xl md:text-3xl font-extrabold bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent tracking-wide">
                             Welcome
                         </span>
                     </div>
+
+                    {/* ── 🔔 Real-Action Face Message Toast (Positioned directly above AgentFace) ── */}
+                    <div className="min-h-[46px] flex items-center justify-center z-30 px-2 pointer-events-none">
+                        <AnimatePresence mode="wait">
+                            {faceToast && (
+                                <motion.div
+                                    key={faceToast.id}
+                                    initial={{ opacity: 0, y: 15, scale: 0.88 }}
+                                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                                    exit={{ opacity: 0, y: -10, scale: 0.9 }}
+                                    transition={{ type: 'spring', damping: 20, stiffness: 350 }}
+                                    className={`pointer-events-auto flex items-center gap-2.5 px-4 py-2 rounded-2xl backdrop-blur-2xl border shadow-xl transition-all ${
+                                        faceToast.color === 'emerald'
+                                            ? 'bg-emerald-950/85 border-emerald-500/60 text-emerald-100 shadow-[0_0_25px_rgba(16,185,129,0.35)]'
+                                            : faceToast.color === 'purple'
+                                            ? 'bg-purple-950/85 border-purple-500/60 text-purple-100 shadow-[0_0_25px_rgba(168,85,247,0.4)]'
+                                            : faceToast.color === 'cyan'
+                                            ? 'bg-cyan-950/85 border-cyan-500/60 text-cyan-100 shadow-[0_0_25px_rgba(6,182,212,0.35)]'
+                                            : faceToast.color === 'blue'
+                                            ? 'bg-blue-950/85 border-blue-500/60 text-blue-100 shadow-[0_0_25px_rgba(59,130,246,0.35)]'
+                                            : faceToast.color === 'amber'
+                                            ? 'bg-amber-950/85 border-amber-500/60 text-amber-100 shadow-[0_0_25px_rgba(245,158,11,0.35)]'
+                                            : 'bg-rose-950/85 border-rose-500/60 text-rose-100 shadow-[0_0_25px_rgba(244,63,94,0.35)]'
+                                    }`}
+                                >
+                                    <span className="text-lg shrink-0 animate-bounce">{faceToast.icon}</span>
+                                    <div className="flex flex-col text-left leading-tight">
+                                        <span className="text-xs font-bold tracking-wide flex items-center gap-1.5">
+                                            {faceToast.title}
+                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                        </span>
+                                        {faceToast.subtitle && (
+                                            <span className="text-[11px] opacity-80 truncate max-w-[220px] sm:max-w-[320px]">
+                                                {faceToast.subtitle}
+                                            </span>
+                                        )}
+                                    </div>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+                    </div>
+
                     <AgentFace status={status} volume={volume} size={160} colorIndex={colorIndex} onDoubleClick={handleFaceDoubleTap} />
                     <p className="text-slate-300 text-sm font-medium">{status}</p>
 
@@ -3767,6 +3882,172 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                     }}
                 />
             )}
+
+            {/* ── 📸 Left-Side 4K AI Photo Popup Card (Cloudflare AI Generated) ── */}
+            <AnimatePresence>
+                {generatedPhoto && (
+                    <motion.div
+                        initial={{ opacity: 0, x: -70, scale: 0.92 }}
+                        animate={{ opacity: 1, x: 0, scale: 1 }}
+                        exit={{ opacity: 0, x: -70, scale: 0.92 }}
+                        transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+                        className="fixed left-3 sm:left-6 top-20 sm:top-24 z-[1050] w-[290px] sm:w-[320px] max-h-[82vh] flex flex-col rounded-3xl bg-slate-950/92 backdrop-blur-2xl border border-purple-500/50 shadow-[0_0_40px_rgba(168,85,247,0.35)] overflow-hidden"
+                    >
+                        {/* Header */}
+                        <div className="flex items-center justify-between px-3.5 py-2.5 bg-gradient-to-r from-purple-950/90 to-slate-900/90 border-b border-purple-500/30">
+                            <div className="flex items-center gap-2 min-w-0">
+                                <Sparkles className="w-4 h-4 text-amber-300 animate-spin" style={{ animationDuration: '4s' }} />
+                                <div className="min-w-0">
+                                    <h4 className="text-xs font-bold text-purple-200 truncate flex items-center gap-1.5">
+                                        <span>4K AI Portrait</span>
+                                        <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-purple-500/30 text-purple-300 font-mono">
+                                            Cloudflare
+                                        </span>
+                                    </h4>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setGeneratedPhoto(null)}
+                                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+                                title="Close popup"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+
+                        {/* Image Preview Container */}
+                        <div className="relative group overflow-hidden bg-black/80 flex items-center justify-center max-h-[280px]">
+                            <img
+                                src={generatedPhoto.url}
+                                alt={generatedPhoto.prompt}
+                                className="w-full h-auto object-cover max-h-[280px] cursor-pointer transition-transform duration-300 group-hover:scale-105"
+                                onClick={() => setIsPhotoFullScreen(true)}
+                            />
+                            <div
+                                onClick={() => setIsPhotoFullScreen(true)}
+                                className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer"
+                            >
+                                <span className="text-xs text-white bg-black/75 px-3 py-1 rounded-full border border-white/20 backdrop-blur-md flex items-center gap-1">
+                                    <span>🔍</span> Zoom 4K
+                                </span>
+                            </div>
+                        </div>
+
+                        {/* Prompt & WhatsApp Delivery Controls */}
+                        <div className="p-3 flex flex-col gap-2.5 overflow-y-auto no-scrollbar">
+                            <p className="text-[11px] text-slate-300 italic line-clamp-3 leading-relaxed bg-white/5 p-2 rounded-xl border border-white/5">
+                                "{generatedPhoto.prompt}"
+                            </p>
+
+                            {/* WhatsApp Delivery Status Badge */}
+                            <div className="flex items-center justify-between text-[11px] px-1">
+                                <span className="text-slate-400">WhatsApp Delivery:</span>
+                                {generatedPhoto.whatsappSent ? (
+                                    <span className="flex items-center gap-1 text-emerald-400 font-semibold">
+                                        <span>Delivered to {generatedPhoto.recipient || 'Boss'}</span>
+                                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                    </span>
+                                ) : (
+                                    <span className="text-amber-300 font-medium">Ready in Dashboard</span>
+                                )}
+                            </div>
+
+                            {/* Action Buttons */}
+                            <div className="grid grid-cols-2 gap-2 pt-1">
+                                <button
+                                    onClick={async () => {
+                                        try {
+                                            setIsSendingPhotoWhatsApp(true);
+                                            const res = await fetch('/api/whatsapp/send-photo', {
+                                                method: 'POST',
+                                                headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify({
+                                                    contactNameOrPhone: 'boss',
+                                                    imageBase64: generatedPhoto.url,
+                                                    caption: `📸 *4K AI Portrait Generated by Friday*\n_${generatedPhoto.prompt}_`,
+                                                }),
+                                            });
+                                            const data = await res.json();
+                                            if (data?.ok) {
+                                                setGeneratedPhoto(prev => prev ? { ...prev, whatsappSent: true } : prev);
+                                                triggerFaceToast('📲', 'Photo Sent to Boss', 'Delivered via WhatsApp', 'emerald');
+                                            }
+                                        } catch (e) {
+                                            console.error('Failed to send photo on WhatsApp', e);
+                                        } finally {
+                                            setIsSendingPhotoWhatsApp(false);
+                                        }
+                                    }}
+                                    disabled={isSendingPhotoWhatsApp}
+                                    className={`flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl text-xs font-semibold border transition-all ${
+                                        generatedPhoto.whatsappSent
+                                            ? 'bg-emerald-600/30 border-emerald-500/50 text-emerald-200 hover:bg-emerald-600/40'
+                                            : 'bg-emerald-600 hover:bg-emerald-500 border-emerald-400/50 text-white shadow-[0_0_15px_rgba(16,185,129,0.3)]'
+                                    }`}
+                                >
+                                    {isSendingPhotoWhatsApp ? (
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    ) : generatedPhoto.whatsappSent ? (
+                                        <>
+                                            <span>📲 Resend</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <span>📲 Send Boss</span>
+                                        </>
+                                    )}
+                                </button>
+
+                                <a
+                                    href={generatedPhoto.url}
+                                    download={`friday-4k-${Date.now()}.jpg`}
+                                    className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl text-xs font-semibold bg-purple-600/30 hover:bg-purple-600/50 border border-purple-500/40 text-purple-200 transition-all shadow-md"
+                                >
+                                    <Download className="w-3.5 h-3.5" />
+                                    <span>Download</span>
+                                </a>
+                            </div>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* ── Full-screen 4K Photo Zoom Modal ── */}
+            <AnimatePresence>
+                {isPhotoFullScreen && generatedPhoto && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-[1200] bg-black/90 backdrop-blur-2xl flex flex-col items-center justify-center p-4"
+                        onClick={() => setIsPhotoFullScreen(false)}
+                    >
+                        <div className="relative max-w-4xl max-h-[90vh] flex flex-col items-center" onClick={e => e.stopPropagation()}>
+                            <img
+                                src={generatedPhoto.url}
+                                alt={generatedPhoto.prompt}
+                                className="max-h-[78vh] w-auto object-contain rounded-2xl border border-purple-500/40 shadow-[0_0_50px_rgba(168,85,247,0.3)]"
+                            />
+                            <div className="mt-3 flex items-center gap-3">
+                                <a
+                                    href={generatedPhoto.url}
+                                    download={`friday-4k-portrait-${Date.now()}.jpg`}
+                                    className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold flex items-center gap-2 shadow-lg transition-all"
+                                >
+                                    <Download className="w-4 h-4" />
+                                    Download 4K Ultra HD
+                                </a>
+                                <button
+                                    onClick={() => setIsPhotoFullScreen(false)}
+                                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-medium transition-colors"
+                                >
+                                    Close
+                                </button>
+                            </div>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             {/* 📞 Active Call Screen (Full-Screen In-Call UI with Timer, DTMF Keypad, Mute, Disconnect Tone) */}
             {activeInCallModal && (

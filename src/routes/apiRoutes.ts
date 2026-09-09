@@ -2755,5 +2755,51 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
+  // ── 4K Cloudflare AI Photo Generation & WhatsApp Delivery Endpoint ────────
+  app.post("/api/generate-photo", async (req, res) => {
+    try {
+      const { prompt, aspectRatio, sendToWhatsApp, targetRecipient } = req.body || {};
+      if (!prompt || !String(prompt).trim()) {
+        return res.status(400).json({ ok: false, error: "Prompt is required" });
+      }
+
+      const result = await toolsEngine.generateAiPhoto(String(prompt).trim(), {
+        aspectRatio: aspectRatio || "9:16",
+        sendToWhatsApp: !!sendToWhatsApp,
+        targetRecipient: targetRecipient || "boss",
+      });
+
+      res.json({ ok: result.success, ...result });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || "Failed to generate photo" });
+    }
+  });
+
+  // ── Send Photo to WhatsApp Endpoint ────────────────────────────────────────
+  app.post("/api/whatsapp/send-photo", async (req, res) => {
+    try {
+      const { contactNameOrPhone, imageBase64, imageUrl, caption } = req.body || {};
+      let imagePayload: any = imageUrl;
+      if (imageBase64) {
+        const cleanB64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+        imagePayload = Buffer.from(cleanB64, "base64");
+      }
+
+      if (!imagePayload) {
+        return res.status(400).json({ ok: false, error: "Image data or URL is required" });
+      }
+
+      const sendRes = await toolsEngine.sendPhotoToWhatsApp(
+        contactNameOrPhone || "boss",
+        imagePayload,
+        caption || "📸 Photo from Friday AI"
+      );
+
+      res.json({ ok: sendRes.success, ...sendRes });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || "Failed to send photo on WhatsApp" });
+    }
+  });
+
   return router;
 }

@@ -93,6 +93,25 @@ function extractValidImageBuffer(rawBuf: Buffer): { buffer: Buffer; mimeType: st
 
 class ImageGenerationService {
   /**
+   * Intelligently enhances a prompt for 4K ultra-realistic cinematic / portrait rendering.
+   */
+  public enhancePortraitPrompt(rawPrompt: string, isPortrait: boolean = true): string {
+    const clean = (rawPrompt || "").trim();
+    if (!clean) return clean;
+
+    // Check if user already gave an ultra detailed prompt
+    if (clean.length > 200 && clean.includes("8k") && clean.includes("photorealistic")) {
+      return clean;
+    }
+
+    const portraitKeywords = isPortrait
+      ? "cinematic 4k portrait photography, beautiful composition, soft natural rim lighting, sharp focus, detailed facial features, realistic skin texture, shallow depth of field, 85mm f/1.4 lens, 8k resolution, photorealistic, masterpiece"
+      : "cinematic ultra-realistic 4k photograph, highly detailed, vivid natural colors, realistic textures, volumetric lighting, 8k uhd, masterpiece";
+
+    return `${clean}, ${portraitKeywords}`;
+  }
+
+  /**
    * Generates a photorealistic AI image from a text prompt.
    * Returns a clean binary Buffer with verified magic bytes ready for WhatsApp media upload.
    */
@@ -103,7 +122,7 @@ class ImageGenerationService {
       enhancePrompt?: boolean;
     } = {}
   ): Promise<GeneratedImageResult> {
-    const rawPrompt = (prompt || "").trim();
+    let rawPrompt = (prompt || "").trim();
     if (!rawPrompt) {
       return {
         success: false,
@@ -111,6 +130,11 @@ class ImageGenerationService {
         prompt: "",
         error: "Prompt cannot be empty",
       };
+    }
+
+    const isPortrait = options.aspectRatio === "9:16" || options.aspectRatio === "3:4" || /portrait|ladki|girl|woman|face|person/i.test(rawPrompt);
+    if (options.enhancePrompt !== false) {
+      rawPrompt = this.enhancePortraitPrompt(rawPrompt, isPortrait);
     }
 
     // ── Tier 1: Cloudflare Workers AI (Primary Engine - Ultra-Fast Edge FLUX.1) ─

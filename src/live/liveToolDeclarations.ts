@@ -5,6 +5,54 @@
 
 const rawFunctionDeclarations: any[] = [
   {
+    "name": "generate_ai_photo",
+    "description": "Generate an ultra-realistic 4K AI portrait/landscape photograph using Cloudflare Workers AI FLUX / SDXL. Use whenever Boss DK or user asks 'ek photo banao', 'ladki ka photo banao jo jungle me ho', 'generate a 4k portrait photo', 'make an image of...', 'ai photo generate karo'. Automatically displays the image in the dashboard's left side popup card and can automatically send it to Boss on WhatsApp.",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {
+        "prompt": {
+          "type": "STRING",
+          "description": "Detailed visual description of the photo/image to generate (e.g. 'A beautiful girl in a deep lush jungle with emerald leaves, 4k portrait, soft rim light')"
+        },
+        "aspectRatio": {
+          "type": "STRING",
+          "description": "Aspect ratio: '9:16' for vertical portrait (recommended for person/mobile), '1:1' for square, '16:9' for landscape"
+        },
+        "sendToWhatsApp": {
+          "type": "BOOLEAN",
+          "description": "Set to true if user wants to send the generated photo to Boss or on WhatsApp ('whatsapp par bhej do', 'boss ko send karo')"
+        },
+        "targetRecipient": {
+          "type": "STRING",
+          "description": "Recipient contact name, 'boss', 'dk', or phone number to send the photo on WhatsApp"
+        }
+      },
+      "required": [
+        "prompt"
+      ]
+    }
+  },
+  {
+    "name": "send_photo_to_whatsapp",
+    "description": "Send a generated photo or an image to Boss or a contact on WhatsApp.",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {
+        "contactNameOrPhone": {
+          "type": "STRING",
+          "description": "Contact name (e.g. 'boss', 'dk') or phone number"
+        },
+        "caption": {
+          "type": "STRING",
+          "description": "Optional caption or message describing the photo"
+        }
+      },
+      "required": [
+        "contactNameOrPhone"
+      ]
+    }
+  },
+  {
     "name": "start_background_task",
     "description": "Start a background task (e.g. weather update, live cricket score check, product deal search, security scan, codebase audit, or custom background operation). Friday immediately acknowledges in conversation that the task has started in background, and when it finishes, it will be reported at the end of a turn or when DK asks.",
     "parameters": {

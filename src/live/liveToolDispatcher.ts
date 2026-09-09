@@ -130,6 +130,50 @@ export async function dispatchLiveToolCall(call: any, context: ToolDispatchConte
                   await memoryEngine.addPersonalVaultFact("custom_skill", fact);
                   result = { success: true, message: `Skill "${skillName}" successfully integrated into Friday's brain!` };
                   clientWs.send(JSON.stringify({ type: "skill_added", skill: { skillName, ruleInstruction } }));
+                } else if (call.name === "generate_ai_photo") {
+                  const { prompt, aspectRatio, sendToWhatsApp, targetRecipient } = call.args || {};
+                  const genRes = await toolsEngine.generateAiPhoto(prompt, {
+                    aspectRatio: aspectRatio || "9:16",
+                    sendToWhatsApp: !!sendToWhatsApp || !!targetRecipient,
+                    targetRecipient: targetRecipient || "boss",
+                  });
+                  result = genRes;
+                  if (genRes.success) {
+                    clientWs.send(
+                      JSON.stringify({
+                        type: "image_generated",
+                        prompt: genRes.prompt,
+                        model: genRes.model,
+                        imageUrl: genRes.imageUrl,
+                        aspectRatio: genRes.aspectRatio,
+                        whatsappSent: genRes.whatsappSent,
+                        recipient: genRes.recipient,
+                        message: genRes.message,
+                      })
+                    );
+                    if (genRes.whatsappSent) {
+                      clientWs.send(
+                        JSON.stringify({
+                          type: "photo_sent_whatsapp",
+                          recipient: genRes.recipient,
+                          prompt: genRes.prompt,
+                        })
+                      );
+                    }
+                  }
+                } else if (call.name === "send_photo_to_whatsapp") {
+                  const { contactNameOrPhone, caption } = call.args || {};
+                  const sendRes = await toolsEngine.sendPhotoToWhatsApp(contactNameOrPhone || "boss", "last_generated", caption);
+                  result = sendRes;
+                  if (sendRes.success) {
+                    clientWs.send(
+                      JSON.stringify({
+                        type: "photo_sent_whatsapp",
+                        recipient: sendRes.recipient,
+                        phone: sendRes.phone,
+                      })
+                    );
+                  }
                 } else if (call.name === "save_contact") {
                   const { contactName, phoneNumber, relation } = call.args || {};
                   const entry = await contactsService.saveContact(contactName, phoneNumber, relation);
