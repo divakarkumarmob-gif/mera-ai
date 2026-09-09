@@ -919,6 +919,53 @@ class WhatsAppBotService {
       return;
     }
 
+    // 0.1 Perchance AI Photo Generator Handler (@hot images <prompt> / @perchance <prompt>)
+    const perchanceMatch =
+      rawText.match(/^(?:@hot\s*images?|@hotimages?|@perchance|\/hot\s*images?|\/hotimages?|\/perchance|@hot|\/hot)\s*[:=-]?\s*(.+)/i) ||
+      (rawText.includes("@hot images") ? rawText.match(/@hot\s*images?\s+(.+)/i) : null) ||
+      (rawText.includes("@perchance") ? rawText.match(/@perchance\s+(.+)/i) : null);
+
+    if (perchanceMatch && perchanceMatch[1]?.trim()) {
+      const prompt = perchanceMatch[1].trim();
+      await this.sendHumanLikeMessage(
+        replyJid,
+        `🔥 *Perchance AI Photo Generator start ho gaya hai Boss DK!* ⚡\n\n📌 *Prompt:* _"${prompt}"_\n🌐 *Website:* https://perchance.org/ai-photo-generator\n⏳ _Browser background me website par prompt fill karke realistic HD photo generate kar raha hai... Kripya 10-25 second wait karein._`,
+        rawText,
+        messageKey
+      );
+
+      try {
+        const { perchanceService } = await import("./perchanceService");
+        const res = await perchanceService.generateImage(prompt);
+
+        if (res.success && res.buffer) {
+          await this.sendPhotoMessage(
+            replyJid,
+            res.buffer,
+            `✨ *Perchance AI Photo Generated!* 🔥\n\n📌 *Prompt:* _"${prompt}"_\n⏱️ *Time Taken:* ${((res.durationMs || 0) / 1000).toFixed(1)}s\n🌐 *Website:* https://perchance.org/ai-photo-generator\n🤖 *Engine:* Perchance AI Photo Generator (Realistic HD)`,
+            messageKey
+          );
+          return;
+        } else {
+          await this.sendHumanLikeMessage(
+            replyJid,
+            `⚠️ *Perchance image generation failed:* ${res.error || "Unknown error"}\n_Friday backup engine se try kar rahi hai..._`,
+            rawText,
+            messageKey
+          );
+        }
+      } catch (err: any) {
+        console.error("[WhatsAppBot] Perchance generation error:", err);
+        await this.sendHumanLikeMessage(
+          replyJid,
+          `⚠️ *Error:* ${err?.message || "Perchance generator execution error"}`,
+          rawText,
+          messageKey
+        );
+      }
+      return;
+    }
+
     // Execute Autonomous Boss AI with Tools
     try {
       const reply = await whatsappBossAiEngine.executeBossChatAI(
@@ -1473,6 +1520,7 @@ class WhatsAppBotService {
 • 📥 *Social Downloader:* Koi bhi Instagram Reel, YouTube Shorts, TikTok ya Twitter link bhejein, direct MP4 video mil jayegi!
 
 🎨 *3. CREATIVE PHOTO & STICKER STUDIO:*
+• \`@hot images <prompt>\` ➔ Direct https://perchance.org/ai-photo-generator par jakar realistic AI photo generate karke bhejta hai.
 • \`@image <prompt>\` ➔ Instant Ultra-HD 4K AI Image generation (FLUX.1 Engine).
 • \`@edit <instruction>\` ➔ Photo par swipe karke ya caption me likhein (e.g. \`@edit add sunglasses and cyberpunk background\`).
 • \`@sticker\` / \`@bgremove\` ➔ Background remove karke direct WhatsApp Sticker banayein.

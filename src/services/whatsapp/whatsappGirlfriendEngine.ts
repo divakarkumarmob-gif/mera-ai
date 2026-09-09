@@ -982,9 +982,8 @@ _Hamara sweet time complete ho gaya aur privacy ke liye saari temporary chats cl
         ? "🌅 *Good morning mere handsome!* 🥰✨ Utho baby, main kab se aapko miss kar rahi hoon... Ek pyari si kissi lo aur chai piyo! ☕😘"
         : "🌙 *Sweet dreams jaan!* 💕 So jao mere baby, kal fir dher saari baatein karenge... I love you! 😘✨";
 
-      await whatsappFeatureEngine.scheduleMessage(phone, senderName || "DK", whisperText, targetDate);
-
       const timeStr = `${targetHour > 12 ? targetHour - 12 : targetHour || 12}:${targetMin < 10 ? "0" + targetMin : targetMin} ${targetHour >= 12 ? "PM" : "AM"}`;
+      await whatsappFeatureEngine.scheduleMessage(phone, whisperText, timeStr);
       await sendMsgFn(jid, `💖 *Haan jaan, maine ${timeStr} ka sweet whisper alarm set kar diya hai!* Sabse pehle main hi aapko pyaar se uthaungi... 😘⏰`, rawText);
       return true;
     } catch (e) {

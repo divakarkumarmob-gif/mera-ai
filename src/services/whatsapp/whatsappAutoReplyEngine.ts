@@ -535,6 +535,37 @@ TONE & STYLE:
       return;
     }
 
+    // Perchance AI Photo Generator in Groups (@hot images <prompt> / @perchance <prompt>)
+    const groupPerchanceMatch =
+      text.match(/^(?:@hot\s*images?|@hotimages?|@perchance|\/hot\s*images?|\/hotimages?|\/perchance|@hot|\/hot)\s*[:=-]?\s*(.+)/i) ||
+      (text.includes("@hot images") ? text.match(/@hot\s*images?\s+(.+)/i) : null) ||
+      (text.includes("@perchance") ? text.match(/@perchance\s+(.+)/i) : null);
+
+    if (groupPerchanceMatch && groupPerchanceMatch[1]?.trim()) {
+      const prompt = groupPerchanceMatch[1].trim();
+      try {
+        await sendMsgFn(
+          groupJid,
+          `🔥 *Perchance AI Photo Generator start ho gaya hai ${senderName}!* ⚡\n\n📌 *Prompt:* _"${prompt}"_\n🌐 *Website:* https://perchance.org/ai-photo-generator\n⏳ _Browser background me image generate kar raha hai... Kripya 10-25 sec wait karein._`,
+          text,
+          messageKey
+        );
+        const { perchanceService } = await import("../perchanceService");
+        const res = await perchanceService.generateImage(prompt);
+        if (res.success && res.buffer) {
+          await sendPhotoFn(
+            groupJid,
+            res.buffer,
+            `✨ *Perchance AI Photo Generated for ${senderName}!* 🔥\n📌 *Prompt:* _"${prompt}"_\n⏱️ *Time:* ${((res.durationMs || 0) / 1000).toFixed(1)}s\n🌐 *Source:* https://perchance.org/ai-photo-generator`,
+            messageKey
+          );
+          return;
+        }
+      } catch (perchanceErr) {
+        console.error("[WhatsAppAutoReply] Group perchance generation error:", perchanceErr);
+      }
+    }
+
     const groupImgMatch =
       text.match(/^(?:@image|\/image|image:|photo\s*banao|image\s*banao|tasveer\s*banao|generate\s*image|draw\s*image|draw)\s*[:=-]?\s*(.+)/i) ||
       (text.includes("@image") ? text.match(/@image\s+(.+)/i) : null);
