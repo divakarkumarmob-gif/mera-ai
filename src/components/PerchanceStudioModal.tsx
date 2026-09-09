@@ -118,122 +118,76 @@ export default function PerchanceStudioModal({ onClose }: { onClose: () => void 
     setGenerationLogs([]);
     setCurrentStepIndex(1);
 
+    const nowStr = () => {
+      const now = new Date();
+      return `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}:${now.getSeconds().toString().padStart(2, "0")}`;
+    };
+
+    const addLocalLog = (level: StepLog["level"], step: string, message: string) => {
+      setGenerationLogs((prev) => [...prev, { level, step, message, timestamp: nowStr() }]);
+    };
+
+    addLocalLog("info", "Browser Initialization", "Scanning OS environment & launching headless Chrome engine...");
+
+    const stepInterval = setInterval(() => {
+      setTimerSeconds((sec) => {
+        if (sec === 3) {
+          setCurrentStepIndex(2);
+          addLocalLog("info", "Page Navigation", "Navigating to https://perchance.org/ai-photo-generator (DOM loading)...");
+        } else if (sec === 7) {
+          setCurrentStepIndex(3);
+          addLocalLog("info", "Prompt & Action", `Targeting generator iframe & typing prompt: "${cleanPrompt}"...`);
+        } else if (sec === 11) {
+          setCurrentStepIndex(4);
+          addLocalLog("info", "Network Stream", "✨ Generate triggered! Intercepting temporary image response stream...");
+        }
+        return sec;
+      });
+    }, 1000);
+
     const token = getAppToken() || "";
 
     try {
-      const streamUrl = getApiUrl(
-        `/api/perchance/generate-stream?prompt=${encodeURIComponent(cleanPrompt)}&timeoutMs=120000&token=${encodeURIComponent(token)}`
-      );
-
-      const res = await fetch(streamUrl, {
+      const res = await fetch(getApiUrl("/api/perchance/generate"), {
+        method: "POST",
         headers: {
+          "Content-Type": "application/json",
           "x-app-key-token": token,
         },
+        body: JSON.stringify({ prompt: cleanPrompt, timeoutMs: 120000 }),
       });
 
-      if (!res.ok || !res.body) {
-        throw new Error(`Server returned HTTP ${res.status}`);
+      clearInterval(stepInterval);
+
+      const rawText = await res.text();
+      let data: any = null;
+      try {
+        data = rawText ? JSON.parse(rawText) : null;
+      } catch {
+        data = null;
       }
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder("utf-8");
-      let buffer = "";
-      let receivedComplete = false;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const events = buffer.split("\n\n");
-        buffer = events.pop() || "";
-
-        for (const rawEvent of events) {
-          if (!rawEvent.trim() || rawEvent.startsWith(":")) continue;
-
-          let eventName = "message";
-          let dataStr = "";
-
-          const lines = rawEvent.split("\n");
-          for (const line of lines) {
-            if (line.startsWith("event:")) {
-              eventName = line.replace("event:", "").trim();
-            } else if (line.startsWith("data:")) {
-              dataStr += line.replace("data:", "").trim();
-            }
-          }
-
-          if (!dataStr) continue;
-
-          try {
-            const data = JSON.parse(dataStr);
-            if (eventName === "log" || data.level) {
-              setGenerationLogs((prev) => [...prev, data]);
-              const msg = (data.message || "").toLowerCase();
-              const stepName = (data.step || "").toLowerCase();
-              if (stepName.includes("browser") || msg.includes("chrome")) setCurrentStepIndex(1);
-              else if (stepName.includes("navigation") || stepName.includes("dom")) setCurrentStepIndex(2);
-              else if (stepName.includes("prompt") || stepName.includes("trigger") || stepName.includes("action")) setCurrentStepIndex(3);
-              else if (stepName.includes("network") || stepName.includes("frame") || msg.includes("intercept")) setCurrentStepIndex(4);
-              else if (stepName.includes("complete")) setCurrentStepIndex(5);
-            } else if (eventName === "complete" || data.image) {
-              receivedComplete = true;
-              setGeneratedImage(data.image);
-              setImageMeta({ bytes: data.bytes || 0, durationMs: data.durationMs || 0 });
-              setCurrentStepIndex(5);
-            } else if (eventName === "error" || data.error) {
-              setErrorMessage(data.error || "Generation error on server");
-            }
-          } catch {}
+      if (data && data.ok && data.image) {
+        if (data.logs && data.logs.length > 0) {
+          setGenerationLogs(data.logs);
+        } else {
+          addLocalLog("success", "Complete", `Image generated successfully (${((data.bytes || 0) / 1024).toFixed(1)} KB)!`);
         }
-      }
-
-      if (!receivedComplete) {
-        // Direct REST fallback if stream closed without payload
-        const restRes = await fetch(getApiUrl("/api/perchance/generate"), {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-app-key-token": token,
-          },
-          body: JSON.stringify({ prompt: cleanPrompt, timeoutMs: 120000 }),
-        });
-        const restData = await restRes.json();
-        if (restData.ok && restData.image) {
-          setGeneratedImage(restData.image);
-          setImageMeta({ bytes: restData.bytes || 0, durationMs: restData.durationMs || 0 });
-          if (restData.logs && restData.logs.length > 0) {
-            setGenerationLogs(restData.logs);
-          }
-          setCurrentStepIndex(5);
-        } else if (!generatedImage) {
-          setErrorMessage(restData.error || "Generation failed on server");
-        }
+        setGeneratedImage(data.image);
+        setImageMeta({ bytes: data.bytes || 0, durationMs: data.durationMs || 0 });
+        setCurrentStepIndex(5);
+      } else {
+        const errMsg = data?.error || (res.status !== 200 ? `Server returned HTTP ${res.status}` : "Generation failed on server");
+        addLocalLog("error", "Execution Failure", errMsg);
+        setErrorMessage(errMsg);
       }
     } catch (err: any) {
-      // Direct REST fallback on network exception
-      try {
-        const restRes = await fetch(getApiUrl("/api/perchance/generate"), {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-app-key-token": token,
-          },
-          body: JSON.stringify({ prompt: cleanPrompt, timeoutMs: 120000 }),
-        });
-        const restData = await restRes.json();
-        if (restData.ok && restData.image) {
-          setGeneratedImage(restData.image);
-          setImageMeta({ bytes: restData.bytes || 0, durationMs: restData.durationMs || 0 });
-          if (restData.logs && restData.logs.length > 0) {
-            setGenerationLogs(restData.logs);
-          }
-          setCurrentStepIndex(5);
-          return;
-        }
-      } catch {}
-      setErrorMessage(err?.message || "Failed to connect to generation stream");
+      clearInterval(stepInterval);
+      const errMsg = err?.message || "Network connection error";
+      addLocalLog("error", "Connection Error", errMsg);
+      setErrorMessage(errMsg);
     } finally {
+      clearInterval(stepInterval);
       setIsGenerating(false);
     }
   };
