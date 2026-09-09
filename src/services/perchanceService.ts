@@ -36,6 +36,71 @@ export class PerchanceService {
     return PerchanceService.instance;
   }
 
+  /**
+   * Solves Cloudflare Turnstile token using Capsolver API
+   */
+  public async solveTurnstileWithCapsolver(
+    websiteURL: string,
+    websiteKey = "0x4AAAAAAADnPIDROrmt1Wwj",
+    proxy?: string
+  ): Promise<string | null> {
+    const apiKey = process.env.CAPSOLVER_API_KEY || process.env.CAP_SOLVER_KEY;
+    if (!apiKey) return null;
+
+    try {
+      const taskPayload: any = {
+        clientKey: apiKey,
+        task: proxy
+          ? {
+              type: "AntiTurnstileTask",
+              websiteURL,
+              websiteKey,
+              proxy,
+            }
+          : {
+              type: "AntiTurnstileTaskProxyLess",
+              websiteURL,
+              websiteKey,
+            },
+      };
+
+      const createRes = await fetch("https://api.capsolver.com/createTask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(taskPayload),
+      });
+      const createData: any = await createRes.json();
+      if (!createData || createData.errorId !== 0 || !createData.taskId) {
+        console.warn("[Capsolver] Create task error:", createData);
+        return null;
+      }
+
+      const taskId = createData.taskId;
+
+      // Poll result every 2s
+      const pollStart = Date.now();
+      while (Date.now() - pollStart < 45000) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const res = await fetch("https://api.capsolver.com/getTaskResult", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ clientKey: apiKey, taskId }),
+        });
+        const data: any = await res.json();
+        if (data.status === "ready" && data.solution?.token) {
+          return data.solution.token;
+        }
+        if (data.status === "failed") {
+          console.warn("[Capsolver] Task failed:", data.errorDescription);
+          break;
+        }
+      }
+    } catch (e: any) {
+      console.warn("[Capsolver] Exception while solving Turnstile:", e?.message || e);
+    }
+    return null;
+  }
+
   private findBinaryInDir(dir: string): string | null {
     try {
       if (!fs.existsSync(dir)) return null;
