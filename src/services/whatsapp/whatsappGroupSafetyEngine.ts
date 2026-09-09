@@ -46,20 +46,60 @@ export class WhatsAppGroupSafetyEngine {
     "fuck", "fucking", "fucker", "motherfucker", "bitch", "slut", "whore", "bastard", "asshole", "cunt", "pussy", "dick", "porn", "nude", "naked", "nsfw", "xxx"
   ]);
 
-  // ── 2. Multi-Word Phrases & Devanagari Patterns ────────────────────────────
+  // ── 2. Multi-Word Phrases, Hinglish Colloquial Slurs & Devanagari Patterns ─
   private static readonly PROFANITY_PHRASES: RegExp[] = [
-    /\b(?:teri\s+m[a@4]+(?:\s+k[i1]|\s+k[a@4])\b)/i,
-    /\b(?:m[a@4]+\s+k[i1]\s+ch[u0]t)\b/i,
+    // Teri maa / behen / family variations
+    /\b(?:teri\s+(?:m[a@4]+|m[a@4][a@4]|mummy|ammi|mai|behan|bhen|behen|sister|dadi|nani)\s+(?:k[i1]|k[a@4]|k[o0]|pe|me|se)\b)/i,
+    /\b(?:apni\s+(?:m[a@4]+|bhen|behen|g[a@4]+nd)\s+(?:chud[a@4]|marw[a@4]|d[e3]|le))\b/i,
+    /\b(?:m[a@4]+\s+k[i1]\s+(?:ch[u0]t|ch[o0][o0]t|l[a@4]ud[a@4]|bhosd[a@4]|[a@4]nkh|chud[a@4]i))\b/i,
     /\b(?:m[a@4]+\s+k[a@4]\s+bh[o0]sd[a@4])\b/i,
+    /\b(?:m[a@4]+\s+chud[a@4]|m[a@4]+\s+chud[a@4]o|m[a@4]\s*chud[a@4])\b/i,
+    /\b(?:bhen\s+chud[a@4]|behen\s+chud[a@4]|bhen\s*chud[a@4])\b/i,
     /\b(?:bh[e3]n\s+k[e3]\s+l[o0]d[e3]|bh[e3]n\s+k\s+l[o0]d[e3]|b[e3]h[e3]n\s+k[e3]\s+l[o0]d[e3]|b[e3]h[a@4]n\s+k[e3]\s+l[o0]d[e3])\b/i,
     /\b(?:bh[o0]sd[i1]\s+k[e3]|bh[o0]s[a@4]d[i1]\s+k[e3])\b/i,
-    /\b(?:g[a@4]+nd\s+(?:m[a@4]r|f[a@4]d|ch[u0]d|m[a@4]rw[a@4]|m[a@4]r[a@4]o|m[e3]\s+u))\b/i,
-    /\b(?:l[u0]nd\s+(?:l[e3]|m[e3]r[a@4]|p[e3]|ch[u0]s|d[e3]|f[e3]k))\b/i,
-    /\b(?:l[a@4]ud[e3]\s+l[a@4]g\s+g[a@4]y[e3]|l[o0]d[e3]\s+l[a@4]g\s+g[a@4]y[e3])\b/i,
-    /\b(?:r[a@4]nd[i1]\s+k[a@4]\s+b[a@4]ch[a@4]|r[a@4]nd[i1]\s+k[i1]\s+[a@4]ul[a@4]d|r[a@4]nd[i1]\s+r[o0]n[a@4])\b/i,
-    /\b(?:kutt[e3]\s+k[e3]\s+p[i1]ll[e3]|kutt[e3]\s+k[a@4]\s+p[i1]ll[a@4]|su[a@4]r\s+k[e3]\s+b[a@4]chh[e3])\b/i,
-    /\b(?:jh[a@4]+t\s+k[e3]\s+b[a@4]l|jh[a@4]+t\s+k[e3]\s+l[o0]d[e3])\b/i,
+
+    // Gand / Gaand variations
+    /\b(?:g[a@4]+nd\s+(?:m[a@4]r[a@4]|m[a@4]r[a@4]o|m[a@4]rw[a@4]|f[a@4]d|f[a@4]+d|chud|m[e3]\s+d[a@4]l|m[e3]\s+ghus|tod|todung[a@4]|f[a@4]dung[a@4]|k[a@4]\s+andh[a@4]|m[e3]\s+ungl[i1]))\b/i,
+    /\b(?:g[a@4]+ndu\s+(?:s[a@4]l[e3]|ins[a@4]n|log|k[a@4]h[i1]n\s+k[a@4]))\b/i,
+
+    // Lund / Lauda / Loda variations
+    /\b(?:l[u0]nd\s+(?:l[e3]|l[e3]l[e3]|p[e3]|p[e3]\s+baith|ch[u0]s|ch[u0]so|pakad|d[e3]|m[e3]r[a@4]|k[a@4]|jais[a@4]|k[e3]\s+t[o0]p[e3]))\b/i,
+    /\b(?:l[a@4]ud[e3]\s+(?:l[a@4]g\s+g[a@4]y[e3]|nik[a@4]l|p[e3]|chup|p[e3]\s+baith|m[e3]r[e3]))\b/i,
+    /\b(?:l[o0]d[e3]\s+(?:l[a@4]g\s+g[a@4]y[e3]|nik[a@4]l|p[e3]|chup|p[e3]\s+baith|m[e3]r[e3]|k[e3]))\b/i,
+    /\b(?:b[a@4]ap\s+ko\s+m[a@4]t\s+ch[o0]d|b[a@4]ap\s+k[o0]\s+ch[o0]d)\b/i,
+
+    // Chutiya / Chutiyapa variations
+    /\b(?:chutiya\s+(?:s[a@4]l[a@4]|h[a@4]i\s+ky[a@4]|m[a@4]t\s+b[a@4]n[a@4]|b[a@4]n[a@4]y[a@4]|ins[a@4]n|k[a@4]h[i1]n\s+k[a@4]|log|jais[a@4]))\b/i,
+    /\b(?:chutiy[a@4]p[a@4]\s+(?:m[a@4]t\s+k[a@4]r|band\s+k[a@4]r|ch[a@4]l\s+r[a@4]h[a@4]))\b/i,
+    /\b(?:chup\s+chutiy[e3]|nik[a@4]l\s+chutiy[e3]|bhaag\s+chutiy[e3])\b/i,
+
+    // BSDK / Bhosda insults
+    /\b(?:(?:chup|nik[a@4]l|bh[a@4]g|ch[a@4]l|ab[e3]|oy[e3]|suno|sun)\s+(?:bsdk|bhosdike|bhosadike|bkl|lodu|gandu|chutiye|harami))\b/i,
+    /\b(?:(?:bsdk|bhosdike|bhosadike|bkl|lodu|gandu|chutiye|harami)\s+(?:k[e3]|w[a@4]l[e3]|s[a@4]l[e3]|chup|nik[a@4]l|bh[a@4]g|k[a@4]h[i1]n\s+k[a@4]))\b/i,
+
+    // Randi variations
+    /\b(?:r[a@4]nd[i1]\s+(?:k[a@4]\s+b[a@4]ch[a@4]|k[i1]\s+[a@4]ul[a@4]d|k[e3]|r[o0]n[a@4]|b[a@4]z|b[a@4]z[i1]))\b/i,
+    /\b(?:r[a@4]nd[i1]\s+r[o0]n[a@4]\s+(?:m[a@4]t\s+k[a@4]r|b[a@4]nd\s+k[a@4]r))\b/i,
+
+    // Harami / Kamina / Insults
+    /\b(?:h[a@4]r[a@4]m[i1]\s+(?:s[a@4]l[a@4]|s[a@4]l[e3]|k[a@4]h[i1]n\s+k[a@4]|ins[a@4]n|k[e3]))\b/i,
+    /\b(?:kutt[e3]\s+(?:k[e3]\s+p[i1]ll[e3]|k[a@4]\s+p[i1]ll[a@4]|k[i1]\s+m[a@4]ut|k[a@4]min[e3]|s[a@4]l[e3]))\b/i,
+    /\b(?:su[a@4]r\s+(?:k[e3]\s+b[a@4]chh[e3]|k[e3]\s+pill[e3]|s[a@4]l[e3]|k[a@4]h[i1]n\s+k[e3]))\b/i,
+    /\b(?:bh[a@4]dw[e3]\s+(?:s[a@4]l[e3]|k[a@4]h[i1]n\s+k[e3]|log|ins[a@4]n))\b/i,
+    /\b(?:jh[a@4]+t\s+k[e3]\s+(?:b[a@4]l|l[o0]d[e3]|jais[a@4]|b[a@4]r[a@4]b[a@4]r))\b/i,
+    /\b(?:t[a@4]tt[e3]\s+(?:ch[a@4]t|d[a@4]b[a@4]|m[e3]|jais[e3]))\b/i,
+
+    // English & Hinglish cross profanities
+    /\b(?:fuck\s+(?:off|you|u|your|this|that|all|bitch|him|her))\b/i,
+    /\b(?:shut\s+(?:up|the\s+fuck\s+up)|stfu|gtfo)\b/i,
+    /\b(?:son\s+of\s+a\s+(?:bitch|whore))\b/i,
+    /\b(?:suck\s+my\s+(?:dick|cock|balls|nuts))\b/i,
+    /\b(?:go\s+to\s+hell\s+(?:bsdk|sale|chutiye)?)\b/i,
+    /\b(?:dickhead|asshole|motherfucker|dumbass|bastard|bullshit)\b/i,
+
+    // Acronyms
     /\b(?:b\s*\.?\s*s\s*\.?\s*d\s*\.?\s*k|b\s*\.?\s*k\s*\.?\s*l|m\s*\.?\s*c|b\s*\.?\s*c|m\s*\.?\s*k\s*\.?\s*c|t\s*\.?\s*m\s*\.?\s*k\s*\.?\s*c)\b/i,
+
     // Devanagari Hindi Regex
     /(?:मादरचोद|मदरचोद|मादरचोद|बहनचोद|भेनचोद|भोसड़ीके|भोसडीके|भोसड़ा|गांड|गांडू|चूत|चूतिया|चूतिये|लौड़े|लौड़े|लौड़ा|लंड|रांड|रंडी|हरामी|कमीने|कुत्ता|सूअर|झांट|तत्ते|दल्ले|भाड़वे|चोद|चुदाई)/i,
   ];
