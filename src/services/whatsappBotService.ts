@@ -543,6 +543,32 @@ class WhatsAppBotService {
               }
             }
 
+            // 1.8. Natural Language Command Intent Resolver & Smart Suggestion Engine
+            try {
+              const naturalRes = await whatsappGroupSuperPowersEngine.detectAndResolveNaturalCommand(
+                this.sock,
+                remoteJid,
+                groupName || "WhatsApp Group",
+                text,
+                senderName,
+                senderPhone,
+                senderJid,
+                msg.key,
+                quotedMessage,
+                isSenderOwner
+              );
+              if (naturalRes.handled && naturalRes.replyText) {
+                if (naturalRes.mentions && naturalRes.mentions.length > 0) {
+                  await this.sock.sendMessage(remoteJid, { text: naturalRes.replyText, mentions: naturalRes.mentions });
+                } else {
+                  await this.sendHumanLikeMessage(remoteJid, naturalRes.replyText, text, msg.key);
+                }
+                continue;
+              }
+            } catch (naturalErr) {
+              console.warn("[WhatsAppBot] Natural command resolution error:", naturalErr);
+            }
+
             // 2. Check if message contains Gandi Gaali / Profanity / Abusive words or NSFW media
             const hasMediaCheck = !!(
               msg.message?.imageMessage ||

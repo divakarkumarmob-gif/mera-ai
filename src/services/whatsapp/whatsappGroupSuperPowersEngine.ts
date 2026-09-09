@@ -812,6 +812,190 @@ Bhagwan aapko lambi umar, beshumar khushiyan, aur bohot saari success de! 🚀�
     }
     return wishedCount;
   }
+
+  // ── 9. Natural Language Command Intent Resolver & Smart Suggestion Engine ──
+
+  public async detectAndResolveNaturalCommand(
+    sock: any,
+    groupJid: string,
+    groupName: string,
+    rawText: string,
+    senderName: string,
+    senderPhone: string,
+    senderJid: string,
+    messageKey: any,
+    quotedMessage?: QuotedMessageContext | null,
+    isOwner = false
+  ): Promise<{ handled: boolean; replyText?: string; mentions?: string[] }> {
+    const clean = (rawText || "").toLowerCase().trim();
+    if (!clean || clean.length < 4) return { handled: false };
+
+    const { whatsappGroupSafetyEngine } = await import("./whatsappGroupSafetyEngine");
+
+    // ── Phase 1: High-Confidence Rule Matchers (Instant 0-Latency Execution) ──
+
+    // 1. Tag All / Everyone Intent
+    if (
+      /(?:sabko|sabhi\s*(?:ko|members?|logon?\s*ko)|everyone|all\s*members?)\s*(?:tag|mention|bata|bol|suchna|message|notif)/i.test(clean) ||
+      /(?:tag|mention)\s*(?:all|everyone|sabko|sabhi)/i.test(clean)
+    ) {
+      const msg = rawText.replace(/^(?:friday|hey\s*friday|hi\s*friday)?\s*(?:sabko|sabhi\s*(?:ko|members?)|tag|mention|everyone|all\s*members?)\s*(?:tag|mention|karke|bol\s*do|batao|bolo)?\s*[:=-]?\s*/i, "").trim();
+      return await this.handleTagAll(sock, groupJid, groupName, msg || rawText, senderName);
+    }
+
+    // 2. Roast Intent
+    if (/(?:roast|khilli|beizzati|taang\s*khincho|mazaak\s*udao)\s*(?:karo|kar\s*do|karna)?/i.test(clean)) {
+      const target = rawText.replace(/^(?:friday|hey\s*friday)?\s*(?:roast|khilli|beizzati|mazaak)\s*(?:karo|kar\s*do|karna)?\s*(?:ka|ki|ko)?\s*/i, "").trim();
+      return await this.handleRoastAndPraise(`@roast ${target}`, quotedMessage, senderName);
+    }
+
+    // 3. Praise / Hype-man Intent
+    if (/(?:praise|tareef|hype|appreciate|badaai)\s*(?:karo|kar\s*do|karna)?/i.test(clean)) {
+      const target = rawText.replace(/^(?:friday|hey\s*friday)?\s*(?:praise|tareef|hype|appreciate)\s*(?:karo|kar\s*do|karna)?\s*(?:ka|ki|ko)?\s*/i, "").trim();
+      return await this.handleRoastAndPraise(`@praise ${target}`, quotedMessage, senderName);
+    }
+
+    // 4. Group Quiz Intent
+    if (/(?:quiz|trivia|game|sawal\s*jawab)\s*(?:shuru|start|khelo|chalao|karo|lagao)/i.test(clean)) {
+      const topic = rawText.replace(/^(?:friday|hey\s*friday)?\s*(?:quiz|trivia|game)\s*(?:shuru|start|chalao|karo|lagao)?\s*(?:par|topic)?\s*/i, "").trim();
+      return await this.handleGroupQuiz(groupJid, `@quiz start ${topic}`, senderName, senderPhone);
+    }
+
+    // 5. Bill Split / Hisaab Intent
+    if (/(?:hisaab|hisab|bill|kharcha|paisa|rupees?|split)\s*(?:split|baant|calculate|karo|batao|divide)/i.test(clean) || /(?:split|divide)\s*(?:karo|kar\s*do)?\s*\d+/i.test(clean)) {
+      return await this.handleBillSplit(rawText, groupName, senderName);
+    }
+
+    // 6. Fact Check / Judge Intent
+    if (/(?:fact\s*check|sach\s*kya\s*hai|sahi\s*bol\s*raha|faisla|asliyat\s*batao|kya\s*ye\s*sach)/i.test(clean)) {
+      return await this.handleJudgeFactCheck(rawText, quotedMessage, senderName);
+    }
+
+    // 7. Decisions / Notes Intent
+    if (/(?:kya\s*decide\s*hua|decision|meeting\s*notes|to-?do|tasks?|final\s*kya\s*hua|kya\s*faisla)/i.test(clean)) {
+      return await this.handleDecisionTracker(groupJid, groupName, rawText, quotedMessage);
+    }
+
+    // 8. Birthday Add / List Intent
+    if (/(?:birthday|bday|janamdin)\s*(?:add|save|note|set)\s*(?:karo|kar\s*do)?/i.test(clean) || /(?:ka\s*birthday|ka\s*janamdin)\s*(?:hai|aata|padta)/i.test(clean)) {
+      return await this.handleBirthdayManager(groupJid, groupName, `@birthday add ${rawText}`, senderName, senderPhone, quotedMessage);
+    }
+    if (/(?:birthdays?|janamdin)\s*(?:list|kab\s*hai|upcoming|batao)/i.test(clean)) {
+      return await this.handleBirthdayManager(groupJid, groupName, "@birthday list", senderName, senderPhone, quotedMessage);
+    }
+
+    // 9. Safety @block safe / @allow all Intent
+    if (/(?:gaali|abuse|profanity|gandi\s*photo|nsfw|spam)\s*(?:filter|rok|band|delete|hata|guard|block|security)/i.test(clean) || /(?:safety|guard|security)\s*(?:on|chalu|enable|lagao|start)/i.test(clean)) {
+      const res = await whatsappGroupSafetyEngine.enableGroupSafety(groupJid, groupName);
+      return { handled: true, replyText: res.message };
+    }
+    if (/(?:saare|sab|sabhi)\s*(?:filter|warnings?|restriction)\s*(?:hatao|band|off|disable|allow)/i.test(clean) || /(?:allow\s*all|sab\s*allow|free\s*chat)/i.test(clean)) {
+      const res = await whatsappGroupSafetyEngine.disableGroupSafety(groupJid);
+      return { handled: true, replyText: res.message };
+    }
+
+    // 10. Voice Note Auto-Transcribe Intent
+    if (/(?:voice\s*notes?|aawaz|audio)\s*(?:ko\s*)?(?:text|transcribe|likh\s*ke|padh\s*ke)\s*(?:bhejo|on|chalu|enable)/i.test(clean)) {
+      const msg = await whatsappGroupSafetyEngine.toggleAutoTranscribeVoice(groupJid, true);
+      return { handled: true, replyText: msg };
+    }
+    if (/(?:voice\s*notes?|audio)\s*(?:transcription?)\s*(?:band|off|disable)/i.test(clean)) {
+      const msg = await whatsappGroupSafetyEngine.toggleAutoTranscribeVoice(groupJid, false);
+      return { handled: true, replyText: msg };
+    }
+
+    // ── Phase 2: Suspicious / Ambiguous Intent Classifier (Gemini AI Powered) ─
+    const isPotentiallyCommandRelated =
+      /(?:tag|mention|roast|tareef|quiz|khel|game|bill|hisab|split|sach|fact|faisla|decision|birthday|janamdin|filter|gaali|safety|voice|audio|quiet|welcome|commands?|rule|rules)/i.test(clean);
+
+    if (isPotentiallyCommandRelated && clean.includes("friday")) {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (apiKey) {
+        try {
+          const ai = new GoogleGenAI({ apiKey });
+          const prompt = `You are Friday AI, analyzing whether a user's natural language group message was attempting to trigger one of the available group features/commands.
+
+User message in group: "${rawText}"
+Speaker: ${senderName}
+
+Available Group Capabilities:
+1. "@everyone [message]" / "@tagall" -> Mentions and notifies all group members for important announcements.
+2. "@block safe" -> Enables anti-profanity (gaali filter), anti-NSFW media, anti-spam, and 3-strike kick guard.
+3. "@allow all" -> Disables all safety filters and warnings for completely free chat.
+4. "@voicenote on/off" -> Automatically transcribes all group voice notes into text cards.
+5. "@quiz start [topic]" -> Starts an interactive 5-round group live trivia showdown.
+6. "@roast [name]" -> Playful, witty, funny stand-up comedy roast of a member.
+7. "@praise [name]" -> High-energy superhero hype-man appreciation card.
+8. "@split [amount] [item] [names]" -> Group bill expense & UPI Splitwise calculator.
+9. "@judge [claim]" / "@factcheck" -> Verifies claims with real facts and delivers an AI courtroom verdict.
+10. "@decision" -> Scans recent conversation to extract agreed plans and assigned tasks.
+11. "@birthday add [name] [date]" -> Saves member birthdays for 12:00 AM midnight celebration.
+12. "@quiet mode on/off" -> Night quiet mode between 11 PM and 6:30 AM.
+13. "@welcome on/off" -> Welcome greeting cards for new members.
+
+Determine:
+1. "CONFIDENT_EXECUTE": If user clearly asked for one of these capabilities. Output: { "action": "EXECUTE", "command": "...", "args": "..." }
+2. "SUSPICIOUS_SUGGEST": If user's message is ambiguous, confused, or inquiring about capabilities. Output: { "action": "SUGGEST", "matchedCommands": [ { "cmd": "@...", "desc": "..." } ] }
+3. "NORMAL_CHAT": If it is just normal chat. Output: { "action": "IGNORE" }
+
+Output STRICT JSON only:
+{
+  "action": "EXECUTE" | "SUGGEST" | "IGNORE",
+  "command": "@everyone",
+  "args": "message text",
+  "matchedCommands": [
+    { "cmd": "@tagall [Message]", "desc": "Group ke sabhi members ko urgent notice ke liye tag karega." },
+    { "cmd": "@quiz start [Topic]", "desc": "Group me live trivia quiz shuru karega." }
+  ]
+}`;
+
+          const resp = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: prompt,
+            config: { responseMimeType: "application/json" },
+          });
+
+          const json = JSON.parse(resp.text?.trim() || "{}");
+
+          if (json.action === "EXECUTE" && json.command) {
+            const execCmd = `${json.command} ${json.args || ""}`.trim();
+            if (this.isSuperPowerCommand(execCmd)) {
+              return await this.handleSuperPowerCommand(
+                sock,
+                groupJid,
+                groupName,
+                execCmd,
+                senderName,
+                senderPhone,
+                senderJid,
+                messageKey,
+                quotedMessage,
+                isOwner
+              );
+            }
+          } else if (json.action === "SUGGEST" && Array.isArray(json.matchedCommands) && json.matchedCommands.length > 0) {
+            const cmdItems = json.matchedCommands
+              .slice(0, 3)
+              .map((c: any, idx: number) => `${idx + 1}️⃣ \`${c.cmd}\`:\n   👉 ${c.desc}`)
+              .join("\n\n");
+
+            const suggestionCard = `💡 *Aap ye command chalana chahte hain kya?*
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+${cmdItems}
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+💬 _(Aap command par reply karke ya directly type karke chala sakte hain!)_`;
+
+            return { handled: true, replyText: suggestionCard };
+          }
+        } catch (aiErr) {
+          console.warn("[GroupSuperPowers] Intent classification AI error:", aiErr);
+        }
+      }
+    }
+
+    return { handled: false };
+  }
 }
 
 export const whatsappGroupSuperPowersEngine = new WhatsAppGroupSuperPowersEngine();
+
