@@ -147,7 +147,13 @@ export class WhatsAppGroupSuperPowersEngine {
       clean.startsWith("/poster") ||
       clean.startsWith("@commentary") ||
       clean.startsWith("/commentary") ||
-      /^(?:tag\s*all|everyone|fact\s*check|ai\s*judge|roast\s*me|start\s*quiz|split\s*bill|group\s*decision|group\s*birthday|make\s*meme|create\s*poll|translate\s*to|group\s*vibe|tell\s*joke|lie\s*detector|rap\s*banao|future\s*prediction|movie\s*cast|match\s*commentary)/i.test(clean)
+      clean.startsWith("@song") ||
+      clean.startsWith("/song") ||
+      clean.startsWith("@gaana") ||
+      clean.startsWith("/gaana") ||
+      clean.startsWith("@music") ||
+      clean.startsWith("/music") ||
+      /^(?:tag\s*all|everyone|fact\s*check|ai\s*judge|roast\s*me|start\s*quiz|split\s*bill|group\s*decision|group\s*birthday|make\s*meme|create\s*poll|translate\s*to|group\s*vibe|tell\s*joke|lie\s*detector|rap\s*banao|future\s*prediction|movie\s*cast|match\s*commentary|find\s*song|song\s*dhundo)/i.test(clean)
     );
   }
 
@@ -303,6 +309,18 @@ export class WhatsAppGroupSuperPowersEngine {
     // 18. @commentary Bhojpuri & Sidhu Sports Commentary
     if (clean.startsWith("@commentary") || clean.startsWith("/commentary") || clean.startsWith("commentary")) {
       return await this.handleSportsCommentary(rawText, senderName);
+    }
+
+    // 19. @song / @gaana / @music Instant Song Radar & Streaming Links
+    if (
+      clean.startsWith("@song") ||
+      clean.startsWith("/song") ||
+      clean.startsWith("@gaana") ||
+      clean.startsWith("/gaana") ||
+      clean.startsWith("@music") ||
+      clean.startsWith("/music")
+    ) {
+      return await this.handleSongFinder(rawText, senderName);
     }
 
     return { handled: false };
@@ -1448,7 +1466,18 @@ Use authentic high-energy Bhojpuri & Sidhuisms punchlines ("Eee dekhi babua", "T
     return { handled: true, replyText: `🏏 Sixer! Ball stadium ke bahar! 💥` };
   }
 
-  // ── 19. Midnight Birthday Cron Worker ─────────────────────────────────────
+  // ── 19. @song / @gaana / @music Instant Song Radar & Streaming Links ──────
+
+  public async handleSongFinder(
+    rawText: string,
+    senderName = "Member"
+  ): Promise<{ handled: boolean; replyText?: string }> {
+    const { whatsappFeatureEngine } = await import("../whatsappFeatureEngine");
+    const reply = await whatsappFeatureEngine.searchMusicWithLyrics(rawText, senderName);
+    return { handled: true, replyText: reply };
+  }
+
+  // ── 20. Midnight Birthday Cron Worker ─────────────────────────────────────
 
   public async checkAndTriggerMidnightBirthdays(sock: any): Promise<number> {
     if (!sock) return 0;
@@ -1644,9 +1673,14 @@ Bhagwan aapko lambi umar, beshumar khushiyan, aur bohot saari success de! 🚀�
       return await this.handleSportsCommentary(rawText, senderName);
     }
 
+    // 22. Instant Song & Music Radar Intent
+    if (/(?:(?:koi\s+)?(?:song|gaana|music)\s+(?:dhundo|sunao|chalao|ka\s*link|bhejo|play\s*karo)|(?:ye\s+)?kaun\s*sa\s*(?:song|gaana)\s*hai)/i.test(clean)) {
+      return await this.handleSongFinder(rawText, senderName);
+    }
+
     // ── Phase 2: Suspicious / Ambiguous Intent Classifier (Gemini AI Powered) ─
     const isPotentiallyCommandRelated =
-      /(?:tag|mention|roast|tareef|quiz|khel|game|bill|hisab|split|sach|fact|faisla|decision|birthday|janamdin|filter|gaali|safety|voice|audio|quiet|welcome|commands?|rule|rules|lie|jhooth|rap|future|kismat|srk|tony|amitabh|modi|mimic|clone|movie|poster|commentary)/i.test(clean);
+      /(?:tag|mention|roast|tareef|quiz|khel|game|bill|hisab|split|sach|fact|faisla|decision|birthday|janamdin|filter|gaali|safety|voice|audio|quiet|welcome|commands?|rule|rules|lie|jhooth|rap|future|kismat|srk|tony|amitabh|modi|mimic|clone|movie|poster|commentary|song|gaana|music)/i.test(clean);
 
     if (isPotentiallyCommandRelated && clean.includes("friday")) {
       const apiKey = process.env.GEMINI_API_KEY;
@@ -1679,6 +1713,7 @@ Available Group Capabilities:
 18. "@mimic [name]" -> Imitates the speaking style & catchphrases of a group member.
 19. "@movie [title]" -> Casts group members in a blockbuster film trailer and generates poster.
 20. "@commentary [scenario]" -> High-voltage Bhojpuri or Sidhu style live match commentary.
+21. "@song [name]" -> Instantly identifies song, singers, lyrics snippet and provides direct YouTube, Spotify, JioSaavn & Apple Music streaming links.
 
 Determine:
 1. "CONFIDENT_EXECUTE": If user clearly asked for one of these capabilities. Output: { "action": "EXECUTE", "command": "...", "args": "..." }

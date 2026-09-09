@@ -26,8 +26,14 @@ export class WhatsAppBossAiEngine {
       return `Haanji Boss! Main Friday hoon. API Key abhi configure nahi hai, par main aapki baat note kar rahi hoon!`;
     }
 
-    const { memoryEngine } = await import("../memoryEngine");
     const { whatsappFeatureEngine } = await import("../whatsappFeatureEngine");
+
+    // Fast direct intercept for @song / @music / @gaana queries
+    if (/^(?:@song|@music|@gaana|\/song|\/music|\/gaana)\b/i.test(messageText.trim())) {
+      return await whatsappFeatureEngine.searchMusicWithLyrics(messageText, senderName);
+    }
+
+    const { memoryEngine } = await import("../memoryEngine");
     const { humanComprehensionEngine } = await import("../humanComprehensionEngine");
     const { circadianEnergyEngine } = await import("../circadianEnergyEngine");
     const { personalOpinionsEngine } = await import("../personalOpinionsEngine");

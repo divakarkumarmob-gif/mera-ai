@@ -222,6 +222,14 @@ export class WhatsAppAutoReplyEngine {
       "/debug",
       "@music",
       "/music",
+      "@song",
+      "/song",
+      "@gaana",
+      "/gaana",
+      "song dhundo",
+      "gaana dhundo",
+      "song sunao",
+      "gaana sunao",
       "@safety",
       "/safety",
       "@block safe",
@@ -559,6 +567,14 @@ TONE & STYLE:
       const handledByGf = await girlfriendCheckFn(text, replyJid, senderName, messageKey);
       if (handledByGf) return;
 
+      // 1v1 Instant Song Radar (@song / @music / @gaana)
+      if (/^(?:@song|@music|@gaana|\/song|\/music|\/gaana)\b/i.test(text.trim())) {
+        const { whatsappFeatureEngine } = await import("../whatsappFeatureEngine");
+        const songCard = await whatsappFeatureEngine.searchMusicWithLyrics(text, senderName);
+        await sendMsgFn(replyJid, songCard, text, messageKey);
+        return;
+      }
+
       let contactRelation = "";
       try {
         const contact = await contactsService.findContact(senderPhone);
@@ -646,6 +662,12 @@ TONE & STYLE:
     if (quotedMessage && quotedMessage.isReply) {
       const handledQuoted = await handleQuotedFn(groupJid, text, quotedMessage, messageKey);
       if (handledQuoted) return;
+    }
+
+    if (/^(?:@song|@music|@gaana|\/song|\/music|\/gaana)\b/i.test(cleanText)) {
+      const songCard = await whatsappFeatureEngine.searchMusicWithLyrics(cleanText, senderName);
+      await sendMsgFn(groupJid, songCard, text, messageKey);
+      return;
     }
 
     try {

@@ -408,24 +408,129 @@ OUTPUT FORMAT:
     return { isSuspicious: false };
   }
 
-  // ── 9. 🎵 Music & Lyrics Finder (@music) ──────────────────────────────────
+  // ── 9. 🎵 Music & Song Finder (@song / @music) ───────────────────────────
 
-  public async searchMusicWithLyrics(query: string): Promise<string> {
-    try {
-      const { publicApisService } = await import("./publicApisService");
-      const musicRes = await publicApisService.searchMusic(query);
+  public async searchMusicWithLyrics(query: string, requesterName = "Boss"): Promise<string> {
+    const rawClean = (query || "")
+      .replace(/^(?:@song|@music|@gaana|\/song|\/music|\/gaana|song:|music:|gaana:)\s*/i, "")
+      .replace(/^(?:friday\s+)?(?:song|gaana|music)\s+(?:dhundo|sunao|chalao|ka\s*link|bhejo|play\s*karo)\s*/i, "")
+      .trim();
 
-      if (musicRes.success && musicRes.spotifyUrl) {
-        return `🎵 *${musicRes.title}* by *${musicRes.artist}*\n\n▶️ *Spotify Link:* ${musicRes.spotifyUrl}\n\n✨ _"Music makes every moment special!"_`;
-      }
-
-      const prompt = `Provide the track title, artist name, and iconic 4-line lyrics snippet for the song query: "${query}".
-Format with WhatsApp bold and music emojis.`;
-      const res = await this.callGeminiWithFallback(prompt);
-      return res || `🎵 *Music Finder:* Searched for "${query}".`;
-    } catch (e: any) {
-      return `🎵 *Music Finder:* Error searching track: ${e?.message || e}`;
+    if (!rawClean) {
+      return `🎵 *FRIDAY SONG RADAR:* Kripya song ka naam ya lyrics likhein!\n\n👉 *Usage:* \`@song Kesariya\` ya \`@song Arijit Singh new track\``;
     }
+
+    let trackTitle = rawClean;
+    let artistName = "Various Artists";
+    let albumName = "";
+    let releaseYear = "";
+    let genre = "Music";
+    let lyricsSnippet = "";
+    let appleMusicUrl = "";
+    let previewAudioUrl = "";
+
+    // Step 1: Query free iTunes API for instantaneous official metadata & Apple Music link
+    try {
+      const itunesRes = await fetch(
+        `https://itunes.apple.com/search?term=${encodeURIComponent(rawClean)}&media=music&entity=song&limit=1`,
+        { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(3500) }
+      );
+      if (itunesRes.ok) {
+        const itunesData: any = await itunesRes.json();
+        const first = itunesData.results?.[0];
+        if (first) {
+          trackTitle = first.trackName || rawClean;
+          artistName = first.artistName || "Unknown Artist";
+          albumName = first.collectionName || "";
+          releaseYear = first.releaseDate ? first.releaseDate.substring(0, 4) : "";
+          genre = first.primaryGenreName || "Music";
+          appleMusicUrl = first.trackViewUrl || "";
+          previewAudioUrl = first.previewUrl || "";
+        }
+      }
+    } catch (itunesErr) {
+      console.warn("[WhatsAppFeatureEngine] iTunes search warning:", itunesErr);
+    }
+
+    // Step 2: Query Gemini AI for accurate Hindi/Bollywood/Regional song context, lyrics snippet & movie details
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (apiKey) {
+      try {
+        const { GoogleGenAI } = await import("@google/genai");
+        const ai = new GoogleGenAI({ apiKey });
+        const prompt = `You are a music recognition expert for Friday AI.
+Identify this song request from user "${rawClean}".
+If it's in Hindi/Bollywood/Punjabi/English/Regional, identify the exact canonical Track Title, Singers/Artists, Movie/Album, Release Year, and 2-3 iconic lines of lyrics in Hinglish/Roman script.
+
+Respond ONLY with valid JSON in this exact structure:
+{
+  "trackTitle": "Exact Song Name",
+  "artists": "Singer 1, Singer 2, Composer",
+  "albumOrMovie": "Movie or Album Name",
+  "year": "YYYY",
+  "genre": "Romantic / Pop / Lo-Fi / Sufi / Rock",
+  "lyricsSnippet": "2-3 most famous hook lyrics lines...",
+  "searchKeyword": "Canonical Song Name Artist"
+}`;
+
+        const aiRes = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: prompt,
+          config: { responseMimeType: "application/json" },
+        });
+
+        const json = JSON.parse(aiRes.text?.trim() || "{}");
+        if (json.trackTitle) trackTitle = json.trackTitle;
+        if (json.artists) artistName = json.artists;
+        if (json.albumOrMovie) albumName = json.albumOrMovie;
+        if (json.year) releaseYear = json.year;
+        if (json.genre) genre = json.genre;
+        if (json.lyricsSnippet) lyricsSnippet = json.lyricsSnippet;
+      } catch (geminiErr) {
+        console.warn("[WhatsAppFeatureEngine] Gemini song identification error:", geminiErr);
+      }
+    }
+
+    // Step 3: Build Canonical Streaming & Playback Links
+    const searchTarget = `${trackTitle} ${artistName}`.trim();
+    const ytSearchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(searchTarget + " official song")}`;
+    const ytMusicUrl = `https://music.youtube.com/search?q=${encodeURIComponent(searchTarget)}`;
+    const spotifyUrl = `https://open.spotify.com/search/${encodeURIComponent(searchTarget)}`;
+    const jioSaavnUrl = `https://www.jiosaavn.com/search/${encodeURIComponent(searchTarget)}`;
+    const wynkUrl = `https://wynk.in/music/search/${encodeURIComponent(searchTarget)}`;
+
+    const detailsBlock = [
+      `🎶 *Track:* ${trackTitle}`,
+      `🎙️ *Singer(s):* ${artistName}`,
+      albumName ? `🎬 *Movie / Album:* ${albumName}${releaseYear ? ` (${releaseYear})` : ""}` : (releaseYear ? `📅 *Year:* ${releaseYear}` : ""),
+      genre ? `🏷️ *Genre:* ${genre}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    const lyricsBlock = lyricsSnippet
+      ? `\n\n📝 *Hook Lyrics:*\n_"${lyricsSnippet}"_`
+      : "";
+
+    const linksBlock = [
+      `🔴 *YouTube:* ${ytSearchUrl}`,
+      `🟢 *Spotify:* ${spotifyUrl}`,
+      `🔴 *YT Music:* ${ytMusicUrl}`,
+      `🎵 *JioSaavn:* ${jioSaavnUrl}`,
+      appleMusicUrl ? `🍎 *Apple Music:* ${appleMusicUrl}` : `🌐 *Wynk Music:* ${wynkUrl}`,
+      previewAudioUrl ? `\n🔊 *30s Audio Preview:* ${previewAudioUrl}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    return `🎵 *FRIDAY AI INSTANT SONG RADAR* 🎧✨
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+${detailsBlock}${lyricsBlock}
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚡ *INSTANT STREAMING & PLAY LINKS:*
+${linksBlock}
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎧 _Gaana suniye aur vibe kijiye ${requesterName}! Volume UP!_ 🔊🔥`;
   }
 
   // ── 10. 🔎 Universal Chat Search & Message Finder (1v1 & Group) ─────────
