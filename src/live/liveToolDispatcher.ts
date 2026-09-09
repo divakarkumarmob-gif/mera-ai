@@ -137,7 +137,17 @@ export async function dispatchLiveToolCall(call: any, context: ToolDispatchConte
                     sendToWhatsApp: !!sendToWhatsApp || !!targetRecipient,
                     targetRecipient: targetRecipient || "boss",
                   });
-                  result = genRes;
+                  result = {
+                    success: genRes.success,
+                    photoGenerated: !!genRes.success,
+                    prompt: genRes.prompt,
+                    model: genRes.model,
+                    aspectRatio: genRes.aspectRatio,
+                    whatsappSent: genRes.whatsappSent,
+                    whatsappMessage: genRes.whatsappMessage,
+                    recipient: genRes.recipient,
+                    message: genRes.message,
+                  };
                   if (genRes.success) {
                     clientWs.send(
                       JSON.stringify({
@@ -180,7 +190,15 @@ export async function dispatchLiveToolCall(call: any, context: ToolDispatchConte
                     sendToWhatsApp: !!sendToWhatsApp || !!targetRecipient,
                     targetRecipient: targetRecipient || "boss",
                   });
-                  result = editRes;
+                  result = {
+                    success: editRes.success,
+                    photoEdited: !!editRes.success,
+                    prompt: editRes.prompt,
+                    model: editRes.model,
+                    whatsappSent: editRes.whatsappSent,
+                    recipient: editRes.recipient,
+                    message: editRes.message,
+                  };
                   if (editRes.success) {
                     clientWs.send(
                       JSON.stringify({
@@ -206,7 +224,16 @@ export async function dispatchLiveToolCall(call: any, context: ToolDispatchConte
                   }
                 } else if (call.name === "check_last_generated_photo") {
                   const photoStatus = toolsEngine.getLastGeneratedPhotoStatus();
-                  result = photoStatus;
+                  result = {
+                    success: photoStatus.success,
+                    hasPhoto: photoStatus.hasPhoto,
+                    prompt: photoStatus.prompt,
+                    model: photoStatus.model,
+                    aspectRatio: photoStatus.aspectRatio,
+                    whatsappSent: photoStatus.whatsappSent,
+                    recipient: photoStatus.recipient,
+                    message: photoStatus.message,
+                  };
                   if (photoStatus.hasPhoto && photoStatus.imageUrl) {
                     clientWs.send(
                       JSON.stringify({
@@ -2926,6 +2953,38 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
     result = { success: false, error: err?.message || String(err) };
   }
 
-  return result;
+  return sanitizeToolOutputForGemini(result);
+}
+
+function sanitizeToolOutputForGemini(output: any): any {
+  if (!output) return output;
+  if (typeof output === "string") {
+    if (output.startsWith("data:") || output.length > 2000) {
+      return output.substring(0, 500) + "... [truncated]";
+    }
+    return output;
+  }
+  if (Array.isArray(output)) {
+    return output.map(sanitizeToolOutputForGemini);
+  }
+  if (typeof output === "object") {
+    const clean: any = {};
+    for (const [k, v] of Object.entries(output)) {
+      if (
+        k === "imageUrl" ||
+        k === "image" ||
+        k === "base64" ||
+        k === "buffer" ||
+        k === "audioSnippetBase64" ||
+        k === "imageBase64"
+      ) {
+        clean[k] = "[IMAGE_DATA_RENDERED_ON_DASHBOARD]";
+      } else {
+        clean[k] = sanitizeToolOutputForGemini(v);
+      }
+    }
+    return clean;
+  }
+  return output;
 }
 

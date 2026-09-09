@@ -552,6 +552,9 @@ class ToolsEngine {
     return await productPriceService.searchAmazon(query);
   }
 
+  private _activePhotoGenPromise: Promise<any> | null = null;
+  private _lastGenPromptCache: { prompt: string; result: any; time: number } | null = null;
+
   /**
    * Ultra-HD 4K AI Photo Generator (Cloudflare Workers AI FLUX & Fallbacks)
    */
@@ -563,14 +566,31 @@ class ToolsEngine {
       targetRecipient?: string;
     } = {}
   ) {
-    const { imageGenerationService } = await import("./imageGenerationService");
-    const { contactsService } = await import("./contactsService");
-    const { whatsappBotService } = await import("./whatsappBotService");
+    const cleanPrompt = String(prompt || "").trim().toLowerCase();
 
-    const genRes = await imageGenerationService.generateImage(prompt, {
-      aspectRatio: options.aspectRatio || "9:16",
-      enhancePrompt: true,
-    });
+    // Check if recent generation for the same prompt completed in last 12 seconds
+    if (this._lastGenPromptCache && (Date.now() - this._lastGenPromptCache.time < 12000)) {
+      if (cleanPrompt === this._lastGenPromptCache.prompt) {
+        console.log(`[ToolsEngine] Returning cached photo generation for duplicate request: "${cleanPrompt}"`);
+        return this._lastGenPromptCache.result;
+      }
+    }
+
+    // If generation is already in flight for the same prompt, wait for it
+    if (this._activePhotoGenPromise) {
+      console.log(`[ToolsEngine] Photo generation already in-flight, awaiting active generation...`);
+      return await this._activePhotoGenPromise;
+    }
+
+    const runGen = async () => {
+      const { imageGenerationService } = await import("./imageGenerationService");
+      const { contactsService } = await import("./contactsService");
+      const { whatsappBotService } = await import("./whatsappBotService");
+
+      const genRes = await imageGenerationService.generateImage(prompt, {
+        aspectRatio: options.aspectRatio || "9:16",
+        enhancePrompt: true,
+      });
 
     if (!genRes.success || !genRes.buffer) {
       return {
@@ -614,17 +634,33 @@ class ToolsEngine {
       timestamp: new Date().toISOString(),
     };
 
-    return {
-      success: true,
-      imageUrl: dataUrl,
-      prompt: genRes.prompt,
-      model: genRes.model,
-      aspectRatio: options.aspectRatio || "9:16",
-      whatsappSent,
-      whatsappMessage,
-      recipient: recipientName,
-      message: `Boss photo generate ho gaya hai, aap dashboard par dekh lo, baki main WhatsApp par bhej rahi hoon! Aur haan, photo pasand nahi aayi toh dobara banau ya isme kuch edit karu?`,
+      return {
+        success: true,
+        imageUrl: dataUrl,
+        prompt: genRes.prompt,
+        model: genRes.model,
+        aspectRatio: options.aspectRatio || "9:16",
+        whatsappSent,
+        whatsappMessage,
+        recipient: recipientName,
+        message: `Boss photo generate ho gaya hai, aap dashboard par dekh lo, baki main WhatsApp par bhej rahi hoon! Aur haan, photo pasand nahi aayi toh dobara banau ya isme kuch edit karu?`,
+      };
     };
+
+    try {
+      this._activePhotoGenPromise = runGen();
+      const output = await this._activePhotoGenPromise;
+      if (output && output.success) {
+        this._lastGenPromptCache = {
+          prompt: cleanPrompt,
+          result: output,
+          time: Date.now(),
+        };
+      }
+      return output;
+    } finally {
+      this._activePhotoGenPromise = null;
+    }
   }
 
   /**
