@@ -196,8 +196,30 @@ export class WhatsAppGroupSafetyEngine {
     return word.replace(/(.)\1+/g, "$1");
   }
 
+  // Flexible Regex Builders for Words with Extra / Repeated Characters (e.g. "maadddarchod")
+  private static readonly FLEXIBLE_ROOTS = [
+    "madarchod", "maderchod", "madarchodi", "madarjaat", "maachod", "machod", "maarchod", "maachuda",
+    "bhenchod", "behenchod", "bhnchod", "benchod", "behnchod", "betichod", "bhenchoda", "behenchoda",
+    "bhosdike", "bhosadike", "bhosdk", "bhosdi", "bhosda", "bhosada", "bhosdiwale", "bhosadiwale", "bhosri", "bhosrike", "bhosdika",
+    "chutiya", "chutiye", "chutiyo", "chutiyapa", "chutiyagiri", "chootiya", "chootiye", "chut", "choot", "chute", "chutad", "chootad", "chutmarike", "chutmarani", "chutya", "chotya",
+    "lund", "lauda", "laude", "loda", "lode", "lawda", "lawde", "louda", "loude", "lodu", "lnd",
+    "gand", "gaand", "gandu", "gaandu", "gandwe", "gandwa", "gandmarike", "gandmasti", "ganduon", "gandfat", "gandfatu",
+    "randi", "raand", "raandi", "randwe", "randwa", "randibaaz", "randirona", "randiwaaz",
+    "harami", "haramzada", "haramzade", "haramzaada", "haramzadi", "haramkhor", "kamina", "kamine", "kamini",
+    "saale", "saali", "kutta", "kutte", "suar", "suwar", "bhadwe", "bhadwa", "dalaal", "dalla", "chakka", "hijra",
+    "jhat", "jhaat", "jhatu", "jhaatu", "jhant", "tatte", "tatton", "chuchi", "chuchiya",
+    "chudai", "chodunga", "chudega", "chudwa", "chodampatti", "chudakkad", "chudwao", "chodne", "chudne", "pelunga",
+    "bsdk", "bkl", "mc", "bc", "mkc", "bkc", "tmkc", "tkl", "mkl"
+  ];
+
+  private static readonly FLEXIBLE_PATTERNS: RegExp[] = WhatsAppGroupSafetyEngine.FLEXIBLE_ROOTS.map((word) => {
+    const pattern = word.split("").map((c) => `${c}+`).join("[\\s_\\-.*~`^]*");
+    return new RegExp(`(?:^|[^a-z0-9])${pattern}(?:$|[^a-z0-9])`, "i");
+  });
+
   /**
    * Check if a text message contains Gandi Gaali / Profanity
+   * Handles extra repeated letters (e.g. "maadddarchod", "bhhhenchhhhod", "bhosssddike")
    */
   public detectProfanity(rawText: string): { isProfane: boolean; reason?: string } {
     if (!rawText || !rawText.trim()) return { isProfane: false };
@@ -211,7 +233,7 @@ export class WhatsAppGroupSafetyEngine {
       }
     }
 
-    // 2. Normalize Text
+    // 2. Normalize Text (numbers/symbols to letters)
     const normalized = this.normalizeText(rawText);
 
     // Check phrases on normalized text too
@@ -221,7 +243,16 @@ export class WhatsAppGroupSafetyEngine {
       }
     }
 
-    // 3. Tokenize by whitespace and punctuation
+    // 3. Flexible Regex for extra/repeated letters (e.g. "maadddarchod", "bheeeennnchood")
+    for (let i = 0; i < WhatsAppGroupSafetyEngine.FLEXIBLE_ROOTS.length; i++) {
+      const root = WhatsAppGroupSafetyEngine.FLEXIBLE_ROOTS[i];
+      const regex = WhatsAppGroupSafetyEngine.FLEXIBLE_PATTERNS[i];
+      if (regex.test(normalized) || regex.test(rawLower)) {
+        return { isProfane: true, reason: `Gandi gaali detected ("${root}")` };
+      }
+    }
+
+    // 4. Tokenize by whitespace and punctuation
     const words = normalized.split(/[\s,.\-_:;!?*~#^&()\[\]{}|\\/+=<>`'"]+/).filter(Boolean);
 
     for (const word of words) {
@@ -230,7 +261,7 @@ export class WhatsAppGroupSafetyEngine {
         return { isProfane: true, reason: `Gandi gaali detected ("${word}")` };
       }
 
-      // Collapsed repeat letters match (e.g., "chhuuuuuuttt" -> "chut")
+      // Collapsed repeat letters match (e.g., "chhuuuuuuttt" -> "chut", "maadddarchod" -> "madarchod")
       const collapsed = this.collapseConsecutiveLetters(word);
       if (WhatsAppGroupSafetyEngine.PROFANITY_WORDS.has(collapsed)) {
         return { isProfane: true, reason: `Gandi gaali detected ("${collapsed}")` };
@@ -238,16 +269,18 @@ export class WhatsAppGroupSafetyEngine {
 
       // Substring checks for compound gaalis (e.g. "madarchodo", "bhenchodon", "chutiyapa")
       for (const root of WhatsAppGroupSafetyEngine.PROFANITY_WORDS) {
-        if (root.length >= 4 && (word.startsWith(root) || word.endsWith(root))) {
+        if (root.length >= 4 && (word.startsWith(root) || word.endsWith(root) || collapsed.startsWith(root) || collapsed.endsWith(root))) {
           return { isProfane: true, reason: `Abusive word detected ("${word}")` };
         }
       }
     }
 
-    // 4. Dot/space joined abbreviations check (e.g., "b.s.d.k", "b s d k", "m.c", "b.c", "m c", "b c")
+    // 5. Stripped & collapsed dot/space joined words (e.g. "m_a_d_a_r_c_h_o_d", "b.s.d.k", "b s d k")
     const stripped = normalized.replace(/[^a-z0-9]/g, "");
-    for (const root of ["bsdk", "bkl", "mkc", "bkc", "tmkc", "madarchod", "bhenchod", "bhosdike", "chutiya", "randi"]) {
-      if (stripped.includes(root)) {
+    const strippedCollapsed = this.collapseConsecutiveLetters(stripped);
+
+    for (const root of WhatsAppGroupSafetyEngine.FLEXIBLE_ROOTS) {
+      if (stripped.includes(root) || strippedCollapsed.includes(this.collapseConsecutiveLetters(root))) {
         return { isProfane: true, reason: `Hidden abusive word detected ("${root}")` };
       }
     }
