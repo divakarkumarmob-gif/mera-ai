@@ -868,22 +868,27 @@ class WhatsAppBotService {
     }
 
     // 0.05 Recent Media Follow-Up Q&A
-    try {
-      const { visionMemoryService } = await import("./visionMemoryService");
-      const recentChatMedia = visionMemoryService.getChatMediaContext(replyJid);
-      if (recentChatMedia && visionMemoryService.isMediaQuestionIntent(rawText)) {
-        await this.sendHumanLikeMessage(replyJid, "🔍 *Recent file/photo me se dhoondh rahi hoon...* ⚡", rawText, messageKey);
-        const ans = await visionMemoryService.answerQuestionOnMedia({
-          question: rawText,
-          chatId: replyJid,
-        });
-        if (ans && !ans.startsWith("⚠️")) {
-          await this.sendHumanLikeMessage(replyJid, ans, rawText, messageKey);
-          return;
+    const isGroupOrChatHistoryInstruction =
+      /\b(group|grup|chat|conversation|history|last\s*\d+|msg|message|messages|bhejo|batao|karo|likho|send|forward|avengers|script)\b/i.test(rawText);
+
+    if (!isGroupOrChatHistoryInstruction) {
+      try {
+        const { visionMemoryService } = await import("./visionMemoryService");
+        const recentChatMedia = visionMemoryService.getChatMediaContext(replyJid);
+        if (recentChatMedia && visionMemoryService.isMediaQuestionIntent(rawText)) {
+          await this.sendHumanLikeMessage(replyJid, "🔍 *Recent file/photo me se dhoondh rahi hoon...* ⚡", rawText, messageKey);
+          const ans = await visionMemoryService.answerQuestionOnMedia({
+            question: rawText,
+            chatId: replyJid,
+          });
+          if (ans && !ans.startsWith("⚠️")) {
+            await this.sendHumanLikeMessage(replyJid, ans, rawText, messageKey);
+            return;
+          }
         }
+      } catch (recentMediaErr) {
+        console.warn("[WhatsAppBot] Direct recent media Q&A notice:", recentMediaErr);
       }
-    } catch (recentMediaErr) {
-      console.warn("[WhatsAppBot] Direct recent media Q&A notice:", recentMediaErr);
     }
 
     // 0.08 Direct Auto-Ring Calling Engine
@@ -1580,6 +1585,91 @@ class WhatsAppBotService {
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 💡 *Tip:* Aap natural bhasha me bhi bol sakte hain (e.g. _"Ram ko msg kar do"_, _"is bill ka excel bana do"_, _"photo ko sticker bana do"_). Friday automatically execute karegi! 👍`;
+  }
+
+  /**
+   * Find a group by name or JID from cache or active metadata
+   */
+  public async findGroup(groupQuery: string): Promise<{ groupId: string; groupName: string } | null> {
+    const rawQ = (groupQuery || "").toLowerCase().trim();
+    const cleanQ = rawQ.replace(/group|grup|ka|ki|ke/gi, "").trim();
+
+    // 1. Direct JID match
+    if (groupQuery.endsWith("@g.us")) {
+      const name = await this.getGroupName(groupQuery);
+      return { groupId: groupQuery, groupName: name };
+    }
+
+    // 2. Check groupNameCache
+    for (const [jid, name] of this.groupNameCache.entries()) {
+      if (name.toLowerCase().includes(cleanQ) || (cleanQ && jid.toLowerCase().includes(cleanQ))) {
+        return { groupId: jid, groupName: name };
+      }
+    }
+
+    // 3. Check WhatsApp History Engine cache
+    const historyMsgs = whatsappHistoryEngine.getCachedMessages().filter((m) => m.isGroup && m.groupId);
+    for (const m of historyMsgs) {
+      if (m.groupName && m.groupName.toLowerCase().includes(cleanQ)) {
+        this.groupNameCache.set(m.groupId!, m.groupName);
+        return { groupId: m.groupId!, groupName: m.groupName };
+      }
+    }
+
+    // 4. Fetch participating groups via Baileys if connected
+    if (this.sock && this.isConnected) {
+      try {
+        const groups = await this.sock.groupFetchAllParticipating();
+        for (const [jid, meta] of Object.entries(groups as Record<string, any>)) {
+          const subject = meta?.subject || jid;
+          this.groupNameCache.set(jid, subject);
+          if (subject.toLowerCase().includes(cleanQ) || jid.toLowerCase().includes(cleanQ)) {
+            return { groupId: jid, groupName: subject };
+          }
+        }
+      } catch (err) {
+        console.warn("[WhatsAppBot] groupFetchAllParticipating failed:", err);
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Send a message to a WhatsApp group
+   */
+  public async sendGroupMessage(
+    groupQuery: string,
+    messageText: string
+  ): Promise<{ success: boolean; groupName?: string; groupId?: string; message: string }> {
+    if (!this.sock || !this.isConnected) {
+      return { success: false, message: "WhatsApp 2 (Baileys) disconnected hai. Message deliver nahi hua." };
+    }
+
+    const group = await this.findGroup(groupQuery);
+    if (!group) {
+      const available = Array.from(this.groupNameCache.values());
+      return {
+        success: false,
+        message: `Group "${groupQuery}" nahi mila.${available.length > 0 ? ` Active groups: ${available.join(", ")}` : ""}`,
+      };
+    }
+
+    try {
+      await this.sock.sendMessage(group.groupId, { text: messageText });
+      return {
+        success: true,
+        groupName: group.groupName,
+        groupId: group.groupId,
+        message: `Message "${group.groupName}" group me successfully send kar diya gaya! ✅`,
+      };
+    } catch (e: any) {
+      return {
+        success: false,
+        groupName: group.groupName,
+        message: `Failed to send message to group ${group.groupName}: ${e?.message || e}`,
+      };
+    }
   }
 
   public getStatus(): WhatsAppStatus {

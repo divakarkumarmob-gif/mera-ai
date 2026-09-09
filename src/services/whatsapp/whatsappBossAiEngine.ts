@@ -192,6 +192,31 @@ export class WhatsAppBossAiEngine {
         },
       },
       {
+        name: "get_group_conversation_history",
+        description: "Retrieve recent messages transcript and conversation history for a specific WhatsApp Group (e.g. 'AVENGERS', 'Friday\'s grup', 'Script talk'). Use whenever Boss says 'avengers group ki last 5 msg batao', 'group ka summary do', 'group me kya baat chal rahi hai'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            groupName: { type: "STRING", description: "Name of the WhatsApp group (e.g. 'AVENGERS', 'Friday\'s grup', 'Script talk')" },
+            limit: { type: "NUMBER", description: "Max messages to retrieve (default: 20)" },
+            daysBack: { type: "NUMBER", description: "Days back to inspect (default: 7)" },
+          },
+          required: ["groupName"],
+        },
+      },
+      {
+        name: "send_whatsapp_group_message",
+        description: "Send a message or summary directly into a specific WhatsApp Group. Use when Boss says 'usi group me msg bhejo ki...', 'AVENGERS group me message send karo', 'group me summary bhej do'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            groupName: { type: "STRING", description: "Name of target group (e.g. 'AVENGERS', 'Friday\'s grup')" },
+            messageText: { type: "STRING", description: "The message text to send into the group" },
+          },
+          required: ["groupName", "messageText"],
+        },
+      },
+      {
         name: "translate_text",
         description: "Translate any text or message accurately into any target language (e.g. English, Hindi, Spanish, French, German, Japanese).",
         parameters: {
@@ -774,6 +799,28 @@ COMMUNICATION STYLE:
           const updates = await telegramBotService.getRecentTelegramMessages(args.limit || 10);
           return { count: updates.length, updates };
         }
+        if (toolName === "get_group_conversation_history") {
+          const res = await whatsappHistoryEngine.getGroupMessagesWithSummary(
+            args.groupName || args.groupNameOrJid,
+            args.limit || 25,
+            args.daysBack || 7
+          );
+          return res;
+        }
+        if (toolName === "send_whatsapp_group_message") {
+          const { whatsappBotService } = await import("../whatsappBotService");
+          const res = await whatsappBotService.sendGroupMessage(
+            args.groupName || args.groupNameOrJid,
+            args.messageText
+          );
+          return res;
+        }
+        if (toolName === "get_messages_digest") {
+          if (args.groupName) {
+            return await whatsappHistoryEngine.getGroupMessagesWithSummary(args.groupName, args.limit || 25);
+          }
+          return await whatsappHistoryEngine.getConversationSummaryAndHistory("all", args.limit || 30);
+        }
         if (toolName === "get_contact_conversation_history") {
           const res = await whatsappHistoryEngine.getConversationSummaryAndHistory(
             args.contactNameOrPhone || args.query,
@@ -870,11 +917,13 @@ ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` 
         let response = await chat.sendMessage({ message: userTurnMessage });
 
         let turns = 0;
+        let lastToolResult: any = null;
         while (response.functionCalls && response.functionCalls.length > 0 && turns < 4) {
           turns++;
           const call = response.functionCalls[0];
           console.log(`[WhatsAppBossAI] Boss Tool Call: ${call.name} with args:`, call.args);
           const toolResult = await executeTool(call.name, call.args);
+          lastToolResult = toolResult;
 
           response = await chat.sendMessage({
             message: [
@@ -888,7 +937,25 @@ ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` 
           });
         }
 
-        const replyText = response.text?.trim();
+        let replyText = response.text?.trim() || "";
+
+        // Raw output / format sanitizer
+        if (
+          !replyText ||
+          replyText.startsWith("out:default_api:") ||
+          replyText.startsWith("call:default_api:") ||
+          replyText.includes("default_api:") ||
+          (replyText.startsWith("{") && replyText.endsWith("}"))
+        ) {
+          if (lastToolResult && lastToolResult.summary) {
+            replyText = lastToolResult.summary;
+          } else if (lastToolResult && lastToolResult.message) {
+            replyText = lastToolResult.message;
+          } else {
+            replyText = "Boss, task execute kar diya gaya hai! ✅";
+          }
+        }
+
         if (replyText) return replyText;
       } catch (e: any) {
         console.warn(`[WhatsAppBossAI] Model ${model} failed (${e?.message || e}), trying next model...`);

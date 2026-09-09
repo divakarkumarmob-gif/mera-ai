@@ -345,8 +345,17 @@ export class WhatsAppHistoryEngine {
     let targetContactPhone = "";
     let targetContactName = "";
 
-    const nameMatch = rawQ.match(/(?:kya\s+)?([a-zA-Z0-9\u0900-\u097F]+?)\s*(?:ne\s*msg|ne\s*message|se\s*kya|ka\s*msg|ka\s*message|se\s*baat|ne\s*kya)/i);
+    const nameMatch = rawQ.match(/(?:kya\s+)?([a-zA-Z0-9\u0900-\u097F\s\-_\.]+?)\s*(?:ne\s*msg|ne\s*message|se\s*kya|ka\s*msg|ka\s*message|se\s*baat|ne\s*kya|group|grup)/i);
     const candidateName = nameMatch ? nameMatch[1].trim() : rawQ;
+
+    const isGroupQuery =
+      rawQ.includes("group") ||
+      rawQ.includes("grup") ||
+      docs.some((m) => m.isGroup && (m.groupName?.toLowerCase().includes(candidateName.toLowerCase()) || m.groupId?.toLowerCase().includes(candidateName.toLowerCase())));
+
+    if (isGroupQuery) {
+      return await this.getGroupMessagesWithSummary(candidateName, limit, daysBack);
+    }
 
     if (!isUnknownSearch && candidateName && candidateName !== "all" && candidateName !== "sab" && candidateName !== "kisi" && !candidateName.includes("kisi ne")) {
       const { contactsService } = await import("../contactsService");
@@ -439,6 +448,69 @@ export class WhatsAppHistoryEngine {
       success: true,
       count: filtered.length,
       summary: card.trim(),
+    };
+  }
+
+  /**
+   * Retrieves messages and executive summary for a specific WhatsApp group
+   */
+  public async getGroupMessagesWithSummary(
+    groupNameQuery?: string,
+    limit = 20,
+    daysBack = 7
+  ): Promise<{ success: boolean; count: number; groupName: string; summary: string; messages: any[] }> {
+    const rawQ = (groupNameQuery || "").toLowerCase().trim();
+    const cleanQ = rawQ.replace(/group|grup|ka|ki|ke|last|msg|message|messages|batao|bataiye|chahiye/gi, "").trim();
+    const startTs = Date.now() - daysBack * 86400000;
+
+    let docs: IncomingMessage[] = [];
+    try {
+      const snap = await inboxCol().where("timestamp", ">=", startTs).where("isGroup", "==", true).orderBy("timestamp", "desc").limit(200).get();
+      docs = snap.docs.map((d) => d.data() as IncomingMessage);
+    } catch {
+      docs = this.messageCache.filter((m) => m.isGroup && m.timestamp >= startTs);
+    }
+
+    if (docs.length === 0 && this.messageCache.length > 0) {
+      docs = this.messageCache.filter((m) => m.isGroup && m.timestamp >= startTs);
+    }
+
+    let matching = docs;
+    if (cleanQ) {
+      matching = docs.filter(
+        (m) =>
+          (m.groupName && m.groupName.toLowerCase().includes(cleanQ)) ||
+          (m.groupId && m.groupId.toLowerCase().includes(cleanQ))
+      );
+    }
+
+    if (matching.length === 0) {
+      const availableGroups = Array.from(new Set(this.messageCache.filter((m) => m.isGroup && m.groupName).map((m) => m.groupName!)));
+      return {
+        success: false,
+        count: 0,
+        groupName: groupNameQuery || "Group",
+        summary: `Boss, "${groupNameQuery || "Group"}" se koi messages nahi mile.${availableGroups.length > 0 ? `\nAvailable active groups in memory: ${availableGroups.join(", ")}` : ""}`,
+        messages: [],
+      };
+    }
+
+    const targetGroupName = matching[0].groupName || "WhatsApp Group";
+    const sorted = matching.sort((a, b) => a.timestamp - b.timestamp).slice(-limit);
+
+    let summaryCard = `👥 *Group Conversation: ${targetGroupName}* (Pichle ${daysBack} din, ${matching.length} msgs recorded):\n━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    sorted.forEach((m, idx) => {
+      const time = m.dateStr || "Recent";
+      const sender = m.senderPhone === "me" ? "Aap (DK)" : m.senderName;
+      summaryCard += `${idx + 1}. [${time}] *${sender}:* _"${m.text}"_\n`;
+    });
+
+    return {
+      success: true,
+      count: matching.length,
+      groupName: targetGroupName,
+      summary: summaryCard.trim(),
+      messages: sorted.map((m) => ({ sender: m.senderName, text: m.text, time: m.dateStr, phone: m.senderPhone })),
     };
   }
 }

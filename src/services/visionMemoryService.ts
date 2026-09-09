@@ -69,9 +69,12 @@ class VisionMemoryService {
    */
   public isMediaQuestionIntent(text: string): boolean {
     const t = text.toLowerCase().trim();
+    if (/\b(group|grup|chat|conversation|history|last\s*\d+|msg|message|messages|bhejo|batao|avengers|script)\b/i.test(t)) {
+      return false;
+    }
     return (
-      /\b(photo|image|picture|pic|pdf|doc|document|file|summary|invoice|bill|receipt|poster|notice|screenshot|chart|slide)\b/i.test(t) ||
-      /\b(meeting|timing|time|kab\s*h|kab\s*hai|kahan\s*h|kahan\s*hai|kya\s*date|kya\s*time|kis\s*din|kis\s*time|kitna\s*amount|total\s*kitna|kisko\s*bhejna|account\s*no|ifsc|venue|location|kya\s*likha\s*hai|padh\s*ke\s*batao|isme\s*kya\s*hai)\b/i.test(t)
+      /\b(photo|image|picture|pic|pdf|doc|document|file|invoice|bill|receipt|poster|notice|screenshot|chart|slide)\b/i.test(t) ||
+      /\b(kya\s*likha\s*hai|padh\s*ke\s*batao|isme\s*kya\s*hai|photo\s*me\s*kya|image\s*me\s*kya)\b/i.test(t)
     );
   }
 
