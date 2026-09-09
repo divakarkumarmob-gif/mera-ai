@@ -59,8 +59,13 @@ export class PerchanceService {
     // 0. Project Local Cache Directory (Render persistent workspace)
     const projectCacheDirs = [
       path.join(process.cwd(), ".cache", "puppeteer"),
+      path.join(process.cwd(), ".cache"),
+      path.join(process.cwd(), "chrome"),
       path.join(process.cwd(), ".chrome"),
       path.join(process.cwd(), "dist", ".cache", "puppeteer"),
+      path.join(process.cwd(), "dist", "chrome"),
+      "/opt/render/project/src/.cache/puppeteer",
+      "/opt/render/project/src/chrome",
     ];
 
     for (const d of projectCacheDirs) {

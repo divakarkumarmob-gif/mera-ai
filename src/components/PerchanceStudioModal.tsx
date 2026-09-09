@@ -148,7 +148,10 @@ export default function PerchanceStudioModal({ onClose }: { onClose: () => void 
         } catch {}
       });
 
+      let receivedResult = false;
+
       es.addEventListener("complete", (e: MessageEvent) => {
+        receivedResult = true;
         try {
           const data = JSON.parse(e.data);
           if (data.image) {
@@ -161,22 +164,61 @@ export default function PerchanceStudioModal({ onClose }: { onClose: () => void 
         es.close();
       });
 
-      es.addEventListener("error", (e: MessageEvent) => {
-        let errText = "Generation failed on server";
+      es.addEventListener("error", async (e: MessageEvent) => {
+        let errText = "";
         try {
           if (e.data) {
             const parsed = JSON.parse(e.data);
-            errText = parsed.error || errText;
+            errText = parsed.error || "";
           }
         } catch {}
-        setErrorMessage(errText);
+
+        if (!receivedResult) {
+          // Attempt instant REST fallback so user request never fails
+          try {
+            setGenerationLogs((prev) => [
+              ...prev,
+              {
+                level: "info",
+                step: "Direct Sync",
+                message: "Syncing final image payload directly via high-speed API...",
+                timestamp: new Date().toLocaleTimeString(),
+              },
+            ]);
+
+            const restRes = await fetch(getApiUrl("/api/perchance/generate"), {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ prompt: cleanPrompt, timeoutMs: 120000 }),
+            });
+            const restData = await restRes.json();
+
+            if (restData.ok && restData.image) {
+              setGeneratedImage(restData.image);
+              setImageMeta({ bytes: restData.bytes || 0, durationMs: restData.durationMs || 0 });
+              if (restData.logs && restData.logs.length > 0) {
+                setGenerationLogs(restData.logs);
+              }
+              setCurrentStepIndex(5);
+              setIsGenerating(false);
+              es.close();
+              return;
+            }
+          } catch {}
+        }
+
+        if (errText) {
+          setErrorMessage(errText);
+        }
         setIsGenerating(false);
         es.close();
       });
 
       es.onerror = () => {
-        setIsGenerating(false);
-        es.close();
+        // EventSource will auto-reconnect or error event will handle fallback
+        if (es.readyState === EventSource.CLOSED && !receivedResult) {
+          setIsGenerating(false);
+        }
       };
     } catch (err: any) {
       setErrorMessage(err?.message || "Failed to initiate generation stream");

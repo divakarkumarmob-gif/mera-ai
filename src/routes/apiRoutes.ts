@@ -2611,12 +2611,21 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
 
     res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
     (res as any).flushHeaders?.();
 
+    const keepAliveTimer = setInterval(() => {
+      try {
+        res.write(": keep-alive\n\n");
+      } catch {}
+    }, 4000);
+
     const sendEvent = (event: string, data: any) => {
-      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      try {
+        res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      } catch {}
     };
 
     sendEvent("log", {
@@ -2654,7 +2663,10 @@ export function createApiRouter(context: ApiRoutesContext): Router {
         error: err?.message || "Unexpected execution error",
       });
     } finally {
-      res.end();
+      clearInterval(keepAliveTimer);
+      try {
+        res.end();
+      } catch {}
     }
   });
 

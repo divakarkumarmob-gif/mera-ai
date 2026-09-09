@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "tsx server.ts",
     "start": "node dist/server.cjs",
-    "build": "npx @puppeteer/browsers install chrome@stable && vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
-    "postinstall": "npx @puppeteer/browsers install chrome@stable || true",
+    "build": "npx @puppeteer/browsers install chrome@stable --path ./.cache/puppeteer && vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "postinstall": "npx @puppeteer/browsers install chrome@stable --path ./.cache/puppeteer || true",
     "preview": "vite preview"
   },
   "dependencies": {
