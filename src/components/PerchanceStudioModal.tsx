@@ -51,6 +51,7 @@ const STYLE_ENHANCERS = [
 ];
 
 export default function PerchanceStudioModal({ onClose }: { onClose: () => void }) {
+  const [studioMode, setStudioMode] = useState<"bot" | "manual">("bot");
   const [prompt, setPrompt] = useState("a queen standing front of tajmahal");
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationLogs, setGenerationLogs] = useState<StepLog[]>([]);
@@ -65,6 +66,7 @@ export default function PerchanceStudioModal({ onClose }: { onClose: () => void 
   const [copiedPrompt, setCopiedPrompt] = useState(false);
   const [copiedCommand, setCopiedCommand] = useState(false);
   const [timerSeconds, setTimerSeconds] = useState(0);
+  const [iframeKey, setIframeKey] = useState(0);
 
   const logsEndRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<any>(null);
@@ -112,6 +114,19 @@ export default function PerchanceStudioModal({ onClose }: { onClose: () => void 
     if (!prompt.toLowerCase().includes(tag.toLowerCase())) {
       setPrompt((prev) => `${prev.trim()}, ${tag}`);
     }
+  };
+
+  const copyWhatsAppCmd = () => {
+    const cmd = `@hot image ${prompt.trim()}`;
+    navigator.clipboard.writeText(cmd);
+    setCopiedCommand(true);
+    setTimeout(() => setCopiedCommand(false), 2000);
+  };
+
+  const copyPromptOnly = () => {
+    navigator.clipboard.writeText(prompt.trim());
+    setCopiedPrompt(true);
+    setTimeout(() => setCopiedPrompt(false), 2000);
   };
 
   const handleStartGeneration = async () => {
@@ -217,69 +232,92 @@ export default function PerchanceStudioModal({ onClose }: { onClose: () => void 
     document.body.removeChild(a);
   };
 
-  const copyWhatsAppCmd = () => {
-    navigator.clipboard.writeText(`@hot image ${prompt.trim()}`);
-    setCopiedCommand(true);
-    setTimeout(() => setCopiedCommand(false), 2000);
-  };
-
   const stepsList = [
-    { title: "Browser Init", desc: "Launch Headless Engine" },
-    { title: "Page Navigation", desc: "Perchance DOM Ready" },
+    { title: "Browser Init", desc: "Environment Discovery" },
+    { title: "Page Navigation", desc: "DOM Frame Loading" },
     { title: "Prompt & Action", desc: "Keyboard Typing & Click" },
     { title: "Stream Intercept", desc: "API Endpoint Capture" },
     { title: "HD Delivery", desc: "JPEG Image Output" },
   ];
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 md:p-6 overflow-y-auto">
+    <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 md:p-6 overflow-y-auto">
       <motion.div
         initial={{ opacity: 0, scale: 0.96, y: 15 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.96, y: 15 }}
-        className="w-full max-w-6xl max-h-[92vh] bg-slate-950 border border-pink-500/40 rounded-3xl shadow-[0_0_60px_rgba(244,63,94,0.25)] flex flex-col overflow-hidden text-slate-100"
+        className="w-full max-w-7xl h-[92vh] bg-slate-950 border border-pink-500/40 rounded-3xl shadow-[0_0_60px_rgba(244,63,94,0.25)] flex flex-col overflow-hidden text-slate-100"
       >
         {/* ── Top Modal Header ────────────────────────────────────────────── */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-pink-500/20 bg-gradient-to-r from-pink-950/40 via-purple-950/30 to-slate-950 shrink-0">
+        <div className="flex flex-wrap items-center justify-between px-4 sm:px-6 py-3.5 border-b border-pink-500/20 bg-gradient-to-r from-pink-950/40 via-purple-950/30 to-slate-950 gap-3 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-pink-500 to-amber-500 flex items-center justify-center shadow-[0_0_20px_rgba(244,63,94,0.4)]">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-pink-500 to-amber-500 flex items-center justify-center shadow-[0_0_20px_rgba(244,63,94,0.4)] shrink-0">
               <Sparkles className="w-5 h-5 text-white animate-pulse" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-lg font-black tracking-wide bg-gradient-to-r from-pink-400 via-rose-300 to-amber-300 bg-clip-text text-transparent">
-                  🔥 Perchance AI Photo Studio & Live Inspector
+                <h2 className="text-base sm:text-lg font-black tracking-wide bg-gradient-to-r from-pink-400 via-rose-300 to-amber-300 bg-clip-text text-transparent">
+                  🔥 Perchance AI Photo Studio & Live View
                 </h2>
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-pink-500/20 text-pink-300 border border-pink-500/30 font-mono font-semibold">
                   Realistic HD
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                Automated Browser Engine with Real-Time Step Logs & Network Interception
+                Choose mode: Automated Bot Execution or Interactive Live Web Studio
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            {/* Engine Status Badge */}
-            <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900 border border-white/10 text-xs font-mono">
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  engineStatus?.isCloud
-                    ? "bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.8)]"
-                    : engineStatus?.isAvailable
-                    ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]"
-                    : "bg-amber-400 animate-pulse"
+          <div className="flex items-center gap-2 sm:gap-3">
+            {/* Mode Switcher: 🤖 By Bot vs 🖐️ By Manual */}
+            <div className="flex items-center p-1 rounded-2xl bg-slate-900 border border-white/10 text-xs shadow-inner">
+              <button
+                onClick={() => setStudioMode("bot")}
+                className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  studioMode === "bot"
+                    ? "bg-gradient-to-r from-pink-500 to-purple-600 text-white shadow-lg shadow-pink-500/25"
+                    : "text-slate-400 hover:text-slate-200"
                 }`}
-              />
-              <span className={engineStatus?.isCloud ? "text-cyan-300 font-semibold" : "text-slate-300"}>
-                {engineStatus?.isCloud
-                  ? "⚡ Cloud Browser (0MB RAM)"
-                  : engineStatus?.isAvailable
-                  ? "Chrome Engine Ready"
-                  : "Auto-Detecting"}
-              </span>
+              >
+                <Cpu className="w-3.5 h-3.5" />
+                <span>🤖 By Bot</span>
+              </button>
+
+              <button
+                onClick={() => setStudioMode("manual")}
+                className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  studioMode === "manual"
+                    ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-lg shadow-cyan-500/25"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                <Globe className="w-3.5 h-3.5" />
+                <span>🖐️ By Manual (Live Web)</span>
+              </button>
             </div>
+
+            {/* Engine Status Badge (Bot Mode) */}
+            {studioMode === "bot" && (
+              <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900 border border-white/10 text-xs font-mono">
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    engineStatus?.isCloud
+                      ? "bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.8)]"
+                      : engineStatus?.isAvailable
+                      ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]"
+                      : "bg-amber-400 animate-pulse"
+                  }`}
+                />
+                <span className={engineStatus?.isCloud ? "text-cyan-300 font-semibold" : "text-slate-300"}>
+                  {engineStatus?.isCloud
+                    ? "⚡ Cloud Browser"
+                    : engineStatus?.isAvailable
+                    ? "Chrome Ready"
+                    : "Auto-Detecting"}
+                </span>
+              </div>
+            )}
 
             {/* Close Button */}
             <button
@@ -292,449 +330,594 @@ export default function PerchanceStudioModal({ onClose }: { onClose: () => void 
           </div>
         </div>
 
-        {/* ── Studio Body (Split 2-Column Grid) ────────────────────────────── */}
-        <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 overflow-y-auto p-4 md:p-6 gap-6">
-          {/* ── LEFT COLUMN: Input Studio & Live Diagnostics (7 Cols) ───────── */}
-          <div className="lg:col-span-7 flex flex-col gap-5">
-            {/* 1. Prompt Input Card */}
-            <div className="p-4 rounded-2xl bg-slate-900/70 border border-white/10 shadow-lg flex flex-col gap-3">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-bold text-pink-300 uppercase tracking-wider flex items-center gap-1.5">
-                  <Zap className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Enter Photo Description (Prompt)</span>
-                </label>
-                <span className="text-[10px] text-slate-400 font-mono">{prompt.length} chars</span>
-              </div>
+        {/* ── Studio Body ─────────────────────────────────────────────────── */}
+        {studioMode === "manual" ? (
+          /* 🖐️ MODE 2: BY MANUAL (Interactive Live Web Iframe + Quick Prompt Builder) */
+          <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 overflow-hidden p-3 sm:p-4 md:p-5 gap-4">
+            {/* Left Column (4 cols): Prompt Builder, Presets & 1-Click Copy */}
+            <div className="lg:col-span-4 flex flex-col gap-3 overflow-y-auto pr-1">
+              <div className="p-4 rounded-2xl bg-slate-900/80 border border-cyan-500/30 shadow-lg flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-cyan-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <Zap className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Prompt Builder (Manual)</span>
+                  </label>
+                  <span className="text-[10px] text-slate-400 font-mono">{prompt.length} chars</span>
+                </div>
 
-              <div className="relative">
                 <textarea
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                      handleStartGeneration();
-                    }
-                  }}
-                  placeholder="Describe your desired photo in detail (e.g. a queen standing in front of tajmahal, 8k resolution)..."
+                  placeholder="Type your prompt here..."
                   rows={3}
-                  className="w-full p-3.5 rounded-xl bg-slate-950/90 border border-slate-700/80 focus:border-pink-500/80 focus:ring-1 focus:ring-pink-500/50 text-sm text-slate-100 placeholder-slate-500 resize-none outline-none transition-all font-sans leading-relaxed"
+                  className="w-full p-3 rounded-xl bg-slate-950 border border-slate-700 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 text-sm text-slate-100 placeholder-slate-500 resize-none outline-none transition-all leading-relaxed"
                 />
-              </div>
 
-              {/* Style Enhancer Tags */}
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mr-1">Enhancers:</span>
-                {STYLE_ENHANCERS.map((tag) => (
-                  <button
-                    key={tag}
-                    onClick={() => addStyleTag(tag)}
-                    className="text-[10px] px-2 py-0.5 rounded-lg bg-pink-500/10 hover:bg-pink-500/20 text-pink-300 border border-pink-500/25 transition-all cursor-pointer"
-                  >
-                    + {tag}
-                  </button>
-                ))}
-              </div>
-
-              {/* Preset Inspiration Pills */}
-              <div className="flex items-center gap-2 overflow-x-auto pb-1">
-                {PRESET_PROMPTS.map((item) => (
-                  <button
-                    key={item.label}
-                    onClick={() => setPrompt(item.text)}
-                    className="text-[11px] px-2.5 py-1 rounded-xl bg-slate-800/80 hover:bg-slate-700/90 text-slate-300 hover:text-white border border-slate-700/50 hover:border-pink-500/40 transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex items-center justify-between pt-2 border-t border-white/5">
+                {/* 1-Click Copy Prompt Button */}
                 <button
-                  onClick={copyWhatsAppCmd}
-                  className="text-xs px-3 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5 transition-all cursor-pointer"
-                  title="Copy command to test on WhatsApp"
+                  onClick={copyPromptOnly}
+                  className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(6,182,212,0.35)] transition-all cursor-pointer active:scale-98"
                 >
-                  {copiedCommand ? <Check className="w-3.5 h-3.5 text-emerald-300" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copiedCommand ? "Copied @hot Command!" : "Copy @hot Command"}</span>
+                  {copiedPrompt ? <Check className="w-4 h-4 text-white" /> : <Copy className="w-4 h-4" />}
+                  <span>{copiedPrompt ? "✓ Prompt Copied to Clipboard!" : "📋 1-Click Copy Prompt"}</span>
                 </button>
 
+                {/* Quick Style Enhancer Tags */}
+                <div>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+                    Click to add enhancer tags:
+                  </span>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {STYLE_ENHANCERS.map((tag) => (
+                      <button
+                        key={tag}
+                        onClick={() => addStyleTag(tag)}
+                        className="text-[10px] px-2 py-0.5 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/25 transition-all cursor-pointer"
+                      >
+                        + {tag}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Preset Prompts */}
+                <div>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+                    Preset Inspirations:
+                  </span>
+                  <div className="flex flex-col gap-1.5 max-h-[160px] overflow-y-auto">
+                    {PRESET_PROMPTS.map((item) => (
+                      <button
+                        key={item.label}
+                        onClick={() => setPrompt(item.text)}
+                        className="text-left text-[11px] p-2 rounded-xl bg-slate-950/60 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 hover:border-cyan-500/40 transition-all cursor-pointer truncate"
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Instructions Card */}
+              <div className="p-3.5 rounded-2xl bg-cyan-950/30 border border-cyan-500/20 text-xs text-slate-300 space-y-2">
+                <div className="font-bold text-cyan-300 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-cyan-400" />
+                  <span>Kaise use karein (Manual Mode):</span>
+                </div>
+                <ol className="list-decimal list-inside space-y-1 text-[11px] text-slate-300 leading-relaxed">
+                  <li>
+                    Upar <b>"📋 1-Click Copy Prompt"</b> dabayein.
+                  </li>
+                  <li>
+                    Right side wale <b>Live Web View</b> me prompt paste karein (Ctrl+V).
+                  </li>
+                  <li>
+                    Wahi page par <b>"generate"</b> button click karein aur 6 photos live dekhein!
+                  </li>
+                </ol>
+              </div>
+
+              {/* WhatsApp Command Card */}
+              <div className="p-3 rounded-2xl bg-emerald-950/30 border border-emerald-500/20 text-xs text-emerald-200 flex items-center justify-between">
+                <span className="font-mono text-[11px] truncate mr-2">@hot image {prompt.substring(0, 25)}...</span>
                 <button
-                  onClick={handleStartGeneration}
-                  disabled={isGenerating || !prompt.trim()}
-                  className={`px-5 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center gap-2 shadow-lg transition-all cursor-pointer ${
-                    isGenerating
-                      ? "bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-700"
-                      : "bg-gradient-to-r from-pink-500 via-rose-500 to-amber-500 hover:from-pink-400 hover:to-amber-400 text-white shadow-[0_0_25px_rgba(244,63,94,0.4)] active:scale-98"
-                  }`}
+                  onClick={copyWhatsAppCmd}
+                  className="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-[10px] font-bold shrink-0 transition-all"
                 >
-                  {isGenerating ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 animate-spin text-pink-400" />
-                      <span>Generating ({timerSeconds}s)...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="w-4 h-4 text-white" />
-                      <span>✨ Generate Photo (Live Stream)</span>
-                    </>
-                  )}
+                  {copiedCommand ? "Copied" : "Copy @hot"}
                 </button>
               </div>
             </div>
 
-            {/* 2. Visual Step Progress Bar */}
-            <div className="p-3.5 rounded-2xl bg-slate-900/60 border border-white/5 flex flex-col gap-2">
-              <div className="flex items-center justify-between text-[11px] text-slate-400 font-bold uppercase tracking-wider">
-                <span className="flex items-center gap-1.5 text-slate-300">
-                  <Layers className="w-3.5 h-3.5 text-pink-400" />
-                  <span>Pipeline Execution Step {currentStepIndex}/5</span>
+            {/* Right Column (8 cols): Interactive Live Web Frame */}
+            <div className="lg:col-span-8 flex flex-col rounded-2xl bg-slate-900 border border-cyan-500/30 overflow-hidden shadow-2xl">
+              {/* Frame Control Bar */}
+              <div className="px-4 py-2 bg-slate-950 border-b border-white/10 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-2 text-xs font-mono text-slate-400 truncate">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+                  <span className="text-cyan-300 font-bold">Live Web View:</span>
+                  <span className="text-slate-400 truncate">https://perchance.org/ai-photo-generator</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setIframeKey((k) => k + 1)}
+                    className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs flex items-center gap-1.5 transition-all cursor-pointer border border-white/5"
+                    title="Reload Web Page"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Reload Frame</span>
+                  </button>
+                  <a
+                    href="https://perchance.org/ai-photo-generator"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2.5 py-1 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 text-xs flex items-center gap-1.5 transition-all border border-cyan-500/30 font-bold"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                    <span>Open in Full Tab</span>
+                  </a>
+                </div>
+              </div>
+
+              {/* Embedded Web Frame */}
+              <div className="flex-1 w-full h-full bg-white relative">
+                <iframe
+                  key={iframeKey}
+                  src="https://perchance.org/ai-photo-generator"
+                  title="Perchance AI Photo Generator Live"
+                  className="w-full h-full border-0 min-h-[480px]"
+                  allow="clipboard-read; clipboard-write; fullscreen"
+                  loading="lazy"
+                />
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* 🤖 MODE 1: BY BOT (Automated Background Worker + Live CCTV Monitor + HD Output) */
+          <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 overflow-y-auto p-4 md:p-6 gap-6">
+            {/* ── LEFT COLUMN: Input Studio & Live Diagnostics (7 Cols) ───────── */}
+            <div className="lg:col-span-7 flex flex-col gap-5">
+              {/* 1. Prompt Input Card */}
+              <div className="p-4 rounded-2xl bg-slate-900/70 border border-white/10 shadow-lg flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-pink-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <Zap className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Enter Photo Description (Prompt)</span>
+                  </label>
+                  <span className="text-[10px] text-slate-400 font-mono">{prompt.length} chars</span>
+                </div>
+
+                <div className="relative">
+                  <textarea
+                    value={prompt}
+                    onChange={(e) => setPrompt(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                        handleStartGeneration();
+                      }
+                    }}
+                    placeholder="Describe your desired photo in detail (e.g. a queen standing in front of tajmahal, 8k resolution)..."
+                    rows={3}
+                    className="w-full p-3.5 rounded-xl bg-slate-950/90 border border-slate-700/80 focus:border-pink-500/80 focus:ring-1 focus:ring-pink-500/50 text-sm text-slate-100 placeholder-slate-500 resize-none outline-none transition-all font-sans leading-relaxed"
+                  />
+                </div>
+
+                {/* Style Enhancer Tags */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mr-1">Enhancers:</span>
+                  {STYLE_ENHANCERS.map((tag) => (
+                    <button
+                      key={tag}
+                      onClick={() => addStyleTag(tag)}
+                      className="text-[10px] px-2 py-0.5 rounded-lg bg-pink-500/10 hover:bg-pink-500/20 text-pink-300 border border-pink-500/25 transition-all cursor-pointer"
+                    >
+                      + {tag}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Preset Inspiration Pills */}
+                <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                  {PRESET_PROMPTS.map((item) => (
+                    <button
+                      key={item.label}
+                      onClick={() => setPrompt(item.text)}
+                      className="text-[11px] px-2.5 py-1 rounded-xl bg-slate-800/80 hover:bg-slate-700/90 text-slate-300 hover:text-white border border-slate-700/50 hover:border-pink-500/40 transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex items-center justify-between pt-2 border-t border-white/5">
+                  <button
+                    onClick={copyWhatsAppCmd}
+                    className="text-xs px-3 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5 transition-all cursor-pointer"
+                    title="Copy command to test on WhatsApp"
+                  >
+                    {copiedCommand ? <Check className="w-3.5 h-3.5 text-emerald-300" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedCommand ? "Copied @hot Command!" : "Copy @hot Command"}</span>
+                  </button>
+
+                  <button
+                    onClick={handleStartGeneration}
+                    disabled={isGenerating || !prompt.trim()}
+                    className={`px-5 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center gap-2 shadow-lg transition-all cursor-pointer ${
+                      isGenerating
+                        ? "bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-700"
+                        : "bg-gradient-to-r from-pink-500 via-rose-500 to-amber-500 hover:from-pink-400 hover:to-amber-400 text-white shadow-[0_0_25px_rgba(244,63,94,0.4)] active:scale-98"
+                    }`}
+                  >
+                    {isGenerating ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin text-pink-400" />
+                        <span>Generating ({timerSeconds}s)...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-4 h-4 text-white" />
+                        <span>✨ Generate Photo (Live Stream)</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* 2. Visual Step Progress Bar */}
+              <div className="p-3.5 rounded-2xl bg-slate-900/60 border border-white/5 flex flex-col gap-2">
+                <div className="flex items-center justify-between text-[11px] text-slate-400 font-bold uppercase tracking-wider">
+                  <span className="flex items-center gap-1.5 text-slate-300">
+                    <Layers className="w-3.5 h-3.5 text-pink-400" />
+                    <span>Pipeline Execution Step {currentStepIndex}/5</span>
+                  </span>
+                  {isGenerating && (
+                    <span className="text-amber-300 font-mono flex items-center gap-1">
+                      <Clock className="w-3 h-3 animate-spin" />
+                      <span>Elapsed: {timerSeconds}s</span>
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-5 gap-1.5">
+                  {stepsList.map((step, idx) => {
+                    const stepNum = idx + 1;
+                    const isDone = currentStepIndex > stepNum || (!isGenerating && generatedImage);
+                    const isCurrent = currentStepIndex === stepNum && isGenerating;
+
+                    return (
+                      <div
+                        key={step.title}
+                        className={`p-2 rounded-xl text-center flex flex-col items-center justify-center transition-all ${
+                          isDone
+                            ? "bg-emerald-500/15 border border-emerald-500/40 text-emerald-300"
+                            : isCurrent
+                            ? "bg-pink-500/25 border border-pink-500/60 text-pink-200 shadow-[0_0_15px_rgba(244,63,94,0.3)] animate-pulse"
+                            : "bg-slate-950/60 border border-slate-800 text-slate-500"
+                        }`}
+                      >
+                        <div className="text-[10px] font-bold font-mono">
+                          {isDone ? "✓ Step " + stepNum : "Step " + stepNum}
+                        </div>
+                        <div className="text-[9px] truncate max-w-full font-semibold">{step.title}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 3. Dual-Mode Inspector: 📺 Live Browser Screen Display + 📟 Terminal Logs */}
+              <div className="flex-1 min-h-[280px] rounded-2xl bg-black/90 border border-slate-800 shadow-inner flex flex-col overflow-hidden">
+                {/* Tab Header */}
+                <div className="px-3 py-2 bg-slate-950 border-b border-white/5 flex items-center justify-between shrink-0">
+                  <div className="flex items-center gap-1.5 p-0.5 rounded-xl bg-slate-900 border border-white/10 text-xs">
+                    <button
+                      onClick={() => setActiveInspectorTab("monitor")}
+                      className={`px-3 py-1 rounded-lg font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
+                        activeInspectorTab === "monitor"
+                          ? "bg-gradient-to-r from-pink-500/20 to-purple-500/20 text-pink-300 border border-pink-500/40 shadow-sm"
+                          : "text-slate-400 hover:text-slate-200"
+                      }`}
+                    >
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                      <span className="font-semibold text-[11px]">📺 Live Screen Monitor</span>
+                      {livePreview && (
+                        <span className="text-[9px] px-1 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-mono">LIVE</span>
+                      )}
+                    </button>
+
+                    <button
+                      onClick={() => setActiveInspectorTab("terminal")}
+                      className={`px-3 py-1 rounded-lg font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
+                        activeInspectorTab === "terminal"
+                          ? "bg-gradient-to-r from-pink-500/20 to-purple-500/20 text-pink-300 border border-pink-500/40 shadow-sm"
+                          : "text-slate-400 hover:text-slate-200"
+                      }`}
+                    >
+                      <Terminal className="w-3.5 h-3.5 text-pink-400" />
+                      <span className="font-semibold text-[11px]">📟 Terminal Logs ({generationLogs.length})</span>
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {activeInspectorTab === "terminal" && (
+                      <button
+                        onClick={() => {
+                          const text = generationLogs.map((l) => `[${l.timestamp}] [${l.step}] ${l.message}`).join("\n");
+                          navigator.clipboard.writeText(text);
+                          setCopiedLink(true);
+                          setTimeout(() => setCopiedLink(false), 1500);
+                        }}
+                        className="text-[10px] px-2 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-white/10 flex items-center gap-1 transition-all"
+                      >
+                        {copiedLink ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                        <span>{copiedLink ? "Copied" : "Copy"}</span>
+                      </button>
+                    )}
+                    {isGenerating && (
+                      <div className="flex items-center gap-1 text-[10px] text-pink-400 font-mono bg-pink-500/10 px-2 py-0.5 rounded border border-pink-500/20 animate-pulse">
+                        <span>BOT ACTIVE</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Tab 1: 📺 Live Browser Screen Monitor */}
+                {activeInspectorTab === "monitor" && (
+                  <div className="flex-1 flex flex-col p-3 gap-2 bg-slate-950/60">
+                    {/* Mock Browser URL Bar */}
+                    <div className="px-3 py-1.5 rounded-xl bg-slate-900/90 border border-white/5 flex items-center justify-between text-[11px] font-mono text-slate-400 shrink-0">
+                      <div className="flex items-center gap-2 truncate">
+                        <div className="flex items-center gap-1 text-emerald-400 shrink-0">
+                          <ShieldCheck className="w-3.5 h-3.5" />
+                          <span className="text-[10px] uppercase font-bold tracking-wider">SSL Secure</span>
+                        </div>
+                        <span className="text-slate-600">|</span>
+                        <span className="truncate text-slate-300">https://perchance.org/ai-photo-generator</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                        <span className="text-[10px] text-emerald-300 font-bold">1280x900</span>
+                      </div>
+                    </div>
+
+                    {/* Browser Viewport Window */}
+                    <div className="flex-1 min-h-[200px] max-h-[320px] rounded-xl bg-slate-950 border border-slate-800 relative overflow-hidden flex items-center justify-center group shadow-inner">
+                      {livePreview ? (
+                        <div className="relative w-full h-full flex items-center justify-center bg-black">
+                          <img
+                            src={livePreview}
+                            alt="Live Headless Browser Screen"
+                            className="w-full h-full object-contain max-h-[300px] transition-all duration-300"
+                          />
+                          {/* Live CCTV HUD Overlay */}
+                          <div className="absolute top-2 left-2 px-2 py-0.5 rounded bg-black/80 backdrop-blur border border-emerald-500/40 text-[10px] font-mono text-emerald-300 flex items-center gap-1.5 shadow-lg">
+                            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                            <span>LIVE BROWSER STREAM</span>
+                          </div>
+                          {isGenerating && (
+                            <div className="absolute bottom-2 right-2 px-2.5 py-1 rounded bg-black/80 backdrop-blur border border-pink-500/40 text-[10px] font-mono text-pink-300 shadow-lg">
+                              ⏱️ {timerSeconds}s
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center justify-center p-6 text-center text-slate-500 gap-3">
+                          <div className="w-12 h-12 rounded-2xl bg-slate-900 border border-white/5 flex items-center justify-center text-slate-600">
+                            <Globe className="w-6 h-6 animate-pulse text-pink-400/60" />
+                          </div>
+                          <div className="space-y-1">
+                            <div className="text-xs font-semibold text-slate-300">Live Browser Display Standby</div>
+                            <p className="text-[11px] text-slate-500 max-w-sm">
+                              Jaise hi aap "✨ Generate Photo" click karenge, bot ka live Chrome screen (typing, clicking & 6-photo grid render) yaha real-time stream hoga.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Quick 1-line latest log ticker */}
+                    {generationLogs.length > 0 && (
+                      <div className="px-3 py-1.5 rounded-xl bg-slate-900/60 border border-white/5 flex items-center justify-between text-[11px] font-mono shrink-0">
+                        <div className="flex items-center gap-2 truncate">
+                          <span className="text-pink-400 font-bold shrink-0">
+                            [{generationLogs[generationLogs.length - 1].step}]:
+                          </span>
+                          <span className="truncate text-slate-300">
+                            {generationLogs[generationLogs.length - 1].message}
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-slate-500 shrink-0 font-mono">
+                          {generationLogs[generationLogs.length - 1].timestamp}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Tab 2: 📟 Terminal Logs */}
+                {activeInspectorTab === "terminal" && (
+                  <div className="flex-1 p-3 overflow-y-auto font-mono text-xs space-y-1.5 text-slate-300 select-text max-h-[320px]">
+                    {generationLogs.length === 0 ? (
+                      <div className="h-full flex flex-col items-center justify-center text-slate-600 text-[11px] italic gap-1">
+                        <span>Terminal standby... Prompt daal kar 'Generate Photo' click karein.</span>
+                        <span>Har browser action aur network packet live yaha render hoga.</span>
+                      </div>
+                    ) : (
+                      generationLogs.map((log, idx) => (
+                        <div key={idx} className="flex items-start gap-2 leading-relaxed">
+                          <span className="text-slate-500 shrink-0 select-none">[{log.timestamp}]</span>
+                          <span
+                            className={`px-1.5 py-0.2 rounded text-[10px] font-bold uppercase shrink-0 ${
+                              log.level === "success"
+                                ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                                : log.level === "error"
+                                ? "bg-red-500/20 text-red-300 border border-red-500/30"
+                                : log.level === "warn"
+                                ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                                : "bg-blue-500/20 text-blue-300 border border-blue-500/30"
+                            }`}
+                          >
+                            {log.step}
+                          </span>
+                          <span
+                            className={`break-all ${
+                              log.level === "success"
+                                ? "text-emerald-200"
+                                : log.level === "error"
+                                ? "text-red-300 font-semibold"
+                                : log.level === "warn"
+                                ? "text-amber-200"
+                                : "text-slate-300"
+                            }`}
+                          >
+                            {log.message}
+                          </span>
+                        </div>
+                      ))
+                    )}
+                    <div ref={logsEndRef} />
+                  </div>
+                )}
+              </div>
+
+              {/* Error Diagnosis Banner if generation fails */}
+              {errorMessage && (
+                <div className="p-3.5 rounded-2xl bg-red-950/80 border border-red-500/50 text-red-200 text-xs flex items-start gap-2.5 shadow-[0_0_20px_rgba(239,68,68,0.2)]">
+                  <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <div className="font-bold text-red-300">Generation Notice / Issue:</div>
+                    <div className="text-red-200/90 leading-relaxed">{errorMessage}</div>
+                    <div className="text-[11px] text-red-400/80 font-mono">
+                      💡 Tip: "🖐️ By Manual" tab par switch karein aur waha se directly 6 photos generate karein.
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ── RIGHT COLUMN: High-Definition Output Showcase (5 Cols) ─────── */}
+            <div className="lg:col-span-5 flex flex-col gap-4">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                  <ImageIcon className="w-4 h-4 text-pink-400" />
+                  <span>AI Photo Output Result</span>
                 </span>
-                {isGenerating && (
-                  <span className="text-amber-300 font-mono flex items-center gap-1">
-                    <Clock className="w-3 h-3 animate-spin" />
-                    <span>Elapsed: {timerSeconds}s</span>
+                {generatedImage && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono font-bold flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3" />
+                    <span>Generated in {((imageMeta?.durationMs || 0) / 1000).toFixed(1)}s</span>
                   </span>
                 )}
               </div>
 
-              <div className="grid grid-cols-5 gap-1.5">
-                {stepsList.map((step, idx) => {
-                  const stepNum = idx + 1;
-                  const isDone = currentStepIndex > stepNum || (!isGenerating && generatedImage);
-                  const isCurrent = currentStepIndex === stepNum && isGenerating;
-
-                  return (
-                    <div
-                      key={step.title}
-                      className={`p-2 rounded-xl text-center flex flex-col items-center justify-center transition-all ${
-                        isDone
-                          ? "bg-emerald-500/15 border border-emerald-500/40 text-emerald-300"
-                          : isCurrent
-                          ? "bg-pink-500/25 border border-pink-500/60 text-pink-200 shadow-[0_0_15px_rgba(244,63,94,0.3)] animate-pulse"
-                          : "bg-slate-950/60 border border-slate-800 text-slate-500"
-                      }`}
-                    >
-                      <div className="text-[10px] font-bold font-mono">
-                        {isDone ? "✓ Step " + stepNum : "Step " + stepNum}
-                      </div>
-                      <div className="text-[9px] truncate max-w-full font-semibold">{step.title}</div>
+              {/* Photo Viewer Card */}
+              <div className="flex-1 min-h-[360px] rounded-3xl bg-slate-900/90 border border-white/10 shadow-2xl flex flex-col items-center justify-center p-4 relative overflow-hidden group">
+                {generatedImage ? (
+                  <div className="w-full h-full flex flex-col items-center justify-between gap-4">
+                    <div className="relative w-full flex-1 flex items-center justify-center overflow-hidden rounded-2xl bg-black/50 border border-white/5">
+                      <img
+                        src={generatedImage}
+                        alt="Perchance AI Generated"
+                        className="max-h-[380px] w-auto object-contain rounded-xl shadow-2xl transition-transform duration-300 group-hover:scale-[1.02]"
+                      />
                     </div>
-                  );
-                })}
-              </div>
-            </div>
 
-            {/* 3. Dual-Mode Inspector: 📺 Live Browser Screen Display + 📟 Terminal Logs */}
-            <div className="flex-1 min-h-[280px] rounded-2xl bg-black/90 border border-slate-800 shadow-inner flex flex-col overflow-hidden">
-              {/* Tab Header */}
-              <div className="px-3 py-2 bg-slate-950 border-b border-white/5 flex items-center justify-between shrink-0">
-                <div className="flex items-center gap-1.5 p-0.5 rounded-xl bg-slate-900 border border-white/10 text-xs">
+                    {/* Image Metadata Strip */}
+                    <div className="w-full grid grid-cols-3 gap-2 text-center text-xs font-mono">
+                      <div className="p-2 rounded-xl bg-slate-950/80 border border-white/5">
+                        <div className="text-[10px] text-slate-400">File Size</div>
+                        <div className="font-bold text-pink-300">
+                          {imageMeta?.bytes ? `${(imageMeta.bytes / 1024).toFixed(1)} KB` : "HD JPEG"}
+                        </div>
+                      </div>
+                      <div className="p-2 rounded-xl bg-slate-950/80 border border-white/5">
+                        <div className="text-[10px] text-slate-400">Gen Time</div>
+                        <div className="font-bold text-emerald-300">
+                          {imageMeta?.durationMs ? `${(imageMeta.durationMs / 1000).toFixed(1)}s` : "Fast"}
+                        </div>
+                      </div>
+                      <div className="p-2 rounded-xl bg-slate-950/80 border border-white/5">
+                        <div className="text-[10px] text-slate-400">Engine</div>
+                        <div className="font-bold text-amber-300">Perchance SD</div>
+                      </div>
+                    </div>
+
+                    {/* Actions Buttons */}
+                    <div className="w-full flex items-center gap-2">
+                      <button
+                        onClick={handleDownload}
+                        className="flex-1 py-2.5 px-3 rounded-xl bg-gradient-to-r from-pink-500 to-rose-600 hover:from-pink-400 hover:to-rose-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(244,63,94,0.35)] transition-all cursor-pointer active:scale-98"
+                      >
+                        <Download className="w-4 h-4" />
+                        <span>Download HD Photo</span>
+                      </button>
+                      <a
+                        href={generatedImage}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 border border-white/10 transition-all"
+                      >
+                        <Eye className="w-4 h-4" />
+                        <span>View Full</span>
+                      </a>
+                    </div>
+                  </div>
+                ) : isGenerating ? (
+                  /* Scanning Radar Animation while generating */
+                  <div className="flex flex-col items-center justify-center gap-4 text-center p-6">
+                    <div className="relative w-24 h-24 rounded-full border-2 border-pink-500/30 flex items-center justify-center animate-pulse">
+                      <div className="absolute inset-0 rounded-full border border-pink-400/60 animate-ping" />
+                      <Sparkles className="w-10 h-10 text-pink-400 animate-spin" style={{ animationDuration: "6s" }} />
+                    </div>
+                    <div>
+                      <h4 className="text-base font-bold text-pink-300">Synthesizing High-Definition Photo</h4>
+                      <p className="text-xs text-slate-400 mt-1 max-w-xs leading-relaxed">
+                        Headless Chrome browser Perchance engine par photo generate karke network stream capture kar raha hai...
+                      </p>
+                    </div>
+                    <div className="px-3.5 py-1.5 rounded-full bg-pink-500/10 border border-pink-500/30 text-xs font-mono text-pink-300 animate-pulse">
+                      ⏱️ Time Elapsed: {timerSeconds}s
+                    </div>
+                  </div>
+                ) : (
+                  /* Empty Placeholder */
+                  <div className="flex flex-col items-center justify-center gap-3 text-center p-6 text-slate-500">
+                    <div className="w-16 h-16 rounded-3xl bg-slate-950/80 border border-white/5 flex items-center justify-center text-3xl shadow-inner">
+                      🖼️
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-semibold text-slate-400">Ready to Generate</h4>
+                      <p className="text-xs text-slate-500 mt-1 max-w-xs">
+                        Left side prompt fill karke <b>"Generate Photo"</b> click karein. Photo result yahan instant load hoga.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* WhatsApp Integration Help Card */}
+              <div className="p-3 rounded-2xl bg-emerald-950/40 border border-emerald-500/30 text-xs text-emerald-200 space-y-1.5">
+                <div className="font-bold text-emerald-300 flex items-center gap-1.5">
+                  <span>📲 WhatsApp Bot Direct Trigger:</span>
+                </div>
+                <p className="text-[11px] text-slate-300 leading-relaxed">
+                  WhatsApp par kabhi bhi ye command bhej kar photo generate kar sakte hain:
+                </p>
+                <div className="p-2 rounded-xl bg-black/60 border border-emerald-500/30 font-mono text-[11px] text-emerald-300 flex items-center justify-between">
+                  <span>@hot image {prompt.substring(0, 30)}...</span>
                   <button
-                    onClick={() => setActiveInspectorTab("monitor")}
-                    className={`px-3 py-1 rounded-lg font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
-                      activeInspectorTab === "monitor"
-                        ? "bg-gradient-to-r from-pink-500/20 to-purple-500/20 text-pink-300 border border-pink-500/40 shadow-sm"
-                        : "text-slate-400 hover:text-slate-200"
-                    }`}
+                    onClick={copyWhatsAppCmd}
+                    className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 transition-colors"
                   >
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                    <span className="font-semibold text-[11px]">📺 Live Screen Monitor</span>
-                    {livePreview && (
-                      <span className="text-[9px] px-1 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-mono">LIVE</span>
-                    )}
-                  </button>
-
-                  <button
-                    onClick={() => setActiveInspectorTab("terminal")}
-                    className={`px-3 py-1 rounded-lg font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
-                      activeInspectorTab === "terminal"
-                        ? "bg-gradient-to-r from-pink-500/20 to-purple-500/20 text-pink-300 border border-pink-500/40 shadow-sm"
-                        : "text-slate-400 hover:text-slate-200"
-                    }`}
-                  >
-                    <Terminal className="w-3.5 h-3.5 text-pink-400" />
-                    <span className="font-semibold text-[11px]">📟 Terminal Logs ({generationLogs.length})</span>
+                    {copiedCommand ? "Copied" : "Copy"}
                   </button>
                 </div>
-
-                <div className="flex items-center gap-2">
-                  {activeInspectorTab === "terminal" && (
-                    <button
-                      onClick={() => {
-                        const text = generationLogs.map((l) => `[${l.timestamp}] [${l.step}] ${l.message}`).join("\n");
-                        navigator.clipboard.writeText(text);
-                        setCopiedLink(true);
-                        setTimeout(() => setCopiedLink(false), 1500);
-                      }}
-                      className="text-[10px] px-2 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-white/10 flex items-center gap-1 transition-all"
-                    >
-                      {copiedLink ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                      <span>{copiedLink ? "Copied" : "Copy"}</span>
-                    </button>
-                  )}
-                  {isGenerating && (
-                    <div className="flex items-center gap-1 text-[10px] text-pink-400 font-mono bg-pink-500/10 px-2 py-0.5 rounded border border-pink-500/20 animate-pulse">
-                      <span>BOT ACTIVE</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Tab 1: 📺 Live Browser Screen Monitor */}
-              {activeInspectorTab === "monitor" && (
-                <div className="flex-1 flex flex-col p-3 gap-2 bg-slate-950/60">
-                  {/* Mock Browser URL Bar */}
-                  <div className="px-3 py-1.5 rounded-xl bg-slate-900/90 border border-white/5 flex items-center justify-between text-[11px] font-mono text-slate-400 shrink-0">
-                    <div className="flex items-center gap-2 truncate">
-                      <div className="flex items-center gap-1 text-emerald-400 shrink-0">
-                        <ShieldCheck className="w-3.5 h-3.5" />
-                        <span className="text-[10px] uppercase font-bold tracking-wider">SSL Secure</span>
-                      </div>
-                      <span className="text-slate-600">|</span>
-                      <span className="truncate text-slate-300">https://perchance.org/ai-photo-generator</span>
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-                      <span className="text-[10px] text-emerald-300 font-bold">1280x900</span>
-                    </div>
-                  </div>
-
-                  {/* Browser Viewport Window */}
-                  <div className="flex-1 min-h-[200px] max-h-[320px] rounded-xl bg-slate-950 border border-slate-800 relative overflow-hidden flex items-center justify-center group shadow-inner">
-                    {livePreview ? (
-                      <div className="relative w-full h-full flex items-center justify-center bg-black">
-                        <img
-                          src={livePreview}
-                          alt="Live Headless Browser Screen"
-                          className="w-full h-full object-contain max-h-[300px] transition-all duration-300"
-                        />
-                        {/* Live CCTV HUD Overlay */}
-                        <div className="absolute top-2 left-2 px-2 py-0.5 rounded bg-black/80 backdrop-blur border border-emerald-500/40 text-[10px] font-mono text-emerald-300 flex items-center gap-1.5 shadow-lg">
-                          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                          <span>LIVE BROWSER STREAM</span>
-                        </div>
-                        {isGenerating && (
-                          <div className="absolute bottom-2 right-2 px-2.5 py-1 rounded bg-black/80 backdrop-blur border border-pink-500/40 text-[10px] font-mono text-pink-300 shadow-lg">
-                            ⏱️ {timerSeconds}s
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="flex flex-col items-center justify-center p-6 text-center text-slate-500 gap-3">
-                        <div className="w-12 h-12 rounded-2xl bg-slate-900 border border-white/5 flex items-center justify-center text-slate-600">
-                          <Globe className="w-6 h-6 animate-pulse text-pink-400/60" />
-                        </div>
-                        <div className="space-y-1">
-                          <div className="text-xs font-semibold text-slate-300">Live Browser Display Standby</div>
-                          <p className="text-[11px] text-slate-500 max-w-sm">
-                            Jaise hi aap "✨ Generate Photo" click karenge, bot ka live Chrome screen (typing, clicking & 6-photo grid render) yaha real-time stream hoga.
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Quick 1-line latest log ticker */}
-                  {generationLogs.length > 0 && (
-                    <div className="px-3 py-1.5 rounded-xl bg-slate-900/60 border border-white/5 flex items-center justify-between text-[11px] font-mono shrink-0">
-                      <div className="flex items-center gap-2 truncate">
-                        <span className="text-pink-400 font-bold shrink-0">
-                          [{generationLogs[generationLogs.length - 1].step}]:
-                        </span>
-                        <span className="truncate text-slate-300">
-                          {generationLogs[generationLogs.length - 1].message}
-                        </span>
-                      </div>
-                      <span className="text-[10px] text-slate-500 shrink-0 font-mono">
-                        {generationLogs[generationLogs.length - 1].timestamp}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Tab 2: 📟 Terminal Logs */}
-              {activeInspectorTab === "terminal" && (
-                <div className="flex-1 p-3 overflow-y-auto font-mono text-xs space-y-1.5 text-slate-300 select-text max-h-[320px]">
-                  {generationLogs.length === 0 ? (
-                    <div className="h-full flex flex-col items-center justify-center text-slate-600 text-[11px] italic gap-1">
-                      <span>Terminal standby... Prompt daal kar 'Generate Photo' click karein.</span>
-                      <span>Har browser action aur network packet live yaha render hoga.</span>
-                    </div>
-                  ) : (
-                    generationLogs.map((log, idx) => (
-                      <div key={idx} className="flex items-start gap-2 leading-relaxed">
-                        <span className="text-slate-500 shrink-0 select-none">[{log.timestamp}]</span>
-                        <span
-                          className={`px-1.5 py-0.2 rounded text-[10px] font-bold uppercase shrink-0 ${
-                            log.level === "success"
-                              ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
-                              : log.level === "error"
-                              ? "bg-red-500/20 text-red-300 border border-red-500/30"
-                              : log.level === "warn"
-                              ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
-                              : "bg-blue-500/20 text-blue-300 border border-blue-500/30"
-                          }`}
-                        >
-                          {log.step}
-                        </span>
-                        <span
-                          className={`break-all ${
-                            log.level === "success"
-                              ? "text-emerald-200"
-                              : log.level === "error"
-                              ? "text-red-300 font-semibold"
-                              : log.level === "warn"
-                              ? "text-amber-200"
-                              : "text-slate-300"
-                          }`}
-                        >
-                          {log.message}
-                        </span>
-                      </div>
-                    ))
-                  )}
-                  <div ref={logsEndRef} />
-                </div>
-              )}
-            </div>
-
-            {/* Error Diagnosis Banner if generation fails */}
-            {errorMessage && (
-              <div className="p-3.5 rounded-2xl bg-red-950/80 border border-red-500/50 text-red-200 text-xs flex items-start gap-2.5 shadow-[0_0_20px_rgba(239,68,68,0.2)]">
-                <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-                <div className="space-y-1">
-                  <div className="font-bold text-red-300">Generation Notice / Issue:</div>
-                  <div className="text-red-200/90 leading-relaxed">{errorMessage}</div>
-                  <div className="text-[11px] text-red-400/80 font-mono">
-                    💡 Tip: Server browser environment retry karein ya WhatsApp fallback engine check karein.
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* ── RIGHT COLUMN: High-Definition Output Showcase (5 Cols) ─────── */}
-          <div className="lg:col-span-5 flex flex-col gap-4">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                <ImageIcon className="w-4 h-4 text-pink-400" />
-                <span>AI Photo Output Result</span>
-              </span>
-              {generatedImage && (
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono font-bold flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3" />
-                  <span>Generated in {((imageMeta?.durationMs || 0) / 1000).toFixed(1)}s</span>
-                </span>
-              )}
-            </div>
-
-            {/* Photo Viewer Card */}
-            <div className="flex-1 min-h-[360px] rounded-3xl bg-slate-900/90 border border-white/10 shadow-2xl flex flex-col items-center justify-center p-4 relative overflow-hidden group">
-              {generatedImage ? (
-                <div className="w-full h-full flex flex-col items-center justify-between gap-4">
-                  <div className="relative w-full flex-1 flex items-center justify-center overflow-hidden rounded-2xl bg-black/50 border border-white/5">
-                    <img
-                      src={generatedImage}
-                      alt="Perchance AI Generated"
-                      className="max-h-[380px] w-auto object-contain rounded-xl shadow-2xl transition-transform duration-300 group-hover:scale-[1.02]"
-                    />
-                  </div>
-
-                  {/* Image Metadata Strip */}
-                  <div className="w-full grid grid-cols-3 gap-2 text-center text-xs font-mono">
-                    <div className="p-2 rounded-xl bg-slate-950/80 border border-white/5">
-                      <div className="text-[10px] text-slate-400">File Size</div>
-                      <div className="font-bold text-pink-300">
-                        {imageMeta?.bytes ? `${(imageMeta.bytes / 1024).toFixed(1)} KB` : "HD JPEG"}
-                      </div>
-                    </div>
-                    <div className="p-2 rounded-xl bg-slate-950/80 border border-white/5">
-                      <div className="text-[10px] text-slate-400">Gen Time</div>
-                      <div className="font-bold text-emerald-300">
-                        {imageMeta?.durationMs ? `${(imageMeta.durationMs / 1000).toFixed(1)}s` : "Fast"}
-                      </div>
-                    </div>
-                    <div className="p-2 rounded-xl bg-slate-950/80 border border-white/5">
-                      <div className="text-[10px] text-slate-400">Engine</div>
-                      <div className="font-bold text-amber-300">Perchance SD</div>
-                    </div>
-                  </div>
-
-                  {/* Actions Buttons */}
-                  <div className="w-full flex items-center gap-2">
-                    <button
-                      onClick={handleDownload}
-                      className="flex-1 py-2.5 px-3 rounded-xl bg-gradient-to-r from-pink-500 to-rose-600 hover:from-pink-400 hover:to-rose-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(244,63,94,0.35)] transition-all cursor-pointer active:scale-98"
-                    >
-                      <Download className="w-4 h-4" />
-                      <span>Download HD Photo</span>
-                    </button>
-                    <a
-                      href={generatedImage}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 border border-white/10 transition-all"
-                    >
-                      <Eye className="w-4 h-4" />
-                      <span>View Full</span>
-                    </a>
-                  </div>
-                </div>
-              ) : isGenerating ? (
-                /* Scanning Radar Animation while generating */
-                <div className="flex flex-col items-center justify-center gap-4 text-center p-6">
-                  <div className="relative w-24 h-24 rounded-full border-2 border-pink-500/30 flex items-center justify-center animate-pulse">
-                    <div className="absolute inset-0 rounded-full border border-pink-400/60 animate-ping" />
-                    <Sparkles className="w-10 h-10 text-pink-400 animate-spin" style={{ animationDuration: "6s" }} />
-                  </div>
-                  <div>
-                    <h4 className="text-base font-bold text-pink-300">Synthesizing High-Definition Photo</h4>
-                    <p className="text-xs text-slate-400 mt-1 max-w-xs leading-relaxed">
-                      Headless Chrome browser Perchance engine par photo generate karke network stream capture kar raha hai...
-                    </p>
-                  </div>
-                  <div className="px-3.5 py-1.5 rounded-full bg-pink-500/10 border border-pink-500/30 text-xs font-mono text-pink-300 animate-pulse">
-                    ⏱️ Time Elapsed: {timerSeconds}s
-                  </div>
-                </div>
-              ) : (
-                /* Empty Placeholder */
-                <div className="flex flex-col items-center justify-center gap-3 text-center p-6 text-slate-500">
-                  <div className="w-16 h-16 rounded-3xl bg-slate-950/80 border border-white/5 flex items-center justify-center text-3xl shadow-inner">
-                    🖼️
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-semibold text-slate-400">Ready to Generate</h4>
-                    <p className="text-xs text-slate-500 mt-1 max-w-xs">
-                      Left side prompt fill karke <b>"Generate Photo"</b> click karein. Photo result yahan instant load hoga.
-                    </p>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* WhatsApp Integration Help Card */}
-            <div className="p-3 rounded-2xl bg-emerald-950/40 border border-emerald-500/30 text-xs text-emerald-200 space-y-1.5">
-              <div className="font-bold text-emerald-300 flex items-center gap-1.5">
-                <span>📲 WhatsApp Bot Direct Trigger:</span>
-              </div>
-              <p className="text-[11px] text-slate-300 leading-relaxed">
-                WhatsApp par kabhi bhi ye command bhej kar photo generate kar sakte hain:
-              </p>
-              <div className="p-2 rounded-xl bg-black/60 border border-emerald-500/30 font-mono text-[11px] text-emerald-300 flex items-center justify-between">
-                <span>@hot image {prompt.substring(0, 30)}...</span>
-                <button
-                  onClick={copyWhatsAppCmd}
-                  className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 transition-colors"
-                >
-                  {copiedCommand ? "Copied" : "Copy"}
-                </button>
               </div>
             </div>
           </div>
-        </div>
+        )}
       </motion.div>
     </div>
   );
