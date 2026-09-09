@@ -546,7 +546,7 @@ TONE & STYLE:
       try {
         await sendMsgFn(
           groupJid,
-          `🔥 *Perchance AI Photo Generator start ho gaya hai ${senderName}!* ⚡\n\n📌 *Prompt:* _"${prompt}"_\n🌐 *Website:* https://perchance.org/ai-photo-generator\n⏳ _Browser background me image generate kar raha hai... Kripya 10-25 sec wait karein._`,
+          `🔥 *Perchance AI Photo Generator start ho gaya hai ${senderName}!* ⚡\n\n📌 *Prompt:* _"${prompt}"_\n🌐 *Website:* https://perchance.org/ai-photo-generator\n⏳ _Browser background me image generate kar raha hai... Kripya 30-90 sec wait karein._`,
           text,
           messageKey
         );
