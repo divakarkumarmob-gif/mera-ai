@@ -56,7 +56,12 @@ export class PerchanceService {
    * Finds the Chrome / Chromium / Edge executable path across OS environments (Windows, Linux, Docker, Render, macOS).
    */
   public getExecutablePath(): string | null {
-    // 0. Project Local Cache Directory (Render persistent workspace)
+    // 0. Cloud Browserless.io / Remote Engine check
+    if (process.env.BROWSER_WS_ENDPOINT || process.env.BROWSERLESS_API_KEY) {
+      return "cloud-browserless";
+    }
+
+    // 1. Project Local Cache Directory (Render persistent workspace)
     const projectCacheDirs = [
       path.join(process.cwd(), ".cache", "puppeteer"),
       path.join(process.cwd(), ".cache"),

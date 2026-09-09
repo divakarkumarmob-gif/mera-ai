@@ -58,7 +58,7 @@ export default function PerchanceStudioModal({ onClose }: { onClose: () => void 
   const [imageMeta, setImageMeta] = useState<{ bytes: number; durationMs: number } | null>(null);
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [engineStatus, setEngineStatus] = useState<{ isAvailable: boolean; path: string | null } | null>(null);
+  const [engineStatus, setEngineStatus] = useState<{ isAvailable: boolean; path: string | null; isCloud?: boolean; engineType?: string } | null>(null);
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedPrompt, setCopiedPrompt] = useState(false);
   const [copiedCommand, setCopiedCommand] = useState(false);
@@ -73,7 +73,12 @@ export default function PerchanceStudioModal({ onClose }: { onClose: () => void 
       .then((r) => r.json())
       .then((d) => {
         if (d.ok) {
-          setEngineStatus({ isAvailable: !!d.isAvailable, path: d.executablePath });
+          setEngineStatus({
+            isAvailable: !!d.isAvailable,
+            path: d.executablePath,
+            isCloud: !!d.isCloud,
+            engineType: d.engineType,
+          });
         }
       })
       .catch(() => {
@@ -249,11 +254,19 @@ export default function PerchanceStudioModal({ onClose }: { onClose: () => void 
             <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900 border border-white/10 text-xs font-mono">
               <span
                 className={`w-2 h-2 rounded-full ${
-                  engineStatus?.isAvailable ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]" : "bg-amber-400 animate-pulse"
+                  engineStatus?.isCloud
+                    ? "bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.8)]"
+                    : engineStatus?.isAvailable
+                    ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]"
+                    : "bg-amber-400 animate-pulse"
                 }`}
               />
-              <span className="text-slate-300">
-                {engineStatus?.isAvailable ? "Chrome Ready" : "Auto-Detecting"}
+              <span className={engineStatus?.isCloud ? "text-cyan-300 font-semibold" : "text-slate-300"}>
+                {engineStatus?.isCloud
+                  ? "⚡ Cloud Browser (0MB RAM)"
+                  : engineStatus?.isAvailable
+                  ? "Chrome Engine Ready"
+                  : "Auto-Detecting"}
               </span>
             </div>
 
