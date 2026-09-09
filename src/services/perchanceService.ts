@@ -48,7 +48,21 @@ export class PerchanceService {
    * Finds the Chrome / Chromium / Edge executable path across OS environments (Windows, Linux, Docker, Render, macOS).
    */
   public getExecutablePath(): string | null {
-    // 0. Puppeteer Bundled Chrome (Auto-downloaded on Render/Linux during npm install)
+    // 0. Project Local Cache Directory (Render persistent workspace)
+    const projectCacheDirs = [
+      path.join(process.cwd(), ".cache", "puppeteer"),
+      path.join(process.cwd(), ".chrome"),
+      path.join(process.cwd(), "dist", ".cache", "puppeteer"),
+    ];
+
+    for (const d of projectCacheDirs) {
+      if (fs.existsSync(d)) {
+        const found = this.findBinaryInDir(d);
+        if (found) return found;
+      }
+    }
+
+    // 1. Puppeteer Bundled Chrome
     try {
       const puppeteerPkg = require("puppeteer");
       if (puppeteerPkg && typeof puppeteerPkg.executablePath === "function") {
@@ -59,7 +73,7 @@ export class PerchanceService {
       }
     } catch {}
 
-    // 1. Environment variables
+    // 2. Environment variables
     const envVars = [
       process.env.PUPPETEER_EXECUTABLE_PATH,
       process.env.CHROME_PATH,
@@ -70,7 +84,7 @@ export class PerchanceService {
       if (v && fs.existsSync(v)) return v;
     }
 
-    // 2. Dynamic 'which' or 'where' resolution
+    // 3. Dynamic 'which' or 'where' resolution
     try {
       const isWin = process.platform === "win32";
       const cmd = isWin ? "where" : "which";
@@ -88,7 +102,7 @@ export class PerchanceService {
       }
     } catch {}
 
-    // 3. Multi-OS Candidate paths
+    // 4. Multi-OS Candidate paths
     const homeDir = process.env.HOME || process.env.USERPROFILE || "";
     const candidates = [
       // Windows
@@ -130,6 +144,26 @@ export class PerchanceService {
         } catch {}
       }
     }
+
+    // 5. Last-mile Auto-Installer at Runtime
+    try {
+      console.log("[PerchanceService] ⏳ No browser found. Running on-the-fly Chrome installer...");
+      const { execSync } = require("child_process");
+      const targetCache = path.join(process.cwd(), ".cache", "puppeteer");
+      execSync(`npx @puppeteer/browsers install chrome@stable --path "${targetCache}"`, {
+        stdio: ["ignore", "pipe", "pipe"],
+        encoding: "utf8",
+        timeout: 90000,
+      });
+      const downloaded = this.findBinaryInDir(targetCache);
+      if (downloaded) {
+        console.log(`[PerchanceService] ⚡ Downloaded Chrome successfully to ${downloaded}`);
+        return downloaded;
+      }
+    } catch (instErr) {
+      console.warn("[PerchanceService] On-the-fly installer notice:", (instErr as any)?.message || instErr);
+    }
+
     return null;
   }
 
