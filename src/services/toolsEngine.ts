@@ -612,7 +612,7 @@ class ToolsEngine {
       whatsappSent,
       whatsappMessage,
       recipient: recipientName,
-      message: `4K AI Portrait generated successfully using ${genRes.model}!${whatsappSent ? ` Delivered to ${recipientName} on WhatsApp.` : ''}`,
+      message: `Boss photo generate ho gaya hai, aap dashboard par dekh lo, baki main WhatsApp par bhej rahi hoon! Aur haan, photo pasand nahi aayi toh dobara banau ya isme kuch edit karu?`,
     };
   }
 
@@ -662,7 +662,7 @@ class ToolsEngine {
           model: editRes.model,
           whatsappSent,
           recipient: recipientName,
-          message: `Photo modified successfully with instructions "${editInstructions}" using ${editRes.model}!${whatsappSent ? ` Sent to ${recipientName} on WhatsApp.` : ''}`,
+          message: `Boss photo edit ho gaya hai, aap dashboard par dekh lo aur maine WhatsApp par bhi bhej diya hai! Baki agar isme kuch aur change karna ho toh batao!`,
         };
       }
     }
