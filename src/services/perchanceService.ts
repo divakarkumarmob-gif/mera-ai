@@ -352,17 +352,20 @@ export class PerchanceService {
       const textareas = await frame.$$("textarea");
       const promptInput = textareas.length > 1 ? textareas[1] : textareas[0];
 
-      pushLog("info", "Prompt Entry", `Typing prompt: "${cleanPrompt}" with virtual keyboard emulation...`);
+      pushLog("info", "Prompt Entry", `Filling prompt: "${cleanPrompt}" into generator...`);
 
-      // Focus, clear, and type prompt with keyboard events for 100% reactivity
-      await promptInput.click({ clickCount: 3 });
-      await promptInput.press("Backspace");
-      await promptInput.type(cleanPrompt, { delay: 10 });
+      // Instant DOM value update with full event dispatching
+      await promptInput.click();
+      await frame.evaluate((el: any, text: string) => {
+        el.value = text;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+      }, promptInput, cleanPrompt);
 
-      pushLog("info", "Action Trigger", "Prompt filled into generator. Clicking ✨ generate button...");
+      pushLog("info", "Action Trigger", "Prompt injected into generator. Triggering ✨ generate button...");
       const genBtn = await frame.waitForSelector("#generateButtonEl", { timeout: 20000 });
       if (!genBtn) throw new Error("Could not find #generateButtonEl on Perchance");
-      await genBtn.click();
+      await frame.evaluate((b: any) => b.click(), genBtn);
       pushLog("info", "AI Generation", "Generate button triggered! Listening on network streams and polling frame canvas...");
 
       // Poll frames in parallel with network interception (giving Perchance full time to render)
