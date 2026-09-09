@@ -171,7 +171,7 @@ export class PerchanceService {
    * Automates https://perchance.org/ai-photo-generator to create an AI image from a prompt.
    * Enters the prompt, clicks generate, captures the generated image buffer, and returns it.
    */
-  public async generateImage(promptText: string, timeoutMs = 50000): Promise<PerchanceImageResult> {
+  public async generateImage(promptText: string, timeoutMs = 90000): Promise<PerchanceImageResult> {
     const cleanPrompt = (promptText || "").trim();
     if (!cleanPrompt) {
       return { success: false, prompt: promptText, error: "Prompt cannot be empty" };
@@ -203,6 +203,12 @@ export class PerchanceService {
           "--disable-gpu",
           "--no-first-run",
           "--no-zygote",
+          "--single-process",
+          "--disable-background-networking",
+          "--disable-default-apps",
+          "--disable-extensions",
+          "--disable-sync",
+          "--disable-translate",
           "--window-size=1280,900",
         ],
       });
@@ -264,19 +270,21 @@ export class PerchanceService {
       });
 
       console.log("[PerchanceService] Navigating to https://perchance.org/ai-photo-generator...");
+      const navT0 = Date.now();
       await page.goto("https://perchance.org/ai-photo-generator", {
         waitUntil: "domcontentloaded",
-        timeout: 45000,
+        timeout: 60000,
       });
+      console.log(`[PerchanceService] ⚡ Page DOM loaded in ${Date.now() - navT0}ms! Accessing generator iframe...`);
 
       // Find generator iframe
-      const iframeHandle = await page.waitForSelector("iframe#outputIframeEl", { timeout: 25000 });
+      const iframeHandle = await page.waitForSelector("iframe#outputIframeEl", { timeout: 30000 });
       if (!iframeHandle) throw new Error("Could not find generator iframe on Perchance page");
       const frame = await iframeHandle.contentFrame();
       if (!frame) throw new Error("Could not access generator content frame");
 
       // Wait for prompt textarea
-      await frame.waitForSelector("textarea", { timeout: 25000 });
+      await frame.waitForSelector("textarea", { timeout: 30000 });
       const textareas = await frame.$$("textarea");
       const promptInput = textareas.length > 1 ? textareas[1] : textareas[0];
 
@@ -288,14 +296,11 @@ export class PerchanceService {
         el.dispatchEvent(new Event("change", { bubbles: true }));
       }, promptInput, cleanPrompt);
 
-      // Also type slightly to trigger keyboard handlers
-      await promptInput.type(" ", { delay: 10 });
-
-      // Click generate button
-      console.log("[PerchanceService] Clicking ✨ generate button...");
-      const genBtn = await frame.waitForSelector("#generateButtonEl", { timeout: 15000 });
+      console.log("[PerchanceService] ✍️ Prompt filled. Clicking ✨ generate button...");
+      const genBtn = await frame.waitForSelector("#generateButtonEl", { timeout: 20000 });
       if (!genBtn) throw new Error("Could not find #generateButtonEl on Perchance");
       await genBtn.click();
+      console.log("[PerchanceService] ⏳ Generate clicked! Waiting for AI image output...");
 
       // Poll frames in parallel with network interception
       const pollingPromise = (async () => {
