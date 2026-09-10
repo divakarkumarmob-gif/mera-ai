@@ -71,8 +71,10 @@ class GroupCollectiveLearningService {
     senderName: string,
     text: string
   ): Promise<void> {
-    await this.init();
     if (!text || text.length < 2 || text.startsWith("/")) return;
+    const isSingleReactionEmoji = /^(👍|👎|❤️|🔥|👏|🙏|😂|😍|🎉|👌|💯|⚡|😎|✨|💪|🙌|🤝|💖|😊|🥺|😢|😭|🕊️|💀|🗿|👀)$/u.test(text.trim());
+    if (text.startsWith("[Reaction:") || text.startsWith("[reaction:") || /^\[Reaction/i.test(text) || isSingleReactionEmoji) return;
+    await this.init();
 
     const cleanGroupId = String(groupId).replace(/[^a-zA-Z0-9_-]/g, "_");
     let profile = this.cache.get(cleanGroupId);

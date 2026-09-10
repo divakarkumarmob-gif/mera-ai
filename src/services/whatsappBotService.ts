@@ -374,6 +374,26 @@ class WhatsAppBotService {
           const text = this.extractMessageText(msg);
           if (!text) continue;
 
+          // ── GLOBAL REACTION INTERCEPTOR & SILENCE GUARD ──
+          // Reactions (👍, ❤️, 😂, etc.) are non-verbal metadata, NEVER chat messages.
+          const isReactionMsg = !!msg.message?.reactionMessage || text.startsWith("[Reaction:") || text.startsWith("[reaction:") || /^\[Reaction/i.test(text);
+          const isSingleReactionEmoji = /^(👍|👎|❤️|🔥|👏|🙏|😂|😍|🎉|👌|💯|⚡|😎|✨|💪|🙌|🤝|💖|😊|🥺|😢|😭|🕊️|💀|🗿|👀)$/u.test(text.trim());
+
+          if (isReactionMsg || isSingleReactionEmoji) {
+            const reactionEmoji = msg.message?.reactionMessage?.text || text.trim();
+            const targetKeyId = msg.message?.reactionMessage?.key?.id;
+            if (reactionEmoji && targetKeyId) {
+              const cachedMsg = whatsappHistoryEngine.findCachedMessage((m) => m.id === targetKeyId);
+              const targetText = cachedMsg?.botReply || cachedMsg?.text || "[Message]";
+              const isBossReact = isFromMe || this.isOwnerSender(remoteJid.replace(/\D/g, ""), msg.pushName || "");
+              import("./aiAdvancedLearningService").then(({ aiAdvancedLearningService }) => {
+                aiAdvancedLearningService.processEmojiReaction(reactionEmoji, targetText, msg.pushName || "Boss", isBossReact).catch(() => {});
+              });
+            }
+            // CRITICAL: Drop immediately so reactions never enter history or trigger AI replies!
+            continue;
+          }
+
           const isGroup = remoteJid.endsWith("@g.us");
           const isFromMe = !!msg.key?.fromMe;
           const isBotSelfEcho = isFromMe && !!msg.key?.id && this.botSentMessageIds.has(msg.key.id);
@@ -414,22 +434,6 @@ class WhatsAppBotService {
 
             if (isBotSelfEcho) continue;
             if (!isGroup) continue;
-          }
-
-          // RLHF Reaction Interceptor: process emoji feedback from Boss or contacts
-          if (msg.message?.reactionMessage) {
-            const reactionEmoji = msg.message.reactionMessage.text;
-            const targetKeyId = msg.message.reactionMessage.key?.id;
-            if (reactionEmoji && targetKeyId) {
-              const cachedMsg = whatsappHistoryEngine.findCachedMessage((m) => m.id === targetKeyId);
-              const targetText = cachedMsg?.botReply || cachedMsg?.text || "[Message]";
-              const isBossReact = isFromMe || this.isOwnerSender(remoteJid.replace(/\D/g, ""), msg.pushName || "");
-              import("./aiAdvancedLearningService").then(({ aiAdvancedLearningService }) => {
-                aiAdvancedLearningService.processEmojiReaction(reactionEmoji, targetText, msg.pushName || "Boss", isBossReact).catch(() => {});
-              });
-            }
-            // CRITICAL FIX: Emoji reactions (like 👍, ❤️, 😂) are NOT chat messages! NEVER pass them to handleOwnerWhatsAppMessage!
-            continue;
           }
 
           const senderJid: string = isGroup
@@ -1087,9 +1091,10 @@ class WhatsAppBotService {
     const rawText = (text || "").trim();
     if (!rawText) return;
 
-    // CRITICAL: Drop reaction messages if any slip through
-    if (rawText.startsWith("[Reaction:") || rawText.startsWith("[reaction:") || /^\[Reaction/i.test(rawText)) {
-      console.log(`[WhatsAppBot] Dropping reaction message in handleOwnerWhatsAppMessage: "${rawText}"`);
+    // CRITICAL: Drop reaction messages and single reaction emojis
+    const isSingleReactionEmoji = /^(👍|👎|❤️|🔥|👏|🙏|😂|😍|🎉|👌|💯|⚡|😎|✨|💪|🙌|🤝|💖|😊|🥺|😢|😭|🕊️|💀|🗿|👀)$/u.test(rawText);
+    if (rawText.startsWith("[Reaction:") || rawText.startsWith("[reaction:") || /^\[Reaction/i.test(rawText) || isSingleReactionEmoji) {
+      console.log(`[WhatsAppBot] Dropping reaction/acknowledgement emoji in handleOwnerWhatsAppMessage: "${rawText}"`);
       return;
     }
 

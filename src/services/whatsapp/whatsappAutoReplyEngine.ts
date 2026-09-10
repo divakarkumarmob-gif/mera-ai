@@ -68,6 +68,11 @@ export class WhatsAppAutoReplyEngine {
       quotedMessage?: QuotedMessageContext | null
     ) => Promise<void>
   ) {
+    const clean = (text || "").trim();
+    const isReaction = clean.startsWith("[Reaction:") || clean.startsWith("[reaction:") || /^\[Reaction/i.test(clean);
+    const isSingleEmoji = /^(👍|👎|❤️|🔥|👏|🙏|😂|😍|🎉|👌|💯|⚡|😎|✨|💪|🙌|🤝|💖|😊|🥺|😢|😭|🕊️|💀|🗿|👀)$/u.test(clean);
+    if (!clean || isReaction || isSingleEmoji) return;
+
     const senderKey = senderPhone || replyJid;
 
     const existing = this.incomingDebounceMap.get(senderKey);
@@ -430,6 +435,11 @@ export class WhatsAppAutoReplyEngine {
     relation?: string,
     quotedMessage?: QuotedMessageContext | null
   ): Promise<string> {
+    const clean = (messageText || "").trim();
+    const isReaction = clean.startsWith("[Reaction:") || clean.startsWith("[reaction:") || /^\[Reaction/i.test(clean);
+    const isSingleEmoji = /^(👍|👎|❤️|🔥|👏|🙏|😂|😍|🎉|👌|💯|⚡|😎|✨|💪|🙌|🤝|💖|😊|🥺|😢|😭|🕊️|💀|🗿|👀)$/u.test(clean);
+    if (!clean || isReaction || isSingleEmoji) return "";
+
     const fallbackText = () => {
       return `Boss 🧑‍🦱 abhi busy hain, unke aate hi unko bataunga aapka msg aaya hai, reply jaldi milega 😊😶‍🌫️`;
     };
@@ -518,6 +528,11 @@ ${
    - "Namaste! DK Boss abhi available nahi hain. Aap apna naam aur kaam bata dijiye, main unko note kara dungi 👍"`
 }
 
+🎯 TOPIC HYPER-FOCUS & ZERO TOPIC BLEEDING (CRITICAL):
+- Strictly answer ONLY what the sender is currently asking in this message!
+- NEVER drag, append, or repeat details from previous already-resolved queries (e.g. past phone numbers, old tasks).
+- Do not repeat or re-quote past context unless specifically asked.
+
 PRIVACY & SECURITY GUARD:
 - Never disclose DK's private passwords, bank details, confidential secrets, or private personal credentials.
 
@@ -574,6 +589,11 @@ TONE & STYLE:
     sendMsgFn: (jid: string, text: string, incomingText?: string, key?: any) => Promise<any>,
     girlfriendCheckFn: (text: string, replyJid: string, senderName: string, key: any) => Promise<boolean>
   ): Promise<void> {
+    const clean = (text || "").trim();
+    const isReaction = clean.startsWith("[Reaction:") || clean.startsWith("[reaction:") || /^\[Reaction/i.test(clean);
+    const isSingleEmoji = /^(👍|👎|❤️|🔥|👏|🙏|😂|😍|🎉|👌|💯|⚡|😎|✨|💪|🙌|🤝|💖|😊|🥺|😢|😭|🕊️|💀|🗿|👀)$/u.test(clean);
+    if (!clean || isReaction || isSingleEmoji) return;
+
     const now = Date.now();
     const senderKey = senderPhone || replyJid;
     const lastAt = this.lastReplyAt.get(senderKey) || 0;
@@ -682,6 +702,9 @@ TONE & STYLE:
     }
 
     const cleanText = (text || "").trim();
+    const isReaction = cleanText.startsWith("[Reaction:") || cleanText.startsWith("[reaction:") || /^\[Reaction/i.test(cleanText);
+    const isSingleEmoji = /^(👍|👎|❤️|🔥|👏|🙏|😂|😍|🎉|👌|💯|⚡|😎|✨|💪|🙌|🤝|💖|😊|🥺|😢|😭|🕊️|💀|🗿|👀)$/u.test(cleanText);
+    if (!cleanText || isReaction || isSingleEmoji) return;
 
     // 0. Strict Zero-Leak Privacy Guard: Never give anyone's contact number or private details in group
     const isAskingForContactOrSensitive =
@@ -905,7 +928,12 @@ TONE & STYLE:
       ? `\n- PREVIOUS QUOTED MESSAGE IN GROUP (From: ${quotedMessage.sender}, Type: ${quotedMessage.mediaType}): "${quotedMessage.text}"`
       : "";
 
-    const recentGroupMsgs = whatsappHistoryEngine.getRecentGroupMessages(groupJid, 25);
+    const recentGroupMsgs = whatsappHistoryEngine
+      .getRecentGroupMessages(groupJid, 25)
+      .filter((m) => {
+        const t = (m.text || "").trim();
+        return !t.startsWith("[Reaction:") && !/^(👍|👎|❤️|🔥|👏|🙏|😂|😍|🎉|👌|💯|⚡|😎|✨|💪|🙌|🤝|💖|😊|🥺|😢|😭|🕊️|💀|🗿|👀)$/u.test(t);
+      });
     const groupHistoryText = recentGroupMsgs.length > 0
       ? `\nRECENT GROUP CHAT HISTORY (Who said what in this group):\n` +
         recentGroupMsgs
@@ -931,14 +959,17 @@ RULES FOR GROUP REPLIES:
 3. GROUP AWARENESS & MEMORY (CRITICAL):
    - You actively keep track of everyone in the group and know who sent what message from the RECENT GROUP CHAT HISTORY above.
    - If someone asks "kisne kya bola", "group me kya baat chal rahi hai", "summary do", or refers to someone else's message, use the history accurately with names!
-4. GREETINGS & MANNERS:
+4. TOPIC HYPER-FOCUS & ZERO TOPIC BLEEDING (CRITICAL):
+   - Strictly address ONLY what the sender is asking in their CURRENT message.
+   - Never drag or bring up past resolved queries or old numbers into new topics.
+5. GREETINGS & MANNERS:
    - When someone says "hi friday", "hello friday", "friday":
      * If sender's name is known (e.g. "${senderName}"): Greet warmly with "Hello ${senderName} ji! Kaise hain aap? Kaise mujhe yaad kiya, koi baat karni hai kya?"
      * If name is not known / just phone number: Greet with "Ji aap sab kaise hain? Kaise mujhe yaad kiya, koi baat karni hai kya?"
-5. Speak in crisp, natural, intelligent Hinglish (maximum 1-3 short lines).
-6. Answer safe group queries directly (general knowledge, coding, facts, calculations, train status, weather, news, recaps).
-7. If they ask who you are: "Main Friday hoon — DK Boss ka intelligent AI assistant! ⚡"
-8. Do NOT use prefixes like 'Friday:' or markdown header hashes. Format with clean WhatsApp bold/italics.`;
+6. Speak in crisp, natural, intelligent Hinglish (maximum 1-3 short lines).
+7. Answer safe group queries directly (general knowledge, coding, facts, calculations, train status, weather, news, recaps).
+8. If they ask who you are: "Main Friday hoon — DK Boss ka intelligent AI assistant! ⚡"
+9. Do NOT use prefixes like 'Friday:' or markdown header hashes. Format with clean WhatsApp bold/italics.`;
 
     const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T> =>
       Promise.race([

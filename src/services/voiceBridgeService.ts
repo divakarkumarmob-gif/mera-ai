@@ -224,6 +224,11 @@ export class VoiceBridgeService {
     const cleanText = text.trim();
     if (!cleanText) throw new Error("Text is empty for TTS");
 
+    const isSingleReactionEmoji = /^(👍|👎|❤️|🔥|👏|🙏|😂|😍|🎉|👌|💯|⚡|😎|✨|💪|🙌|🤝|💖|😊|🥺|😢|😭|🕊️|💀|🗿|👀)$/u.test(cleanText);
+    if (cleanText.startsWith("[Reaction:") || cleanText.startsWith("[reaction:") || /^\[Reaction/i.test(cleanText) || isSingleReactionEmoji) {
+      throw new Error("Text is a reaction or single emoji, skipping speech generation");
+    }
+
     // 0. Affective Humanization & Acoustic Cadence Infusion
     const { cleanSpokenText, prosody } = humanSpeechProsodyEngine.humanizeTextForSpeech(cleanText, context);
     const textToSpeak = cleanSpokenText || cleanText;

@@ -184,6 +184,12 @@ class TelegramSecurityBotService {
 
     if (!chatId || !text) return;
 
+    // Drop reaction messages or standalone emojis (never trigger security alerts for reaction taps)
+    const isSingleReactionEmoji = /^(👍|👎|❤️|🔥|👏|🙏|😂|😍|🎉|👌|💯|⚡|😎|✨|💪|🙌|🤝|💖|😊|🥺|😢|😭|🕊️|💀|🗿|👀)$/u.test(text);
+    if (text.startsWith("[Reaction:") || text.startsWith("[reaction:") || /^\[Reaction/i.test(text) || isSingleReactionEmoji) {
+      return;
+    }
+
     const bossChatId = this.getBossChatId();
 
     // ── Layer 1: Telegram Chat ID Verification ────────────────────────────────

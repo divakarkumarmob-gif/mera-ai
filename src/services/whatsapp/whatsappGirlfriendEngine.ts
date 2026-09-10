@@ -1045,6 +1045,11 @@ _👉 Kisi bhi mood number (1-6) ya mood name (jaise "sassy", "naughty", "mix") 
     const session = this.girlfriendSessions.get(jid);
     if (!session) return;
 
+    const clean = (rawText || "").trim();
+    const isReaction = clean.startsWith("[Reaction:") || clean.startsWith("[reaction:") || /^\[Reaction/i.test(clean);
+    const isSingleEmoji = /^(👍|👎|❤️|🔥|👏|🙏|😂|😍|🎉|👌|💯|⚡|😎|✨|💪|🙌|🤝|💖|😊|🥺|😢|😭|🕊️|💀|🗿|👀)$/u.test(clean);
+    if (!clean || isReaction || isSingleEmoji) return;
+
     // Refresh custom 3-6 min live online presence and realistic human read delay before blue ticks
     if (sock) {
       this.triggerGirlfriendOnlinePresence(sock, jid);
@@ -1298,6 +1303,7 @@ STRICT REALISTIC WHATSAPP CHAT RULES:
 1. EXTREMELY SHORT, SWEET & CASUAL (TOP PRIORITY):
    - ALWAYS reply in only 1 to 2 short sentences (MAXIMUM 15 to 25 words total).
    - Real girlfriends text in quick, punchy, sweet messages—NEVER write long paragraphs, speeches, essays, or multiple questions in one message!
+   - TOPIC HYPER-FOCUS: Reply strictly to what he is saying in his latest message. Never bring up past resolved queries.
 
 2. ABSOLUTELY NO ACTION TEXT OR ASTERISKS (*...*):
    - NEVER write *blushes*, *smiles*, *Aapke paas aakar...*, *gently strokes your chest...*, or any third-person actions.

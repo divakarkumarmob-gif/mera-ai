@@ -184,6 +184,12 @@ class WhatsAppCloudService {
 
         const from = msg.from;
         let text = isText ? (msg.text?.body || "") : `[${msg.type}]`;
+        const isReaction = msg.type === "reaction";
+        const isSingleEmoji = /^(👍|👎|❤️|🔥|👏|🙏|😂|😍|🎉|👌|💯|⚡|😎|✨|💪|🙌|🤝|💖|😊|🥺|😢|😭|🕊️|💀|🗿|👀)$/u.test(text.trim());
+        if (isReaction || text.startsWith("[Reaction:") || /^\[Reaction/i.test(text) || isSingleEmoji) {
+          console.log(`[WhatsApp Cloud] Dropping reaction in webhook from ${from}: "${text || msg.reaction?.emoji}"`);
+          continue;
+        }
         const messageId = msg.id;
         const timestamp = parseInt(msg.timestamp, 10) * 1000;
 

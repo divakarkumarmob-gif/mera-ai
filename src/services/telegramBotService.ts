@@ -1486,10 +1486,10 @@ Provide a 2-4 sentence executive digest of main topics, project updates, member 
   ): Promise<string> {
     const customBusy = await this.getCustomBusyReply();
 
-    // Direct silence guard: If Boss sends a single reaction emoji (👍, ❤️, etc.), stay silent per Boss training
-    const isSingleReactionEmoji = /^(👍|👎|❤️|🔥|👏|🙏|😂|😍|🎉|👌|💯)$/u.test(messageText.trim());
-    if (isSingleReactionEmoji && isOwner) {
-      console.log(`[TelegramBot] Boss sent single reaction emoji "${messageText.trim()}" — remaining silent per Boss directive.`);
+    // Direct silence guard: If sender sends a reaction or single emoji (👍, ❤️, etc.), stay silent
+    const isSingleReactionEmoji = /^(👍|👎|❤️|🔥|👏|🙏|😂|😍|🎉|👌|💯|⚡|😎|✨|💪|🙌|🤝|💖|😊|🥺|😢|😭|🕊️|💀|🗿|👀)$/u.test(messageText.trim());
+    if (messageText.trim().startsWith("[Reaction:") || /^\[Reaction/i.test(messageText.trim()) || isSingleReactionEmoji) {
+      console.log(`[TelegramBot] Dropping reaction/acknowledgement emoji in Telegram AI reply: "${messageText.trim()}"`);
       return "";
     }
 
@@ -2043,8 +2043,9 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
     const text = (msg.text || msg.caption || "").trim();
     const isGroup = msg.chat?.type === "group" || msg.chat?.type === "supergroup";
 
-    // Drop reaction messages or emoji-reaction wrappers
-    if (text.startsWith("[Reaction:") || text.startsWith("[reaction:") || /^\[Reaction/i.test(text)) {
+    // Drop reaction messages or standalone emoji-reaction acknowledgements
+    const isSingleReactionEmoji = /^(👍|👎|❤️|🔥|👏|🙏|😂|😍|🎉|👌|💯|⚡|😎|✨|💪|🙌|🤝|💖|😊|🥺|😢|😭|🕊️|💀|🗿|👀)$/u.test(text);
+    if (text.startsWith("[Reaction:") || text.startsWith("[reaction:") || /^\[Reaction/i.test(text) || isSingleReactionEmoji) {
       console.log(`[TelegramBot] Dropping reaction message in Telegram: "${text}"`);
       return;
     }
