@@ -21,20 +21,20 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: 8.4
 
       - name: Build Debug APK
         working-directory: ./android-helper
         run: |
-          gradle wrapper
-          chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          gradle assembleDebug --no-daemon --stacktrace
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FridayGamingBridge-APK
+          name: FridayGamingBridge-Touch-APK
           path: android-helper/app/build/outputs/apk/debug/app-debug.apk
 
       - name: Create GitHub Release with APK
