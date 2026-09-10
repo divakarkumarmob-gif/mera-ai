@@ -8,6 +8,7 @@ import { dailyUpdateService } from "./dailyUpdateService";
 import { publicApisService } from "./publicApisService";
 import { voiceBridgeService, VoiceBridgeService } from "./voiceBridgeService";
 import { railRadarService } from "./railRadarService";
+import { fridayModeService, UNCENSORED_SAFETY_SETTINGS } from "./fridayModeService";
 
 export interface TelegramStatus {
   isConfigured: boolean;
@@ -1479,6 +1480,7 @@ ${
    - Warm, respectful, crisp (1-3 short sentences).
    - Return ONLY the exact text to send on Telegram without markdown headers.`;
 
+    const currentMode = isOwner ? await fridayModeService.getMode() : "mode_a";
     const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T> =>
       Promise.race([
         p,
@@ -1491,6 +1493,7 @@ ${
           ai.models.generateContent({
             model,
             contents: prompt,
+            config: currentMode === "mode_b" ? { safetySettings: UNCENSORED_SAFETY_SETTINGS as any } : undefined,
           }),
           7000
         );
@@ -1502,6 +1505,14 @@ ${
       } catch (err: any) {
         console.warn(`[TelegramBot] ${model} failed (${err?.message || err}), falling back to next model...`);
       }
+    }
+
+    if (isOwner && currentMode === "mode_b") {
+      const uncensoredReply = await fridayModeService.queryUncensoredEngine({
+        systemInstruction: `You are Friday AI, DK's (Divakar Kumar) personal super-intelligence on Telegram. Address him as Boss.`,
+        userMessage: text,
+      });
+      if (uncensoredReply) return uncensoredReply;
     }
 
     if (customBusy) {
@@ -2115,6 +2126,13 @@ ${
         resolved.chatId,
         `🔊 *Voice-Text Bridge Connected with ${senderName}!* ⚡\n\n• *Aap (User B):* 🎙️ Voice notes boliye (Friday text banakar unko deliver karegi)\n• *${senderName} (User A):* ✍️ Jo bhi likhenge, aapko Voice Note me sunai dega!\n\n_Bridge band karne ke liye \`/bridge stop\` likhein._`
       );
+      return;
+    }
+
+    // 2.2 Mode Switch Handler (/mode b, /mode a, Friday mode b, mode b)
+    if (/^(?:\/mode\s*(?:a|b)|friday\s+mode\s+(?:a|b)|mode\s+(?:a|b))/i.test(text.trim())) {
+      const modeResult = await fridayModeService.setMode(text.trim());
+      await this.sendMessage(chatId, modeResult.message);
       return;
     }
 

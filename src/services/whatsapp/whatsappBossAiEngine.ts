@@ -1,6 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { QuotedMessageContext } from "./whatsappTypes";
 import { whatsappHistoryEngine } from "./whatsappHistoryEngine";
+import { fridayModeService, UNCENSORED_SAFETY_SETTINGS } from "../fridayModeService";
 
 export class WhatsAppBossAiEngine {
   private callTriggerCallback: ((data: { callerName: string; isOwner: boolean; callId: string }) => void) | null = null;
@@ -1366,6 +1367,7 @@ ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` 
           config: {
             systemInstruction,
             tools: [{ functionDeclarations }],
+            ...(currentMode === "mode_b" ? { safetySettings: UNCENSORED_SAFETY_SETTINGS as any } : {}),
           },
         });
 
@@ -1414,6 +1416,20 @@ ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` 
         if (replyText) return replyText;
       } catch (e: any) {
         console.warn(`[WhatsAppBossAI] Model ${model} failed (${e?.message || e}), trying next model...`);
+      }
+    }
+
+    if (currentMode === "mode_b") {
+      const openModelReply = await fridayModeService.queryUncensoredEngine({
+        systemInstruction,
+        userMessage: userTurnMessage,
+        conversationHistory: recentBossMsgs.map((m) => ({
+          role: m.senderName.includes("Boss") || m.senderName.includes("DK") ? "user" : "assistant",
+          text: m.text,
+        })),
+      });
+      if (openModelReply) {
+        return openModelReply;
       }
     }
 
