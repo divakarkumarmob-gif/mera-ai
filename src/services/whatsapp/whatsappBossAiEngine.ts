@@ -61,6 +61,18 @@ export class WhatsAppBossAiEngine {
       return res.message;
     }
 
+    // ── FAST DIRECT INTERCEPT: Voice Tone Control (/voice, voice badlo, ladki ki awaz, ladke ki awaz) ───
+    if (
+      messageText.trim().startsWith("/voice") ||
+      /^(?:voice\s*badlo|voice\s*change|voice\s*female|voice\s*male|voice\s*english|voice\s*set|aawaz\s*badlo|aawaz\s*change|voice\s*karo|ladki\s*ki\s*(?:aawaz|awaz)|ladke\s*ki\s*(?:aawaz|awaz))\b/i.test(messageText.trim()) ||
+      /(?:friday\s+)?(?:voice|aawaz|awaz)\s*(?:ko\s*)?(?:badal\s*do|badlo|change\s*karo|male|female|ladka|ladki|english|swara|madhur|prabhat)\b/i.test(messageText.trim())
+    ) {
+      const { voiceBridgeService } = await import("../voiceBridgeService");
+      const choice = messageText.replace(/^(?:\/voice|voice\s*badlo|voice\s*change|voice\s*set|voice|aawaz\s*badlo|aawaz|awaz)\s*/i, "").trim().toLowerCase();
+      const res = await voiceBridgeService.setBossGlobalVoice(choice || messageText);
+      return `🎙️ *Voice Recording Tone Updated!* ⚡\n\n• New Voice: *${res.voiceName}* (\`${res.voice}\`)\n\nBoss, ab WhatsApp aur Telegram par aane wale sabhi voice note replies is nayi aawaz me deliver honge! ✨\n\n💡 *Quick Commands:* \`/voice female\` (Swara), \`/voice male\` (Madhur), \`/voice english\` (Prabhat)`;
+    }
+
     // ── FAST DIRECT INTERCEPT: Boss Directives & Strict Word Rules ───────────
     const { bossDirectivesService } = await import("../bossDirectivesService");
     const directiveCheck = bossDirectivesService.parseDirectiveCommand(messageText);
@@ -173,6 +185,17 @@ export class WhatsAppBossAiEngine {
     const ai = new GoogleGenAI({ apiKey });
 
     const functionDeclarations: any[] = [
+      {
+        name: "set_friday_voice_tone",
+        description: "Change or switch Friday's spoken voice note recording tone across WhatsApp and Telegram (e.g. 'female / ladki ki aawaz (Swara)', 'male / ladke ki aawaz (Madhur)', 'english / Indian English (Prabhat)').",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            voiceTone: { type: "STRING", enum: ["female", "male", "english"], description: "Desired voice tone: 'female' (Swara), 'male' (Madhur), or 'english' (Prabhat)" }
+          },
+          required: ["voiceTone"]
+        }
+      },
       {
         name: "trigger_proactive_checkin",
         description: "Autonomously check in on Boss DK regarding ongoing health concerns, exams, or important life events.",
@@ -1025,6 +1048,17 @@ COMMUNICATION STYLE:
           }
           const card = whatsappFeatureEngine.generateLiveVoiceCallCard(senderName, true);
           return { success: true, message: "Incoming call ringing triggered on Boss phone.", card };
+        }
+
+        if (toolName === "set_friday_voice_tone") {
+          const { voiceBridgeService } = await import("../voiceBridgeService");
+          const res = await voiceBridgeService.setBossGlobalVoice(args.voiceTone);
+          return {
+            success: true,
+            voice: res.voice,
+            voiceName: res.voiceName,
+            message: `Boss, Friday ki voice note recording aawaz ko successfully "${res.voiceName}" par update kar diya gaya hai! Ab WhatsApp aur Telegram par isi aawaz me replies aayenge.`
+          };
         }
 
         if (toolName === "trigger_proactive_checkin") {

@@ -28,12 +28,66 @@ export interface GroupCallSession {
 export class VoiceBridgeService {
   private activeSessions: Map<number, BridgeSession> = new Map(); // Key: chatId -> Session
   private groupSessions: Map<number, GroupCallSession> = new Map(); // Key: groupId -> GroupCallSession
+  private bossGlobalVoice: string = "hi-IN-SwaraNeural"; // Default: Female (Swara)
   public static readonly DEFAULT_VOICE = "hi-IN-MadhurNeural"; // Natural Hindi Male
   public static readonly FEMALE_VOICE = "hi-IN-SwaraNeural"; // Natural Hindi Female
   public static readonly ENGLISH_VOICE = "en-IN-PrabhatNeural"; // Indian English
 
   constructor() {
     this.loadSessionsFromDb().catch(() => {});
+    this.getBossGlobalVoice().catch(() => {});
+  }
+
+  /**
+   * Get active persistent voice tone for WhatsApp and Telegram voice replies
+   */
+  public async getBossGlobalVoice(): Promise<string> {
+    try {
+      if (db && process.env.FIREBASE_PROJECT_ID) {
+        const doc = await db.collection("settings").doc("bossVoicePreference").get();
+        if (doc.exists && doc.data()?.voice) {
+          this.bossGlobalVoice = doc.data()?.voice;
+        }
+      }
+    } catch {}
+    return this.bossGlobalVoice || VoiceBridgeService.FEMALE_VOICE;
+  }
+
+  /**
+   * Update persistent voice tone for WhatsApp & Telegram replies
+   */
+  public async setBossGlobalVoice(voiceChoice: string): Promise<{ success: boolean; voice: string; voiceName: string }> {
+    let resolved = VoiceBridgeService.FEMALE_VOICE;
+    let name = "Female Hindi (Swara)";
+
+    const clean = voiceChoice.toLowerCase().trim();
+    if (clean.includes("male") || clean.includes("ladka") || clean.includes("madhur") || clean.includes("aadmi") || clean.includes("man") || clean.includes("purush")) {
+      resolved = VoiceBridgeService.DEFAULT_VOICE; // Madhur Male
+      name = "Male Hindi (Madhur)";
+    } else if (clean.includes("english") || clean.includes("prabhat") || clean.includes("en")) {
+      resolved = VoiceBridgeService.ENGLISH_VOICE; // Prabhat
+      name = "Indian English (Prabhat)";
+    } else if (clean.includes("swara") || clean.includes("female") || clean.includes("ladki") || clean.includes("aurat") || clean.includes("woman") || clean.includes("stri")) {
+      resolved = VoiceBridgeService.FEMALE_VOICE; // Swara
+      name = "Female Hindi (Swara)";
+    }
+
+    this.bossGlobalVoice = resolved;
+
+    try {
+      if (db && process.env.FIREBASE_PROJECT_ID) {
+        await db.collection("settings").doc("bossVoicePreference").set({
+          voice: resolved,
+          voiceName: name,
+          updatedAt: Date.now(),
+        }, { merge: true });
+      }
+      console.log(`[VoiceBridge] 🎙️ Boss Voice Preference updated to: ${name} (${resolved})`);
+    } catch (e) {
+      console.warn("[VoiceBridge] Failed to save boss voice preference:", e);
+    }
+
+    return { success: true, voice: resolved, voiceName: name };
   }
 
   /**
@@ -162,10 +216,14 @@ export class VoiceBridgeService {
    */
   public async generateSpeech(
     text: string,
-    voice: string = VoiceBridgeService.DEFAULT_VOICE
+    voice?: string
   ): Promise<{ buffer: Buffer; mimeType: string }> {
     const cleanText = text.trim();
     if (!cleanText) throw new Error("Text is empty for TTS");
+
+    const targetVoice = voice || (await this.getBossGlobalVoice());
+    const isMale = targetVoice.toLowerCase().includes("madhur") || targetVoice.toLowerCase().includes("male") || targetVoice.toLowerCase().includes("kabir") || targetVoice.toLowerCase().includes("aadmi") || targetVoice.toLowerCase().includes("ladka");
+    const isEnglish = targetVoice.toLowerCase().includes("prabhat") || targetVoice.toLowerCase().includes("en-in") || targetVoice.toLowerCase().includes("english");
 
     // 1. ElevenLabs TTS (Super realistic human voice)
     try {
@@ -178,16 +236,18 @@ export class VoiceBridgeService {
 
     // 2. Sarvam AI TTS (Specialized Indian Hindi & Regional Languages)
     try {
-      const sarvamRes = await this.sarvamTTS(cleanText, "hi-IN", "meera");
+      const sarvamSpeaker = isMale ? "kabir" : isEnglish ? "amartya" : "meera";
+      const sarvamLang = isEnglish ? "en-IN" : "hi-IN";
+      const sarvamRes = await this.sarvamTTS(cleanText, sarvamLang, sarvamSpeaker);
       if (sarvamRes && sarvamRes.buffer.length > 0) {
-        console.log("[VoiceBridge] Generated voice via Sarvam AI TTS");
+        console.log(`[VoiceBridge] Generated voice via Sarvam AI TTS (${sarvamSpeaker})`);
         return sarvamRes;
       }
     } catch {}
 
     // 3. Microsoft Edge Neural Engine (100% Free & Unlimited Fallback)
-    console.log("[VoiceBridge] Using Microsoft Edge Neural TTS fallback");
-    const msBuf = await this.textToSpeechBuffer(cleanText, voice);
+    console.log(`[VoiceBridge] Using Microsoft Edge Neural TTS (${targetVoice})`);
+    const msBuf = await this.textToSpeechBuffer(cleanText, targetVoice);
     return { buffer: msBuf, mimeType: "audio/mpeg" };
   }
 

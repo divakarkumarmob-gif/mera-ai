@@ -2368,19 +2368,14 @@ ${
     }
 
     // 2.3 Handle /voice command (Switch TTS Voice Tone)
-    if (text.startsWith("/voice")) {
-      const choice = text.replace(/^\/voice\s*/i, "").trim().toLowerCase();
-      let voiceCode = VoiceBridgeService.DEFAULT_VOICE;
-      if (choice.includes("female") || choice.includes("ladki") || choice.includes("swara")) {
-        voiceCode = VoiceBridgeService.FEMALE_VOICE;
-      } else if (choice.includes("english") || choice.includes("en")) {
-        voiceCode = VoiceBridgeService.ENGLISH_VOICE;
-      }
+    if (text.startsWith("/voice") || /^(voice\s*badlo|voice\s*change|voice\s*female|voice\s*male|voice\s*english|voice\s*set)/i.test(text)) {
+      const choice = text.replace(/^(\/voice|voice\s*badlo|voice\s*change|voice\s*set|voice)\s*/i, "").trim().toLowerCase();
+      const res = await voiceBridgeService.setBossGlobalVoice(choice || text);
+      voiceBridgeService.setPreferredVoice(chatId, res.voice);
 
-      voiceBridgeService.setPreferredVoice(chatId, voiceCode);
       await this.sendMessage(
         chatId,
-        `🎙️ *Voice tone updated to:* \`${voiceCode}\` (${voiceCode.includes("Swara") ? "Female Hindi" : voiceCode.includes("Prabhat") ? "Indian English" : "Male Hindi"})\n\nAb bridge me yehi voice use hogi! ✨`
+        `🎙️ *Voice Recording Tone Updated!* ⚡\n\n• New Voice: **${res.voiceName}** (\`${res.voice}\`)\n\nAb WhatsApp aur Telegram par aane wale sabhi voice note replies is nayi aawaz me deliver honge! ✨`
       );
       return;
     }
@@ -2391,7 +2386,8 @@ ${
       if (speechText) {
         try {
           await this.sendChatAction(chatId, "record_voice");
-          const speechRes = await voiceBridgeService.generateSpeech(speechText);
+          const targetVoice = await voiceBridgeService.getBossGlobalVoice();
+          const speechRes = await voiceBridgeService.generateSpeech(speechText, targetVoice);
           await this.sendVoice(chatId, speechRes.buffer, `🔊 "${speechText}"`);
         } catch (e: any) {
           await this.sendMessage(chatId, `❌ Voice generate karne me error: ${e?.message || e}`);
@@ -2465,9 +2461,10 @@ ${
         // Voice-to-Voice: Friday speaks back with a voice recording!
         try {
           await this.sendChatAction(chatId, "record_voice");
+          const targetVoice = await voiceBridgeService.getBossGlobalVoice();
           const speechRes = await voiceBridgeService.generateSpeech(
             replyText,
-            VoiceBridgeService.FEMALE_VOICE
+            targetVoice
           );
           if (speechRes?.buffer && speechRes.buffer.length > 0) {
             await this.sendVoice(chatId, speechRes.buffer, "🎙️ Friday Audio Response");

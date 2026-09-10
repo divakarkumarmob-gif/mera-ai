@@ -1237,8 +1237,9 @@ class WhatsAppBotService {
       let voiceSent = false;
       if (wantsVoice) {
         try {
-          const { voiceBridgeService, VoiceBridgeService } = await import("./voiceBridgeService");
-          const speechRes = await voiceBridgeService.generateSpeech(reply, VoiceBridgeService.FEMALE_VOICE);
+          const { voiceBridgeService } = await import("./voiceBridgeService");
+          const targetVoice = await voiceBridgeService.getBossGlobalVoice();
+          const speechRes = await voiceBridgeService.generateSpeech(reply, targetVoice);
           if (speechRes && speechRes.buffer.length > 0) {
             await this.sendVoiceMessage(replyJid, speechRes.buffer, messageKey, speechRes.mimeType);
             voiceSent = true;
