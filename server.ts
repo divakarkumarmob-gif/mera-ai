@@ -7,6 +7,15 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+// ── Global Process Crash Sentinel (Prevents Render Server 502 / Status 1 Crashes) ──
+process.on("uncaughtException", (err) => {
+  console.error("[Fatal Server Shield] Uncaught Exception caught:", err?.message || err);
+});
+
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("[Fatal Server Shield] Unhandled Promise Rejection at:", promise, "reason:", reason);
+});
+
 import cors from "cors";
 import rateLimit from "express-rate-limit";
 import { GoogleGenAI, Modality, StartSensitivity, EndSensitivity } from "@google/genai";
@@ -335,7 +344,7 @@ async function startServer() {
       let thisSessionRef: any;
 
       const newSession = await ai.live.connect({
-        model: "gemini-3.1-flash-live-preview",
+        model: "gemini-2.0-flash-exp",
         callbacks: {
           onopen: () => {
             console.log(`[Server] Gemini Live session opened (session=${sessionId})`);
@@ -344,14 +353,14 @@ async function startServer() {
             console.error(`[Server] Gemini Live session ERROR (session=${sessionId}):`, err?.message || err);
             if (currentSession === thisSessionRef) {
               currentSession = undefined;
-              autoReconnect();
+              autoReconnect().catch((e) => console.error("[Server] Auto-reconnect catch in onerror:", e));
             }
           },
           onclose: (evt: any) => {
             console.warn(`[Server] Gemini Live session CLOSED (session=${sessionId}) code=${evt?.code} reason=${evt?.reason || "n/a"}`);
             if (currentSession === thisSessionRef) {
               currentSession = undefined;
-              autoReconnect();
+              autoReconnect().catch((e) => console.error("[Server] Auto-reconnect catch in onclose:", e));
             }
           },
           onmessage: async (message: any) => {
@@ -629,7 +638,7 @@ async function startServer() {
           return;
         }
         if (isInitializingSession) return;
-        if (hasEverConnected && !isReconnecting) autoReconnect();
+        if (hasEverConnected && !isReconnecting) autoReconnect().catch((e) => console.error("[Server] Auto-reconnect catch in message router:", e));
         return;
       }
 
