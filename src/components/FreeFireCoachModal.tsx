@@ -570,11 +570,21 @@ export const FreeFireCoachModal: React.FC<FreeFireCoachModalProps> = ({ isOpen, 
 
                 {/* 3 Step Setup Info */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
-                  <div className="p-3.5 bg-slate-950/80 border border-slate-800 rounded-xl">
-                    <div className="text-xs font-bold text-slate-300 mb-1">1️⃣ Step 1: Install APK</div>
-                    <p className="text-[11px] text-slate-400">
-                      <code>android-helper/</code> folder se <b>FRIDAY Gaming Bridge APK</b> phone me install karein.
-                    </p>
+                  <div className="p-3.5 bg-slate-950/80 border border-slate-800 rounded-xl flex flex-col justify-between">
+                    <div>
+                      <div className="text-xs font-bold text-slate-300 mb-1">1️⃣ Step 1: Install APK</div>
+                      <p className="text-[11px] text-slate-400 mb-2">
+                        <b>FRIDAY Gaming Bridge</b> APK phone me download & install karein.
+                      </p>
+                    </div>
+                    <a
+                      href="/api/gaming/freefire/helper/download"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 rounded-lg text-xs font-bold transition w-full text-center"
+                    >
+                      <Upload className="w-3.5 h-3.5 rotate-180" /> Download APK
+                    </a>
                   </div>
                   <div className="p-3.5 bg-slate-950/80 border border-slate-800 rounded-xl">
                     <div className="text-xs font-bold text-slate-300 mb-1">2️⃣ Step 2: Accessibility ON</div>

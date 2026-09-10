@@ -2815,6 +2815,31 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     res.json({ ok: true, helper: freeFireGamingService.getAndroidHelperStatus() });
   });
 
+  app.get("/api/gaming/freefire/helper/download", (_req, res) => {
+    const apkPaths = [
+      path.resolve(process.cwd(), "public", "downloads", "FridayGamingBridge.apk"),
+      path.resolve(process.cwd(), "android-helper", "app", "build", "outputs", "apk", "release", "app-release.apk"),
+      path.resolve(process.cwd(), "android-helper", "FridayGamingBridge.apk"),
+    ];
+
+    for (const p of apkPaths) {
+      if (fs.existsSync(p)) {
+        return res.download(p, "FridayGamingBridge.apk");
+      }
+    }
+
+    // Fallback response with setup guide if prebuilt APK binary is not yet generated
+    res.json({
+      ok: true,
+      message: "FRIDAY Gaming Bridge Source Code is ready in /android-helper project folder.",
+      instructions: [
+        "1. Open android-helper/ folder in Android Studio OR run './gradlew assembleRelease'",
+        "2. Copy app-release.apk to your phone and install",
+        "3. Grant Accessibility Service permission in Settings"
+      ]
+    });
+  });
+
   app.get("/api/gaming/freefire/devices", async (_req, res) => {
     try {
       const devices = await freeFireGamingService.listDevices();
