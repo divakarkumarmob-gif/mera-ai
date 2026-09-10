@@ -343,120 +343,146 @@ async function startServer() {
       let outputTranscriptBuffer = "";
       let thisSessionRef: any;
 
-      const newSession = await ai.live.connect({
-        model: "gemini-2.0-flash-exp",
-        callbacks: {
-          onopen: () => {
-            console.log(`[Server] Gemini Live session opened (session=${sessionId})`);
-          },
-          onerror: (err: any) => {
-            console.error(`[Server] Gemini Live session ERROR (session=${sessionId}):`, err?.message || err);
-            if (currentSession === thisSessionRef) {
-              currentSession = undefined;
-              autoReconnect().catch((e) => console.error("[Server] Auto-reconnect catch in onerror:", e));
-            }
-          },
-          onclose: (evt: any) => {
-            console.warn(`[Server] Gemini Live session CLOSED (session=${sessionId}) code=${evt?.code} reason=${evt?.reason || "n/a"}`);
-            if (currentSession === thisSessionRef) {
-              currentSession = undefined;
-              autoReconnect().catch((e) => console.error("[Server] Auto-reconnect catch in onclose:", e));
-            }
-          },
-          onmessage: async (message: any) => {
-            const parts = message.serverContent?.modelTurn?.parts || [];
-            let hasAudio = false;
-            for (const part of parts) {
-              if (part.inlineData?.data) {
-                hasAudio = true;
-                safeSend(JSON.stringify({ type: "speaking" }));
-                safeSend(JSON.stringify({ audio: part.inlineData.data }));
-              }
-            }
+      const liveModelsToTry = [
+        "gemini-3-flash-live",
+        "gemini-3.1-flash-live-preview",
+        "gemini-2.5-flash-native-audio-dialog",
+        "gemini-2.5-flash",
+        "gemini-2.0-flash-exp",
+      ];
 
-            const transcript = message.serverContent?.outputTranscription?.text;
-            const inputTranscript = message.serverContent?.inputTranscription?.text;
+      let newSession: any = null;
+      let lastLiveError: any = null;
 
-            const isThinkingFrame =
-              !hasAudio && !transcript && !inputTranscript &&
-              message.serverContent?.modelTurn !== undefined &&
-              !message.serverContent?.turnComplete;
-
-            if (isThinkingFrame) safeSend(JSON.stringify({ type: "thinking" }));
-            if (transcript) {
-              safeSend(JSON.stringify({ text: transcript }));
-              outputTranscriptBuffer += transcript;
-            }
-            if (inputTranscript) inputTranscriptBuffer += inputTranscript;
-            if (message.serverContent?.interrupted) safeSend(JSON.stringify({ interrupted: true }));
-            if (message.serverContent?.turnComplete) {
-              safeSend(JSON.stringify({ turnComplete: true }));
-              if (inputTranscriptBuffer.trim()) {
-                saveMessage("user", inputTranscriptBuffer).catch((e) => console.error("[Server] Failed to save user message:", e));
-                memoryEngine.recordMessage(sessionId, "user", inputTranscriptBuffer);
-              }
-              if (outputTranscriptBuffer.trim()) {
-                saveMessage("ai", outputTranscriptBuffer).catch((e) => console.error("[Server] Failed to save AI message:", e));
-                memoryEngine.recordMessage(sessionId, "ai", outputTranscriptBuffer);
-                backgroundTasksService.markTaskNotified("all");
-              }
-              // Extract important facts dynamically during conversation
-              memoryEngine.maybeAutoExtract(sessionId, ai, 4).catch((e) => console.warn("[Server] Periodic memory extraction failed:", e));
-              inputTranscriptBuffer = "";
-              outputTranscriptBuffer = "";
-            }
-
-            // Handle Gemini Live Function Calling via Clean Modular Dispatcher
-            if (message.toolCall?.functionCalls) {
-              const functionResponses: any[] = [];
-              for (const call of message.toolCall.functionCalls) {
-                const toolOutput = await dispatchLiveToolCall(call, {
-                  sessionId,
-                  clientWs,
-                  safeSend,
-                  connectedClients,
-                  getBaileysEnabled: () => baileysEnabled,
-                  setBaileysEnabled: (v) => { baileysEnabled = v; },
-                });
-                functionResponses.push({ id: call.id, name: call.name, response: { output: toolOutput } });
-                if ((call.name === "generate_ai_photo" || call.name === "edit_ai_photo") && toolOutput?.success) {
-                  memoryEngine.recordMessage(
-                    sessionId,
-                    "ai",
-                    `[SYSTEM STATE]: Photo was generated and is visible in the dashboard left popup. WhatsApp sent: ${toolOutput.whatsappSent}. Confirmation: "${toolOutput.message}"`
-                  );
+      for (const modelCandidate of liveModelsToTry) {
+        try {
+          console.log(`[Server] Connecting to Gemini Live with model: ${modelCandidate} (session=${sessionId})`);
+          newSession = await ai.live.connect({
+            model: modelCandidate,
+            callbacks: {
+              onopen: () => {
+                console.log(`[Server] 🟢 Gemini Live session opened with ${modelCandidate} (session=${sessionId})`);
+              },
+              onerror: (err: any) => {
+                console.error(`[Server] Gemini Live session ERROR on ${modelCandidate} (session=${sessionId}):`, err?.message || err);
+                if (currentSession === thisSessionRef) {
+                  currentSession = undefined;
+                  autoReconnect().catch((e) => console.error("[Server] Auto-reconnect catch in onerror:", e));
                 }
-              }
+              },
+              onclose: (evt: any) => {
+                console.warn(`[Server] Gemini Live session CLOSED on ${modelCandidate} (session=${sessionId}) code=${evt?.code} reason=${evt?.reason || "n/a"}`);
+                if (currentSession === thisSessionRef) {
+                  currentSession = undefined;
+                  autoReconnect().catch((e) => console.error("[Server] Auto-reconnect catch in onclose:", e));
+                }
+              },
+              onmessage: async (message: any) => {
+                const parts = message.serverContent?.modelTurn?.parts || [];
+                let hasAudio = false;
+                for (const part of parts) {
+                  if (part.inlineData?.data) {
+                    hasAudio = true;
+                    safeSend(JSON.stringify({ type: "speaking" }));
+                    safeSend(JSON.stringify({ audio: part.inlineData.data }));
+                  }
+                }
 
-              try {
-                if (currentSession) currentSession.sendToolResponse({ functionResponses });
-              } catch (err) {
-                console.error("[Friday Tools] Failed to send tool response:", err);
-              }
-            }
-          },
-        },
-        config: {
-          responseModalities: [Modality.AUDIO],
-          outputAudioTranscription: {},
-          inputAudioTranscription: {},
-          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice || "Aoede" } } },
-          thinkingConfig: { thinkingLevel: (["low", "medium", "high"].includes(effectiveThinking) ? effectiveThinking : "high") as any },
-          realtimeInputConfig: {
-            automaticActivityDetection: {
-              startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_HIGH,
-              endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_LOW,
-              silenceDurationMs: 500,
-              prefixPaddingMs: 160,
+                const transcript = message.serverContent?.outputTranscription?.text;
+                const inputTranscript = message.serverContent?.inputTranscription?.text;
+
+                const isThinkingFrame =
+                  !hasAudio && !transcript && !inputTranscript &&
+                  message.serverContent?.modelTurn !== undefined &&
+                  !message.serverContent?.turnComplete;
+
+                if (isThinkingFrame) safeSend(JSON.stringify({ type: "thinking" }));
+                if (transcript) {
+                  safeSend(JSON.stringify({ text: transcript }));
+                  outputTranscriptBuffer += transcript;
+                }
+                if (inputTranscript) inputTranscriptBuffer += inputTranscript;
+                if (message.serverContent?.interrupted) safeSend(JSON.stringify({ interrupted: true }));
+                if (message.serverContent?.turnComplete) {
+                  safeSend(JSON.stringify({ turnComplete: true }));
+                  if (inputTranscriptBuffer.trim()) {
+                    saveMessage("user", inputTranscriptBuffer).catch((e) => console.error("[Server] Failed to save user message:", e));
+                    memoryEngine.recordMessage(sessionId, "user", inputTranscriptBuffer);
+                  }
+                  if (outputTranscriptBuffer.trim()) {
+                    saveMessage("ai", outputTranscriptBuffer).catch((e) => console.error("[Server] Failed to save AI message:", e));
+                    memoryEngine.recordMessage(sessionId, "ai", outputTranscriptBuffer);
+                    backgroundTasksService.markTaskNotified("all");
+                  }
+                  // Extract important facts dynamically during conversation
+                  memoryEngine.maybeAutoExtract(sessionId, ai, 4).catch((e) => console.warn("[Server] Periodic memory extraction failed:", e));
+                  inputTranscriptBuffer = "";
+                  outputTranscriptBuffer = "";
+                }
+
+                // Handle Gemini Live Function Calling via Clean Modular Dispatcher
+                if (message.toolCall?.functionCalls) {
+                  const functionResponses: any[] = [];
+                  for (const call of message.toolCall.functionCalls) {
+                    const toolOutput = await dispatchLiveToolCall(call, {
+                      sessionId,
+                      clientWs,
+                      safeSend,
+                      connectedClients,
+                      getBaileysEnabled: () => baileysEnabled,
+                      setBaileysEnabled: (v) => { baileysEnabled = v; },
+                    });
+                    functionResponses.push({ id: call.id, name: call.name, response: { output: toolOutput } });
+                    if ((call.name === "generate_ai_photo" || call.name === "edit_ai_photo") && toolOutput?.success) {
+                      memoryEngine.recordMessage(
+                        sessionId,
+                        "ai",
+                        `[SYSTEM STATE]: Photo was generated and is visible in the dashboard left popup. WhatsApp sent: ${toolOutput.whatsappSent}. Confirmation: "${toolOutput.message}"`
+                      );
+                    }
+                  }
+
+                  try {
+                    if (currentSession) currentSession.sendToolResponse({ functionResponses });
+                  } catch (err) {
+                    console.error("[Friday Tools] Failed to send tool response:", err);
+                  }
+                }
+              },
             },
-          },
-          tools: [
-            ...(googleSearchMode ? [{ googleSearch: {} }] : []),
-            { functionDeclarations: fridayFunctionDeclarations },
-          ],
-          systemInstruction,
-        },
-      });
+            config: {
+              responseModalities: [Modality.AUDIO],
+              outputAudioTranscription: {},
+              inputAudioTranscription: {},
+              speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice || "Aoede" } } },
+              thinkingConfig: { thinkingLevel: (["low", "medium", "high"].includes(effectiveThinking) ? effectiveThinking : "high") as any },
+              realtimeInputConfig: {
+                automaticActivityDetection: {
+                  startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_HIGH,
+                  endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_LOW,
+                  silenceDurationMs: 500,
+                  prefixPaddingMs: 160,
+                },
+              },
+              tools: [
+                ...(googleSearchMode ? [{ googleSearch: {} }] : []),
+                { functionDeclarations: fridayFunctionDeclarations },
+              ],
+              systemInstruction,
+            },
+          });
+
+          // Successfully established live connection with this candidate
+          break;
+        } catch (err: any) {
+          console.warn(`[Server] Live model ${modelCandidate} connection error: ${err?.message || err}`);
+          lastLiveError = err;
+        }
+      }
+
+      if (!newSession) {
+        throw lastLiveError || new Error("Failed to connect to any Gemini Live Audio models");
+      }
 
       thisSessionRef = newSession;
       return newSession;
