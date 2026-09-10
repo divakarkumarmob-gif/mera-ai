@@ -98,13 +98,13 @@ export async function sendWhatsAppUnified(
 
   const cleanPhone = toPhone.replace(/[\s\-\(\)\+]/g, "").trim();
 
-  // Resolve requested channel or fall back to remembered primary channel
+  // Resolve requested channel or fall back to remembered primary channel (default: WhatsApp 2)
   let targetChannel = options.channel && options.channel !== "auto"
     ? options.channel
     : await getPrimaryWhatsAppChannel();
 
-  // ── 1. DIRECT CHANNEL: WhatsApp 2 (Baileys Dedicated Bot) ─────────────────
-  if (targetChannel === "whatsapp2") {
+  // ── 1. PRIMARY / DEFAULT CHANNEL: WhatsApp 2 (Baileys Dedicated Bot) ────────
+  if (targetChannel === "whatsapp2" || targetChannel === "auto" || !targetChannel) {
     const baileysStatus = whatsappBotService.getStatus();
     if (baileysStatus.isConnected && isBaileysActive) {
       const baileysRes = await whatsappBotService.sendMessage(cleanPhone, text);

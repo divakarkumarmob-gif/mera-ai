@@ -48,8 +48,8 @@ if (!process.env.GEMINI_API_KEY) {
   console.warn("WARNING: GEMINI_API_KEY is not set. The AI agent will not work until you set it.");
 }
 
-// ── Global Baileys (unofficial WA) toggle ────────────────────────────────────
-let baileysEnabled: boolean = false;
+// ── Global Baileys (unofficial WA) toggle (Default ON for maximum responsiveness) ──
+let baileysEnabled: boolean = true;
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "placeholder-gemini-key" });
 

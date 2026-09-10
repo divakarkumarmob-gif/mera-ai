@@ -952,12 +952,15 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     } else {
       baileysEnabled = !baileysEnabled; // flip if no value given
     }
+    setBaileysEnabled(baileysEnabled);
+    whatsappBotService.setBaileysEnabled(baileysEnabled);
     console.log(`[Server] Baileys system ${baileysEnabled ? 'ENABLED' : 'DISABLED'} via API`);
     res.json({ ok: true, baileysEnabled });
   });
 
   app.get("/api/whatsapp/baileys/status", (_req, res) => {
-    res.json({ baileysEnabled });
+    const currentEnabled = typeof getBaileysEnabled === "function" ? getBaileysEnabled() : baileysEnabled;
+    res.json({ baileysEnabled: currentEnabled });
   });
 
   // ── Primary WhatsApp Channel endpoints ───────────────────────────────────

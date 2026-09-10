@@ -56,7 +56,7 @@ export async function dispatchLiveToolCall(call: any, context: ToolDispatchConte
     clientWs,
     safeSend,
     connectedClients = new Set(),
-    getBaileysEnabled = () => false,
+    getBaileysEnabled = () => true,
     setBaileysEnabled = () => {},
   } = context;
 

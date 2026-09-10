@@ -131,7 +131,7 @@ function ToggleSwitch({ label, description, active, onToggle, activeColor = 'bg-
 
 // ── WhatsApp 2 (Baileys Multi-Device Bot) Toggle ─────────────────────────────
 function BaileysToggle({ onOpenPairModal }: { onOpenPairModal?: () => void }) {
-    const [enabled, setEnabled] = useState(false);
+    const [enabled, setEnabled] = useState(true);
     const [loading, setLoading] = useState(false);
     const [baileysLinked, setBaileysLinked] = useState(false);
     const [linkedPhone, setLinkedPhone] = useState<string | null>(null);
@@ -140,7 +140,9 @@ function BaileysToggle({ onOpenPairModal }: { onOpenPairModal?: () => void }) {
         fetch('/api/whatsapp/status')
             .then(r => r.json())
             .then(d => {
-                setEnabled(!!d.baileysEnabled);
+                if (typeof d.baileysEnabled === 'boolean') {
+                    setEnabled(d.baileysEnabled);
+                }
                 setBaileysLinked(!!(d.isBaileysConnected ?? d.baileys?.isConnected));
                 setLinkedPhone(d.dedicatedPhone || d.baileys?.dedicatedPhone || null);
             })
@@ -162,7 +164,9 @@ function BaileysToggle({ onOpenPairModal }: { onOpenPairModal?: () => void }) {
                 body: JSON.stringify({ enabled: !enabled }),
             });
             const data = await res.json();
-            setEnabled(!!data.baileysEnabled);
+            if (typeof data.baileysEnabled === 'boolean') {
+                setEnabled(data.baileysEnabled);
+            }
         } catch { /* ignore */ }
         setLoading(false);
     };
@@ -171,7 +175,7 @@ function BaileysToggle({ onOpenPairModal }: { onOpenPairModal?: () => void }) {
         <div className="flex flex-col gap-2.5 p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800">
             <ToggleSwitch
                 label="WhatsApp 2 (Baileys Multi-Device Bot)"
-                description={enabled ? '⚡ ON: Auto-failover active (agar WhatsApp 1 fail ho toh WhatsApp 2 se jayega)' : '🛡️ OFF: Only WhatsApp 1 (Friday failure par aapse WhatsApp 2 confirmation mangegi)'}
+                description={enabled ? '⚡ ON: Primary Priority Active (Saare messages default WhatsApp 2 se directly dispatch honge)' : '🛡️ OFF: WhatsApp 2 disabled (Only WhatsApp 1 Active)'}
                 active={enabled}
                 onToggle={toggle}
                 activeColor="bg-cyan-500"
