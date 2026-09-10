@@ -333,6 +333,24 @@ const rawFunctionDeclarations: any[] = [
     }
   },
   {
+    "name": "trigger_proactive_checkin",
+    "description": "Autonomously check in on Boss DK regarding ongoing health concerns, exams, or important life events.",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "trigger_night_dream_consolidation",
+    "description": "Run Hippocampal Dream & Night Memory Replay to consolidate all daily experiences and lessons.",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
     "name": "teach_friday_lesson",
     "description": "Teach Friday how to speak, react, or behave in a specific situation (like teaching a child). Friday permanently memorizes how Boss wants her to respond.",
     "parameters": {

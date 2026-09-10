@@ -360,6 +360,16 @@ export async function dispatchLiveToolCall(call: any, context: ToolDispatchConte
                   } catch (e: any) {
                     result = { success: false, message: `Failed to generate pairing code: ${e?.message || e}` };
                   }
+                } else if (call.name === "trigger_proactive_checkin") {
+                  const { frontierCognitionService } = await import("../services/frontierCognitionService");
+                  const res = await frontierCognitionService.checkAndDispatchProactiveCheckins();
+                  result = res;
+                  clientWs.send(JSON.stringify({ type: "proactive_checkin_triggered", ...res }));
+                } else if (call.name === "trigger_night_dream_consolidation") {
+                  const { frontierCognitionService } = await import("../services/frontierCognitionService");
+                  const ledger = await frontierCognitionService.runNightDreamConsolidation();
+                  result = { success: true, ledger };
+                  clientWs.send(JSON.stringify({ type: "dream_consolidation_complete", ledger }));
                 } else if (call.name === "teach_friday_lesson") {
                   const { situationTrigger, taughtReaction, idealSampleResponse, category } = call.args || {};
                   const { fridayChildTrainingService } = await import("../services/fridayChildTrainingService");

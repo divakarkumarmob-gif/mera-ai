@@ -130,8 +130,10 @@ export class WhatsAppBossAiEngine {
     });
 
     const { aiAdvancedLearningService } = await import("../aiAdvancedLearningService");
+    const { frontierCognitionService } = await import("../frontierCognitionService");
     const rlhfContext = await aiAdvancedLearningService.compileRlhfPrompt();
     const bossStyleContext = await aiAdvancedLearningService.compileBossStylePrompt();
+    const affinityContext = await frontierCognitionService.compileAffinityPrompt("boss_dk", "Boss DK");
 
     const directivesContext = await bossDirectivesService.compileDirectivesPrompt();
     const trainingLessonsContext = await fridayChildTrainingService.compileTrainingPrompt(messageText);
@@ -150,6 +152,24 @@ export class WhatsAppBossAiEngine {
     const ai = new GoogleGenAI({ apiKey });
 
     const functionDeclarations: any[] = [
+      {
+        name: "trigger_proactive_checkin",
+        description: "Autonomously check in on Boss DK regarding ongoing health concerns, exams, or important life events.",
+        parameters: {
+          type: "OBJECT",
+          properties: {},
+          required: [],
+        },
+      },
+      {
+        name: "trigger_night_dream_consolidation",
+        description: "Run Hippocampal Dream & Night Memory Replay to consolidate all daily experiences and lessons.",
+        parameters: {
+          type: "OBJECT",
+          properties: {},
+          required: [],
+        },
+      },
       {
         name: "teach_friday_lesson",
         description: "Teach Friday how to speak, react, or behave in a specific situation (like teaching a child). Friday permanently memorizes how Boss wants her to respond.",
@@ -933,6 +953,8 @@ ${rlhfContext}
 
 ${bossStyleContext}
 
+${affinityContext}
+
 🧠 HUMAN-LEVEL PRONOUN & INTUITION MANDATE (Theory of Mind & Insaan Jaisi Samajh):
 - Understand pronouns ("isko", "inhe", "ise", "unko", "usko", "use", "in logo ko") like a real, intelligent human companion:
   • If Boss previously sent a number/contact, or swiped on a message, and says "isko msg karo...", "isko bol do...", "inhe message kar do...", the pronoun "isko/inhe" refers to that EXACT phone number or person! Call 'send_whatsapp_message' (channel 'whatsapp2') immediately.
@@ -966,6 +988,22 @@ COMMUNICATION STYLE:
           }
           const card = whatsappFeatureEngine.generateLiveVoiceCallCard(senderName, true);
           return { success: true, message: "Incoming call ringing triggered on Boss phone.", card };
+        }
+
+        if (toolName === "trigger_proactive_checkin") {
+          const { frontierCognitionService } = await import("../frontierCognitionService");
+          const res = await frontierCognitionService.checkAndDispatchProactiveCheckins();
+          return res;
+        }
+
+        if (toolName === "trigger_night_dream_consolidation") {
+          const { frontierCognitionService } = await import("../frontierCognitionService");
+          const ledger = await frontierCognitionService.runNightDreamConsolidation();
+          return {
+            success: true,
+            ledger,
+            message: `Hippocampal Memory Consolidation complete for ${ledger.dateStr}: ${ledger.personalityEvolutionSummary}`,
+          };
         }
 
         if (toolName === "teach_friday_lesson") {
