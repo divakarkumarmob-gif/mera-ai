@@ -2895,5 +2895,41 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
+  app.get("/api/gaming/freefire/copilot/config", (_req, res) => {
+    res.json({ ok: true, config: freeFireGamingService.getCoPilotConfig() });
+  });
+
+  app.post("/api/gaming/freefire/copilot/config", (req, res) => {
+    try {
+      const updated = freeFireGamingService.updateCoPilotConfig(req.body || {});
+      res.json({ ok: true, config: updated });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || "Failed to update co-pilot config" });
+    }
+  });
+
+  app.post("/api/gaming/freefire/copilot/pilot", (req, res) => {
+    try {
+      const { pilot } = req.body || {};
+      const result = freeFireGamingService.setPilot(pilot === "friday" ? "friday" : "boss");
+      res.json({ ok: true, ...result });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || "Failed to switch pilot" });
+    }
+  });
+
+  app.post("/api/gaming/freefire/copilot/assist", async (req, res) => {
+    try {
+      const { assistType, gunType } = req.body || {};
+      if (!assistType) {
+        return res.status(400).json({ ok: false, error: "assistType is required" });
+      }
+      const result = await freeFireGamingService.triggerCoPilotAssist(assistType, gunType);
+      res.json({ ok: result.success, ...result });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || "Failed to trigger co-pilot assist" });
+    }
+  });
+
   return router;
 }

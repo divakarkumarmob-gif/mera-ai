@@ -73,11 +73,30 @@ export interface LiveRadarFrameResult {
   tacticalAdvice: string;
 }
 
+export interface CoPilotConfig {
+  coPlayEnabled: boolean;
+  autoHealOnDamage: boolean;
+  autoShootOnTarget: boolean;
+  autoGlooOnDamage: boolean;
+  afkTakeover: boolean;
+  currentPilot: "boss" | "friday";
+  preferredGunType: "shotgun" | "smg" | "ar" | "sniper";
+}
+
 class FreeFireGamingService {
   private activeDeviceId: string | null = null;
   private isAdbAvailable: boolean | null = null;
   private isSpectating: boolean = false;
   private currentRoomInfo: CustomRoomParams | null = null;
+  private coPilotConfig: CoPilotConfig = {
+    coPlayEnabled: true,
+    autoHealOnDamage: true,
+    autoShootOnTarget: false,
+    autoGlooOnDamage: true,
+    afkTakeover: true,
+    currentPilot: "boss",
+    preferredGunType: "smg",
+  };
 
   private getGenAI(): GoogleGenAI | null {
     const key = process.env.GEMINI_API_KEY;
@@ -591,6 +610,98 @@ Provide a deep technical breakdown in strictly valid JSON:
   }
 
   /**
+   * Get Active Co-Pilot & Co-Play Configuration
+   */
+  public getCoPilotConfig(): CoPilotConfig {
+    return { ...this.coPilotConfig };
+  }
+
+  /**
+   * Update Co-Pilot & Co-Play Configuration
+   */
+  public updateCoPilotConfig(cfg: Partial<CoPilotConfig>): CoPilotConfig {
+    this.coPilotConfig = { ...this.coPilotConfig, ...cfg };
+    return { ...this.coPilotConfig };
+  }
+
+  /**
+   * Set Active Pilot (Handover between Boss & Friday)
+   */
+  public setPilot(pilot: "boss" | "friday"): { success: boolean; currentPilot: "boss" | "friday"; message: string } {
+    this.coPilotConfig.currentPilot = pilot;
+    const msg =
+      pilot === "friday"
+        ? "Boss, controls FRIDAY ke haath me hain! Main character run & rotation handle kar rahi hoon."
+        : "Boss, game controls wapas aapke haath me hain! Main background radar & tactical support par hoon.";
+    return {
+      success: true,
+      currentPilot: pilot,
+      message: msg,
+    };
+  }
+
+  /**
+   * Trigger Real-Time Co-Pilot Assistance (Shoot, Gloo, Heal, Reload, Takeover)
+   */
+  public async triggerCoPilotAssist(
+    assistType: "heal" | "shoot" | "gloo" | "reload" | "takeover" | "handover",
+    gunType?: "shotgun" | "smg" | "ar" | "sniper"
+  ): Promise<{ success: boolean; message: string; actionDone: string }> {
+    const activeGun = gunType || this.coPilotConfig.preferredGunType || "smg";
+
+    switch (assistType) {
+      case "heal": {
+        await this.executeGameAction({ action: "heal" });
+        return {
+          success: true,
+          actionDone: "auto_heal",
+          message: "Boss, Medkit apply ho gaya hai! Health recover ho rahi hai.",
+        };
+      }
+      case "shoot": {
+        await this.executeGameAction({ action: "drag_headshot", gunType: activeGun });
+        return {
+          success: true,
+          actionDone: "auto_drag_headshot",
+          message: `Boss, ${activeGun.toUpperCase()} drag headshot execute kiya! Red numbers locked!`,
+        };
+      }
+      case "gloo": {
+        await this.executeGameAction({ action: "quick_gloo" });
+        return {
+          success: true,
+          actionDone: "quick_gloo",
+          message: "Boss, 360 Sit-up Gloo Wall deploy kar diya hai! Cover safe hai.",
+        };
+      }
+      case "takeover": {
+        this.setPilot("friday");
+        // Start running forward / joystick swipe
+        await this.runAdbShell("input swipe 300 800 300 500 2000"); // Move forward 2s
+        return {
+          success: true,
+          actionDone: "friday_takeover",
+          message: "Samajh gayi Boss! Main character ko safe zone me dauda rahi hoon.",
+        };
+      }
+      case "handover": {
+        this.setPilot("boss");
+        return {
+          success: true,
+          actionDone: "boss_handover",
+          message: "Done Boss! Controls aapke paas hain, kill kijiye!",
+        };
+      }
+      default:
+        return {
+          success: true,
+          actionDone: assistType,
+          message: `Co-Pilot action ${assistType} completed.`,
+        };
+    }
+  }
+
+  /**
    * Get service state summary
    */
   public getStatus() {
@@ -599,6 +710,7 @@ Provide a deep technical breakdown in strictly valid JSON:
       isSpectating: this.isSpectating,
       currentRoom: this.currentRoomInfo,
       adbReady: this.isAdbAvailable ?? false,
+      coPilot: this.coPilotConfig,
     };
   }
 }

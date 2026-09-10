@@ -677,6 +677,29 @@ export class WhatsAppBossAiEngine {
           required: ["action"],
         },
       },
+      {
+        name: "freefire_copilot_assist",
+        description: "Trigger real-time Co-Pilot duo assist in Free Fire match: Boss runs while Friday fires ('shoot'), or Boss fights while Friday heals ('heal') or drops panic gloo wall ('gloo'). Also handles 'takeover' and 'handover'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            assistType: { type: "STRING", enum: ["heal", "shoot", "gloo", "reload", "takeover", "handover"], description: "The duo co-pilot assist action" },
+            gunType: { type: "STRING", enum: ["shotgun", "smg", "ar", "sniper"], description: "Optional gun type" },
+          },
+          required: ["assistType"],
+        },
+      },
+      {
+        name: "freefire_set_pilot",
+        description: "Switch control of character between Boss and Friday. Use when Boss says 'Friday take over', 'tum khelo', 'main khel raha hoon', 'hand over'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            pilot: { type: "STRING", enum: ["boss", "friday"], description: "Who is controlling character ('boss' or 'friday')" },
+          },
+          required: ["pilot"],
+        },
+      },
     ];
 
     const systemInstruction = `YOU ARE FRIDAY: DK's (Divakar Kumar) ultra-intelligent, loyal, warm, witty, and deeply caring AI companion and chief executive assistant.
@@ -1137,6 +1160,16 @@ COMMUNICATION STYLE:
             action: args.action || "drag_headshot",
             gunType: args.gunType || "smg",
           });
+          return res;
+        }
+        if (toolName === "freefire_copilot_assist") {
+          const { freeFireGamingService } = await import("../freeFireGamingService");
+          const res = await freeFireGamingService.triggerCoPilotAssist(args.assistType, args.gunType);
+          return res;
+        }
+        if (toolName === "freefire_set_pilot") {
+          const { freeFireGamingService } = await import("../freeFireGamingService");
+          const res = freeFireGamingService.setPilot(args.pilot === "friday" ? "friday" : "boss");
           return res;
         }
         if (toolName === "get_messages_digest") {

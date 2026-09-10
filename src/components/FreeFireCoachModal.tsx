@@ -16,6 +16,10 @@ import {
   RefreshCw,
   Play,
   Upload,
+  Bot,
+  UserCheck,
+  Heart,
+  Flame,
 } from "lucide-react";
 
 interface FreeFireCoachModalProps {
@@ -24,7 +28,7 @@ interface FreeFireCoachModalProps {
 }
 
 export const FreeFireCoachModal: React.FC<FreeFireCoachModalProps> = ({ isOpen, onClose }) => {
-  const [activeTab, setActiveTab] = useState<"connect" | "custom_room" | "actions" | "analysis">("connect");
+  const [activeTab, setActiveTab] = useState<"connect" | "custom_room" | "actions" | "analysis" | "copilot">("connect");
   const [phoneIp, setPhoneIp] = useState("192.168.1.");
   const [phonePort, setPhonePort] = useState("5555");
   const [connecting, setConnecting] = useState(false);
@@ -43,9 +47,29 @@ export const FreeFireCoachModal: React.FC<FreeFireCoachModalProps> = ({ isOpen, 
   const [analysisReport, setAnalysisReport] = useState<any>(null);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
+  // Co-Pilot State
+  const [coPilotConfig, setCoPilotConfig] = useState<{
+    coPlayEnabled: boolean;
+    autoHealOnDamage: boolean;
+    autoShootOnTarget: boolean;
+    autoGlooOnDamage: boolean;
+    afkTakeover: boolean;
+    currentPilot: "boss" | "friday";
+    preferredGunType: "shotgun" | "smg" | "ar" | "sniper";
+  }>({
+    coPlayEnabled: true,
+    autoHealOnDamage: true,
+    autoShootOnTarget: false,
+    autoGlooOnDamage: true,
+    afkTakeover: true,
+    currentPilot: "boss",
+    preferredGunType: "smg",
+  });
+
   useEffect(() => {
     if (isOpen) {
       fetchDevices();
+      fetchCoPilotConfig();
     }
   }, [isOpen]);
 
@@ -58,6 +82,61 @@ export const FreeFireCoachModal: React.FC<FreeFireCoachModalProps> = ({ isOpen, 
       }
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  const fetchCoPilotConfig = async () => {
+    try {
+      const res = await fetch("/api/gaming/freefire/copilot/config");
+      const data = await res.json();
+      if (data.ok && data.config) {
+        setCoPilotConfig(data.config);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleUpdateCoPilotConfig = async (updated: Partial<typeof coPilotConfig>) => {
+    const next = { ...coPilotConfig, ...updated };
+    setCoPilotConfig(next);
+    try {
+      await fetch("/api/gaming/freefire/copilot/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updated),
+      });
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleSwitchPilot = async (pilot: "boss" | "friday") => {
+    try {
+      const res = await fetch("/api/gaming/freefire/copilot/pilot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pilot }),
+      });
+      const data = await res.json();
+      setStatusMsg(data.message);
+      setCoPilotConfig((prev) => ({ ...prev, currentPilot: pilot }));
+    } catch (err: any) {
+      setStatusMsg("Switch failed: " + err.message);
+    }
+  };
+
+  const handleTriggerAssist = async (assistType: string, gunType?: string) => {
+    try {
+      const res = await fetch("/api/gaming/freefire/copilot/assist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assistType, gunType }),
+      });
+      const data = await res.json();
+      setStatusMsg(data.message || `Assist ${assistType} triggered!`);
+    } catch (err: any) {
+      setStatusMsg("Assist failed: " + err.message);
     }
   };
 
@@ -167,13 +246,13 @@ export const FreeFireCoachModal: React.FC<FreeFireCoachModalProps> = ({ isOpen, 
             </div>
             <div>
               <h2 className="text-xl font-black text-amber-300 tracking-wider flex items-center gap-2 uppercase">
-                FRIDAY Esports AI Coach & Bot Engine
+                FRIDAY Esports AI Coach & Duo Bot
                 <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                  FREE FIRE SPECIAL EDITION
+                  CO-PILOT READY
                 </span>
               </h2>
               <p className="text-xs text-slate-400">
-                WiFi ADB Auto-Player • Live Spectator • Multimodal Weakness & Sensitivity Analyzer
+                WiFi ADB Auto-Player • Duo Co-Play Assist • Live Spectator • Multimodal Weakness Analyzer
               </p>
             </div>
           </div>
@@ -186,12 +265,13 @@ export const FreeFireCoachModal: React.FC<FreeFireCoachModalProps> = ({ isOpen, 
         </div>
 
         {/* Tab Navigation */}
-        <div className="flex items-center border-b border-slate-800 bg-slate-950/60 px-6 gap-2 pt-2">
+        <div className="flex items-center border-b border-slate-800 bg-slate-950/60 px-6 gap-2 pt-2 overflow-x-auto">
           {[
-            { id: "connect", label: "1. Phone / ADB Connect", icon: Smartphone },
-            { id: "custom_room", label: "2. Custom Room Join", icon: Eye },
-            { id: "actions", label: "3. Fast Combat Macros", icon: Crosshair },
-            { id: "analysis", label: "4. AI Match Analysis & Settings", icon: Sparkles },
+            { id: "connect", label: "1. Phone ADB", icon: Smartphone },
+            { id: "copilot", label: "2. AI Co-Pilot (Duo Play)", icon: Bot },
+            { id: "custom_room", label: "3. Custom Room", icon: Eye },
+            { id: "actions", label: "4. Combat Macros", icon: Crosshair },
+            { id: "analysis", label: "5. AI Breakdown", icon: Sparkles },
           ].map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -199,7 +279,7 @@ export const FreeFireCoachModal: React.FC<FreeFireCoachModalProps> = ({ isOpen, 
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
-                className={`flex items-center gap-2 px-4 py-3 text-sm font-semibold border-b-2 transition ${
+                className={`flex items-center gap-2 px-4 py-3 text-sm font-semibold border-b-2 transition whitespace-nowrap ${
                   isActive
                     ? "border-amber-400 text-amber-300 bg-amber-500/10 rounded-t-lg"
                     : "border-transparent text-slate-400 hover:text-slate-200"
@@ -218,6 +298,208 @@ export const FreeFireCoachModal: React.FC<FreeFireCoachModalProps> = ({ isOpen, 
             <div className="p-3 bg-amber-500/15 border border-amber-500/40 rounded-xl text-amber-300 text-xs flex items-center gap-2">
               <Activity className="w-4 h-4 shrink-0" />
               <span>{statusMsg}</span>
+            </div>
+          )}
+
+          {/* TAB: AI CO-PILOT & DUO PLAY */}
+          {activeTab === "copilot" && (
+            <div className="space-y-6">
+              {/* Pilot Status Card */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div
+                  className={`p-5 rounded-2xl border transition-all ${
+                    coPilotConfig.currentPilot === "boss"
+                      ? "bg-amber-950/30 border-amber-400 shadow-[0_0_20px_rgba(245,158,11,0.2)]"
+                      : "bg-slate-950/60 border-slate-800"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2.5 font-bold text-slate-100">
+                      <UserCheck className="w-5 h-5 text-amber-400" />
+                      <span>👑 Boss in Control</span>
+                    </div>
+                    {coPilotConfig.currentPilot === "boss" && (
+                      <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                        ACTIVE PILOT
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-400 mb-4">
+                    Aap game screen touch karke character run & fight kar rahe hain. Friday background me heal & gloo support degi.
+                  </p>
+                  <button
+                    onClick={() => handleSwitchPilot("boss")}
+                    disabled={coPilotConfig.currentPilot === "boss"}
+                    className="w-full py-2 bg-slate-800 hover:bg-slate-700 disabled:bg-amber-500/20 disabled:text-amber-300 text-slate-200 text-xs font-bold rounded-xl border border-white/10 transition"
+                  >
+                    {coPilotConfig.currentPilot === "boss" ? "✓ Boss is Controlling" : "Take Over (Boss Hand)"}
+                  </button>
+                </div>
+
+                <div
+                  className={`p-5 rounded-2xl border transition-all ${
+                    coPilotConfig.currentPilot === "friday"
+                      ? "bg-purple-950/30 border-purple-400 shadow-[0_0_20px_rgba(168,85,247,0.2)]"
+                      : "bg-slate-950/60 border-slate-800"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2.5 font-bold text-slate-100">
+                      <Bot className="w-5 h-5 text-purple-400" />
+                      <span>🤖 Friday Autonomous Takeover</span>
+                    </div>
+                    {coPilotConfig.currentPilot === "friday" && (
+                      <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40">
+                        FRIDAY DRIVING
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-400 mb-4">
+                    Jab aap haath hata lenge, Friday joystick handle karke character ko safe zone me daudayegi aur loot karegi.
+                  </p>
+                  <button
+                    onClick={() => handleSwitchPilot("friday")}
+                    disabled={coPilotConfig.currentPilot === "friday"}
+                    className="w-full py-2 bg-purple-600 hover:bg-purple-500 disabled:bg-purple-500/20 disabled:text-purple-300 text-white text-xs font-bold rounded-xl border border-purple-500/30 transition shadow-lg"
+                  >
+                    {coPilotConfig.currentPilot === "friday" ? "✓ Friday is Driving" : "Let Friday Play (Auto Run)"}
+                  </button>
+                </div>
+              </div>
+
+              {/* Duo Task Division Toggles */}
+              <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-5 space-y-4">
+                <h3 className="text-sm font-bold text-amber-300 flex items-center gap-2">
+                  <Sliders className="w-4 h-4 text-amber-400" />
+                  Duo Task Division (Aap Run Karo, Friday Support Kare!)
+                </h3>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                  {/* Auto-Heal */}
+                  <div className="p-4 bg-slate-900/90 border border-slate-800 rounded-xl flex items-start justify-between gap-3">
+                    <div>
+                      <div className="font-bold text-slate-200 flex items-center gap-1.5 mb-1">
+                        <Heart className="w-4 h-4 text-emerald-400" />
+                        <span>Auto-Heal Assist</span>
+                      </div>
+                      <p className="text-slate-400 leading-relaxed text-[11px]">
+                        Fight ke dauran jaise hi aapki HP 50% se kam hogi, Friday automatically Medkit press karegi.
+                      </p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={coPilotConfig.autoHealOnDamage}
+                      onChange={(e) => handleUpdateCoPilotConfig({ autoHealOnDamage: e.target.checked })}
+                      className="w-5 h-5 accent-amber-500 rounded mt-0.5 cursor-pointer"
+                    />
+                  </div>
+
+                  {/* Panic Gloo */}
+                  <div className="p-4 bg-slate-900/90 border border-slate-800 rounded-xl flex items-start justify-between gap-3">
+                    <div>
+                      <div className="font-bold text-slate-200 flex items-center gap-1.5 mb-1">
+                        <Shield className="w-4 h-4 text-blue-400" />
+                        <span>Panic Gloo Wall Assist</span>
+                      </div>
+                      <p className="text-slate-400 leading-relaxed text-[11px]">
+                        Enemy ki heavy gunfire padte hi Friday instant 0.09s me Sit-up 360 Gloo Wall deploy karegi.
+                      </p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={coPilotConfig.autoGlooOnDamage}
+                      onChange={(e) => handleUpdateCoPilotConfig({ autoGlooOnDamage: e.target.checked })}
+                      className="w-5 h-5 accent-amber-500 rounded mt-0.5 cursor-pointer"
+                    />
+                  </div>
+
+                  {/* Auto Drag Assist */}
+                  <div className="p-4 bg-slate-900/90 border border-slate-800 rounded-xl flex items-start justify-between gap-3">
+                    <div>
+                      <div className="font-bold text-slate-200 flex items-center gap-1.5 mb-1">
+                        <Flame className="w-4 h-4 text-red-400" />
+                        <span>Auto Drag Headshot Assist</span>
+                      </div>
+                      <p className="text-slate-400 leading-relaxed text-[11px]">
+                        Aap character ko move & align karenge, crosshair red hote hi Friday fire drag execute karegi.
+                      </p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={coPilotConfig.autoShootOnTarget}
+                      onChange={(e) => handleUpdateCoPilotConfig({ autoShootOnTarget: e.target.checked })}
+                      className="w-5 h-5 accent-amber-500 rounded mt-0.5 cursor-pointer"
+                    />
+                  </div>
+
+                  {/* AFK Auto-Takeover */}
+                  <div className="p-4 bg-slate-900/90 border border-slate-800 rounded-xl flex items-start justify-between gap-3">
+                    <div>
+                      <div className="font-bold text-slate-200 flex items-center gap-1.5 mb-1">
+                        <Bot className="w-4 h-4 text-purple-400" />
+                        <span>AFK Auto-Takeover (Idle Handover)</span>
+                      </div>
+                      <p className="text-slate-400 leading-relaxed text-[11px]">
+                        Jab aap 3 second tak phone nahi chhuenge, Friday character ko safe zone me daudana shuru karegi.
+                      </p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={coPilotConfig.afkTakeover}
+                      onChange={(e) => handleUpdateCoPilotConfig({ afkTakeover: e.target.checked })}
+                      className="w-5 h-5 accent-amber-500 rounded mt-0.5 cursor-pointer"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Real-time Voice & Trigger Hotkeys */}
+              <div className="space-y-3">
+                <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                  ⚡ Live Assist Hotkeys (Tap or Say to Friday)
+                </h4>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <button
+                    onClick={() => handleTriggerAssist("shoot")}
+                    className="p-3 bg-red-950/40 border border-red-500/40 hover:bg-red-900/40 rounded-xl text-left transition space-y-1"
+                  >
+                    <div className="text-red-400 font-bold text-xs flex items-center gap-1.5">
+                      <Crosshair className="w-4 h-4" /> Shoot / Drag!
+                    </div>
+                    <div className="text-[10px] text-slate-400">"Friday, Fire now!"</div>
+                  </button>
+
+                  <button
+                    onClick={() => handleTriggerAssist("gloo")}
+                    className="p-3 bg-blue-950/40 border border-blue-500/40 hover:bg-blue-900/40 rounded-xl text-left transition space-y-1"
+                  >
+                    <div className="text-blue-400 font-bold text-xs flex items-center gap-1.5">
+                      <Shield className="w-4 h-4" /> Panic Gloo!
+                    </div>
+                    <div className="text-[10px] text-slate-400">"Friday, Gloo dalo!"</div>
+                  </button>
+
+                  <button
+                    onClick={() => handleTriggerAssist("heal")}
+                    className="p-3 bg-emerald-950/40 border border-emerald-500/40 hover:bg-emerald-900/40 rounded-xl text-left transition space-y-1"
+                  >
+                    <div className="text-emerald-400 font-bold text-xs flex items-center gap-1.5">
+                      <Heart className="w-4 h-4" /> Apply Medkit!
+                    </div>
+                    <div className="text-[10px] text-slate-400">"Friday, Heal karo!"</div>
+                  </button>
+
+                  <button
+                    onClick={() => handleTriggerAssist("takeover")}
+                    className="p-3 bg-purple-950/40 border border-purple-500/40 hover:bg-purple-900/40 rounded-xl text-left transition space-y-1"
+                  >
+                    <div className="text-purple-400 font-bold text-xs flex items-center gap-1.5">
+                      <Bot className="w-4 h-4" /> Auto Run Safe!
+                    </div>
+                    <div className="text-[10px] text-slate-400">"Friday, Take over!"</div>
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
@@ -315,7 +597,7 @@ export const FreeFireCoachModal: React.FC<FreeFireCoachModalProps> = ({ isOpen, 
             </div>
           )}
 
-          {/* TAB 2: CUSTOM ROOM */}
+          {/* TAB: CUSTOM ROOM */}
           {activeTab === "custom_room" && (
             <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-6 space-y-5 max-w-xl mx-auto">
               <h3 className="text-base font-bold text-amber-300 flex items-center gap-2">
@@ -391,7 +673,7 @@ export const FreeFireCoachModal: React.FC<FreeFireCoachModalProps> = ({ isOpen, 
             </div>
           )}
 
-          {/* TAB 3: FAST COMBAT MACROS */}
+          {/* TAB: FAST COMBAT MACROS */}
           {activeTab === "actions" && (
             <div className="space-y-4">
               <p className="text-xs text-slate-400">
@@ -445,7 +727,7 @@ export const FreeFireCoachModal: React.FC<FreeFireCoachModalProps> = ({ isOpen, 
             </div>
           )}
 
-          {/* TAB 4: MATCH ANALYSIS & WEAKNESS BREAKDOWN */}
+          {/* TAB: MATCH ANALYSIS & WEAKNESS BREAKDOWN */}
           {activeTab === "analysis" && (
             <div className="space-y-6">
               <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-5 space-y-4">
