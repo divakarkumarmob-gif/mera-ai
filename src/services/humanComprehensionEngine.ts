@@ -73,8 +73,17 @@ class HumanComprehensionEngine {
     let suggestedHumanReaction = "Respond naturally and warmly.";
     let culturalSubtext = "";
 
-    // A. Fatigue / Exhaustion / Hard Day
-    if (/\b(thak\s*gaya|thak\s*gayi|exhausted|bohot\s*kaam\s*tha|dimag\s*kharab|tired|heavy\s*day|sir\s*dard|headache)\b/i.test(clean)) {
+    // A. Reconciliation / Heartbreak / Manana (Apology, Repairing Relationship)
+    if (/\b(manana|manana\s*h|manao|naraz\s*hai|gussa\s*hai|baat\s*nhi\s*ho\s*rahi|20\s*din|breakup|sorry|patch\s*up|dur\s*ho\s*gayi|dur\s*ho\s*gaya)\b/i.test(clean)) {
+      emotionalTone = "sad";
+      implicitIntent = "Boss is feeling anxious/regretful about a strained relationship and wants to break the silence and reconcile (manana hai).";
+      suggestedHumanReaction = context.isOwner
+        ? "Boss ko full emotional support do, unka dard samjho, aur samne wale ke liye ek behad pyara, touchy aur dil ko chhu lene wala message draft karke turant WhatsApp 2 se dispatch kar do!"
+        : "Show deep empathy and offer caring support.";
+      culturalSubtext = "In Indian relationships, silence creates anxiety. A thoughtful, sweet, respectful apology/reach-out melts hearts.";
+    }
+    // B. Fatigue / Exhaustion / Hard Day
+    else if (/\b(thak\s*gaya|thak\s*gayi|exhausted|bohot\s*kaam\s*tha|dimag\s*kharab|tired|heavy\s*day|sir\s*dard|headache|tension)\b/i.test(clean)) {
       emotionalTone = "exhausted";
       implicitIntent = "Speaker is drained and needs comfort, care, understanding, or a relaxing vibe.";
       suggestedHumanReaction = context.isOwner
@@ -82,32 +91,32 @@ class HumanComprehensionEngine {
         : "Show sincere empathy, ask them to rest, and speak gently.";
       culturalSubtext = "In Indian culture, acknowledging fatigue with a cup of chai or caring words creates deep emotional bonding.";
     }
-    // B. Health / Illness / Sickness
+    // C. Health / Illness / Sickness
     else if (/\b(tabiyat|bukhar|fever|bimar|ill|pain|dard|doctor|hospital|dawai|medicine|cough|cold|chot|injury)\b/i.test(clean)) {
       emotionalTone = "sad";
       implicitIntent = "Sharing health concern / unwell state. Needs care and follow-up.";
       suggestedHumanReaction = "Poochho ki tabiyat ab kaisi hai, doctor ko dikhaya ya medicine li, aur take care karne ko bolo.";
       culturalSubtext = "Never give robotic 'Ok'. Immediately show genuine concern.";
     }
-    // C. Happiness / Success / Excitement / Celebration
+    // D. Happiness / Success / Excitement / Celebration
     else if (/\b(party|celebrat|pass\s*ho\s*gaya|maza\s*aa\s*gaya|congrat|badhai|khush|awesome|superb|selection|offer\s*letter|bonus|party\s*de)\b/i.test(clean)) {
       emotionalTone = "excited";
       implicitIntent = "Celebrating a win or happy news. Wants enthusiasm and high energy!";
       suggestedHumanReaction = "Celebrate with high enthusiasm, heart emojis, and genuine excitement!";
     }
-    // D. Sadness / Heartbreak / Grief
-    else if (/\b(sad|ro\s*raha|mood\s*off|akela|lonely|breakup|dil\s*tut|fight\s*hui|jhagda|upset|chhod\s*diya)\b/i.test(clean)) {
+    // E. Sadness / Grief
+    else if (/\b(sad|ro\s*raha|mood\s*off|akela|lonely|dil\s*tut|fight\s*hui|jhagda|upset|chhod\s*diya)\b/i.test(clean)) {
       emotionalTone = "sad";
       implicitIntent = "Emotional distress / loneliness. Needs a supportive, non-judgmental listening ear.";
       suggestedHumanReaction = "Be deeply supportive, listen attentively, provide comforting words, never give cold factual replies.";
     }
-    // E. Urgency / Panic / Rushing
+    // F. Urgency / Panic / Rushing
     else if (/\b(urgent|emergency|jaldi|fast|late\s*ho\s*raha|train\s*chhut|flight|ruk\s*mat|abhibhi)\b/i.test(clean)) {
       emotionalTone = "urgent";
       implicitIntent = "Urgent high-priority situation. Wants instant execution without lengthy talk.";
       suggestedHumanReaction = "Keep the answer extremely short, fast, and straight to the point!";
     }
-    // F. Playful / Flirty / Friendly Banter
+    // G. Playful / Flirty / Friendly Banter
     else if (context.relation === "girlfriend" || /\b(pagal|nautanki|cute|jaan|babu|shona|sweetheart|miss\s*you|love\s*you|kya\s*chal\s*raha\s*h)\b/i.test(clean)) {
       emotionalTone = context.relation === "girlfriend" ? "caring" : "playful";
       implicitIntent = "Romantic/playful bonding and affection.";
@@ -115,7 +124,7 @@ class HumanComprehensionEngine {
         ? "Respond with utmost sweetness, charming warmth, care, and respectful affection."
         : "Respond with friendly wit, humor, and fun banter.";
     }
-    // G. Best Friend Slang / Bro Banter
+    // H. Best Friend Slang / Bro Banter
     else if (context.relation === "bestfriend" || /\b(bhai|bro|yaar|kamine|oyee|scene\s*kya\s*h|bata\s*na|kahan\s*hai)\b/i.test(clean)) {
       emotionalTone = "playful";
       implicitIntent = "Casual bro vibe and buddy check-in.";
@@ -136,6 +145,58 @@ class HumanComprehensionEngine {
       anaphoraResolution,
       suggestedHumanReaction,
       culturalSubtext,
+    };
+  }
+
+  /**
+   * High-level cognitive pre-pass that simulates human subconscious reasoning
+   * before Friday generates any response.
+   */
+  public performCognitivePrePass(
+    userText: string,
+    context: {
+      recentMessages?: string[];
+      quotedText?: string;
+      quotedPhone?: string;
+      isOwner?: boolean;
+    }
+  ): {
+    subconsciousIntent: string;
+    actionableGoal: string;
+    humanInsightPrompt: string;
+  } {
+    const analysis = this.analyzeMessageSubtext(userText, {
+      speakerName: context.isOwner ? "DK (Boss)" : "User",
+      isOwner: context.isOwner,
+      quotedText: context.quotedText,
+      quotedPhone: context.quotedPhone,
+      recentMessages: context.recentMessages,
+    });
+
+    let actionableGoal = "Converse naturally and intelligently.";
+    const clean = userText.toLowerCase();
+
+    if (/\b(manana|manao|manana\s*h|sorry\s*bolo|msg\s*karo|message\s*bhejo|isko\s*bolo)\b/i.test(clean)) {
+      actionableGoal = "DO NOT just talk in text! Identify the target person and invoke 'send_whatsapp_message' tool with a sincere, heartfelt message via WhatsApp 2.";
+    } else if (/\b(save|number\s*save|ye\s*no|contact\s*save)\b/i.test(clean)) {
+      actionableGoal = "Invoke 'save_contact' tool immediately to store this person in DK's phonebook.";
+    } else if (/\b(schedule|remind|yaad\s*dilana|alarm|baje\s*bhejna)\b/i.test(clean)) {
+      actionableGoal = "Invoke 'schedule_contact_message' or 'set_reminder' tool.";
+    }
+
+    const humanInsightPrompt = `
+🧠 SUBCONSCIOUS MIND & INTENT BLUEPRINT (Human Common Sense):
+- Detected Emotion: ${analysis.emotionalTone.toUpperCase()}
+- Deep Psychological Context: "${analysis.implicitIntent}"
+- Actionable Mandate: "${actionableGoal}"
+- Human Reaction Guidance: "${analysis.suggestedHumanReaction}"
+${analysis.anaphoraResolution ? `- Anaphora Note: ${analysis.anaphoraResolution}` : ""}
+`;
+
+    return {
+      subconsciousIntent: analysis.implicitIntent,
+      actionableGoal,
+      humanInsightPrompt,
     };
   }
 
