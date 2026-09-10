@@ -49,26 +49,30 @@ class FloatingOverlayService : Service() {
     }
 
     private fun startForegroundNotification() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "FRIDAY Gaming Service",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Running in background for Free Fire in-game gesture bridge"
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(
+                    CHANNEL_ID,
+                    "FRIDAY Gaming Service",
+                    NotificationManager.IMPORTANCE_LOW
+                ).apply {
+                    description = "Running in background for Free Fire in-game gesture bridge"
+                }
+                val manager = getSystemService(NotificationManager::class.java)
+                manager?.createNotificationChannel(channel)
             }
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
+
+            val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("FRIDAY Gaming Bridge Active")
+                .setContentText("Zero-ADB Accessibility Bridge connected for Free Fire")
+                .setSmallIcon(android.R.drawable.ic_menu_compass)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .build()
+
+            startForeground(NOTIF_ID, notification)
+        } catch (e: Throwable) {
+            e.printStackTrace()
         }
-
-        val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("FRIDAY Gaming Bridge Active")
-            .setContentText("Zero-ADB Accessibility Bridge connected for Free Fire")
-            .setSmallIcon(android.R.drawable.ic_menu_compass)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
-
-        startForeground(NOTIF_ID, notification)
     }
 
     private fun createFloatingHud() {

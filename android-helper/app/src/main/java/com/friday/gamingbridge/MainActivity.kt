@@ -1,5 +1,6 @@
 package com.friday.gamingbridge
 
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
@@ -11,9 +12,8 @@ import android.provider.Settings
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.*
-import androidx.appcompat.app.AppCompatActivity
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : Activity() {
 
     private lateinit var statusText: TextView
     private lateinit var serverInput: EditText
@@ -23,6 +23,12 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        try {
+            Thread.setDefaultUncaughtExceptionHandler { _, throwable ->
+                throwable.printStackTrace()
+            }
+        } catch (ignored: Throwable) {}
 
         // Programmatic Cyberpunk UI layout (Clean, self-contained, no XML dependency issues)
         val prefs = getSharedPreferences("friday_prefs", Context.MODE_PRIVATE)
