@@ -122,6 +122,12 @@ export class WhatsAppBossAiEngine {
       }
     }
 
+    const recentBossMsgs = whatsappHistoryEngine
+      .getCachedMessages()
+      .filter((m) => !m.isGroup && (m.senderName.includes("Boss") || m.senderName.includes("DK") || (replyJid && m.replyJid === replyJid)))
+      .slice(0, 5)
+      .reverse();
+
     const { memoryEngine } = await import("../memoryEngine");
     const { humanComprehensionEngine } = await import("../humanComprehensionEngine");
     const { circadianEnergyEngine } = await import("../circadianEnergyEngine");
@@ -1956,12 +1962,6 @@ COMMUNICATION STYLE:
       }
       return { status: "unknown_tool" };
     };
-
-    const recentBossMsgs = whatsappHistoryEngine
-      .getCachedMessages()
-      .filter((m) => !m.isGroup && (m.senderName.includes("Boss") || m.senderName.includes("DK") || (replyJid && m.replyJid === replyJid)))
-      .slice(0, 5)
-      .reverse();
 
     let contextPrefix = "";
     if (recentBossMsgs.length > 0) {
