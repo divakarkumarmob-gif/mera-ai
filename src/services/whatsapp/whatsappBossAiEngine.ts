@@ -212,6 +212,20 @@ export class WhatsAppBossAiEngine {
     const vulnerabilityContext = flawedVulnerabilityEngine.compileVulnerabilityPrompt();
     const exertionContext = cognitiveExertionEngine.compileExertionPrompt();
 
+    const {
+      acousticSceneParser,
+      companionMilestoneTracker,
+      curiosityCounterQuestionEngine,
+      counterfactualRegretEngine,
+      aestheticTasteEngine,
+    } = await import("../frontierCompanionBondEngine");
+
+    const sceneContext = acousticSceneParser.compileScenePrompt(messageText);
+    const nostalgiaContext = companionMilestoneTracker.compileNostalgiaPrompt();
+    const curiosityContext = curiosityCounterQuestionEngine.compileCuriosityPrompt(messageText);
+    const regretContext = counterfactualRegretEngine.compileRegretPrompt(messageText);
+    const tasteContext = aestheticTasteEngine.compileTastePrompt();
+
     const ai = new GoogleGenAI({ apiKey });
 
     const functionDeclarations: any[] = [
@@ -1091,6 +1105,16 @@ ${mirrorContext}
 ${vulnerabilityContext}
 
 ${exertionContext}
+
+${sceneContext}
+
+${nostalgiaContext}
+
+${curiosityContext}
+
+${regretContext}
+
+${tasteContext}
 
 🧠 HUMAN-LEVEL PRONOUN & INTUITION MANDATE (Theory of Mind & Insaan Jaisi Samajh):
 - Understand pronouns ("isko", "inhe", "ise", "unko", "usko", "use", "in logo ko") like a real, intelligent human companion:

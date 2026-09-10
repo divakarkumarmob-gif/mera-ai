@@ -1581,6 +1581,20 @@ Provide a 2-4 sentence executive digest of main topics, project updates, member 
     const vulnerabilityContext = flawedVulnerabilityEngine.compileVulnerabilityPrompt();
     const exertionContext = cognitiveExertionEngine.compileExertionPrompt();
 
+    const {
+      acousticSceneParser,
+      companionMilestoneTracker,
+      curiosityCounterQuestionEngine,
+      counterfactualRegretEngine,
+      aestheticTasteEngine,
+    } = await import("./frontierCompanionBondEngine");
+
+    const sceneContext = acousticSceneParser.compileScenePrompt(messageText);
+    const nostalgiaContext = companionMilestoneTracker.compileNostalgiaPrompt();
+    const curiosityContext = curiosityCounterQuestionEngine.compileCuriosityPrompt(messageText);
+    const regretContext = counterfactualRegretEngine.compileRegretPrompt(messageText);
+    const tasteContext = aestheticTasteEngine.compileTastePrompt();
+
     // Stream of consciousness logging
     frontierCognitionService.recordStreamEvent(senderName, messageText, isOwner ? 6 : 4).catch(() => {});
 
@@ -1644,6 +1658,16 @@ ${mirrorContext}
 ${vulnerabilityContext}
 
 ${exertionContext}
+
+${sceneContext}
+
+${nostalgiaContext}
+
+${curiosityContext}
+
+${regretContext}
+
+${tasteContext}
 
 ${cognitivePass.humanInsightPrompt}
 
