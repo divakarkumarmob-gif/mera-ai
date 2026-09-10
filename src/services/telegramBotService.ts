@@ -1621,6 +1621,16 @@ Provide a 2-4 sentence executive digest of main topics, project updates, member 
     const nicknameContext = dynamicAffectionEngine.compileNicknamePrompt(messageText);
     const giggleContext = playfulGiggleEngine.compileGigglePrompt(messageText);
 
+    const {
+      processSupervisionEngine,
+      cognitiveScaffoldingEngine,
+      machineUnlearningSentinel,
+    } = await import("./frontierTrainingEngine");
+
+    const prmContext = processSupervisionEngine.compilePRMPrompt();
+    const scaffoldingContext = cognitiveScaffoldingEngine.compileScaffoldingPrompt();
+    const unlearningContext = machineUnlearningSentinel.compileUnlearningPrompt();
+
     // Stream of consciousness logging
     frontierCognitionService.recordStreamEvent(senderName, messageText, isOwner ? 6 : 4).catch(() => {});
 
@@ -1713,6 +1723,12 @@ ${nicknameContext}
 
 ${giggleContext}
 
+${prmContext}
+
+${scaffoldingContext}
+
+${unlearningContext}
+
 ${cognitivePass.humanInsightPrompt}
 
 CHAT CONTEXT:
@@ -1765,8 +1781,10 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
           console.log(`[TelegramBot] Reply generated using ${model}`);
           const replaced = bossDirectivesService.applyWordReplacements(reply);
           const finalReply = await aiAdvancedLearningService.runConstitutionalCritique(replaced, { isToBoss: isOwner });
-          neurotransmitterEngine.updateEmotionalMomentum(messageText, finalReply);
-          return finalReply;
+          const { cleanText } = machineUnlearningSentinel.scrubRoboticArtifacts(finalReply);
+          cognitiveScaffoldingEngine.addMasteryPoints(2).catch(() => {});
+          neurotransmitterEngine.updateEmotionalMomentum(messageText, cleanText);
+          return cleanText;
         }
       } catch (err: any) {
         console.warn(`[TelegramBot] ${model} failed (${err?.message || err}), falling back to next model...`);
@@ -1781,8 +1799,10 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
       if (uncensoredReply) {
         const replaced = bossDirectivesService.applyWordReplacements(uncensoredReply);
         const finalReply = await aiAdvancedLearningService.runConstitutionalCritique(replaced, { isToBoss: isOwner });
-        neurotransmitterEngine.updateEmotionalMomentum(messageText, finalReply);
-        return finalReply;
+        const { cleanText } = machineUnlearningSentinel.scrubRoboticArtifacts(finalReply);
+        cognitiveScaffoldingEngine.addMasteryPoints(2).catch(() => {});
+        neurotransmitterEngine.updateEmotionalMomentum(messageText, cleanText);
+        return cleanText;
       }
     }
 

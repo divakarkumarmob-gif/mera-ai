@@ -252,6 +252,16 @@ export class WhatsAppBossAiEngine {
     const nicknameContext = dynamicAffectionEngine.compileNicknamePrompt(messageText);
     const giggleContext = playfulGiggleEngine.compileGigglePrompt(messageText);
 
+    const {
+      processSupervisionEngine,
+      cognitiveScaffoldingEngine,
+      machineUnlearningSentinel,
+    } = await import("../frontierTrainingEngine");
+
+    const prmContext = processSupervisionEngine.compilePRMPrompt();
+    const scaffoldingContext = cognitiveScaffoldingEngine.compileScaffoldingPrompt();
+    const unlearningContext = machineUnlearningSentinel.compileUnlearningPrompt();
+
     const ai = new GoogleGenAI({ apiKey });
 
     const functionDeclarations: any[] = [
@@ -1185,6 +1195,12 @@ ${nicknameContext}
 
 ${giggleContext}
 
+${prmContext}
+
+${scaffoldingContext}
+
+${unlearningContext}
+
 🧠 HUMAN-LEVEL PRONOUN & INTUITION MANDATE (Theory of Mind & Insaan Jaisi Samajh):
 - Understand pronouns ("isko", "inhe", "ise", "unko", "usko", "use", "in logo ko") like a real, intelligent human companion:
   • If Boss previously sent a number/contact, or swiped on a message, and says "isko msg karo...", "isko bol do...", "inhe message kar do...", the pronoun "isko/inhe" refers to that EXACT phone number or person! Call 'send_whatsapp_message' (channel 'whatsapp2') immediately.
@@ -1984,10 +2000,13 @@ ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` 
           const { bossDirectivesService } = await import("../bossDirectivesService");
           const { aiAdvancedLearningService } = await import("../aiAdvancedLearningService");
           const { neurotransmitterEngine } = await import("../frontierHumanEngines");
+          const { machineUnlearningSentinel, cognitiveScaffoldingEngine } = await import("../frontierTrainingEngine");
           const replaced = bossDirectivesService.applyWordReplacements(replyText);
           const finalReply = await aiAdvancedLearningService.runConstitutionalCritique(replaced, { isToBoss: true });
-          neurotransmitterEngine.updateEmotionalMomentum(messageText, finalReply);
-          return finalReply;
+          const { cleanText } = machineUnlearningSentinel.scrubRoboticArtifacts(finalReply);
+          cognitiveScaffoldingEngine.addMasteryPoints(2).catch(() => {});
+          neurotransmitterEngine.updateEmotionalMomentum(messageText, cleanText);
+          return cleanText;
         }
       } catch (e: any) {
         console.warn(`[WhatsAppBossAI] Model ${model} failed (${e?.message || e}), trying next model...`);
@@ -2007,10 +2026,13 @@ ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` 
         const { bossDirectivesService } = await import("../bossDirectivesService");
         const { aiAdvancedLearningService } = await import("../aiAdvancedLearningService");
         const { neurotransmitterEngine } = await import("../frontierHumanEngines");
+        const { machineUnlearningSentinel, cognitiveScaffoldingEngine } = await import("../frontierTrainingEngine");
         const replaced = bossDirectivesService.applyWordReplacements(openModelReply);
         const finalReply = await aiAdvancedLearningService.runConstitutionalCritique(replaced, { isToBoss: true });
-        neurotransmitterEngine.updateEmotionalMomentum(messageText, finalReply);
-        return finalReply;
+        const { cleanText } = machineUnlearningSentinel.scrubRoboticArtifacts(finalReply);
+        cognitiveScaffoldingEngine.addMasteryPoints(2).catch(() => {});
+        neurotransmitterEngine.updateEmotionalMomentum(messageText, cleanText);
+        return cleanText;
       }
     }
 
