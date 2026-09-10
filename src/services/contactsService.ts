@@ -179,6 +179,21 @@ class ContactsService {
     const relMatch = all.find((c) => c.relation && (c.relation.toLowerCase().includes(q) || q.includes(c.relation.toLowerCase())));
     if (relMatch) return relMatch;
 
+    // 4.1 Lookup recent WhatsApp message senders & history
+    try {
+      const { whatsappHistoryEngine } = await import("./whatsapp/whatsappHistoryEngine");
+      const recentMsgs = whatsappHistoryEngine.getCachedMessages();
+      const matchInHistory = recentMsgs.find(
+        (m) =>
+          (m.senderName && (m.senderName.toLowerCase().includes(q) || q.includes(m.senderName.toLowerCase()))) &&
+          m.senderPhone
+      );
+      if (matchInHistory) {
+        const hEntry = await this.saveContact(matchInHistory.senderName, matchInHistory.senderPhone, "Friend / Contact");
+        return hEntry;
+      }
+    } catch {}
+
     // 5. Unsaved pure phone number fallback
     if (queryLast10.length === 10) {
       return {
