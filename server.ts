@@ -344,10 +344,8 @@ async function startServer() {
       let thisSessionRef: any;
 
       const liveModelsToTry = [
-        "gemini-3-flash-live",
         "gemini-3.1-flash-live-preview",
         "gemini-2.5-flash-native-audio-dialog",
-        "gemini-2.5-flash",
         "gemini-2.0-flash-exp",
       ];
 
