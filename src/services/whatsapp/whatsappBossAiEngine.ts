@@ -182,6 +182,22 @@ export class WhatsAppBossAiEngine {
     const multimodalContext = await multimodalCoPresenceEngine.compileVisualCoPresencePrompt(replyJid);
     const selfEvolutionContext = await selfEvolutionEngine.compileSelfEvolutionPrompt();
 
+    const {
+      neurotransmitterEngine,
+      acousticBackchannelEngine,
+      spontaneousProactiveEngine,
+      loyalPushbackEngine,
+      linguisticCryptophasiaEngine,
+      comedicTimingEngine,
+    } = await import("../frontierHumanEngines");
+
+    const neurotransmitterContext = neurotransmitterEngine.compileNeurotransmitterPrompt();
+    const backchannelContext = acousticBackchannelEngine.compileBackchannelPrompt();
+    const spontaneousContext = spontaneousProactiveEngine.compileSpontaneousPrompt();
+    const pushbackContext = loyalPushbackEngine.compilePushbackPrompt();
+    const cryptophasiaContext = linguisticCryptophasiaEngine.compileCryptophasiaPrompt();
+    const comedicTimingContext = comedicTimingEngine.compileComedicTimingPrompt();
+
     const ai = new GoogleGenAI({ apiKey });
 
     const functionDeclarations: any[] = [
@@ -194,6 +210,19 @@ export class WhatsAppBossAiEngine {
             voiceTone: { type: "STRING", enum: ["female", "male", "english"], description: "Desired voice tone: 'female' (Swara), 'male' (Madhur), or 'english' (Prabhat)" }
           },
           required: ["voiceTone"]
+        }
+      },
+      {
+        name: "register_cryptophasia_code",
+        description: "Save a private secret nickname, inside slang, or coded phrase between Boss DK and Friday into the shared memory universe.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            code: { type: "STRING", description: "The slang word, nickname, or shorthand" },
+            meaning: { type: "STRING", description: "What it means between Boss and Friday" },
+            context: { type: "STRING", description: "Context or backstory" }
+          },
+          required: ["code", "meaning"]
         }
       },
       {
@@ -1015,6 +1044,18 @@ ${ghostWorkerContext}
 
 ${worldTwinContext}
 
+${neurotransmitterContext}
+
+${backchannelContext}
+
+${spontaneousContext}
+
+${pushbackContext}
+
+${cryptophasiaContext}
+
+${comedicTimingContext}
+
 🧠 HUMAN-LEVEL PRONOUN & INTUITION MANDATE (Theory of Mind & Insaan Jaisi Samajh):
 - Understand pronouns ("isko", "inhe", "ise", "unko", "usko", "use", "in logo ko") like a real, intelligent human companion:
   • If Boss previously sent a number/contact, or swiped on a message, and says "isko msg karo...", "isko bol do...", "inhe message kar do...", the pronoun "isko/inhe" refers to that EXACT phone number or person! Call 'send_whatsapp_message' (channel 'whatsapp2') immediately.
@@ -1058,6 +1099,15 @@ COMMUNICATION STYLE:
             voice: res.voice,
             voiceName: res.voiceName,
             message: `Boss, Friday ki voice note recording aawaz ko successfully "${res.voiceName}" par update kar diya gaya hai! Ab WhatsApp aur Telegram par isi aawaz me replies aayenge.`
+          };
+        }
+
+        if (toolName === "register_cryptophasia_code") {
+          const { linguisticCryptophasiaEngine } = await import("../frontierHumanEngines");
+          await linguisticCryptophasiaEngine.registerCodeWord(args.code, args.meaning, args.context || "");
+          return {
+            success: true,
+            message: `Boss, humara private code word "${args.code}" memory universe me permanently save ho gaya hai!`
           };
         }
 
@@ -1777,8 +1827,11 @@ ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` 
         if (replyText) {
           const { bossDirectivesService } = await import("../bossDirectivesService");
           const { aiAdvancedLearningService } = await import("../aiAdvancedLearningService");
+          const { neurotransmitterEngine } = await import("../frontierHumanEngines");
           const replaced = bossDirectivesService.applyWordReplacements(replyText);
-          return await aiAdvancedLearningService.runConstitutionalCritique(replaced, { isToBoss: true });
+          const finalReply = await aiAdvancedLearningService.runConstitutionalCritique(replaced, { isToBoss: true });
+          neurotransmitterEngine.updateEmotionalMomentum(messageText, finalReply);
+          return finalReply;
         }
       } catch (e: any) {
         console.warn(`[WhatsAppBossAI] Model ${model} failed (${e?.message || e}), trying next model...`);
@@ -1797,8 +1850,11 @@ ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` 
       if (openModelReply) {
         const { bossDirectivesService } = await import("../bossDirectivesService");
         const { aiAdvancedLearningService } = await import("../aiAdvancedLearningService");
+        const { neurotransmitterEngine } = await import("../frontierHumanEngines");
         const replaced = bossDirectivesService.applyWordReplacements(openModelReply);
-        return await aiAdvancedLearningService.runConstitutionalCritique(replaced, { isToBoss: true });
+        const finalReply = await aiAdvancedLearningService.runConstitutionalCritique(replaced, { isToBoss: true });
+        neurotransmitterEngine.updateEmotionalMomentum(messageText, finalReply);
+        return finalReply;
       }
     }
 

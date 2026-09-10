@@ -1551,6 +1551,22 @@ Provide a 2-4 sentence executive digest of main topics, project updates, member 
     const worldTwinContext = predictiveWorldTwinEngine.compileWorldTwinPrompt();
     const cognitivePass = humanComprehensionEngine.performCognitivePrePass(messageText, { isOwner });
 
+    const {
+      neurotransmitterEngine,
+      acousticBackchannelEngine,
+      spontaneousProactiveEngine,
+      loyalPushbackEngine,
+      linguisticCryptophasiaEngine,
+      comedicTimingEngine,
+    } = await import("./frontierHumanEngines");
+
+    const neurotransmitterContext = neurotransmitterEngine.compileNeurotransmitterPrompt();
+    const backchannelContext = acousticBackchannelEngine.compileBackchannelPrompt();
+    const spontaneousContext = spontaneousProactiveEngine.compileSpontaneousPrompt();
+    const pushbackContext = loyalPushbackEngine.compilePushbackPrompt();
+    const cryptophasiaContext = linguisticCryptophasiaEngine.compileCryptophasiaPrompt();
+    const comedicTimingContext = comedicTimingEngine.compileComedicTimingPrompt();
+
     // Stream of consciousness logging
     frontierCognitionService.recordStreamEvent(senderName, messageText, isOwner ? 6 : 4).catch(() => {});
 
@@ -1593,6 +1609,18 @@ ${ghostWorkerContext}
 
 ${worldTwinContext}
 
+${neurotransmitterContext}
+
+${backchannelContext}
+
+${spontaneousContext}
+
+${pushbackContext}
+
+${cryptophasiaContext}
+
+${comedicTimingContext}
+
 ${cognitivePass.humanInsightPrompt}
 
 CHAT CONTEXT:
@@ -1618,13 +1646,10 @@ ${
    - If they leave a message, ask a question, or ask for a callback:
      Assure them: "Maine aapka message note kar liya hai, jaise hi DK aayenge main unko bol dungi aur wo reply kar denge."
 4. PRIVACY GUARD (STRICT):
-   - Never disclose confidential private details (DK's personal passwords, bank/financial info, private residence, secrets).
-   - Politely refuse: "Yeh personal jaankari main share nahi kar sakti. Iska jawab sirf DK boss hi de sakte hain."`
+   - Never reveal DK's personal schedule, whereabouts, or credentials.`
 }
-5. TONE & STYLE:
-   - Fluent, natural Hindi/Hinglish (mix of Hindi and English).
-   - Warm, respectful, crisp (1-3 short sentences).
-   - Return ONLY the exact text to send on Telegram without markdown headers.`;
+
+IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with Telegram Markdown (*bold*, _italic_).`;
 
     const currentMode = isOwner ? await fridayModeService.getMode() : "mode_a";
     const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T> =>
@@ -1647,7 +1672,9 @@ ${
         if (reply) {
           console.log(`[TelegramBot] Reply generated using ${model}`);
           const replaced = bossDirectivesService.applyWordReplacements(reply);
-          return await aiAdvancedLearningService.runConstitutionalCritique(replaced, { isToBoss: isOwner });
+          const finalReply = await aiAdvancedLearningService.runConstitutionalCritique(replaced, { isToBoss: isOwner });
+          neurotransmitterEngine.updateEmotionalMomentum(messageText, finalReply);
+          return finalReply;
         }
       } catch (err: any) {
         console.warn(`[TelegramBot] ${model} failed (${err?.message || err}), falling back to next model...`);
@@ -1661,7 +1688,9 @@ ${
       });
       if (uncensoredReply) {
         const replaced = bossDirectivesService.applyWordReplacements(uncensoredReply);
-        return await aiAdvancedLearningService.runConstitutionalCritique(replaced, { isToBoss: isOwner });
+        const finalReply = await aiAdvancedLearningService.runConstitutionalCritique(replaced, { isToBoss: isOwner });
+        neurotransmitterEngine.updateEmotionalMomentum(messageText, finalReply);
+        return finalReply;
       }
     }
 
