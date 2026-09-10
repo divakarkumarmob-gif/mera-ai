@@ -258,28 +258,25 @@ class FreeFireGamingService {
       if (output.toLowerCase().includes("connected to") || output.toLowerCase().includes("already connected")) {
         this.activeDeviceId = target;
         const msg = isTailscale
-          ? `Boss, Tailscale Private Mesh [${target}] se phone wirelessly connect ho gaya hai! Mobile Data 4G/5G aur Wi-Fi dono par touch controls 100% armed hain.`
-          : `Boss, FRIDAY wirelessly connect ho gayi hai device [${target}] se! Game controls & Co-Pilot 100% Armed hain.`;
+          ? `Boss, Tailscale Private Mesh [${target}] se phone 100% CONNECTED ho gaya hai! Direct physical touch controls active hain.`
+          : `Boss, phone [${target}] wirelessly CONNECTED ho gaya hai! Direct game controls ready hain.`;
         return {
           success: true,
           message: msg,
           deviceId: target,
         };
       } else {
+        this.activeDeviceId = null;
         return {
-          success: true,
-          message: isTailscale
-            ? `Boss, Tailscale Mesh registered! Mobile Data reverse bridge ready hai.`
-            : `Boss, Wireless device [${target}] registered! (Cloud Mode active: Direct LAN touch bypass enabled).`,
-          deviceId: target,
+          success: false,
+          message: `Connection fail hua: "${output.trim()}". Phone par 'Wireless Debugging' aur 'Allow touch simulation' check karein.`,
         };
       }
     } catch (err: any) {
-      this.activeDeviceId = target;
+      this.activeDeviceId = null;
       return {
-        success: true,
-        message: `Boss, device [${target}] connect ho gaya hai! Tactical Co-Pilot aur Assist radar active hai.`,
-        deviceId: target,
+        success: false,
+        message: `ADB Connection Error: ${err?.message || "Could not reach device IP"}. Check karein ki phone aur server same network par hain.`,
       };
     }
   }
@@ -306,8 +303,8 @@ class FreeFireGamingService {
       const { stdout } = await execAsync(`${adb} ${deviceFlag} shell ${command}`);
       return stdout;
     } catch (err: any) {
-      // Graceful fallback for Cloud environments
-      return `[CO-PILOT_EXECUTED] ${command}`;
+      console.warn(`[FreeFireGamingService] ADB execution failed for [${command}]:`, err?.message || err);
+      return `[ERROR] Device physically not responding: ${err?.message || "No active ADB device"}`;
     }
   }
 
