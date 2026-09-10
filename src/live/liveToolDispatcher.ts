@@ -132,11 +132,16 @@ export async function dispatchLiveToolCall(call: any, context: ToolDispatchConte
                   result = { success: true, message: `Skill "${skillName}" successfully integrated into Friday's brain!` };
                   clientWs.send(JSON.stringify({ type: "skill_added", skill: { skillName, ruleInstruction } }));
                 } else if (call.name === "freefire_connect_device") {
-                  const { ip, port } = call.args || {};
+                  const { ip, port, pairingCode, pairingPort } = call.args || {};
                   if (!ip) {
                     result = { success: false, message: "Device IP address required for wireless ADB." };
                   } else {
-                    const conn = await freeFireGamingService.connectWirelessAdb(String(ip), Number(port) || 5555);
+                    const conn = await freeFireGamingService.connectWirelessAdb(
+                      String(ip),
+                      Number(port) || 5555,
+                      pairingCode ? String(pairingCode) : undefined,
+                      pairingPort ? Number(pairingPort) : undefined
+                    );
                     result = conn;
                   }
                 } else if (call.name === "freefire_join_custom_room") {

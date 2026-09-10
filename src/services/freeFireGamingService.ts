@@ -193,23 +193,44 @@ class FreeFireGamingService {
   /**
    * Connect to Android phone via Wireless ADB (IP:Port)
    */
-  public async connectWirelessAdb(ip: string, port = 5555): Promise<{ success: boolean; message: string; deviceId?: string }> {
-    const target = `${ip}:${port}`;
+  public async connectWirelessAdb(
+    ip: string,
+    port = 5555,
+    pairingCode?: string,
+    pairingPort?: number
+  ): Promise<{ success: boolean; message: string; deviceId?: string }> {
+    const cleanIp = ip.trim();
+    const adb = this.getAdbBinary();
+
+    // If pairing code is supplied, perform Android 11+ pairing first
+    if (pairingCode && pairingPort) {
+      try {
+        const pairTarget = `${cleanIp}:${pairingPort}`;
+        const { stdout: pOut, stderr: pErr } = await execAsync(`${adb} pair ${pairTarget} ${pairingCode.trim()}`);
+        const pOutput = pOut + " " + pErr;
+        if (!pOutput.toLowerCase().includes("successfully paired")) {
+          console.warn("[FreeFireGamingService] Pairing warning:", pOutput);
+        }
+      } catch (err: any) {
+        console.warn("[FreeFireGamingService] Pairing attempt error:", err?.message || err);
+      }
+    }
+
+    const target = `${cleanIp}:${port}`;
     try {
-      const adb = this.getAdbBinary();
       const { stdout, stderr } = await execAsync(`${adb} connect ${target}`);
       const output = stdout + " " + stderr;
       if (output.toLowerCase().includes("connected to") || output.toLowerCase().includes("already connected")) {
         this.activeDeviceId = target;
         return {
           success: true,
-          message: `Boss, FRIDAY wirelessly connect ho gayi hai device [${target}] se! Game controls ready hain.`,
+          message: `Boss, FRIDAY wirelessly connect ho gayi hai device [${target}] se! Game controls & Co-Pilot 100% Armed hain.`,
           deviceId: target,
         };
       } else {
         return {
           success: false,
-          message: `Connection failed: ${output.trim()}. Check karein ki phone me 'Wireless Debugging' on hai.`,
+          message: `Connection output: ${output.trim()}. Agar pehli baar connect kar rahe hain, toh 'Wireless Debugging -> Pair with pairing code' se pairing code provide karein ya USB cable se connect karein.`,
         };
       }
     } catch (err: any) {
@@ -218,6 +239,18 @@ class FreeFireGamingService {
         message: `ADB error: ${err?.message || "Could not execute adb connect"}`,
       };
     }
+  }
+
+  /**
+   * Pair Android 11+ device using Pairing Code & Port
+   */
+  public async pairWirelessAdb(
+    ip: string,
+    pairingPort: number,
+    pairingCode: string,
+    connectPort: number
+  ): Promise<{ success: boolean; message: string; deviceId?: string }> {
+    return this.connectWirelessAdb(ip, connectPort, pairingCode, pairingPort);
   }
 
   /**

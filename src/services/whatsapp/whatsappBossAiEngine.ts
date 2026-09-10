@@ -655,12 +655,14 @@ export class WhatsAppBossAiEngine {
       },
       {
         name: "freefire_connect_device",
-        description: "Connect to Android phone wirelessly via WiFi ADB for in-game auto controls and macros. Use when Boss gives phone IP to connect for gaming.",
+        description: "Connect to Android phone wirelessly via WiFi ADB for in-game auto controls and macros. Supports direct IP/Port or Android 11+ Pairing code & pairing port.",
         parameters: {
           type: "OBJECT",
           properties: {
             ip: { type: "STRING", description: "Phone IP address, e.g. '192.168.1.15'" },
-            port: { type: "INTEGER", description: "ADB Wireless port (default 5555)" },
+            port: { type: "INTEGER", description: "ADB Wireless connect port (default 5555 or 5-digit port)" },
+            pairingCode: { type: "STRING", description: "Optional 6-digit Wi-Fi pairing code from phone Developer Options" },
+            pairingPort: { type: "INTEGER", description: "Optional pairing port shown with pairing code" },
           },
           required: ["ip"],
         },
@@ -1151,7 +1153,12 @@ COMMUNICATION STYLE:
         }
         if (toolName === "freefire_connect_device") {
           const { freeFireGamingService } = await import("../freeFireGamingService");
-          const res = await freeFireGamingService.connectWirelessAdb(String(args.ip), Number(args.port) || 5555);
+          const res = await freeFireGamingService.connectWirelessAdb(
+            String(args.ip),
+            Number(args.port) || 5555,
+            args.pairingCode ? String(args.pairingCode) : undefined,
+            args.pairingPort ? Number(args.pairingPort) : undefined
+          );
           return res;
         }
         if (toolName === "freefire_execute_action") {

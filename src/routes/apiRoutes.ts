@@ -2818,11 +2818,16 @@ export function createApiRouter(context: ApiRoutesContext): Router {
 
   app.post("/api/gaming/freefire/connect", async (req, res) => {
     try {
-      const { ip, port } = req.body || {};
+      const { ip, port, pairingCode, pairingPort } = req.body || {};
       if (!ip) {
         return res.status(400).json({ ok: false, error: "Device IP address is required" });
       }
-      const result = await freeFireGamingService.connectWirelessAdb(ip, Number(port) || 5555);
+      const result = await freeFireGamingService.connectWirelessAdb(
+        ip,
+        Number(port) || 5555,
+        pairingCode ? String(pairingCode) : undefined,
+        pairingPort ? Number(pairingPort) : undefined
+      );
       res.json({ ok: result.success, ...result });
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err?.message || "Failed to connect to device" });
