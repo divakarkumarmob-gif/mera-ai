@@ -33,6 +33,11 @@ export const FreeFireCoachModal: React.FC<FreeFireCoachModalProps> = ({ isOpen, 
   const [phonePort, setPhonePort] = useState("5555");
   const [connecting, setConnecting] = useState(false);
   const [devices, setDevices] = useState<any[]>([]);
+  const [helperStatus, setHelperStatus] = useState<{ connected: boolean; count: number; devices: any[] }>({
+    connected: false,
+    count: 0,
+    devices: [],
+  });
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
 
   // Custom Room State
@@ -70,15 +75,33 @@ export const FreeFireCoachModal: React.FC<FreeFireCoachModalProps> = ({ isOpen, 
     if (isOpen) {
       fetchDevices();
       fetchCoPilotConfig();
+      fetchHelperStatus();
+      const interval = setInterval(() => {
+        fetchHelperStatus();
+      }, 4000);
+      return () => clearInterval(interval);
     }
   }, [isOpen]);
+
+  const fetchHelperStatus = async () => {
+    try {
+      const res = await fetch("/api/gaming/freefire/helper/status");
+      const data = await res.json();
+      if (data.ok && data.helper) {
+        setHelperStatus(data.helper);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   const fetchDevices = async () => {
     try {
       const res = await fetch("/api/gaming/freefire/devices");
       const data = await res.json();
-      if (data.ok && data.devices) {
-        setDevices(data.devices);
+      if (data.ok) {
+        if (data.devices) setDevices(data.devices);
+        if (data.helper) setHelperStatus(data.helper);
       }
     } catch (e) {
       console.error(e);
@@ -506,16 +529,100 @@ export const FreeFireCoachModal: React.FC<FreeFireCoachModalProps> = ({ isOpen, 
           {/* TAB 1: CONNECT */}
           {activeTab === "connect" && (
             <div className="space-y-6">
+              {/* Tarika B (Zero-ADB Android Helper Banner) */}
+              <div className="bg-gradient-to-r from-emerald-950/50 via-slate-900 to-cyan-950/50 border border-emerald-500/40 rounded-2xl p-6 shadow-xl space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="p-3 bg-emerald-500/20 rounded-xl border border-emerald-500/40 text-emerald-400">
+                      <Zap className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-black text-emerald-300 flex items-center gap-2">
+                        Tarika B: Zero-ADB Android Helper (Accessibility Bridge)
+                        <span className="text-[10px] uppercase font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                          RECOMMENDED
+                        </span>
+                      </h3>
+                      <p className="text-xs text-slate-400">
+                        Zero Wi-Fi ADB • Works on 4G/5G Mobile Data • Direct Millisecond Screen In-Game Tap/Drag
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`text-xs font-bold px-3 py-1.5 rounded-xl border flex items-center gap-2 ${
+                        helperStatus.connected
+                          ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-[0_0_15px_rgba(16,185,129,0.3)]"
+                          : "bg-slate-800/80 text-slate-400 border-slate-700"
+                      }`}
+                    >
+                      <div
+                        className={`w-2.5 h-2.5 rounded-full ${
+                          helperStatus.connected ? "bg-emerald-400 animate-pulse" : "bg-slate-500"
+                        }`}
+                      />
+                      {helperStatus.connected
+                        ? `🟢 Helper Connected (${helperStatus.count} Device)`
+                        : "⚪ APK Standby (Waiting)"}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 3 Step Setup Info */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
+                  <div className="p-3.5 bg-slate-950/80 border border-slate-800 rounded-xl">
+                    <div className="text-xs font-bold text-slate-300 mb-1">1️⃣ Step 1: Install APK</div>
+                    <p className="text-[11px] text-slate-400">
+                      <code>android-helper/</code> folder se <b>FRIDAY Gaming Bridge APK</b> phone me install karein.
+                    </p>
+                  </div>
+                  <div className="p-3.5 bg-slate-950/80 border border-slate-800 rounded-xl">
+                    <div className="text-xs font-bold text-slate-300 mb-1">2️⃣ Step 2: Accessibility ON</div>
+                    <p className="text-[11px] text-slate-400">
+                      Phone Settings ➔ Accessibility ➔ <b>FRIDAY Gaming Bridge</b> ko <b>ON</b> karein (Touch permission).
+                    </p>
+                  </div>
+                  <div className="p-3.5 bg-slate-950/80 border border-slate-800 rounded-xl">
+                    <div className="text-xs font-bold text-slate-300 mb-1">3️⃣ Step 3: Connect & Play</div>
+                    <p className="text-[11px] text-slate-400">
+                      App me Render URL daal kar <b>Connect</b> karein — Phir Free Fire open karke maze lein!
+                    </p>
+                  </div>
+                </div>
+
+                {/* Instant Gesture Test Controls */}
+                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-emerald-500/20">
+                  <span className="text-xs font-semibold text-slate-300">Quick In-Game Test:</span>
+                  <button
+                    onClick={() => handleTriggerAssist("drag_headshot", "smg")}
+                    className="px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 rounded-lg text-xs font-bold transition flex items-center gap-1.5"
+                  >
+                    <Crosshair className="w-3.5 h-3.5" /> Test Auto-Drag Headshot
+                  </button>
+                  <button
+                    onClick={() => handleTriggerAssist("quick_gloo")}
+                    className="px-3 py-1.5 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 rounded-lg text-xs font-bold transition flex items-center gap-1.5"
+                  >
+                    <Shield className="w-3.5 h-3.5" /> Test 360 Sit-up Gloo
+                  </button>
+                  <button
+                    onClick={() => handleTriggerAssist("heal")}
+                    className="px-3 py-1.5 bg-green-500/20 hover:bg-green-500/30 text-green-300 border border-green-500/40 rounded-lg text-xs font-bold transition flex items-center gap-1.5"
+                  >
+                    <Heart className="w-3.5 h-3.5" /> Test Auto Medkit
+                  </button>
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Wireless ADB Box */}
+                {/* Wireless ADB Box (Alternative) */}
                 <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-5 space-y-4">
                   <h3 className="text-base font-bold text-amber-300 flex items-center gap-2">
                     <Wifi className="w-5 h-5 text-amber-400" />
-                    Jugaad 1: Wireless WiFi ADB Connect
+                    Option 2: Wireless WiFi ADB Connect (Developer Mode)
                   </h3>
                   <p className="text-xs text-slate-400 leading-relaxed">
                     Apne phone me <b>Developer Options → Wireless Debugging</b> ON karein aur IP & Port enter karein.
-                    Game phone par chalega, FRIDAY laptop se wirelessly touch control karegi!
                   </p>
 
                   <div className="flex gap-2">
@@ -547,7 +654,7 @@ export const FreeFireCoachModal: React.FC<FreeFireCoachModalProps> = ({ isOpen, 
                     className="w-full py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold rounded-xl text-sm transition flex items-center justify-center gap-2 shadow-lg disabled:opacity-50"
                   >
                     {connecting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-                    {connecting ? "Connecting..." : "Pair & Connect Device"}
+                    {connecting ? "Connecting..." : "Pair & Connect ADB"}
                   </button>
                 </div>
 
@@ -556,7 +663,7 @@ export const FreeFireCoachModal: React.FC<FreeFireCoachModalProps> = ({ isOpen, 
                   <div className="flex items-center justify-between">
                     <h3 className="text-base font-bold text-slate-200 flex items-center gap-2">
                       <Smartphone className="w-5 h-5 text-emerald-400" />
-                      Active Devices ({devices.length})
+                      Active Endpoints & Handsets
                     </h3>
                     <button
                       onClick={fetchDevices}
@@ -568,8 +675,25 @@ export const FreeFireCoachModal: React.FC<FreeFireCoachModalProps> = ({ isOpen, 
                   </div>
 
                   <div className="space-y-2">
-                    {devices.length === 0 ? (
-                      <p className="text-xs text-slate-500 italic">No ADB devices detected yet. Connect via USB or WiFi.</p>
+                    {helperStatus.connected && (
+                      <div className="flex items-center justify-between p-3 bg-emerald-950/30 border border-emerald-500/40 rounded-xl">
+                        <div className="flex items-center gap-3">
+                          <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+                          <div>
+                            <div className="text-sm font-semibold text-emerald-300">Android Accessibility Bridge</div>
+                            <div className="text-xs text-slate-400">
+                              {helperStatus.count} Handset(s) • Zero-ADB Native Touch
+                            </div>
+                          </div>
+                        </div>
+                        <span className="text-xs px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                          ONLINE
+                        </span>
+                      </div>
+                    )}
+
+                    {devices.length === 0 && !helperStatus.connected ? (
+                      <p className="text-xs text-slate-500 italic">No devices connected yet. Launch FRIDAY Helper APK or connect WiFi ADB.</p>
                     ) : (
                       devices.map((dev, idx) => (
                         <div
@@ -586,7 +710,7 @@ export const FreeFireCoachModal: React.FC<FreeFireCoachModalProps> = ({ isOpen, 
                             </div>
                           </div>
                           <span className="text-xs px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                            ONLINE
+                            ADB ONLINE
                           </span>
                         </div>
                       ))

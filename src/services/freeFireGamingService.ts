@@ -91,6 +91,7 @@ class FreeFireGamingService {
   private isSpectating: boolean = false;
   private currentRoomInfo: CustomRoomParams | null = null;
   private wsBroadcaster: ((payload: string) => void) | null = null;
+  private registeredAndroidHelpers: Set<{ ws: any; deviceName?: string; model?: string; connectedAt: number }> = new Set();
   private coPilotConfig: CoPilotConfig = {
     coPlayEnabled: true,
     autoHealOnDamage: true,
@@ -100,6 +101,75 @@ class FreeFireGamingService {
     currentPilot: "boss",
     preferredGunType: "smg",
   };
+
+  /**
+   * Register a connected Android Helper App (Accessibility Service - Zero ADB)
+   */
+  public registerAndroidHelper(ws: any, meta?: { deviceName?: string; model?: string }): void {
+    // Remove if already exists with same ws instance
+    this.unregisterAndroidHelper(ws);
+    this.registeredAndroidHelpers.add({
+      ws,
+      deviceName: meta?.deviceName || "Android Device (Accessibility Bridge)",
+      model: meta?.model || "Android 11+ Handset",
+      connectedAt: Date.now(),
+    });
+    console.log(`[FreeFireGamingService] ⚡ Android Native Helper Connected (Total: ${this.registeredAndroidHelpers.size})`);
+    
+    // Broadcast status to UI
+    this.broadcastWsAction({
+      type: "android_helper_status_change",
+      connected: true,
+      helperCount: this.registeredAndroidHelpers.size,
+    });
+  }
+
+  /**
+   * Unregister disconnected Android Helper
+   */
+  public unregisterAndroidHelper(ws: any): void {
+    for (const helper of this.registeredAndroidHelpers) {
+      if (helper.ws === ws) {
+        this.registeredAndroidHelpers.delete(helper);
+      }
+    }
+  }
+
+  /**
+   * Get live status of Android Accessibility Helper connections
+   */
+  public getAndroidHelperStatus(): { connected: boolean; count: number; devices: any[] } {
+    const devices = Array.from(this.registeredAndroidHelpers).map((h) => ({
+      deviceName: h.deviceName,
+      model: h.model,
+      connectedAt: h.connectedAt,
+    }));
+    return {
+      connected: this.registeredAndroidHelpers.size > 0,
+      count: this.registeredAndroidHelpers.size,
+      devices,
+    };
+  }
+
+  /**
+   * Send direct gesture payload to all connected Android Native Helper Apps
+   */
+  public dispatchToAndroidHelper(payload: any): boolean {
+    if (this.registeredAndroidHelpers.size === 0) return false;
+    let sentCount = 0;
+    const msg = JSON.stringify(payload);
+    for (const helper of this.registeredAndroidHelpers) {
+      try {
+        if (helper.ws && helper.ws.readyState === 1 /* OPEN */) {
+          helper.ws.send(msg);
+          sentCount++;
+        }
+      } catch (e) {
+        console.warn("[FreeFireGamingService] Error sending to Android Helper:", e);
+      }
+    }
+    return sentCount > 0;
+  }
 
   /**
    * Set WebSocket Broadcaster to send real-time action triggers to Phone Web Client
@@ -310,15 +380,31 @@ class FreeFireGamingService {
 
   /**
    * Humanized Tap with random coordinate offset (Anti-Ban Guard)
+   * Dispatches via Android Native Accessibility Helper (Tarika B) if connected, else ADB Shell
    */
   public async humanTap(x: number, y: number, jitterRadius = 3): Promise<void> {
     const rx = Math.round(x + (Math.random() * jitterRadius * 2 - jitterRadius));
     const ry = Math.round(y + (Math.random() * jitterRadius * 2 - jitterRadius));
+
+    // 1. If Android Native Helper (Accessibility Service) is connected, dispatch direct native gesture
+    if (this.registeredAndroidHelpers.size > 0) {
+      this.dispatchToAndroidHelper({
+        type: "ANDROID_GESTURE",
+        gesture: "TAP",
+        x: rx,
+        y: ry,
+        durationMs: 50,
+      });
+      return;
+    }
+
+    // 2. Fallback to ADB Shell
     await this.runAdbShell(`input tap ${rx} ${ry}`);
   }
 
   /**
    * Human-Like Bezier Drag for Smooth Headshots & Camera Swipes
+   * Dispatches via Android Native Accessibility Helper (Tarika B) if connected, else ADB Shell
    */
   public async bezierDrag(
     startX: number,
@@ -331,7 +417,23 @@ class FreeFireGamingService {
     const midX = Math.round((startX + endX) / 2 + (Math.random() * 20 - 10));
     const midY = Math.round((startY + endY) / 2 + (Math.random() * 15 - 7));
     
-    // In ADB, swipe startX startY endX endY duration
+    // 1. If Android Native Helper (Accessibility Service) is connected, dispatch native Bezier gesture
+    if (this.registeredAndroidHelpers.size > 0) {
+      this.dispatchToAndroidHelper({
+        type: "ANDROID_GESTURE",
+        gesture: "DRAG",
+        startX,
+        startY,
+        midX,
+        midY,
+        endX,
+        endY,
+        durationMs: Math.max(40, Math.round(durationMs)),
+      });
+      return;
+    }
+
+    // 2. Fallback to ADB Shell swipe
     await this.runAdbShell(`input swipe ${startX} ${startY} ${endX} ${endY} ${Math.max(50, Math.round(durationMs))}`);
   }
 

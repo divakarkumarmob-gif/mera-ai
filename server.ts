@@ -528,6 +528,15 @@ async function startServer() {
           isAuthorized = true;
           if (authTimeout) clearTimeout(authTimeout);
           safeSend(JSON.stringify({ type: "auth_ack", ok: true }));
+
+          // If this client is the Android Native Helper (Accessibility Service)
+          if (parsedData.clientType === "android_helper" || parsedData.isAndroidHelper) {
+            freeFireGamingService.registerAndroidHelper(clientWs, {
+              deviceName: parsedData.deviceName || "Android Phone",
+              model: parsedData.model || "Mobile Handset",
+            });
+            safeSend(JSON.stringify({ type: "android_helper_registered", ok: true, timestamp: Date.now() }));
+          }
           return;
         } else {
           console.warn("[Server] WebSocket auth failed: Invalid App Key Token");
@@ -535,6 +544,25 @@ async function startServer() {
           try { clientWs.close(4001, "UNAUTHORIZED_APP_KEY"); } catch {}
           return;
         }
+      }
+
+      if (parsedData.type === "register_android_helper") {
+        if (!isAuthorized) {
+          const token = parsedData.token;
+          if (token && appSecurityService.verifySessionToken(token)) {
+            isAuthorized = true;
+            if (authTimeout) clearTimeout(authTimeout);
+          } else {
+            safeSend(JSON.stringify({ error: "ACCESS_LOCKED", message: "Invalid App Key Token for Android Helper." }));
+            return;
+          }
+        }
+        freeFireGamingService.registerAndroidHelper(clientWs, {
+          deviceName: parsedData.deviceName || "Android Phone (Accessibility)",
+          model: parsedData.model || "Android 11+ Handset",
+        });
+        safeSend(JSON.stringify({ type: "android_helper_registered", ok: true, timestamp: Date.now() }));
+        return;
       }
 
       if (!isAuthorized) {
@@ -632,6 +660,7 @@ async function startServer() {
     clientWs.on("close", () => {
       console.log(`[Server] Client disconnected (session=${sessionId})`);
       connectedClients.delete(clientWs);
+      freeFireGamingService.unregisterAndroidHelper(clientWs);
       if (authTimeout) clearTimeout(authTimeout);
       if (currentSession) {
         try { currentSession.close(); } catch {}

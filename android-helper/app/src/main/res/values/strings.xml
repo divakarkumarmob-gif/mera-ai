@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">FRIDAY Gaming Bridge</string>
+    <string name="accessibility_service_description">FRIDAY AI Gaming Co-Pilot Assist: Dispatches in-game tactical touches (drag headshot, sit-up gloo, auto-heal) autonomously without ADB or Root.</string>
+</resources>

@@ -2804,13 +2804,22 @@ export function createApiRouter(context: ApiRoutesContext): Router {
 
   // ── Free Fire AI Gaming & Autonomous Spectator/Coach Endpoints ─────────────
   app.get("/api/gaming/freefire/status", (_req, res) => {
-    res.json({ ok: true, status: freeFireGamingService.getStatus() });
+    res.json({ 
+      ok: true, 
+      status: freeFireGamingService.getStatus(),
+      helper: freeFireGamingService.getAndroidHelperStatus()
+    });
+  });
+
+  app.get("/api/gaming/freefire/helper/status", (_req, res) => {
+    res.json({ ok: true, helper: freeFireGamingService.getAndroidHelperStatus() });
   });
 
   app.get("/api/gaming/freefire/devices", async (_req, res) => {
     try {
       const devices = await freeFireGamingService.listDevices();
-      res.json({ ok: true, devices });
+      const helper = freeFireGamingService.getAndroidHelperStatus();
+      res.json({ ok: true, devices, helper });
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err?.message || "Failed to list ADB devices" });
     }
