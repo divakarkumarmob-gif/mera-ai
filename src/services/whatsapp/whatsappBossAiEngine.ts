@@ -129,6 +129,10 @@ export class WhatsAppBossAiEngine {
       recentMessages: recentBossMsgs.slice(-4).map((m) => m.text),
     });
 
+    const { aiAdvancedLearningService } = await import("../aiAdvancedLearningService");
+    const rlhfContext = await aiAdvancedLearningService.compileRlhfPrompt();
+    const bossStyleContext = await aiAdvancedLearningService.compileBossStylePrompt();
+
     const directivesContext = await bossDirectivesService.compileDirectivesPrompt();
     const trainingLessonsContext = await fridayChildTrainingService.compileTrainingPrompt(messageText);
     const memoryContext = await memoryEngine.compileLeanMemoryPrompt();
@@ -925,6 +929,10 @@ ${selfEvolutionContext}
 
 ${cognitivePass.humanInsightPrompt}
 
+${rlhfContext}
+
+${bossStyleContext}
+
 🧠 HUMAN-LEVEL PRONOUN & INTUITION MANDATE (Theory of Mind & Insaan Jaisi Samajh):
 - Understand pronouns ("isko", "inhe", "ise", "unko", "usko", "use", "in logo ko") like a real, intelligent human companion:
   • If Boss previously sent a number/contact, or swiped on a message, and says "isko msg karo...", "isko bol do...", "inhe message kar do...", the pronoun "isko/inhe" refers to that EXACT phone number or person! Call 'send_whatsapp_message' (channel 'whatsapp2') immediately.
@@ -1659,7 +1667,9 @@ ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` 
 
         if (replyText) {
           const { bossDirectivesService } = await import("../bossDirectivesService");
-          return bossDirectivesService.applyWordReplacements(replyText);
+          const { aiAdvancedLearningService } = await import("../aiAdvancedLearningService");
+          const replaced = bossDirectivesService.applyWordReplacements(replyText);
+          return await aiAdvancedLearningService.runConstitutionalCritique(replaced, { isToBoss: true });
         }
       } catch (e: any) {
         console.warn(`[WhatsAppBossAI] Model ${model} failed (${e?.message || e}), trying next model...`);
@@ -1677,7 +1687,9 @@ ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` 
       });
       if (openModelReply) {
         const { bossDirectivesService } = await import("../bossDirectivesService");
-        return bossDirectivesService.applyWordReplacements(openModelReply);
+        const { aiAdvancedLearningService } = await import("../aiAdvancedLearningService");
+        const replaced = bossDirectivesService.applyWordReplacements(openModelReply);
+        return await aiAdvancedLearningService.runConstitutionalCritique(replaced, { isToBoss: true });
       }
     }
 

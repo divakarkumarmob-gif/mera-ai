@@ -405,8 +405,29 @@ class WhatsAppBotService {
               whatsappHistoryEngine.saveToFirestore(outgoing).catch(() => {});
             }
 
+            // Shadow Style Learning: passively observe Boss's genuine communication patterns
+            if (!isBotSelfEcho && text && !text.startsWith("[")) {
+              import("./aiAdvancedLearningService").then(({ aiAdvancedLearningService }) => {
+                aiAdvancedLearningService.observeBossChattingStyle(text, remoteJid).catch(() => {});
+              });
+            }
+
             if (isBotSelfEcho) continue;
             if (!isGroup) continue;
+          }
+
+          // RLHF Reaction Interceptor: process emoji feedback from Boss or contacts
+          if (msg.message?.reactionMessage) {
+            const reactionEmoji = msg.message.reactionMessage.text;
+            const targetKeyId = msg.message.reactionMessage.key?.id;
+            if (reactionEmoji && targetKeyId) {
+              const cachedMsg = whatsappHistoryEngine.findCachedMessage((m) => m.id === targetKeyId);
+              const targetText = cachedMsg?.botReply || cachedMsg?.text || "[Message]";
+              const isBossReact = isFromMe || this.isOwnerSender(remoteJid.replace(/\D/g, ""), msg.pushName || "");
+              import("./aiAdvancedLearningService").then(({ aiAdvancedLearningService }) => {
+                aiAdvancedLearningService.processEmojiReaction(reactionEmoji, targetText, msg.pushName || "Boss", isBossReact).catch(() => {});
+              });
+            }
           }
 
           const senderJid: string = isGroup

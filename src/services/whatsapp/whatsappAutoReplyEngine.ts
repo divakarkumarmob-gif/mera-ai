@@ -541,14 +541,26 @@ TONE & STYLE:
         const reply = response.text?.trim();
         if (reply) {
           console.log(`[WhatsAppAutoReply] Auto-reply generated using ${model}`);
-          return bossDirectivesService.applyWordReplacements(reply);
+          const { aiAdvancedLearningService } = await import("../aiAdvancedLearningService");
+          const replaced = bossDirectivesService.applyWordReplacements(reply);
+          return await aiAdvancedLearningService.runConstitutionalCritique(replaced, {
+            isToBoss: false,
+            recipientName: senderName,
+            relation,
+          });
         }
       } catch (err: any) {
         console.error(`[WhatsAppAutoReply] ${model} failed (${err?.message || err}), trying next model...`);
       }
     }
 
-    return bossDirectivesService.applyWordReplacements(fallbackText());
+    const { aiAdvancedLearningService } = await import("../aiAdvancedLearningService");
+    const replacedFallback = bossDirectivesService.applyWordReplacements(fallbackText());
+    return await aiAdvancedLearningService.runConstitutionalCritique(replacedFallback, {
+      isToBoss: false,
+      recipientName: senderName,
+      relation,
+    });
   }
 
   public async tryFactualOrChatReply(
