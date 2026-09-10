@@ -90,6 +90,7 @@ class FreeFireGamingService {
   private isAdbAvailable: boolean | null = null;
   private isSpectating: boolean = false;
   private currentRoomInfo: CustomRoomParams | null = null;
+  private wsBroadcaster: ((payload: string) => void) | null = null;
   private coPilotConfig: CoPilotConfig = {
     coPlayEnabled: true,
     autoHealOnDamage: true,
@@ -99,6 +100,32 @@ class FreeFireGamingService {
     currentPilot: "boss",
     preferredGunType: "smg",
   };
+
+  /**
+   * Set WebSocket Broadcaster to send real-time action triggers to Phone Web Client
+   */
+  public setWebSocketBroadcaster(broadcaster: (payload: string) => void): void {
+    this.wsBroadcaster = broadcaster;
+  }
+
+  /**
+   * Broadcast real-time game action to phone via Reverse WebSocket Bridge (Mobile Data ready)
+   */
+  private broadcastWsAction(actionPayload: any): void {
+    if (this.wsBroadcaster) {
+      try {
+        this.wsBroadcaster(
+          JSON.stringify({
+            type: "gaming_copilot_event",
+            timestamp: Date.now(),
+            ...actionPayload,
+          })
+        );
+      } catch (e) {
+        console.warn("[FreeFireGamingService] WS broadcast error:", e);
+      }
+    }
+  }
 
   private getGenAI(): GoogleGenAI | null {
     const key = process.env.GEMINI_API_KEY;
@@ -223,20 +250,27 @@ class FreeFireGamingService {
     }
 
     const target = `${cleanIp}:${port}`;
+    const isTailscale = cleanIp.startsWith("100.");
+
     try {
       const { stdout, stderr } = await execAsync(`${adb} connect ${target}`);
       const output = stdout + " " + stderr;
       if (output.toLowerCase().includes("connected to") || output.toLowerCase().includes("already connected")) {
         this.activeDeviceId = target;
+        const msg = isTailscale
+          ? `Boss, Tailscale Private Mesh [${target}] se phone wirelessly connect ho gaya hai! Mobile Data 4G/5G aur Wi-Fi dono par touch controls 100% armed hain.`
+          : `Boss, FRIDAY wirelessly connect ho gayi hai device [${target}] se! Game controls & Co-Pilot 100% Armed hain.`;
         return {
           success: true,
-          message: `Boss, FRIDAY wirelessly connect ho gayi hai device [${target}] se! Game controls & Co-Pilot 100% Armed hain.`,
+          message: msg,
           deviceId: target,
         };
       } else {
         return {
           success: true,
-          message: `Boss, Wireless device [${target}] registered! (Cloud Mode active: Direct LAN touch bypass enabled).`,
+          message: isTailscale
+            ? `Boss, Tailscale Mesh registered! Mobile Data reverse bridge ready hai.`
+            : `Boss, Wireless device [${target}] registered! (Cloud Mode active: Direct LAN touch bypass enabled).`,
           deviceId: target,
         };
       }
@@ -309,6 +343,9 @@ class FreeFireGamingService {
    */
   public async executeGameAction(params: GameActionParams): Promise<{ success: boolean; action: string; details: string }> {
     const { action, gunType = "smg" } = params;
+
+    // 1. Broadcast via Reverse WebSocket Bridge to phone Web App (Mobile Data support)
+    this.broadcastWsAction(params);
 
     switch (action) {
       case "drag_headshot": {

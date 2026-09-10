@@ -24,6 +24,7 @@ import { appSecurityService } from "./src/services/appSecurityService";
 import { telegramSecurityBotService } from "./src/services/telegramSecurityBotService";
 import { serverFirewallService } from "./src/services/serverFirewallService";
 import { scheduledAutomationService } from "./src/services/scheduledAutomationService";
+import { freeFireGamingService } from "./src/services/freeFireGamingService";
 
 // Clean modular live AI & route subsystems
 import { fridayFunctionDeclarations } from "./src/live/liveToolDeclarations";
@@ -150,6 +151,13 @@ async function startServer() {
   telegramSecurityBotService.setConnectionTracker(() => wss.clients.size);
 
   const connectedClients = new Set<any>();
+
+  // ── Free Fire Reverse WebSocket Bridge (Mobile Data 4G/5G Instant Action Delivery) ──
+  freeFireGamingService.setWebSocketBroadcaster((payload) => {
+    for (const client of connectedClients) {
+      if (client.readyState === client.OPEN) client.send(payload);
+    }
+  });
 
   // ── Background Schedulers & Real-time Event Broadcasters ──────────────────
   reminderScheduler.start((reminder) => {
