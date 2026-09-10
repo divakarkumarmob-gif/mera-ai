@@ -360,6 +360,35 @@ export async function dispatchLiveToolCall(call: any, context: ToolDispatchConte
                   } catch (e: any) {
                     result = { success: false, message: `Failed to generate pairing code: ${e?.message || e}` };
                   }
+                } else if (call.name === "teach_friday_lesson") {
+                  const { situationTrigger, taughtReaction, idealSampleResponse, category } = call.args || {};
+                  const { fridayChildTrainingService } = await import("../services/fridayChildTrainingService");
+                  const lesson = await fridayChildTrainingService.teachLesson(situationTrigger, taughtReaction, {
+                    idealSampleResponse,
+                    category,
+                  });
+                  result = {
+                    success: true,
+                    lesson,
+                    message: `Boss, maine ye sikh liya: Jab "${lesson.situationTrigger}", tab "${lesson.taughtReaction}" karna hai.`,
+                  };
+                  clientWs.send(JSON.stringify({ type: "training_lesson_saved", lesson }));
+                } else if (call.name === "correct_friday_behavior") {
+                  const { correctionText } = call.args || {};
+                  const { fridayChildTrainingService } = await import("../services/fridayChildTrainingService");
+                  const res = await fridayChildTrainingService.correctPreviousMistake(correctionText);
+                  result = res;
+                  clientWs.send(JSON.stringify({ type: "training_correction_applied", ...res }));
+                } else if (call.name === "list_taught_lessons") {
+                  const { fridayChildTrainingService } = await import("../services/fridayChildTrainingService");
+                  const lessons = await fridayChildTrainingService.getAllLessons();
+                  result = {
+                    success: true,
+                    count: lessons.length,
+                    lessons,
+                    message: `Found ${lessons.length} learned lessons.`,
+                  };
+                  clientWs.send(JSON.stringify({ type: "training_lessons_list", lessons }));
                 } else if (call.name === "add_boss_directive") {
                   const { ruleText, targetWord, replacementWord, type } = call.args || {};
                   const { bossDirectivesService } = await import("../services/bossDirectivesService");

@@ -333,6 +333,61 @@ const rawFunctionDeclarations: any[] = [
     }
   },
   {
+    "name": "teach_friday_lesson",
+    "description": "Teach Friday how to speak, react, or behave in a specific situation (like teaching a child). Friday permanently memorizes how Boss wants her to respond.",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {
+        "situationTrigger": {
+          "type": "STRING",
+          "description": "The scenario or trigger, e.g. 'Jab Boss thake hue ya gusse me hon'"
+        },
+        "taughtReaction": {
+          "type": "STRING",
+          "description": "How Friday should behave/react, e.g. 'Bohot softly baat karna, comfort dena'"
+        },
+        "idealSampleResponse": {
+          "type": "STRING",
+          "description": "Optional ideal sample sentence Friday should say"
+        },
+        "category": {
+          "type": "STRING",
+          "enum": ["emotional_comfort", "relationship_advice", "social_etiquette", "task_execution", "voice_tone"],
+          "description": "Lesson category"
+        }
+      },
+      "required": [
+        "situationTrigger",
+        "taughtReaction"
+      ]
+    }
+  },
+  {
+    "name": "correct_friday_behavior",
+    "description": "Correct Friday's behavior or mistake from a previous interaction so she learns and improves for the future.",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {
+        "correctionText": {
+          "type": "STRING",
+          "description": "What Friday did wrong and how she should improve"
+        }
+      },
+      "required": [
+        "correctionText"
+      ]
+    }
+  },
+  {
+    "name": "list_taught_lessons",
+    "description": "List all behavioral lessons, manners, and scenarios that Boss DK has taught Friday.",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
     "name": "add_boss_directive",
     "description": "Save a strict Boss directive, training order, or word-replacement rule (e.g. 'aaj se tum mango ko frooti bologe', 'mango ko frooti samjho', 'ye strict rule follow karo: ...'). Friday will strictly obey this across all outputs.",
     "parameters": {

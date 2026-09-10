@@ -87,6 +87,29 @@ export class WhatsAppBossAiEngine {
       }
     }
 
+    // ── FAST DIRECT INTERCEPT: Child Mentorship & Behavioral Training (Gurukul) ───
+    const { fridayChildTrainingService } = await import("../fridayChildTrainingService");
+    const teachCheck = fridayChildTrainingService.parseTeachingCommand(messageText);
+    if (teachCheck.isTeachingCommand) {
+      if (teachCheck.action === "teach" && teachCheck.situation && teachCheck.reaction) {
+        const lesson = await fridayChildTrainingService.teachLesson(teachCheck.situation, teachCheck.reaction);
+        return `Haan Boss! Maine ye dil se sikh liya hai! 👶✨\n\n📌 *Jab:* "${lesson.situationTrigger}"\n👉 *Main karungi:* "${lesson.taughtReaction}"\n\nAage se main bilkul waise hi react karungi jaise aapne sikhaya hai! 🫡❤️`;
+      } else if (teachCheck.action === "correct" && teachCheck.correctionText) {
+        const res = await fridayChildTrainingService.correctPreviousMistake(teachCheck.correctionText);
+        return res.message;
+      } else if (teachCheck.action === "revise") {
+        const all = await fridayChildTrainingService.getAllLessons();
+        if (all.length === 0) {
+          return "Boss, abhi tak maine koi custom behavioral lesson nahi seekha hai. Aap mujhe sikhaiye ki kis situation me kaise react karna hai! 👶✨";
+        }
+        const listStr = all.map((l, i) => `*${i+1}. Jab:* "${l.situationTrigger}"\n   👉 *Taught:* "${l.taughtReaction}"`).join("\n\n");
+        return `🎓 *Friday's Learned Lessons from Boss DK:*\n\n${listStr}\n\n_Aap naye lessons sikhane ke liye 'Friday sikh lo: Jab [Situation] ho tab [Reaction] karna' bol sakte hain!_`;
+      } else if (teachCheck.action === "delete") {
+        const res = await fridayChildTrainingService.deleteLesson(teachCheck.situation || "all");
+        return res.message;
+      }
+    }
+
     const { memoryEngine } = await import("../memoryEngine");
     const { humanComprehensionEngine } = await import("../humanComprehensionEngine");
     const { circadianEnergyEngine } = await import("../circadianEnergyEngine");
@@ -107,6 +130,7 @@ export class WhatsAppBossAiEngine {
     });
 
     const directivesContext = await bossDirectivesService.compileDirectivesPrompt();
+    const trainingLessonsContext = await fridayChildTrainingService.compileTrainingPrompt(messageText);
     const memoryContext = await memoryEngine.compileLeanMemoryPrompt();
     const humanComprehensionContext = await humanComprehensionEngine.compileHumanComprehensionPrompt("boss_dk", "DK (Boss)", "boss");
     const circadianContext = circadianEnergyEngine.compileCircadianPrompt();
@@ -122,6 +146,40 @@ export class WhatsAppBossAiEngine {
     const ai = new GoogleGenAI({ apiKey });
 
     const functionDeclarations: any[] = [
+      {
+        name: "teach_friday_lesson",
+        description: "Teach Friday how to speak, react, or behave in a specific situation (like teaching a child). Friday permanently memorizes how Boss wants her to respond.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            situationTrigger: { type: "STRING", description: "The scenario or trigger, e.g. 'Jab Boss thake hue ya gusse me hon'" },
+            taughtReaction: { type: "STRING", description: "How Friday should behave/react, e.g. 'Bohot softly baat karna, comfort dena'" },
+            idealSampleResponse: { type: "STRING", description: "Optional ideal sample sentence Friday should say" },
+            category: { type: "STRING", enum: ["emotional_comfort", "relationship_advice", "social_etiquette", "task_execution", "voice_tone"], description: "Lesson category" },
+          },
+          required: ["situationTrigger", "taughtReaction"],
+        },
+      },
+      {
+        name: "correct_friday_behavior",
+        description: "Correct Friday's behavior or mistake from a previous interaction so she learns and improves for the future.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            correctionText: { type: "STRING", description: "What Friday did wrong and how she should improve" },
+          },
+          required: ["correctionText"],
+        },
+      },
+      {
+        name: "list_taught_lessons",
+        description: "List all behavioral lessons, manners, and scenarios that Boss DK has taught Friday.",
+        parameters: {
+          type: "OBJECT",
+          properties: {},
+          required: [],
+        },
+      },
       {
         name: "add_boss_directive",
         description: "Save a strict Boss directive, training rule, or word-replacement placeholder (e.g. 'aaj se tum mango ko frooti bologe', 'mango ko frooti samjho', 'ye strict rule follow karo: ...'). Friday will strictly obey this across all outputs.",
@@ -841,6 +899,8 @@ RULE: You MUST FIRST read and understand the PREVIOUS QUOTED MESSAGE, and THEN a
 BOSS IDENTITY & MEMORY:
 ${directivesContext}
 
+${trainingLessonsContext}
+
 ${memoryContext}
 
 ${humanComprehensionContext}
@@ -898,6 +958,35 @@ COMMUNICATION STYLE:
           }
           const card = whatsappFeatureEngine.generateLiveVoiceCallCard(senderName, true);
           return { success: true, message: "Incoming call ringing triggered on Boss phone.", card };
+        }
+
+        if (toolName === "teach_friday_lesson") {
+          const { fridayChildTrainingService } = await import("../fridayChildTrainingService");
+          const lesson = await fridayChildTrainingService.teachLesson(args.situationTrigger, args.taughtReaction, {
+            idealSampleResponse: args.idealSampleResponse,
+            category: args.category,
+          });
+          return {
+            success: true,
+            lesson,
+            message: `Lesson learned & memorized: When "${lesson.situationTrigger}", Friday will react: "${lesson.taughtReaction}".`,
+          };
+        }
+
+        if (toolName === "correct_friday_behavior") {
+          const { fridayChildTrainingService } = await import("../fridayChildTrainingService");
+          const res = await fridayChildTrainingService.correctPreviousMistake(args.correctionText);
+          return res;
+        }
+
+        if (toolName === "list_taught_lessons") {
+          const { fridayChildTrainingService } = await import("../fridayChildTrainingService");
+          const lessons = await fridayChildTrainingService.getAllLessons();
+          return {
+            success: true,
+            count: lessons.length,
+            lessons,
+          };
         }
 
         if (toolName === "add_boss_directive") {
