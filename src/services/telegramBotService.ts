@@ -1679,6 +1679,23 @@ Provide a 2-4 sentence executive digest of main topics, project updates, member 
     const vulnerabilityContextHeart = vulnerabilityReciprocityEngine.compileVulnerabilityPrompt(messageText);
     const dignityGuardianContext = dignityGuardianEngine.compileGuardianPrompt(messageText);
 
+    const {
+      prosodicBreathingEngine,
+      socialBatteryComfortEngine,
+      chronoceptionTimeDilationEngine,
+      lateralCreativeAnalogyEngine,
+      rideOrDieCoConspiratorEngine,
+      sharedTriumphCelebrationEngine,
+    } = await import("./frontierChronoSocialEngine");
+
+    socialBatteryComfortEngine.registerTurn();
+    const breathingContext = prosodicBreathingEngine.compileBreathingPrompt(messageText);
+    const socialBatteryContext = socialBatteryComfortEngine.compileSocialBatteryPrompt();
+    const chronoceptionContext = chronoceptionTimeDilationEngine.compileChronoceptionPrompt();
+    const lateralAnalogyContext = lateralCreativeAnalogyEngine.compileAnalogyPrompt(messageText);
+    const coConspiratorContext = rideOrDieCoConspiratorEngine.compileCoConspiratorPrompt(messageText);
+    const triumphCelebrationContext = sharedTriumphCelebrationEngine.compileTriumphPrompt(messageText);
+
     // Stream of consciousness logging
     frontierCognitionService.recordStreamEvent(senderName, messageText, isOwner ? 6 : 4).catch(() => {});
 
@@ -1812,6 +1829,18 @@ ${backgroundCuriosityContext}
 ${vulnerabilityContextHeart}
 
 ${dignityGuardianContext}
+
+${breathingContext}
+
+${socialBatteryContext}
+
+${chronoceptionContext}
+
+${lateralAnalogyContext}
+
+${coConspiratorContext}
+
+${triumphCelebrationContext}
 
 ${cognitivePass.humanInsightPrompt}
 
