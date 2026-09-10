@@ -702,6 +702,29 @@ export class WhatsAppBossAiEngine {
           required: ["pilot"],
         },
       },
+      {
+        name: "freefire_auto_play_toggle",
+        description: "Start or stop autonomous Free Fire auto-play bot. Use when Boss says 'mai aatta hu 5 min me tum game khelo', 'auto play on karo', 'game khelo', 'auto play band karo', etc.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            action: { type: "STRING", enum: ["start", "stop"], description: "Whether to 'start' or 'stop' auto-play" },
+            reason: { type: "STRING", description: "Reason or context (e.g. 'Boss is away for 5 mins')" },
+          },
+          required: ["action"],
+        },
+      },
+      {
+        name: "freefire_send_sensitivity",
+        description: "Send the pro Free Fire sensitivity settings and custom HUD layout directly to Boss on WhatsApp via WhatsApp 2. Use when Boss says 'sensitivity bhejo', 'best sensi bhejo', 'setting send karo', etc.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            playerTag: { type: "STRING", description: "Player tag or custom profile name" },
+          },
+          required: [],
+        },
+      },
     ];
 
     const systemInstruction = `YOU ARE FRIDAY: DK's (Divakar Kumar) ultra-intelligent, loyal, warm, witty, and deeply caring AI companion and chief executive assistant.
@@ -1177,6 +1200,31 @@ COMMUNICATION STYLE:
         if (toolName === "freefire_set_pilot") {
           const { freeFireGamingService } = await import("../freeFireGamingService");
           const res = freeFireGamingService.setPilot(args.pilot === "friday" ? "friday" : "boss");
+          return res;
+        }
+        if (toolName === "freefire_auto_play_toggle") {
+          const { freeFireGamingService } = await import("../freeFireGamingService");
+          if (args.action === "start") {
+            const res = freeFireGamingService.startAutoCoPilotDaemon(1000);
+            freeFireGamingService.setPilot("friday");
+            return {
+              success: true,
+              message: "Boss, main Free Fire me takeover kar chuki hoon! Auto-Bot autonomous movement, auto aim, drag headshots aur defense active hai. Aap aaram se apna kaam karo, main game sambhal rahi hoon! 🎮⚡",
+            };
+          } else {
+            const res = freeFireGamingService.stopAutoCoPilotDaemon();
+            freeFireGamingService.setPilot("boss");
+            return {
+              success: true,
+              message: "Boss, Free Fire Auto-Play paused kar diya hai aur control aapko handover kar diya hai. Ready jab bhi aap khelo! 🕹️",
+            };
+          }
+        }
+        if (toolName === "freefire_send_sensitivity") {
+          const { freeFireGamingService } = await import("../freeFireGamingService");
+          const res = await freeFireGamingService.sendSensitivityToWhatsApp(undefined, {
+            playerTag: args.playerTag || "Boss DK",
+          });
           return res;
         }
         if (toolName === "get_messages_digest") {

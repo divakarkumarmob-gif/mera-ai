@@ -10,10 +10,7 @@ import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
-import android.os.Handler
 import android.os.IBinder
-import android.os.Looper
-import android.util.DisplayMetrics
 import android.view.*
 import android.widget.*
 import androidx.core.app.NotificationCompat
@@ -24,9 +21,6 @@ class FloatingOverlayService : Service() {
     private var floatingBubble: View? = null
     private var expandedPanel: View? = null
     private var isExpanded = false
-    private var isAutoBotRunning = false
-    private val botHandler = Handler(Looper.getMainLooper())
-    private var botRunnable: Runnable? = null
 
     companion object {
         private const val CHANNEL_ID = "FridayOverlayChannel"
@@ -55,6 +49,8 @@ class FloatingOverlayService : Service() {
         createFloatingBubble()
     }
 
+    private fun dpToPx(dp: Int): Int = (dp * resources.displayMetrics.density).toInt()
+
     private fun startForegroundNotification() {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -70,8 +66,8 @@ class FloatingOverlayService : Service() {
             }
 
             val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("FRIDAY Gaming Bridge Active")
-                .setContentText("Zero-ADB Accessibility Bridge connected for Free Fire")
+                .setContentTitle("FRIDAY Gaming HUD Active")
+                .setContentText("Neural Free Fire Co-Pilot & Gesture Bridge connected")
                 .setSmallIcon(android.R.drawable.ic_menu_compass)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .build()
@@ -80,14 +76,6 @@ class FloatingOverlayService : Service() {
         } catch (e: Throwable) {
             e.printStackTrace()
         }
-    }
-
-    private fun getScreenMetrics(): Pair<Float, Float> {
-        val dm = resources.displayMetrics
-        // In landscape, width is the larger dimension
-        val w = Math.max(dm.widthPixels, dm.heightPixels).toFloat()
-        val h = Math.min(dm.widthPixels, dm.heightPixels).toFloat()
-        return Pair(w, h)
     }
 
     private fun createFloatingBubble() {
@@ -108,26 +96,26 @@ class FloatingOverlayService : Service() {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = 30
-            y = 120
+            x = dpToPx(16)
+            y = dpToPx(80)
         }
 
         val bubble = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(28, 16, 28, 16)
+            setPadding(dpToPx(14), dpToPx(8), dpToPx(14), dpToPx(8))
             gravity = Gravity.CENTER_VERTICAL
-            background = createGradientDrawable(Color.parseColor("#E6090D16"), Color.parseColor("#06B6D4"), 30f)
+            background = createCardBg(Color.parseColor("#EE0B0F19"), Color.parseColor("#06B6D4"), 24f)
         }
 
         val icon = TextView(this).apply {
             text = "⚡"
-            textSize = 16f
-            setPadding(0, 0, 10, 0)
+            textSize = 15f
+            setPadding(0, 0, dpToPx(6), 0)
         }
         bubble.addView(icon)
 
         val text = TextView(this).apply {
-            text = "FRIDAY BOT"
+            text = "FRIDAY HUD"
             setTextColor(Color.parseColor("#38BDF8"))
             textSize = 12f
             paint.isFakeBoldText = true
@@ -166,7 +154,7 @@ class FloatingOverlayService : Service() {
                     }
                     MotionEvent.ACTION_UP -> {
                         if (!hasMoved) {
-                            toggleExpandedPanel(params.x, params.y)
+                            toggleExpandedPanel()
                         }
                         return true
                     }
@@ -183,15 +171,15 @@ class FloatingOverlayService : Service() {
         }
     }
 
-    private fun toggleExpandedPanel(bubbleX: Int, bubbleY: Int) {
+    private fun toggleExpandedPanel() {
         if (isExpanded) {
             hideExpandedPanel()
         } else {
-            showExpandedPanel(bubbleX, bubbleY)
+            showExpandedPanel()
         }
     }
 
-    private fun showExpandedPanel(bubbleX: Int, bubbleY: Int) {
+    private fun showExpandedPanel() {
         if (expandedPanel != null) return
 
         val layoutFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -201,196 +189,240 @@ class FloatingOverlayService : Service() {
             WindowManager.LayoutParams.TYPE_PHONE
         }
 
+        val panelWidth = Math.min(dpToPx(340), (resources.displayMetrics.widthPixels * 0.90f).toInt())
+
         val panelParams = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
+            panelWidth,
             WindowManager.LayoutParams.WRAP_CONTENT,
             layoutFlag,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            x = Math.max(10, bubbleX - 20)
-            y = bubbleY + 110
+            gravity = Gravity.CENTER
         }
 
-        val (screenWidth, screenHeight) = getScreenMetrics()
-        val service = FridayAccessibilityService.instance
+        val scroll = ScrollView(this).apply {
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+            background = createCardBg(Color.parseColor("#F7090D16"), Color.parseColor("#38BDF8"), 22f)
+            setPadding(dpToPx(16), dpToPx(14), dpToPx(16), dpToPx(14))
+        }
 
-        val panel = LinearLayout(this).apply {
+        val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(24, 20, 24, 20)
-            background = createGradientDrawable(Color.parseColor("#F20F172A"), Color.parseColor("#38BDF8"), 24f)
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
         }
+        scroll.addView(container)
 
-        // Header
+        // 1. Header (Title + Close button)
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, 0, 0, 16)
+            setPadding(0, 0, 0, dpToPx(10))
         }
         val headerTitle = TextView(this).apply {
-            text = "⚡ FRIDAY CO-PILOT HUD"
+            text = "⚡ FRIDAY GAMING HUD"
             setTextColor(Color.parseColor("#38BDF8"))
-            textSize = 13f
+            textSize = 14f
             paint.isFakeBoldText = true
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
         val closeBtn = TextView(this).apply {
             text = "✖"
             setTextColor(Color.parseColor("#94A3B8"))
-            textSize = 14f
-            setPadding(16, 4, 8, 4)
+            textSize = 16f
+            setPadding(dpToPx(12), dpToPx(4), dpToPx(4), dpToPx(4))
             setOnClickListener { hideExpandedPanel() }
         }
         header.addView(headerTitle)
         header.addView(closeBtn)
-        panel.addView(header)
+        container.addView(header)
 
-        // 1. Auto-Play Bot Toggle Button
-        val botBtn = Button(this).apply {
-            text = if (isAutoBotRunning) "🟢 AUTO-PLAY BOT: ACTIVE" else "🔴 AUTO-PLAY BOT: OFF"
+        // 2. Feature Rows with Right-side Toggles
+        // Row 1: Auto Bot (Autonomous Gameplay)
+        val switchAutoBot = Switch(this).apply {
+            isChecked = FridayGamingEngine.isAutoBotEnabled
+            setOnCheckedChangeListener { _, isChecked ->
+                FridayGamingEngine.setAutoBot(isChecked, this@FloatingOverlayService)
+                Toast.makeText(this@FloatingOverlayService, if (isChecked) "🟢 Auto-Bot Activated!" else "🔴 Auto-Bot Paused", Toast.LENGTH_SHORT).show()
+            }
+        }
+        container.addView(createToggleRow("🤖 1. Auto Bot", "Full AI autonomous movement & combat", switchAutoBot))
+
+        // Row 2: Auto Aim
+        val switchAutoAim = Switch(this).apply {
+            isChecked = FridayGamingEngine.isAutoAimEnabled
+            setOnCheckedChangeListener { _, isChecked ->
+                FridayGamingEngine.setAutoAim(isChecked)
+            }
+        }
+        container.addView(createToggleRow("🎯 2. Auto Aim", "Smart enemy aim-lock assist", switchAutoAim))
+
+        // Row 3: Co-Pilot (Duo Mode)
+        val switchCoPilot = Switch(this).apply {
+            isChecked = FridayGamingEngine.isCoPilotEnabled
+            setOnCheckedChangeListener { _, isChecked ->
+                FridayGamingEngine.setCoPilot(isChecked)
+            }
+        }
+        container.addView(createToggleRow("👥 3. Co-Pilot (Duo)", "Duo play: You move, Friday shoots", switchCoPilot))
+
+        // Row 4: Auto Headshot
+        val switchHeadshot = Switch(this).apply {
+            isChecked = FridayGamingEngine.isAutoHeadshotEnabled
+            setOnCheckedChangeListener { _, isChecked ->
+                FridayGamingEngine.setAutoHeadshot(isChecked)
+            }
+        }
+        container.addView(createToggleRow("🔴 4. Auto Headshot", "Instant J-drag red numbers aim", switchHeadshot))
+
+        // Row 5: Humanized Behaviour
+        val switchHuman = Switch(this).apply {
+            isChecked = FridayGamingEngine.isHumanBehaviorEnabled
+            setOnCheckedChangeListener { _, isChecked ->
+                FridayGamingEngine.setHumanBehavior(isChecked)
+            }
+        }
+        container.addView(createToggleRow("🧠 5. Human Behavior", "Anti-ban natural curved Bezier drag", switchHuman))
+
+        // Spacer
+        container.addView(Space(this).apply { layoutParams = LinearLayout.LayoutParams(1, dpToPx(8)) })
+
+        // 3. Send Best Sensi to WhatsApp (WhatsApp 2) Button
+        val prefs = getSharedPreferences("friday_prefs", Context.MODE_PRIVATE)
+        val serverUrl = prefs.getString("server_url", "https://mera-ai-3496.onrender.com") ?: "https://mera-ai-3496.onrender.com"
+
+        val sendSensiBtn = Button(this).apply {
+            text = "📤 Send Best Sensi to WhatsApp (WA2)"
             setTextColor(Color.WHITE)
             textSize = 11f
             paint.isFakeBoldText = true
-            background = createGradientDrawable(
-                if (isAutoBotRunning) Color.parseColor("#059669") else Color.parseColor("#1E293B"),
-                if (isAutoBotRunning) Color.parseColor("#10B981") else Color.parseColor("#475569"),
-                14f
-            )
+            background = createCardBg(Color.parseColor("#047857"), Color.parseColor("#10B981"), 12f)
+            setPadding(dpToPx(12), dpToPx(10), dpToPx(12), dpToPx(10))
             setOnClickListener {
-                if (service == null) {
-                    Toast.makeText(this@FloatingOverlayService, "⚠️ Please Enable Accessibility Permission first!", Toast.LENGTH_LONG).show()
-                    return@setOnClickListener
-                }
-                isAutoBotRunning = !isAutoBotRunning
-                if (isAutoBotRunning) {
-                    text = "🟢 AUTO-PLAY BOT: ACTIVE"
-                    background = createGradientDrawable(Color.parseColor("#059669"), Color.parseColor("#10B981"), 14f)
-                    startAutonomousBotLoop(service, screenWidth, screenHeight)
-                    Toast.makeText(this@FloatingOverlayService, "🤖 Friday Auto-Play Bot Started!", Toast.LENGTH_SHORT).show()
-                } else {
-                    text = "🔴 AUTO-PLAY BOT: OFF"
-                    background = createGradientDrawable(Color.parseColor("#1E293B"), Color.parseColor("#475569"), 14f)
-                    stopAutonomousBotLoop()
-                    Toast.makeText(this@FloatingOverlayService, "🛑 Auto-Play Bot Paused", Toast.LENGTH_SHORT).show()
+                text = "⏳ Sending Sensi via WhatsApp 2..."
+                isEnabled = false
+                FridayGamingEngine.sendSensitivityToWhatsApp(serverUrl) { success, msg ->
+                    text = "📤 Send Best Sensi to WhatsApp (WA2)"
+                    isEnabled = true
+                    Toast.makeText(this@FloatingOverlayService, if (success) "✅ $msg" else "❌ $msg", Toast.LENGTH_LONG).show()
                 }
             }
         }
-        panel.addView(botBtn)
+        container.addView(sendSensiBtn)
 
-        panel.addView(Space(this).apply { layoutParams = LinearLayout.LayoutParams(1, 12) })
+        // Spacer
+        container.addView(Space(this).apply { layoutParams = LinearLayout.LayoutParams(1, dpToPx(8)) })
 
-        // Actions Row 1: Headshot & Gloo Wall
-        val row1 = LinearLayout(this).apply {
+        // 4. Quick Action Macro Buttons
+        val macroRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
         }
 
-        val headshotBtn = Button(this).apply {
-            text = "🎯 Headshot Drag"
+        val btnDrag = Button(this).apply {
+            text = "🎯 Headshot"
             setTextColor(Color.WHITE)
             textSize = 10f
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginEnd = 8
+                marginEnd = dpToPx(4)
             }
-            background = createGradientDrawable(Color.parseColor("#DC2626"), Color.parseColor("#EF4444"), 14f)
+            background = createCardBg(Color.parseColor("#DC2626"), Color.parseColor("#EF4444"), 10f)
             setOnClickListener {
-                if (service != null) {
-                    val fireX = screenWidth * 0.82f
-                    val fireY = screenHeight * 0.72f
-                    val dragY = fireY - (screenHeight * 0.30f)
-                    service.performBezierDrag(fireX, fireY, fireX, fireY - 120f, fireX, dragY, 90)
-                    Toast.makeText(this@FloatingOverlayService, "🎯 Drag Headshot Executed!", Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(this@FloatingOverlayService, "⚠️ Accessibility not enabled", Toast.LENGTH_SHORT).show()
-                }
+                FridayGamingEngine.triggerHeadshotDrag()
+                Toast.makeText(this@FloatingOverlayService, "🎯 Drag Headshot!", Toast.LENGTH_SHORT).show()
             }
         }
 
-        val glooBtn = Button(this).apply {
-            text = "🛡️ Quick Gloo"
-            setTextColor(Color.WHITE)
-            textSize = 10f
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            background = createGradientDrawable(Color.parseColor("#2563EB"), Color.parseColor("#3B82F6"), 14f)
-            setOnClickListener {
-                if (service != null) {
-                    val glooX = screenWidth * 0.20f
-                    val glooY = screenHeight * 0.78f
-                    val crouchX = screenWidth * 0.90f
-                    val crouchY = screenHeight * 0.82f
-                    val fireX = screenWidth * 0.82f
-                    val fireY = screenHeight * 0.72f
-
-                    service.performTap(glooX, glooY, 30) {
-                        botHandler.postDelayed({
-                            service.performTap(crouchX, crouchY, 30) {
-                                botHandler.postDelayed({
-                                    service.performDrag(fireX, fireY, fireX, fireY + 160f, 50)
-                                }, 20)
-                            }
-                        }, 25)
-                    }
-                    Toast.makeText(this@FloatingOverlayService, "🛡️ Fast Gloo Wall Deployed!", Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(this@FloatingOverlayService, "⚠️ Accessibility not enabled", Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
-        row1.addView(headshotBtn)
-        row1.addView(glooBtn)
-        panel.addView(row1)
-
-        panel.addView(Space(this).apply { layoutParams = LinearLayout.LayoutParams(1, 12) })
-
-        // Actions Row 2: Auto Run & Heal
-        val row2 = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-        }
-
-        val runBtn = Button(this).apply {
-            text = "🏃 Sprint / Run"
+        val btnGloo = Button(this).apply {
+            text = "🛡️ Gloo Wall"
             setTextColor(Color.WHITE)
             textSize = 10f
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginEnd = 8
+                marginEnd = dpToPx(4)
             }
-            background = createGradientDrawable(Color.parseColor("#7C3AED"), Color.parseColor("#8B5CF6"), 14f)
+            background = createCardBg(Color.parseColor("#2563EB"), Color.parseColor("#3B82F6"), 10f)
             setOnClickListener {
-                if (service != null) {
-                    val joyX = screenWidth * 0.18f
-                    val joyY = screenHeight * 0.75f
-                    service.performDrag(joyX, joyY, joyX, joyY - 200f, 350)
-                    Toast.makeText(this@FloatingOverlayService, "🏃 Sprint Locked!", Toast.LENGTH_SHORT).show()
-                }
+                FridayGamingEngine.triggerQuickGloo()
+                Toast.makeText(this@FloatingOverlayService, "🛡️ Fast Gloo Deployed!", Toast.LENGTH_SHORT).show()
             }
         }
 
-        val healBtn = Button(this).apply {
-            text = "💊 Auto Medkit"
+        val btnRun = Button(this).apply {
+            text = "🏃 Auto Run"
             setTextColor(Color.WHITE)
             textSize = 10f
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            background = createGradientDrawable(Color.parseColor("#059669"), Color.parseColor("#10B981"), 14f)
+            background = createCardBg(Color.parseColor("#7C3AED"), Color.parseColor("#8B5CF6"), 10f)
             setOnClickListener {
-                if (service != null) {
-                    val healX = screenWidth * 0.15f
-                    val healY = screenHeight * 0.85f
-                    service.performTap(healX, healY, 50)
-                    Toast.makeText(this@FloatingOverlayService, "💊 Medkit Used!", Toast.LENGTH_SHORT).show()
-                }
+                FridayGamingEngine.triggerAutoRun()
+                Toast.makeText(this@FloatingOverlayService, "🏃 Sprint Locked!", Toast.LENGTH_SHORT).show()
             }
         }
-        row2.addView(runBtn)
-        row2.addView(healBtn)
-        panel.addView(row2)
 
-        expandedPanel = panel
+        macroRow.addView(btnDrag)
+        macroRow.addView(btnGloo)
+        macroRow.addView(btnRun)
+        container.addView(macroRow)
+
+        FridayGamingEngine.onStateChanged = {
+            switchAutoBot.isChecked = FridayGamingEngine.isAutoBotEnabled
+            switchAutoAim.isChecked = FridayGamingEngine.isAutoAimEnabled
+            switchCoPilot.isChecked = FridayGamingEngine.isCoPilotEnabled
+            switchHeadshot.isChecked = FridayGamingEngine.isAutoHeadshotEnabled
+            switchHuman.isChecked = FridayGamingEngine.isHumanBehaviorEnabled
+        }
+
+        expandedPanel = scroll
         isExpanded = true
         try {
             windowManager?.addView(expandedPanel, panelParams)
         } catch (e: Exception) {
             e.printStackTrace()
         }
+    }
+
+    private fun createToggleRow(titleText: String, subtitleText: String, switchView: Switch): LinearLayout {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dpToPx(8), dpToPx(6), dpToPx(8), dpToPx(6))
+            background = createCardBg(Color.parseColor("#141D2E"), Color.parseColor("#1E293B"), 10f)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                bottomMargin = dpToPx(6)
+            }
+        }
+
+        val textCol = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+
+        val title = TextView(this).apply {
+            text = titleText
+            setTextColor(Color.WHITE)
+            textSize = 12f
+            paint.isFakeBoldText = true
+        }
+        val sub = TextView(this).apply {
+            text = subtitleText
+            setTextColor(Color.parseColor("#94A3B8"))
+            textSize = 9.5f
+        }
+        textCol.addView(title)
+        textCol.addView(sub)
+
+        row.addView(textCol)
+        row.addView(switchView)
+        return row
     }
 
     private fun hideExpandedPanel() {
@@ -405,74 +437,16 @@ class FloatingOverlayService : Service() {
         isExpanded = false
     }
 
-    private fun startAutonomousBotLoop(service: FridayAccessibilityService, screenWidth: Float, screenHeight: Float) {
-        stopAutonomousBotLoop()
-
-        var loopCount = 0
-        botRunnable = object : Runnable {
-            override fun run() {
-                if (!isAutoBotRunning) return
-
-                val joyX = screenWidth * 0.18f
-                val joyY = screenHeight * 0.75f
-                val fireX = screenWidth * 0.82f
-                val fireY = screenHeight * 0.72f
-                val jumpX = screenWidth * 0.95f
-                val jumpY = screenHeight * 0.60f
-                val camX = screenWidth * 0.65f
-                val camY = screenHeight * 0.50f
-
-                loopCount++
-
-                when (loopCount % 4) {
-                    0 -> {
-                        // Forward Run
-                        service.performDrag(joyX, joyY, joyX, joyY - 180f, 350)
-                    }
-                    1 -> {
-                        // Camera Swipe & Jump
-                        service.performDrag(camX, camY, camX + 100f, camY, 80) {
-                            botHandler.postDelayed({
-                                service.performTap(jumpX, jumpY, 40)
-                            }, 50)
-                        }
-                    }
-                    2 -> {
-                        // Headshot J-Drag
-                        val dragY = fireY - (screenHeight * 0.28f)
-                        service.performBezierDrag(fireX, fireY, fireX, fireY - 100f, fireX, dragY, 90)
-                    }
-                    3 -> {
-                        // Forward sprint
-                        service.performDrag(joyX, joyY, joyX, joyY - 200f, 300)
-                    }
-                }
-
-                botHandler.postDelayed(this, 1200)
-            }
-        }
-        botHandler.post(botRunnable!!)
-    }
-
-    private fun stopAutonomousBotLoop() {
-        if (botRunnable != null) {
-            botHandler.removeCallbacks(botRunnable!!)
-            botRunnable = null
-        }
-    }
-
-    private fun createGradientDrawable(bgColor: Int, strokeColor: Int, radius: Float): GradientDrawable {
+    private fun createCardBg(bgColor: Int, strokeColor: Int, radiusDp: Float): GradientDrawable {
         return GradientDrawable().apply {
             setColor(bgColor)
-            cornerRadius = radius
-            setStroke(2, strokeColor)
+            cornerRadius = dpToPx(radiusDp.toInt()).toFloat()
+            setStroke(dpToPx(1), strokeColor)
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        isAutoBotRunning = false
-        stopAutonomousBotLoop()
         hideExpandedPanel()
         if (floatingBubble != null) {
             try {

@@ -979,6 +979,63 @@ Provide a deep technical breakdown in strictly valid JSON:
   }
 
   /**
+   * Send Pro Free Fire Sensitivity & Best Custom HUD Setup directly to Boss DK's WhatsApp using WhatsApp 2
+   */
+  public async sendSensitivityToWhatsApp(targetPhone?: string, options?: { playerTag?: string; autoBotActive?: boolean }): Promise<{ success: boolean; message: string }> {
+    try {
+      const { sendWhatsAppUnified } = await import("./whatsappService");
+      const phone = targetPhone || process.env.OWNER_WHATSAPP_NUMBER || process.env.BOSS_WHATSAPP_NUMBER || "919999999999";
+
+      const msg = `⚡ *FRIDAY AI — FREE FIRE PRO SENSITIVITY & HUD SETUP* 🎯
+━━━━━━━━━━━━━━━━━━
+🎮 *Target Player:* ${options?.playerTag || "Boss DK"}
+🤖 *Neural Co-Pilot Status:* ${options?.autoBotActive ? "🟢 Active & Ready" : "⚪ Standby"}
+📱 *Dispatch Channel:* WhatsApp 2 (Dedicated AI Bridge)
+
+🎯 *RECOMMENDED PRO SENSITIVITY (DPI 420-480):*
+• *General (Drag & Look):* 98%
+• *Red Dot (Headshot Track):* 94%
+• *2X Scope:* 90%
+• *4X Scope:* 86%
+• *Sniper Scope (Quick-Snap):* 54%
+• *Free Look:* 72%
+
+🔘 *BEST FIRE BUTTON & HUD CONFIG:*
+• *Fire Button Size:* 48% (Optimal Drag Arc)
+• *Fire Button Placement:* Lower-Right (X: 82%, Y: 72%)
+• *Quick Gloo Slot:* Dedicated Left (X: 20%, Y: 78%)
+• *Quick Weapon Switch:* ON (Always Active)
+
+🔥 *WEAPON DRAG FORMULA:*
+1. *M1887 / Shotguns:* Fast J-Drag (Downwards micro-pull then explosive upward drag in 70ms).
+2. *MP40 / UMP / SMGs:* Smooth Straight Drag with 110ms recoil buffer.
+3. *Woodpecker / Desert Eagle:* One-Tap rotational swipe with immediate weapon switch & sit-up gloo wall.
+
+━━━━━━━━━━━━━━━━━━
+_FRIDAY AI Neural Engine — Game me aage raho Boss!_ 🏆`;
+
+      const result = await sendWhatsAppUnified(phone, msg, { channel: "whatsapp2" });
+      if (result.success) {
+        return {
+          success: true,
+          message: `Boss, Free Fire ki best setting aur sensitivity aapke WhatsApp (+${phone}) par WhatsApp 2 se bhej di gayi hai! 🎯`,
+        };
+      } else {
+        return {
+          success: false,
+          message: `WhatsApp message deliver nahi ho paya: ${result.message}`,
+        };
+      }
+    } catch (err: any) {
+      console.error("[FreeFireGamingService] Error sending sensitivity to WhatsApp:", err);
+      return {
+        success: false,
+        message: `Error sending to WhatsApp: ${err?.message || err}`,
+      };
+    }
+  }
+
+  /**
    * Get service state summary
    */
   public getStatus() {

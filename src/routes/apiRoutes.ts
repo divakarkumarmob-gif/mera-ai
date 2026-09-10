@@ -2952,6 +2952,19 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
+  app.post("/api/gaming/freefire/send-sensitivity-whatsapp", async (req, res) => {
+    try {
+      const { targetPhone, playerTag, autoBotActive } = req.body || {};
+      const result = await freeFireGamingService.sendSensitivityToWhatsApp(targetPhone, {
+        playerTag,
+        autoBotActive,
+      });
+      res.json({ ok: result.success, message: result.message });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || "Failed to dispatch sensitivity to WhatsApp" });
+    }
+  });
+
   app.get("/api/gaming/freefire/copilot/config", (_req, res) => {
     res.json({ ok: true, config: freeFireGamingService.getCoPilotConfig() });
   });
