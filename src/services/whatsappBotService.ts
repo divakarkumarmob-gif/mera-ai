@@ -1239,6 +1239,10 @@ class WhatsAppBotService {
         messageKey,
         (j, img, cap, k) => this.sendPhotoMessage(j, img, cap, k)
       );
+      if (!reply || reply.trim().length === 0) {
+        return;
+      }
+
       const wantsVoice = isVoiceInput || /\b(voice|audio|speak|bolo|sunao|bol\s*kar|bol\s*ke|aawaz|voice\s*note)\b/i.test(rawText);
       const wantsTranscript = !isVoiceInput || /\b(transcript|text|likh\s*ke|likho|dono|both|transcript\s*\+\s*voice|voice\s*\+\s*transcript|write)\b/i.test(rawText);
 

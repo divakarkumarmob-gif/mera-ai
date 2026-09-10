@@ -27,6 +27,13 @@ export class WhatsAppBossAiEngine {
       return `Haanji Boss! Main Friday hoon. API Key abhi configure nahi hai, par main aapki baat note kar rahi hoon!`;
     }
 
+    // Direct silence guard: If Boss sends a single reaction emoji (👍, ❤️, etc.), stay silent per Boss training
+    const isSingleReactionEmoji = /^(👍|👎|❤️|🔥|👏|🙏|😂|😍|🎉|👌|💯)$/u.test(messageText.trim());
+    if (isSingleReactionEmoji) {
+      console.log(`[WhatsAppBossAI] Boss sent single reaction emoji "${messageText.trim()}" — remaining silent per Boss directive.`);
+      return "";
+    }
+
     const { whatsappFeatureEngine } = await import("../whatsappFeatureEngine");
 
     // Fast direct intercept for follow-up "Iska link do" / "Link bhejo"

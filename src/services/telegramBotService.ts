@@ -168,6 +168,21 @@ class TelegramBotService {
     this.messageCallback = cb;
   }
 
+  // Rolling cache of recent Telegram dialogue turns to preserve context and avoid repeating resolved topics
+  private static chatHistoryCache: { senderName: string; text: string; timeStr: string }[] = [];
+
+  public static recordChatTurn(senderName: string, text: string) {
+    if (!text || text.startsWith("[Reaction:") || !text.trim()) return;
+    this.chatHistoryCache.push({
+      senderName,
+      text: text.trim(),
+      timeStr: new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" }),
+    });
+    if (this.chatHistoryCache.length > 25) {
+      this.chatHistoryCache = this.chatHistoryCache.slice(-25);
+    }
+  }
+
   private async callApi(method: string, body?: any, timeoutMs = 35000): Promise<any> {
     if (!this.token) throw new Error("TELEGRAM_BOT_TOKEN is not configured.");
     const url = `https://api.telegram.org/bot${this.token}/${method}`;
@@ -1471,6 +1486,16 @@ Provide a 2-4 sentence executive digest of main topics, project updates, member 
   ): Promise<string> {
     const customBusy = await this.getCustomBusyReply();
 
+    // Direct silence guard: If Boss sends a single reaction emoji (👍, ❤️, etc.), stay silent per Boss training
+    const isSingleReactionEmoji = /^(👍|👎|❤️|🔥|👏|🙏|😂|😍|🎉|👌|💯)$/u.test(messageText.trim());
+    if (isSingleReactionEmoji && isOwner) {
+      console.log(`[TelegramBot] Boss sent single reaction emoji "${messageText.trim()}" — remaining silent per Boss directive.`);
+      return "";
+    }
+
+    // Record incoming user turn in chat cache
+    TelegramBotService.recordChatTurn(senderName, messageText);
+
     // ── Fast Direct Intercept: Boss Directives & Word Rules (for Owner) ─────
     if (isOwner) {
       const { bossDirectivesService } = await import("./bossDirectivesService");
@@ -1850,6 +1875,14 @@ Is Sender Boss (DK)?: ${isOwner ? "YES (Talk directly to Boss with affection/res
 Message Received: "${messageText}"
 ${customBusy ? `Boss Custom Status / Busy Note: "${customBusy}"` : ""}
 
+[RECENT TELEGRAM CHAT CONTEXT]:
+${TelegramBotService.chatHistoryCache.slice(-6).map((m) => `• [${m.timeStr}] ${m.senderName}: "${m.text}"`).join("\n")}
+
+🎯 TOPIC HYPER-FOCUS & ZERO TOPIC BLEEDING (CRITICAL):
+- Strictly answer ONLY what the sender is asking in the CURRENT message!
+- NEVER drag, append, or repeat details from previous already-resolved queries (e.g. past phone numbers, old tasks).
+- If Boss asks a new question or command, focus 100% on that command with no stale topic bleeding!
+
 ${
   isOwner
     ? `INSTRUCTIONS FOR WHEN SENDER IS BOSS (DK):
@@ -1897,6 +1930,7 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
           const { cleanText } = machineUnlearningSentinel.scrubRoboticArtifacts(finalReply);
           cognitiveScaffoldingEngine.addMasteryPoints(2).catch(() => {});
           neurotransmitterEngine.updateEmotionalMomentum(messageText, cleanText);
+          TelegramBotService.recordChatTurn("Friday", cleanText);
           return cleanText;
         }
       } catch (err: any) {
@@ -1977,6 +2011,23 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
   private async handleUpdate(update: any): Promise<void> {
     this.lastActive = Date.now();
 
+    // 0. Drop Telegram Reactions (message_reaction & message_reaction_count in Telegram Bot API 7.0+)
+    if (update.message_reaction || update.message_reaction_count) {
+      const rxn = update.message_reaction;
+      if (rxn) {
+        const newReaction = rxn.new_reaction?.[0];
+        const emoji = newReaction?.emoji || (newReaction?.type === "custom_emoji" ? "⭐" : null);
+        const user = rxn.user || {};
+        const isBoss = String(user.id) === String(process.env.TELEGRAM_OWNER_ID);
+        if (emoji) {
+          import("./aiAdvancedLearningService").then(({ aiAdvancedLearningService }) => {
+            aiAdvancedLearningService.processEmojiReaction(emoji, "[Telegram Message]", user.first_name || "User", isBoss).catch(() => {});
+          });
+        }
+      }
+      return;
+    }
+
     // 1. Handle Inline Keyboard Button Clicks (Coding Agent Approve/Deny)
     if (update.callback_query) {
       await this.handleCallbackQuery(update.callback_query);
@@ -1990,6 +2041,13 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
     const from = msg.from || {};
     const senderName = from.first_name ? `${from.first_name} ${from.last_name || ""}`.trim() : "Boss";
     const text = (msg.text || msg.caption || "").trim();
+    const isGroup = msg.chat?.type === "group" || msg.chat?.type === "supergroup";
+
+    // Drop reaction messages or emoji-reaction wrappers
+    if (text.startsWith("[Reaction:") || text.startsWith("[reaction:") || /^\[Reaction/i.test(text)) {
+      console.log(`[TelegramBot] Dropping reaction message in Telegram: "${text}"`);
+      return;
+    }
     // 0. Handle New Group Members (Welcome Greeting Card)
     if (msg.new_chat_members && msg.new_chat_members.length > 0 && isGroup) {
       const newNames = msg.new_chat_members.map((m: any) => m.first_name || m.username || "Member").join(", ");
@@ -3059,9 +3117,11 @@ INSTRUCTIONS:
       isOwner,
       isGroup ? { id: chatId, title: msg.chat?.title } : undefined
     );
-    await this.sendHumanLikeMessage(chatId, replyText);
-    if (loggedDocId) {
-      this.updateBotReplyInLog(loggedDocId, replyText).catch(() => {});
+    if (replyText && replyText.trim().length > 0) {
+      await this.sendHumanLikeMessage(chatId, replyText);
+      if (loggedDocId) {
+        this.updateBotReplyInLog(loggedDocId, replyText).catch(() => {});
+      }
     }
   }
 
