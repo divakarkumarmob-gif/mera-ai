@@ -131,12 +131,24 @@ export class WhatsAppBossAiEngine {
 
     const { aiAdvancedLearningService } = await import("../aiAdvancedLearningService");
     const { frontierCognitionService } = await import("../frontierCognitionService");
+    const { syntheticSelfGymEngine } = await import("../syntheticSelfGymEngine");
+    const { semanticKnowledgeGraphEngine } = await import("../semanticKnowledgeGraphEngine");
+    const { multiAgentCouncilEngine } = await import("../multiAgentCouncilEngine");
+    const { ghostWorkerEngine } = await import("../ghostWorkerEngine");
+    const { predictiveWorldTwinEngine } = await import("../predictiveWorldTwinEngine");
+
     const rlhfContext = await aiAdvancedLearningService.compileRlhfPrompt();
     const goldenStandardsContext = await aiAdvancedLearningService.compileGoldenStandardsPrompt();
     const bossStyleContext = await aiAdvancedLearningService.compileBossStylePrompt();
     const affinityContext = await frontierCognitionService.compileAffinityPrompt("boss_dk", "Boss DK");
     const realizationsContext = await frontierCognitionService.compileRealizationsPrompt();
     const moodContext = frontierCognitionService.compileMoodPrompt();
+    const selfGymContext = await syntheticSelfGymEngine.compileSelfPlayPrompt();
+    const knowledgeGraphContext = await semanticKnowledgeGraphEngine.compileKnowledgeGraphPrompt();
+    const councilContext = multiAgentCouncilEngine.compileCouncilPrompt(true);
+    const ghostWorkerContext = await ghostWorkerEngine.compileGhostWorkerPrompt();
+    predictiveWorldTwinEngine.updateBossState(messageText);
+    const worldTwinContext = predictiveWorldTwinEngine.compileWorldTwinPrompt();
 
     // Auto-record to Stream of Consciousness and check Golden Standards
     frontierCognitionService.recordStreamEvent("Boss DK", messageText, 6).catch(() => {});
@@ -969,6 +981,16 @@ ${affinityContext}
 ${realizationsContext}
 
 ${moodContext}
+
+${selfGymContext}
+
+${knowledgeGraphContext}
+
+${councilContext}
+
+${ghostWorkerContext}
+
+${worldTwinContext}
 
 🧠 HUMAN-LEVEL PRONOUN & INTUITION MANDATE (Theory of Mind & Insaan Jaisi Samajh):
 - Understand pronouns ("isko", "inhe", "ise", "unko", "usko", "use", "in logo ko") like a real, intelligent human companion:

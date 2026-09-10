@@ -1528,6 +1528,11 @@ Provide a 2-4 sentence executive digest of main topics, project updates, member 
     const { frontierCognitionService } = await import("./frontierCognitionService");
     const { humanComprehensionEngine } = await import("./humanComprehensionEngine");
     const { groupCollectiveLearningService } = await import("./groupCollectiveLearningService");
+    const { syntheticSelfGymEngine } = await import("./syntheticSelfGymEngine");
+    const { semanticKnowledgeGraphEngine } = await import("./semanticKnowledgeGraphEngine");
+    const { multiAgentCouncilEngine } = await import("./multiAgentCouncilEngine");
+    const { ghostWorkerEngine } = await import("./ghostWorkerEngine");
+    const { predictiveWorldTwinEngine } = await import("./predictiveWorldTwinEngine");
 
     const directivesContext = await bossDirectivesService.compileDirectivesPrompt();
     const trainingContext = await fridayChildTrainingService.compileTrainingPrompt(messageText);
@@ -1538,6 +1543,12 @@ Provide a 2-4 sentence executive digest of main topics, project updates, member 
     const realizationsContext = await frontierCognitionService.compileRealizationsPrompt();
     const moodContext = frontierCognitionService.compileMoodPrompt();
     const groupContext = groupInfo?.id ? await groupCollectiveLearningService.compileGroupContextPrompt(String(groupInfo.id)) : "";
+    const selfGymContext = await syntheticSelfGymEngine.compileSelfPlayPrompt();
+    const knowledgeGraphContext = await semanticKnowledgeGraphEngine.compileKnowledgeGraphPrompt();
+    const councilContext = multiAgentCouncilEngine.compileCouncilPrompt(isOwner);
+    const ghostWorkerContext = await ghostWorkerEngine.compileGhostWorkerPrompt();
+    predictiveWorldTwinEngine.updateBossState(messageText);
+    const worldTwinContext = predictiveWorldTwinEngine.compileWorldTwinPrompt();
     const cognitivePass = humanComprehensionEngine.performCognitivePrePass(messageText, { isOwner });
 
     // Stream of consciousness logging
@@ -1571,6 +1582,16 @@ ${realizationsContext}
 ${moodContext}
 
 ${groupContext}
+
+${selfGymContext}
+
+${knowledgeGraphContext}
+
+${councilContext}
+
+${ghostWorkerContext}
+
+${worldTwinContext}
 
 ${cognitivePass.humanInsightPrompt}
 
