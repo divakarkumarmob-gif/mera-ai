@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { X, Mic, Plus, Loader2, Settings, ChevronDown, Captions, MessageSquare, Square, Code2, Terminal, Shield, ShieldCheck, Trash2, Key, Check, AlertCircle, Send, Instagram, Download, Radio, Music, Sparkles, Sliders, Volume2, Bot, Layers, Cpu } from 'lucide-react';
+import { X, Mic, Plus, Loader2, Settings, ChevronDown, ChevronLeft, ChevronRight, Captions, MessageSquare, Square, Code2, Terminal, Shield, ShieldCheck, Trash2, Key, Check, AlertCircle, Send, Instagram, Download, Radio, Music, Sparkles, Sliders, Volume2, Bot, Layers, Cpu } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import AgentFace from './AgentFace';
 import ChatHistoryModal from './ChatHistoryModal';
@@ -2805,7 +2805,28 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                     </div>
 
                     {/* ── Horizontally Slideable Capsule Pills (Swipe Left/Right on Mobile & Desktop) ── */}
-                    <div className="w-full overflow-x-auto no-scrollbar scroll-smooth flex items-center gap-2 py-1 px-1 touch-pan-x select-none">
+                    <div className="relative w-full flex items-center group/capsules">
+                        {/* Desktop Left Scroll Arrow */}
+                        <button
+                            type="button"
+                            onClick={(e) => {
+                                const container = e.currentTarget.parentElement?.querySelector('.capsule-scroll-container');
+                                container?.scrollBy({ left: -260, behavior: 'smooth' });
+                            }}
+                            className="hidden md:flex absolute left-0 z-20 p-1.5 rounded-full bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-white/10 shadow-lg backdrop-blur-sm -translate-x-2 opacity-0 group-hover/capsules:opacity-100 transition-all cursor-pointer active:scale-95"
+                            title="Scroll Left"
+                        >
+                            <ChevronLeft className="w-3.5 h-3.5" />
+                        </button>
+
+                        <div 
+                            className="capsule-scroll-container w-full overflow-x-auto no-scrollbar scroll-smooth flex items-center gap-2 py-1 px-1 touch-pan-x select-none"
+                            onWheel={(e) => {
+                                if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+                                    e.currentTarget.scrollLeft += e.deltaY;
+                                }
+                            }}
+                        >
                         {/* 1. Wi-Fi Radar Capsule */}
                         <button
                             onClick={() => setShowWifiRadar(true)}
@@ -2963,6 +2984,20 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                             <span>Close</span>
                         </button>
                     </div>
+
+                    {/* Desktop Right Scroll Arrow */}
+                    <button
+                        type="button"
+                        onClick={(e) => {
+                            const container = e.currentTarget.parentElement?.querySelector('.capsule-scroll-container');
+                            container?.scrollBy({ left: 260, behavior: 'smooth' });
+                        }}
+                        className="hidden md:flex absolute right-0 z-20 p-1.5 rounded-full bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-white/10 shadow-lg backdrop-blur-sm translate-x-2 opacity-0 group-hover/capsules:opacity-100 transition-all cursor-pointer active:scale-95"
+                        title="Scroll Right"
+                    >
+                        <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                </div>
                 </div>
 
                 <AnimatePresence>
