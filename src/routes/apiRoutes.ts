@@ -50,6 +50,7 @@ import { johnTheRipperService } from "../services/johnTheRipperService";
 import { voicePersonaService } from "../services/voicePersonaService";
 import { serverFirewallService } from "../services/serverFirewallService";
 import { whatsappFeatureEngine } from "../services/whatsappFeatureEngine";
+import { freeFireGamingService } from "../services/freeFireGamingService";
 
 export interface ApiRoutesContext {
   getBaileysEnabled: () => boolean;
@@ -2798,6 +2799,99 @@ export function createApiRouter(context: ApiRoutesContext): Router {
       res.json({ ok: sendRes.success, ...sendRes });
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err?.message || "Failed to send photo on WhatsApp" });
+    }
+  });
+
+  // ── Free Fire AI Gaming & Autonomous Spectator/Coach Endpoints ─────────────
+  app.get("/api/gaming/freefire/status", (_req, res) => {
+    res.json({ ok: true, status: freeFireGamingService.getStatus() });
+  });
+
+  app.get("/api/gaming/freefire/devices", async (_req, res) => {
+    try {
+      const devices = await freeFireGamingService.listDevices();
+      res.json({ ok: true, devices });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || "Failed to list ADB devices" });
+    }
+  });
+
+  app.post("/api/gaming/freefire/connect", async (req, res) => {
+    try {
+      const { ip, port } = req.body || {};
+      if (!ip) {
+        return res.status(400).json({ ok: false, error: "Device IP address is required" });
+      }
+      const result = await freeFireGamingService.connectWirelessAdb(ip, Number(port) || 5555);
+      res.json({ ok: result.success, ...result });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || "Failed to connect to device" });
+    }
+  });
+
+  app.post("/api/gaming/freefire/custom-room/join", async (req, res) => {
+    try {
+      const { roomId, password, role, slotNumber } = req.body || {};
+      if (!roomId) {
+        return res.status(400).json({ ok: false, error: "Custom Room ID is required" });
+      }
+      const result = await freeFireGamingService.joinCustomRoom({
+        roomId: String(roomId),
+        password: password ? String(password) : undefined,
+        role: role === "player" ? "player" : "spectate",
+        slotNumber: slotNumber ? Number(slotNumber) : undefined,
+      });
+      res.json({ ok: result.success, ...result });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || "Failed to join custom room" });
+    }
+  });
+
+  app.post("/api/gaming/freefire/action", async (req, res) => {
+    try {
+      const { action, gunType, direction, durationMs } = req.body || {};
+      if (!action) {
+        return res.status(400).json({ ok: false, error: "Game action is required" });
+      }
+      const result = await freeFireGamingService.executeGameAction({
+        action,
+        gunType,
+        direction,
+        durationMs,
+      });
+      res.json({ ok: result.success, ...result });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || "Failed to execute game action" });
+    }
+  });
+
+  app.post("/api/gaming/freefire/radar-frame", async (req, res) => {
+    try {
+      const { imageBase64 } = req.body || {};
+      const cleanB64 = imageBase64 ? imageBase64.replace(/^data:image\/\w+;base64,/, "") : undefined;
+      const result = await freeFireGamingService.analyzeLiveRadarFrame(cleanB64);
+      res.json({ ok: true, radar: result });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || "Failed to analyze frame" });
+    }
+  });
+
+  app.post("/api/gaming/freefire/post-match-report", async (req, res) => {
+    try {
+      const { playerTag, customRoomId, gameplayNotes, matchFramesBase64 } = req.body || {};
+      const frames = Array.isArray(matchFramesBase64)
+        ? matchFramesBase64.map((f: string) => f.replace(/^data:image\/\w+;base64,/, ""))
+        : undefined;
+
+      const report = await freeFireGamingService.generatePostMatchAnalysis({
+        playerTag,
+        customRoomId,
+        gameplayNotes,
+        matchFramesBase64: frames,
+      });
+      res.json({ ok: true, report });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || "Failed to generate post match report" });
     }
   });
 

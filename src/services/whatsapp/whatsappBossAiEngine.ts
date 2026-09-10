@@ -627,6 +627,56 @@ export class WhatsAppBossAiEngine {
           required: ["groupName", "commandText"],
         },
       },
+      {
+        name: "freefire_join_custom_room",
+        description: "Auto-join a Free Fire Custom match room with Room ID and Password as a spectator or player. Use when Boss texts 'room join karo', 'custom spectate karo', 'room ID 1234 pass 9999 me jao'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            roomId: { type: "STRING", description: "Custom match Room ID" },
+            password: { type: "STRING", description: "Custom match password if private" },
+            role: { type: "STRING", enum: ["spectate", "player"], description: "Role to join as ('spectate' or 'player')" },
+          },
+          required: ["roomId"],
+        },
+      },
+      {
+        name: "freefire_analyze_match",
+        description: "Generate deep AI esports match breakdown with player weaknesses, drag headshot flaws, and custom sensitivity settings for Free Fire. Use when Boss says 'match analyze karo', 'meri weakness batao', 'sensitivity kya rakhu', etc.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            playerTag: { type: "STRING", description: "Player in-game name or tag (defaults to Boss DK)" },
+            customRoomId: { type: "STRING", description: "Custom Room ID or match title" },
+            gameplayNotes: { type: "STRING", description: "Specific gameplay notes or context to inspect" },
+          },
+          required: [],
+        },
+      },
+      {
+        name: "freefire_connect_device",
+        description: "Connect to Android phone wirelessly via WiFi ADB for in-game auto controls and macros. Use when Boss gives phone IP to connect for gaming.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            ip: { type: "STRING", description: "Phone IP address, e.g. '192.168.1.15'" },
+            port: { type: "INTEGER", description: "ADB Wireless port (default 5555)" },
+          },
+          required: ["ip"],
+        },
+      },
+      {
+        name: "freefire_execute_action",
+        description: "Execute in-game humanized macro or touch action on connected phone (e.g. 'drag_headshot', 'quick_gloo', 'jump_shot').",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            action: { type: "STRING", enum: ["drag_headshot", "quick_gloo", "jump_shot", "heal"], description: "Game action macro" },
+            gunType: { type: "STRING", enum: ["shotgun", "smg", "ar", "sniper"], description: "Weapon type for drag calculation" },
+          },
+          required: ["action"],
+        },
+      },
     ];
 
     const systemInstruction = `YOU ARE FRIDAY: DK's (Divakar Kumar) ultra-intelligent, loyal, warm, witty, and deeply caring AI companion and chief executive assistant.
@@ -1051,6 +1101,43 @@ COMMUNICATION STYLE:
             return { success: true, message: `Superpower "${args.commandText}" triggered successfully in "${grp.groupName}"!` };
           }
           return { success: false, message: "Superpower execution failed." };
+        }
+        if (toolName === "freefire_join_custom_room") {
+          const { freeFireGamingService } = await import("../freeFireGamingService");
+          const res = await freeFireGamingService.joinCustomRoom({
+            roomId: String(args.roomId),
+            password: args.password ? String(args.password) : undefined,
+            role: args.role === "player" ? "player" : "spectate",
+          });
+          return res;
+        }
+        if (toolName === "freefire_analyze_match") {
+          const { freeFireGamingService } = await import("../freeFireGamingService");
+          const report = await freeFireGamingService.generatePostMatchAnalysis({
+            playerTag: args.playerTag || "Boss DK",
+            customRoomId: args.customRoomId,
+            gameplayNotes: args.gameplayNotes,
+          });
+          return {
+            success: true,
+            summary: report.coachAudioSummaryHinglish,
+            grade: report.grade,
+            weaknesses: report.weaknesses,
+            sensitivityRecommendations: report.sensitivityRecommendations,
+          };
+        }
+        if (toolName === "freefire_connect_device") {
+          const { freeFireGamingService } = await import("../freeFireGamingService");
+          const res = await freeFireGamingService.connectWirelessAdb(String(args.ip), Number(args.port) || 5555);
+          return res;
+        }
+        if (toolName === "freefire_execute_action") {
+          const { freeFireGamingService } = await import("../freeFireGamingService");
+          const res = await freeFireGamingService.executeGameAction({
+            action: args.action || "drag_headshot",
+            gunType: args.gunType || "smg",
+          });
+          return res;
         }
         if (toolName === "get_messages_digest") {
           if (args.groupName) {

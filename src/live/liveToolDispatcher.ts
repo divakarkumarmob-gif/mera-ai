@@ -39,6 +39,7 @@ import { productPriceService } from "../services/productPriceService";
 import { priceDropTrackerService } from "../services/priceDropTrackerService";
 import { ecommerceOrderService } from "../services/ecommerceOrderService";
 import { autonomousBuyerService } from "../services/autonomousBuyerService";
+import { freeFireGamingService } from "../services/freeFireGamingService";
 
 export interface ToolDispatchContext {
   sessionId: string;
@@ -130,6 +131,50 @@ export async function dispatchLiveToolCall(call: any, context: ToolDispatchConte
                   await memoryEngine.addPersonalVaultFact("custom_skill", fact);
                   result = { success: true, message: `Skill "${skillName}" successfully integrated into Friday's brain!` };
                   clientWs.send(JSON.stringify({ type: "skill_added", skill: { skillName, ruleInstruction } }));
+                } else if (call.name === "freefire_connect_device") {
+                  const { ip, port } = call.args || {};
+                  if (!ip) {
+                    result = { success: false, message: "Device IP address required for wireless ADB." };
+                  } else {
+                    const conn = await freeFireGamingService.connectWirelessAdb(String(ip), Number(port) || 5555);
+                    result = conn;
+                  }
+                } else if (call.name === "freefire_join_custom_room") {
+                  const { roomId, password, role, slotNumber } = call.args || {};
+                  if (!roomId) {
+                    result = { success: false, message: "Custom Room ID is required." };
+                  } else {
+                    const joinRes = await freeFireGamingService.joinCustomRoom({
+                      roomId: String(roomId),
+                      password: password ? String(password) : undefined,
+                      role: role === "player" ? "player" : "spectate",
+                      slotNumber: slotNumber ? Number(slotNumber) : undefined,
+                    });
+                    result = joinRes;
+                  }
+                } else if (call.name === "freefire_execute_action") {
+                  const { action, gunType, direction, durationMs } = call.args || {};
+                  const actRes = await freeFireGamingService.executeGameAction({
+                    action: action || "drag_headshot",
+                    gunType: gunType || "smg",
+                    direction,
+                    durationMs,
+                  });
+                  result = actRes;
+                } else if (call.name === "freefire_analyze_match") {
+                  const { playerTag, customRoomId, gameplayNotes } = call.args || {};
+                  const analysis = await freeFireGamingService.generatePostMatchAnalysis({
+                    playerTag: playerTag || "Boss DK",
+                    customRoomId,
+                    gameplayNotes,
+                  });
+                  result = {
+                    success: true,
+                    grade: analysis.grade,
+                    summary: analysis.coachAudioSummaryHinglish,
+                    weaknesses: analysis.weaknesses,
+                    sensitivityRecommendations: analysis.sensitivityRecommendations,
+                  };
                 } else if (call.name === "generate_ai_photo") {
                   const { prompt, aspectRatio, sendToWhatsApp, targetRecipient } = call.args || {};
                   const genRes = await toolsEngine.generateAiPhoto(prompt, {

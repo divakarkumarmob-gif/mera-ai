@@ -11,6 +11,8 @@ import { YouTubeStudioModal } from './YouTubeStudioModal';
 import MemoryBackupModal from './MemoryBackupModal';
 import WifiRadarModal from './WifiRadarModal';
 import { HolographicLabModal } from './HolographicLabModal';
+import { FreeFireCoachModal } from './FreeFireCoachModal';
+import { Gamepad2 } from 'lucide-react';
 import { getWsUrl, getApiUrl } from '@/utils/api';
 import { wakeWordManager } from '@/utils/wakeWord';
 import { getAppToken, clearAppSession } from '@/utils/appSecurityClient';
@@ -927,6 +929,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
     const [showPerchanceStudio, setShowPerchanceStudio] = useState(false);
     const [showHologramLab, setShowHologramLab] = useState(false);
     const [hologramInitialModel, setHologramInitialModel] = useState('arc_reactor');
+    const [showFreeFireCoach, setShowFreeFireCoach] = useState(false);
     const [showSongPreviewModal, setShowSongPreviewModal] = useState(false);
     const [previewQuery, setPreviewQuery] = useState('');
     const [previewCandidates, setPreviewCandidates] = useState<PreviewCandidate[]>([]);
@@ -3800,6 +3803,30 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                                 </AnimatePresence>
                             </div>
 
+                            {/* ── 7. 🎮 Free Fire Esports AI Coach & ADB Auto-Player ── */}
+                            <div className="rounded-2xl border border-amber-500/30 bg-gradient-to-r from-amber-950/20 to-slate-900/80 p-4 flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-400">
+                                        <Gamepad2 className="w-5 h-5 animate-pulse" />
+                                    </div>
+                                    <div>
+                                        <h4 className="text-sm font-bold text-amber-300 flex items-center gap-2">
+                                            Free Fire Esports AI Coach & Bot
+                                            <span className="text-[10px] px-2 py-0.2 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                                                SPECIAL
+                                            </span>
+                                        </h4>
+                                        <p className="text-[11px] text-slate-400">WiFi ADB Controller, Custom Room Spectator & Weakness Analyzer</p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => setShowFreeFireCoach(true)}
+                                    className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-lg transition"
+                                >
+                                    Open Rig
+                                </button>
+                            </div>
+
                         </div>
                     </motion.div>
                 )}
@@ -3814,6 +3841,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
             {showBackupModal && <MemoryBackupModal onClose={() => setShowBackupModal(false)} />}
             {showWifiRadar && <WifiRadarModal onClose={() => setShowWifiRadar(false)} />}
             <HolographicLabModal isOpen={showHologramLab} onClose={() => setShowHologramLab(false)} initialModelId={hologramInitialModel} />
+            <FreeFireCoachModal isOpen={showFreeFireCoach} onClose={() => setShowFreeFireCoach(false)} />
 
             {/* Deep Research Report Modal */}
             <AnimatePresence>
