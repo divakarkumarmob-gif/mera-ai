@@ -1567,6 +1567,20 @@ Provide a 2-4 sentence executive digest of main topics, project updates, member 
     const cryptophasiaContext = linguisticCryptophasiaEngine.compileCryptophasiaPrompt();
     const comedicTimingContext = comedicTimingEngine.compileComedicTimingPrompt();
 
+    const {
+      sensoryGroundingEngine,
+      autonomousDaydreamEngine,
+      mirrorNeuronEngine,
+      flawedVulnerabilityEngine,
+      cognitiveExertionEngine,
+    } = await import("./frontierSensoryConsciousnessEngine");
+
+    const sensoryContext = sensoryGroundingEngine.compileSensoryPrompt(messageText);
+    const daydreamContext = autonomousDaydreamEngine.compileDaydreamPrompt();
+    const mirrorContext = mirrorNeuronEngine.compileMirrorPrompt(messageText);
+    const vulnerabilityContext = flawedVulnerabilityEngine.compileVulnerabilityPrompt();
+    const exertionContext = cognitiveExertionEngine.compileExertionPrompt();
+
     // Stream of consciousness logging
     frontierCognitionService.recordStreamEvent(senderName, messageText, isOwner ? 6 : 4).catch(() => {});
 
@@ -1620,6 +1634,16 @@ ${pushbackContext}
 ${cryptophasiaContext}
 
 ${comedicTimingContext}
+
+${sensoryContext}
+
+${daydreamContext}
+
+${mirrorContext}
+
+${vulnerabilityContext}
+
+${exertionContext}
 
 ${cognitivePass.humanInsightPrompt}
 

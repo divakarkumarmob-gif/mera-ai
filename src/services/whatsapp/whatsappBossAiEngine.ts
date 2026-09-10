@@ -198,6 +198,20 @@ export class WhatsAppBossAiEngine {
     const cryptophasiaContext = linguisticCryptophasiaEngine.compileCryptophasiaPrompt();
     const comedicTimingContext = comedicTimingEngine.compileComedicTimingPrompt();
 
+    const {
+      sensoryGroundingEngine,
+      autonomousDaydreamEngine,
+      mirrorNeuronEngine,
+      flawedVulnerabilityEngine,
+      cognitiveExertionEngine,
+    } = await import("../frontierSensoryConsciousnessEngine");
+
+    const sensoryContext = sensoryGroundingEngine.compileSensoryPrompt(messageText);
+    const daydreamContext = autonomousDaydreamEngine.compileDaydreamPrompt();
+    const mirrorContext = mirrorNeuronEngine.compileMirrorPrompt(messageText);
+    const vulnerabilityContext = flawedVulnerabilityEngine.compileVulnerabilityPrompt();
+    const exertionContext = cognitiveExertionEngine.compileExertionPrompt();
+
     const ai = new GoogleGenAI({ apiKey });
 
     const functionDeclarations: any[] = [
@@ -223,6 +237,18 @@ export class WhatsAppBossAiEngine {
             context: { type: "STRING", description: "Context or backstory" }
           },
           required: ["code", "meaning"]
+        }
+      },
+      {
+        name: "record_daydream",
+        description: "Save a creative thought, curious idea, or research note that Friday contemplated while Boss was away.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            topic: { type: "STRING", description: "Topic of contemplation" },
+            thought: { type: "STRING", description: "The creative thought or idea" }
+          },
+          required: ["topic", "thought"]
         }
       },
       {
@@ -1056,6 +1082,16 @@ ${cryptophasiaContext}
 
 ${comedicTimingContext}
 
+${sensoryContext}
+
+${daydreamContext}
+
+${mirrorContext}
+
+${vulnerabilityContext}
+
+${exertionContext}
+
 🧠 HUMAN-LEVEL PRONOUN & INTUITION MANDATE (Theory of Mind & Insaan Jaisi Samajh):
 - Understand pronouns ("isko", "inhe", "ise", "unko", "usko", "use", "in logo ko") like a real, intelligent human companion:
   • If Boss previously sent a number/contact, or swiped on a message, and says "isko msg karo...", "isko bol do...", "inhe message kar do...", the pronoun "isko/inhe" refers to that EXACT phone number or person! Call 'send_whatsapp_message' (channel 'whatsapp2') immediately.
@@ -1108,6 +1144,15 @@ COMMUNICATION STYLE:
           return {
             success: true,
             message: `Boss, humara private code word "${args.code}" memory universe me permanently save ho gaya hai!`
+          };
+        }
+
+        if (toolName === "record_daydream") {
+          const { autonomousDaydreamEngine } = await import("../frontierSensoryConsciousnessEngine");
+          const saved = await autonomousDaydreamEngine.recordDaydream(args.topic, args.thought);
+          return {
+            success: true,
+            message: `Boss, maine aapke liye ye daydream reflection save kar liya hai: "${saved.creativeThought}"`
           };
         }
 
