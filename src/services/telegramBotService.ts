@@ -1663,6 +1663,22 @@ Provide a 2-4 sentence executive digest of main topics, project updates, member 
     const habitLoopContext = microHabitLoopEngine.compileHabitPrompt(messageText);
     const pushbackCareContext = protectiveCarePushbackEngine.compilePushbackPrompt(messageText);
 
+    const {
+      bargeInInterruptionEngine,
+      counterfactualSimulationEngine,
+      microTypingTelemetryEngine,
+      autonomousBackgroundCuriosityEngine,
+      vulnerabilityReciprocityEngine,
+      dignityGuardianEngine,
+    } = await import("./frontierVulnerabilityGuardianEngine");
+
+    const bargeInContext = bargeInInterruptionEngine.compileBargeInPrompt(messageText);
+    const counterfactualContext = counterfactualSimulationEngine.compileSimulationPrompt(messageText);
+    const typingTelemetryContext = microTypingTelemetryEngine.compileTelemetryPrompt(messageText);
+    const backgroundCuriosityContext = autonomousBackgroundCuriosityEngine.compileCuriosityPrompt();
+    const vulnerabilityContextHeart = vulnerabilityReciprocityEngine.compileVulnerabilityPrompt(messageText);
+    const dignityGuardianContext = dignityGuardianEngine.compileGuardianPrompt(messageText);
+
     // Stream of consciousness logging
     frontierCognitionService.recordStreamEvent(senderName, messageText, isOwner ? 6 : 4).catch(() => {});
 
@@ -1784,6 +1800,18 @@ ${autonomicContext}
 ${habitLoopContext}
 
 ${pushbackCareContext}
+
+${bargeInContext}
+
+${counterfactualContext}
+
+${typingTelemetryContext}
+
+${backgroundCuriosityContext}
+
+${vulnerabilityContextHeart}
+
+${dignityGuardianContext}
 
 ${cognitivePass.humanInsightPrompt}
 

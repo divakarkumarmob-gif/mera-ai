@@ -294,6 +294,22 @@ export class WhatsAppBossAiEngine {
     const habitLoopContext = microHabitLoopEngine.compileHabitPrompt(messageText);
     const pushbackCareContext = protectiveCarePushbackEngine.compilePushbackPrompt(messageText);
 
+    const {
+      bargeInInterruptionEngine,
+      counterfactualSimulationEngine,
+      microTypingTelemetryEngine,
+      autonomousBackgroundCuriosityEngine,
+      vulnerabilityReciprocityEngine,
+      dignityGuardianEngine,
+    } = await import("../frontierVulnerabilityGuardianEngine");
+
+    const bargeInContext = bargeInInterruptionEngine.compileBargeInPrompt(messageText);
+    const counterfactualContext = counterfactualSimulationEngine.compileSimulationPrompt(messageText);
+    const typingTelemetryContext = microTypingTelemetryEngine.compileTelemetryPrompt(messageText);
+    const backgroundCuriosityContext = autonomousBackgroundCuriosityEngine.compileCuriosityPrompt();
+    const vulnerabilityContextHeart = vulnerabilityReciprocityEngine.compileVulnerabilityPrompt(messageText);
+    const dignityGuardianContext = dignityGuardianEngine.compileGuardianPrompt(messageText);
+
     const ai = new GoogleGenAI({ apiKey });
 
     const functionDeclarations: any[] = [
@@ -1256,6 +1272,18 @@ ${autonomicContext}
 ${habitLoopContext}
 
 ${pushbackCareContext}
+
+${bargeInContext}
+
+${counterfactualContext}
+
+${typingTelemetryContext}
+
+${backgroundCuriosityContext}
+
+${vulnerabilityContextHeart}
+
+${dignityGuardianContext}
 
 🧠 HUMAN-LEVEL PRONOUN & INTUITION MANDATE (Theory of Mind & Insaan Jaisi Samajh):
 - Understand pronouns ("isko", "inhe", "ise", "unko", "usko", "use", "in logo ko") like a real, intelligent human companion:
