@@ -1426,28 +1426,92 @@ Provide a 2-4 sentence executive digest of main topics, project updates, member 
   private async generateSmartAiReply(senderName: string, messageText: string, isOwner: boolean = false): Promise<string> {
     const customBusy = await this.getCustomBusyReply();
 
+    // ── Fast Direct Intercept: Boss Directives & Word Rules (for Owner) ─────
+    if (isOwner) {
+      const { bossDirectivesService } = await import("./bossDirectivesService");
+      const directiveCheck = bossDirectivesService.parseDirectiveCommand(messageText);
+      if (directiveCheck.isDirectiveCommand) {
+        if (directiveCheck.action === "add") {
+          const added = await bossDirectivesService.addDirective(directiveCheck.ruleText || messageText, {
+            targetWord: directiveCheck.targetWord,
+            replacementWord: directiveCheck.replacementWord,
+          });
+          if (added.targetWord && added.replacementWord) {
+            return `Haan Boss! Maine ye rule strictly lock kar liya hai: aage se "${added.targetWord}" ko hamesha "${added.replacementWord}" hi bolungi aur samjhungi (Telegram + WhatsApp)! 🫡`;
+          }
+          return `Ji Boss! Aapka strict order save ho gaya hai: "${added.rule}". Aage se ye strictly follow hoga! 🫡`;
+        } else if (directiveCheck.action === "remove") {
+          const remRes = await bossDirectivesService.removeDirective(directiveCheck.targetWord || messageText);
+          return remRes.message;
+        } else if (directiveCheck.action === "list") {
+          const active = await bossDirectivesService.getActiveDirectives();
+          if (active.length === 0) {
+            return "Boss, abhi koi custom directive ya word rule active nahi hai. Sab standard normal state me chal raha hai! ✨";
+          }
+          const listStr = active.map((d, i) => d.targetWord && d.replacementWord ? `*${i+1}.* "${d.targetWord}" ➔ "${d.replacementWord}"` : `*${i+1}.* ${d.rule}`).join("\n");
+          return `📋 *Active Boss Directives & Strict Rules:*\n\n${listStr}\n\n_Aap kisi bhi rule ko "[Naam] wala rule hata do" bolkar cancel kar sakte hain._`;
+        }
+      }
+
+      // ── Fast Direct Intercept: Child Training & Mentorship (Gurukul) ──────
+      const { fridayChildTrainingService } = await import("./fridayChildTrainingService");
+      const teachCheck = fridayChildTrainingService.parseTeachingCommand(messageText);
+      if (teachCheck.isTeachingCommand) {
+        if (teachCheck.action === "teach" && teachCheck.situation && teachCheck.reaction) {
+          const lesson = await fridayChildTrainingService.teachLesson(teachCheck.situation, teachCheck.reaction);
+          return `Haan Boss! Maine ye dil se sikh liya hai! 👶✨\n\n📌 *Jab:* "${lesson.situationTrigger}"\n👉 *Main karungi:* "${lesson.taughtReaction}"\n\nAage se main bilkul waise hi react karungi jaise aapne sikhaya hai! 🫡❤️`;
+        } else if (teachCheck.action === "correct" && teachCheck.correctionText) {
+          const res = await fridayChildTrainingService.correctPreviousMistake(teachCheck.correctionText);
+          return res.message;
+        } else if (teachCheck.action === "revise") {
+          const all = await fridayChildTrainingService.getAllLessons();
+          if (all.length === 0) {
+            return "Boss, abhi tak maine koi custom behavioral lesson nahi seekha hai. Aap mujhe sikhaiye ki kis situation me kaise react karna hai! 👶✨";
+          }
+          const listStr = all.map((l, i) => `*${i+1}. Jab:* "${l.situationTrigger}"\n   👉 *Taught:* "${l.taughtReaction}"`).join("\n\n");
+          return `🎓 *Friday's Learned Lessons from Boss DK:*\n\n${listStr}\n\n_Aap naye lessons sikhane ke liye 'Friday sikh lo: Jab [Situation] ho tab [Reaction] karna' bol sakte hain!_`;
+        } else if (teachCheck.action === "delete") {
+          const res = await fridayChildTrainingService.deleteLesson(teachCheck.situation || "all");
+          return res.message;
+        }
+      }
+    }
+
+    const { bossDirectivesService } = await import("./bossDirectivesService");
+    const { fridayChildTrainingService } = await import("./fridayChildTrainingService");
+    const { aiAdvancedLearningService } = await import("./aiAdvancedLearningService");
+    const { frontierCognitionService } = await import("./frontierCognitionService");
+    const { humanComprehensionEngine } = await import("./humanComprehensionEngine");
+
+    const directivesContext = await bossDirectivesService.compileDirectivesPrompt();
+    const trainingContext = await fridayChildTrainingService.compileTrainingPrompt(messageText);
+    const rlhfContext = await aiAdvancedLearningService.compileRlhfPrompt();
+    const bossStyleContext = await aiAdvancedLearningService.compileBossStylePrompt();
+    const affinityContext = await frontierCognitionService.compileAffinityPrompt(isOwner ? "boss_dk" : senderName, senderName);
+    const cognitivePass = humanComprehensionEngine.performCognitivePrePass(messageText, { isOwner });
+
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       if (customBusy) {
         return `Haanji ${senderName} ji! Main Friday hoon — DK Boss (Divakar Kumar) ka AI assistant. ${customBusy} 👍`;
       }
-      return `Haanji ${senderName} ji! Main Friday hoon — DK Boss (Divakar Kumar) ka AI assistant. Boss abhi busy hain, jaise hi aayenge main unko aapka message bol dungi 👍`;
-    }
-
-    // 1. Try factual answer from today's daily update first (if not owner)
-    if (!isOwner) {
-      try {
-        const updateAnswer = await dailyUpdateService.answerFromTodayUpdate(messageText);
-        if (updateAnswer) {
-          return `${senderName} ji, ${updateAnswer}`;
-        }
-      } catch (e) {
-        // continue
-      }
+      return `Haanji ${senderName} ji! Main Friday hoon — DK Boss abhi busy hain, jaise hi wo aayenge main aapka message unko bata dungi 👍`;
     }
 
     const ai = new GoogleGenAI({ apiKey });
     const prompt = `YOU ARE FRIDAY: DK's (Divakar Kumar) ultra-intelligent, loyal, warm, human-like AI companion.
+
+${directivesContext}
+
+${trainingContext}
+
+${rlhfContext}
+
+${bossStyleContext}
+
+${affinityContext}
+
+${cognitivePass.humanInsightPrompt}
 
 CHAT CONTEXT:
 Sender: "${senderName}"
@@ -1500,7 +1564,8 @@ ${
         const reply = response.text?.trim();
         if (reply) {
           console.log(`[TelegramBot] Reply generated using ${model}`);
-          return reply;
+          const replaced = bossDirectivesService.applyWordReplacements(reply);
+          return await aiAdvancedLearningService.runConstitutionalCritique(replaced, { isToBoss: isOwner });
         }
       } catch (err: any) {
         console.warn(`[TelegramBot] ${model} failed (${err?.message || err}), falling back to next model...`);
@@ -1509,10 +1574,13 @@ ${
 
     if (isOwner && currentMode === "mode_b") {
       const uncensoredReply = await fridayModeService.queryUncensoredEngine({
-        systemInstruction: `You are Friday AI, DK's (Divakar Kumar) personal super-intelligence on Telegram. Address him as Boss.`,
-        userMessage: text,
+        systemInstruction: `You are Friday AI, DK's (Divakar Kumar) personal super-intelligence on Telegram. Address him as Boss.\n${directivesContext}\n${trainingContext}\n${bossStyleContext}`,
+        userMessage: messageText,
       });
-      if (uncensoredReply) return uncensoredReply;
+      if (uncensoredReply) {
+        const replaced = bossDirectivesService.applyWordReplacements(uncensoredReply);
+        return await aiAdvancedLearningService.runConstitutionalCritique(replaced, { isToBoss: isOwner });
+      }
     }
 
     if (customBusy) {
