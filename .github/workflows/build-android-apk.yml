@@ -438,32 +438,52 @@ XMLEOF
           }
           EOF
 
-      - name: 🔨 Build Debug APK via Gradle
+      - name: 🔨 Build FRIDAY Main AI APK via Gradle
         run: |
           cd android
           chmod +x ./gradlew
           ./gradlew assembleDebug --no-daemon
 
-      - name: 📦 Prepare & Rename FRIDAY.apk
+      - name: 🎮 Build Friday Touch Helper Standalone APK via Gradle
+        run: |
+          cd android-helper
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          if [ ! -f "gradlew" ]; then
+            gradle wrapper
+          fi
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: 📦 Prepare & Rename Both APKs
         run: |
           mkdir -p apk-output
           cp android/app/build/outputs/apk/debug/app-debug.apk apk-output/FRIDAY.apk
-          echo "FRIDAY.apk size:"
-          ls -lh apk-output/FRIDAY.apk
+          cp android-helper/app/build/outputs/apk/debug/app-debug.apk apk-output/FridayTouchHelper.apk
+          echo "Generated APK Files:"
+          ls -lh apk-output/
 
-      - name: 📤 Upload Downloadable FRIDAY.apk Artifact
+      - name: 📤 Upload FRIDAY.apk (Main AI Live Agent App)
         uses: actions/upload-artifact@v4
         with:
-          name: FRIDAY-Android-APK
+          name: FRIDAY-Main-App
           path: apk-output/FRIDAY.apk
           retention-days: 30
 
-      - name: 🚀 Attach FRIDAY.apk to GitHub Release
+      - name: 📤 Upload FridayTouchHelper.apk (Touch Helper App)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Friday-Touch-Helper
+          path: apk-output/FridayTouchHelper.apk
+          retention-days: 30
+
+      - name: 🚀 Attach Both APKs to GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: apk-output/FRIDAY.apk
-          name: FRIDAY AI Mobile Release ${{ github.ref_name }}
+          files: |
+            apk-output/FRIDAY.apk
+            apk-output/FridayTouchHelper.apk
+          name: FRIDAY AI Mobile & Touch Release ${{ github.ref_name }}
           draft: false
           prerelease: false
           generate_release_notes: true
