@@ -511,7 +511,12 @@ class WhatsAppBotService {
           whatsappHistoryEngine.unshiftMessage(incoming);
           whatsappHistoryEngine.saveToFirestore(incoming).catch(() => {});
 
-          // ── GROUP AUTO-MODERATION & @block safe SHIELD ────────────────────────
+          // ── GROUP COLLECTIVE LEARNING & AUTO-MODERATION ─────────────────────
+          if (isGroup) {
+            const { groupCollectiveLearningService } = await import("./groupCollectiveLearningService");
+            groupCollectiveLearningService.learnFromGroupMessage("whatsapp", remoteJid, groupName || "WhatsApp Group", senderPhone, senderName, text).catch(() => {});
+          }
+
           if (isGroup && this.sock) {
             // 1. Check if user is issuing a safety command (@block safe, @block safe on/off, etc.)
             if (whatsappGroupSafetyEngine.isSafetyCommand(text)) {

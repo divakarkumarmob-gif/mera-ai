@@ -1420,10 +1420,55 @@ Provide a 2-4 sentence executive digest of main topics, project updates, member 
   }
 
   /**
+   * Deletes a message in a Telegram chat or group (Auto-moderation).
+   */
+  public async deleteMessage(chatId: number | string, messageId: number): Promise<boolean> {
+    try {
+      await this.callApi("deleteMessage", { chat_id: chatId, message_id: messageId });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Bans/kicks a member from a Telegram group.
+   */
+  public async banChatMember(chatId: number | string, userId: number): Promise<boolean> {
+    try {
+      await this.callApi("banChatMember", { chat_id: chatId, user_id: userId });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Sends a poll to a Telegram group.
+   */
+  public async sendPoll(chatId: number | string, question: string, options: string[]): Promise<any> {
+    try {
+      return await this.callApi("sendPoll", {
+        chat_id: chatId,
+        question: question.slice(0, 300),
+        options: JSON.stringify(options.map((o) => o.slice(0, 100))),
+      });
+    } catch (e) {
+      console.warn("[TelegramBot] Failed to send poll:", e);
+      return null;
+    }
+  }
+
+  /**
    * Generates a conversational AI reply using a multi-tier Gemini model fallback chain.
    * Matches WhatsApp auto-reply behavior: identifies as DK's AI, explains DK is busy, takes notes.
    */
-  private async generateSmartAiReply(senderName: string, messageText: string, isOwner: boolean = false): Promise<string> {
+  private async generateSmartAiReply(
+    senderName: string,
+    messageText: string,
+    isOwner: boolean = false,
+    groupInfo?: { id: string | number; title?: string }
+  ): Promise<string> {
     const customBusy = await this.getCustomBusyReply();
 
     // ── Fast Direct Intercept: Boss Directives & Word Rules (for Owner) ─────
@@ -1482,6 +1527,7 @@ Provide a 2-4 sentence executive digest of main topics, project updates, member 
     const { aiAdvancedLearningService } = await import("./aiAdvancedLearningService");
     const { frontierCognitionService } = await import("./frontierCognitionService");
     const { humanComprehensionEngine } = await import("./humanComprehensionEngine");
+    const { groupCollectiveLearningService } = await import("./groupCollectiveLearningService");
 
     const directivesContext = await bossDirectivesService.compileDirectivesPrompt();
     const trainingContext = await fridayChildTrainingService.compileTrainingPrompt(messageText);
@@ -1491,6 +1537,7 @@ Provide a 2-4 sentence executive digest of main topics, project updates, member 
     const affinityContext = await frontierCognitionService.compileAffinityPrompt(isOwner ? "boss_dk" : senderName, senderName);
     const realizationsContext = await frontierCognitionService.compileRealizationsPrompt();
     const moodContext = frontierCognitionService.compileMoodPrompt();
+    const groupContext = groupInfo?.id ? await groupCollectiveLearningService.compileGroupContextPrompt(String(groupInfo.id)) : "";
     const cognitivePass = humanComprehensionEngine.performCognitivePrePass(messageText, { isOwner });
 
     // Stream of consciousness logging
@@ -1522,6 +1569,8 @@ ${affinityContext}
 ${realizationsContext}
 
 ${moodContext}
+
+${groupContext}
 
 ${cognitivePass.humanInsightPrompt}
 
@@ -1666,12 +1715,93 @@ ${
     const from = msg.from || {};
     const senderName = from.first_name ? `${from.first_name} ${from.last_name || ""}`.trim() : "Boss";
     const text = (msg.text || msg.caption || "").trim();
-    const isGroup = msg.chat?.type === "group" || msg.chat?.type === "supergroup";
+    // 0. Handle New Group Members (Welcome Greeting Card)
+    if (msg.new_chat_members && msg.new_chat_members.length > 0 && isGroup) {
+      const newNames = msg.new_chat_members.map((m: any) => m.first_name || m.username || "Member").join(", ");
+      const welcomeCard = `👋 *Namaste & Welcome ${newNames}!* 🎉✨\n\nMain Friday AI hoon — *${msg.chat?.title || "is group"}* ki autonomous AI assistant! 🚀\n\nAap is group me kisi bhi topic pe discuss kar sakte hain, instant summary le sakte hain (\`@summary\`), quiz khel sakte hain (\`@quiz\`), ya mujhse direct sawal pooch sakte hain. Rules follow kijiye aur enjoy karein! ✨`;
+      await this.sendMessage(chatId, welcomeCard);
+      return;
+    }
 
     // Auto-track user and group profiles in Firestore
     if (isGroup) {
       this.saveTelegramGroup(msg.chat, from, text).catch(() => {});
       this.saveTelegramUser(from, undefined, msg.chat.title, text).catch(() => {});
+
+      // ── Group Collective Learning ──────────────────────────────────────────
+      const { groupCollectiveLearningService } = await import("./groupCollectiveLearningService");
+      groupCollectiveLearningService.learnFromGroupMessage(
+        "telegram",
+        String(chatId),
+        msg.chat?.title || "Telegram Group",
+        String(from.id),
+        senderName,
+        text
+      ).catch(() => {});
+
+      // ── Group Auto-Moderation & Anti-Abuse Shield ──────────────────────────
+      const profanityRegex = /\b(?:madarchod|maderchod|bhenchod|behenchod|bhosdike|bhosadike|gandu|gaandu|chutiya|chutiye|randi|mc|bc|bsdk|bkl|lodu|jhaatu|chudai|lawde|laude|lund)\b/i;
+      if (profanityRegex.test(text)) {
+        await this.deleteMessage(chatId, msg.message_id);
+        await this.sendMessage(
+          chatId,
+          `⚠️ *Shield Alert [${senderName}]:* Group me abusive language / gaali galauj allowed nahi hai. Message auto-delete kar diya gaya hai! 🛡️`
+        );
+        return;
+      }
+
+      // ── Group SuperPower Commands ─────────────────────────────────────────
+      if (/^(?:@summary|\/summary|group\s*summary|group\s*digest|catchup)/i.test(text)) {
+        const sum = await groupCollectiveLearningService.generateGroupSummary(String(chatId), msg.chat?.title || "Telegram Group");
+        await this.sendMessage(chatId, sum);
+        return;
+      }
+
+      if (/^(?:@tagall|\/tagall|@everyone|\/everyone)/i.test(text)) {
+        const note = text.replace(/^(?:@tagall|\/tagall|@everyone|\/everyone)/i, "").trim();
+        await this.sendMessage(
+          chatId,
+          `📢 *ATTENTION EVERYONE in ${msg.chat?.title || "Group"}!* ⚡\n\n${note ? `💬 *Note:* "${note}"\n\n` : ""}🔔 Sabhi members kripya active ho jayein!`
+        );
+        return;
+      }
+
+      if (/^(?:@quiz|\/quiz|@trivia|\/trivia)/i.test(text)) {
+        const topic = text.replace(/^(?:@quiz|\/quiz|@trivia|\/trivia)/i, "").trim() || "General Knowledge & Tech";
+        await this.sendMessage(
+          chatId,
+          `🎯 *Group Quiz Challenge on "${topic}":*\n\n1. What is the powerhouse of the cell?\n🅰️ Mitochondria\n🅱️ Nucleus\n🅲 Ribosome\n🅳 Golgi Apparatus\n\n👉 _Apna answer type kijiye (A, B, C, D)!_`
+        );
+        return;
+      }
+
+      if (/^(?:@roast|\/roast)/i.test(text)) {
+        const target = text.replace(/^(?:@roast|\/roast)/i, "").trim() || senderName;
+        await this.sendMessage(
+          chatId,
+          `🔥 *Friendly Roast on ${target}:*\n\n"Bhai ka logic itna solid hai ki binary me bhi 2 likh dete hain! 😂🔥 (All love in the group! ❤️)"`
+        );
+        return;
+      }
+
+      if (/^(?:@praise|\/praise|@hypeman|\/hypeman)/i.test(text)) {
+        const target = text.replace(/^(?:@praise|\/praise|@hypeman|\/hypeman)/i, "").trim() || senderName;
+        await this.sendMessage(
+          chatId,
+          `🌟 *Pure Hype for ${target}!* 👑🚀\n\n"${target} is the real MVP of this group! Consistent, sharp, and always bringing good vibes! 💯✨"`
+        );
+        return;
+      }
+
+      if (/^(?:@split|\/split|@hisab|\/hisab|@bill|\/bill)/i.test(text)) {
+        const match = text.match(/\b(\d+)\b/);
+        const amt = match ? Number(match[1]) : 1000;
+        await this.sendMessage(
+          chatId,
+          `🧾 *Group Expense Splitter:* Total ₹${amt}\n\n• Agar 4 log hain: *₹${Math.round(amt / 4)} per person*\n• Agar 5 log hain: *₹${Math.round(amt / 5)} per person*\n\n_Hisab barabar, dosti solid!_ 💸`
+        );
+        return;
+      }
     } else if (chatId) {
       this.saveTelegramUser(from, chatId, undefined, text).catch(() => {});
     }
@@ -2303,7 +2433,12 @@ ${
 
         const ownerChatId = process.env.TELEGRAM_OWNER_CHAT_ID;
         const isOwner = !!ownerChatId && String(chatId) === String(ownerChatId);
-        const replyText = await this.generateSmartAiReply(senderName, transcribedText, isOwner);
+        const replyText = await this.generateSmartAiReply(
+          senderName,
+          transcribedText,
+          isOwner,
+          isGroup ? { id: chatId, title: msg.chat?.title } : undefined
+        );
         await this.sendHumanLikeMessage(chatId, replyText);
 
         // Voice-to-Voice: Friday speaks back with a voice recording!
@@ -2645,7 +2780,12 @@ INSTRUCTIONS:
     // 9. General Smart AI Conversational Reply via Multi-Tier Fallback Chain (with Typing presence)
     const ownerChatId = process.env.TELEGRAM_OWNER_CHAT_ID;
     const isOwner = !!ownerChatId && String(chatId) === String(ownerChatId);
-    const replyText = await this.generateSmartAiReply(senderName, text, isOwner);
+    const replyText = await this.generateSmartAiReply(
+      senderName,
+      text,
+      isOwner,
+      isGroup ? { id: chatId, title: msg.chat?.title } : undefined
+    );
     await this.sendHumanLikeMessage(chatId, replyText);
     if (loggedDocId) {
       this.updateBotReplyInLog(loggedDocId, replyText).catch(() => {});
