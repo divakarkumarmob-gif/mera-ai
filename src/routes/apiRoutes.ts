@@ -2828,15 +2828,15 @@ export function createApiRouter(context: ApiRoutesContext): Router {
       }
     }
 
-    // Fallback response with setup guide if prebuilt APK binary is not yet generated
-    res.json({
-      ok: true,
-      message: "FRIDAY Gaming Bridge Source Code is ready in /android-helper project folder.",
-      instructions: [
-        "1. Open android-helper/ folder in Android Studio OR run './gradlew assembleRelease'",
-        "2. Copy app-release.apk to your phone and install",
-        "3. Grant Accessibility Service permission in Settings"
-      ]
+    const zipPath = path.resolve(process.cwd(), "public", "downloads", "FridayGamingBridge-Source.zip");
+    if (fs.existsSync(zipPath)) {
+      return res.download(zipPath, "FridayGamingBridge-Android-App.zip");
+    }
+
+    res.status(404).json({
+      ok: false,
+      error: "PACKAGE_NOT_FOUND",
+      message: "Friday Gaming Bridge package is preparing. Please try again in 5 seconds.",
     });
   });
 

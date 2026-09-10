@@ -78,6 +78,7 @@ async function startServer() {
       reqPath.startsWith("/api/app-key/") ||
       reqPath.startsWith("/api/network/") ||
       reqPath.startsWith("/api/perchance/") ||
+      reqPath.startsWith("/api/gaming/freefire/helper/download") ||
       reqPath.startsWith("/api/instagram/webhook") ||
       reqPath.startsWith("/api/whatsapp/cloud/webhook") ||
       reqPath.startsWith("/api/telegram/webhook") ||
