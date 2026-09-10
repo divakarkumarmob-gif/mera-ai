@@ -142,6 +142,17 @@ object FridayWsManager {
                 return
             }
 
+            if (type == "AI_TACTICAL_ACTION") {
+                val action = json.optString("action")
+                val hitbox = json.optString("hitbox", "head")
+                val advice = json.optString("advice", "")
+                if (action.isNotEmpty()) {
+                    Log.i(TAG, "🧠 AI Tactical Action Received: $action ($hitbox) — $advice")
+                    FridayGamingEngine.executeTacticalAction(action, hitbox)
+                }
+                return
+            }
+
             if (type == "ANDROID_GESTURE" || type == "gaming_copilot_event") {
                 val gesture = json.optString("gesture")
                 val service = FridayAccessibilityService.instance
@@ -177,27 +188,14 @@ object FridayWsManager {
                     }
 
                     else -> {
-                        // High-level macro fallback (e.g. drag_headshot directly in event)
                         val action = json.optString("action")
                         val gunType = json.optString("gunType", "smg")
-                        if (action == "drag_headshot") {
-                            val fireBtnX = 1850f
-                            val fireBtnY = 750f
-                            val lift = if (gunType == "shotgun") 420f else 320f
-                            val speed = if (gunType == "shotgun") 70L else 100L
-                            service.performDrag(fireBtnX, fireBtnY, fireBtnX, fireBtnY - lift, speed)
-                        } else if (action == "quick_gloo") {
-                            service.performTap(420f, 820f, 30) {
-                                mainHandler.postDelayed({
-                                    service.performTap(1980f, 880f, 30) {
-                                        mainHandler.postDelayed({
-                                            service.performDrag(1850f, 750f, 1850f, 950f, 50)
-                                        }, 20)
-                                    }
-                                }, 25)
-                            }
-                        } else if (action == "heal") {
-                            service.performTap(350f, 920f, 50)
+                        when (action.lowercase()) {
+                            "drag_headshot" -> FridayGamingEngine.triggerHeadshotDrag(gunType, "head")
+                            "quick_gloo" -> FridayGamingEngine.triggerQuickGloo()
+                            "heal" -> FridayGamingEngine.triggerAutoHeal()
+                            "sprint", "move_joystick" -> FridayGamingEngine.lockProSprint()
+                            else -> FridayGamingEngine.executeTacticalAction(action, "head")
                         }
                     }
                 }

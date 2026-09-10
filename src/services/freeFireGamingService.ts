@@ -619,14 +619,26 @@ class FreeFireGamingService {
     }
 
     try {
-      const prompt = `You are FRIDAY AI's Real-Time Free Fire Co-Pilot & Tactical Radar.
+      const prompt = `You are FRIDAY AI's High-Precision Free Fire Esports Neural Brain & Combat Perception Engine.
 Analyze this in-game Free Fire frame and output ONLY valid JSON matching this schema:
 {
   "state": "in_lobby" | "in_plane" | "looting" | "combat" | "spectating" | "match_summary",
   "healthPercentage": number (0-100),
   "alivePlayers": number,
+  "enemies": [
+    {
+      "direction": "front" | "left" | "right" | "behind",
+      "distance": "close" | "mid" | "far",
+      "distanceMetersEstimated": number,
+      "behindCover": boolean,
+      "aimingAtPlayer": boolean,
+      "positionOnScreen": { "xPercent": number, "yPercent": number }
+    }
+  ],
+  "targetHitbox": "head" | "neck" | "upper_chest",
+  "recommendedAction": "RUSH_SHOTGUN" | "MID_RANGE_SMG_DRAG" | "DEPLOY_GLOO_WALL" | "SPRINT_FLANK" | "HEAL_BEHIND_COVER" | "SNIPE_HEAD" | "FAST_SPRINT_SEARCH",
   "dangerAlerts": ["urgent danger alert 1", "urgent danger alert 2"],
-  "tacticalAdvice": "Immediate 1-sentence tactical action in Hinglish addressing user as Boss (e.g., 'Boss right ridge par enemy hai, cover lekar drag shot lo')"
+  "tacticalAdvice": "Immediate 1-sentence tactical action in Hinglish addressing user as Boss (e.g., 'Boss front me 15m par enemy open me hai, SMG straight head drag lo!')"
 }`;
 
       const response = await ai.models.generateContent({
@@ -651,14 +663,35 @@ Analyze this in-game Free Fire frame and output ONLY valid JSON matching this sc
       const cleanJson = text.replace(/```json/gi, "").replace(/```/g, "").trim();
       const parsed = JSON.parse(cleanJson);
 
-      return {
+      const result: LiveRadarFrameResult & {
+        enemies?: any[];
+        targetHitbox?: string;
+        recommendedAction?: string;
+      } = {
         timestamp: nowStr,
         state: parsed.state || "combat",
         healthPercentage: parsed.healthPercentage ?? 100,
         alivePlayers: parsed.alivePlayers ?? 24,
         dangerAlerts: Array.isArray(parsed.dangerAlerts) ? parsed.dangerAlerts : [],
-        tacticalAdvice: parsed.tacticalAdvice || "Boss, cover maintain rakhein aur crosshair head level par set karein.",
+        tacticalAdvice: parsed.tacticalAdvice || "Boss, crosshair head level par lock karein aur cover maintain karein.",
       };
+
+      (result as any).enemies = parsed.enemies || [];
+      (result as any).targetHitbox = parsed.targetHitbox || "head";
+      (result as any).recommendedAction = parsed.recommendedAction || "FAST_SPRINT_SEARCH";
+
+      // If Android Helper is connected, dispatch tactical decision directly to device
+      if (this.registeredAndroidHelpers.size > 0 && parsed.recommendedAction) {
+        this.dispatchToAndroidHelper({
+          type: "AI_TACTICAL_ACTION",
+          action: parsed.recommendedAction,
+          hitbox: parsed.targetHitbox || "head",
+          enemies: parsed.enemies || [],
+          advice: result.tacticalAdvice,
+        });
+      }
+
+      return result;
     } catch (err) {
       return {
         timestamp: nowStr,
