@@ -1,6 +1,7 @@
 import { MsEdgeTTS, OUTPUT_FORMAT } from "msedge-tts";
 import { GoogleGenAI } from "@google/genai";
 import { db } from "./firebaseAdmin";
+import { humanSpeechProsodyEngine } from "./humanSpeechProsodyEngine";
 
 export interface BridgeSession {
   userA_chatId: number; // Text user (Types text -> becomes voice for B)
@@ -166,7 +167,8 @@ export class VoiceBridgeService {
   public async sarvamTTS(
     text: string,
     targetLanguageCode: string = "hi-IN",
-    speaker: string = "simran_hindi_ai_assistant"
+    speaker: string = "simran_hindi_ai_assistant",
+    prosodyOverride?: { pitch?: number; pace?: number; loudness?: number }
   ): Promise<{ buffer: Buffer; mimeType: string } | null> {
     const apiKey = (process.env.SARVAM_API_KEY || process.env.SARVAM_AI_API_KEY)?.trim();
     if (!apiKey) return null;
@@ -182,9 +184,9 @@ export class VoiceBridgeService {
           inputs: [text.trim()],
           target_language_code: targetLanguageCode,
           speaker: speaker,
-          pitch: 0,
-          pace: 1.0,
-          loudness: 1.5,
+          pitch: prosodyOverride?.pitch ?? 0,
+          pace: prosodyOverride?.pace ?? 1.0,
+          loudness: prosodyOverride?.loudness ?? 1.5,
           speech_sample_rate: 22050,
           enable_preprocessing: true,
           model: "bulbul:v2",
@@ -209,17 +211,22 @@ export class VoiceBridgeService {
   }
 
   /**
-   * Universal Smart Text-to-Speech (TTS) Pipeline:
+   * Universal Smart Text-to-Speech (TTS) Pipeline with Human Speech Prosody:
    * 1. ElevenLabs TTS (Primary - If ELEVENLABS_API_KEY present)
    * 2. Sarvam AI TTS (Secondary - If SARVAM_API_KEY present)
    * 3. Microsoft Edge Neural Engine (Fallback - 100% Free & Unlimited)
    */
   public async generateSpeech(
     text: string,
-    voice?: string
+    voice?: string,
+    context?: { isBoss?: boolean; userPrompt?: string; emotionOverride?: any }
   ): Promise<{ buffer: Buffer; mimeType: string }> {
     const cleanText = text.trim();
     if (!cleanText) throw new Error("Text is empty for TTS");
+
+    // 0. Affective Humanization & Acoustic Cadence Infusion
+    const { cleanSpokenText, prosody } = humanSpeechProsodyEngine.humanizeTextForSpeech(cleanText, context);
+    const textToSpeak = cleanSpokenText || cleanText;
 
     const targetVoice = voice || (await this.getBossGlobalVoice());
     const isMale = targetVoice.toLowerCase().includes("madhur") || targetVoice.toLowerCase().includes("male") || targetVoice.toLowerCase().includes("kabir") || targetVoice.toLowerCase().includes("aadmi") || targetVoice.toLowerCase().includes("ladka");
@@ -227,9 +234,9 @@ export class VoiceBridgeService {
 
     // 1. ElevenLabs TTS (Super realistic human voice)
     try {
-      const elevenRes = await this.elevenLabsTTS(cleanText);
+      const elevenRes = await this.elevenLabsTTS(textToSpeak);
       if (elevenRes && elevenRes.buffer.length > 0) {
-        console.log("[VoiceBridge] Generated voice via ElevenLabs TTS");
+        console.log(`[VoiceBridge] Generated voice via ElevenLabs TTS (${prosody.vibeDescription})`);
         return elevenRes;
       }
     } catch {}
@@ -238,16 +245,16 @@ export class VoiceBridgeService {
     try {
       const sarvamSpeaker = isMale ? "kabir" : isEnglish ? "amartya" : "meera";
       const sarvamLang = isEnglish ? "en-IN" : "hi-IN";
-      const sarvamRes = await this.sarvamTTS(cleanText, sarvamLang, sarvamSpeaker);
+      const sarvamRes = await this.sarvamTTS(textToSpeak, sarvamLang, sarvamSpeaker, prosody.sarvamProsody);
       if (sarvamRes && sarvamRes.buffer.length > 0) {
-        console.log(`[VoiceBridge] Generated voice via Sarvam AI TTS (${sarvamSpeaker})`);
+        console.log(`[VoiceBridge] Generated voice via Sarvam AI TTS (${sarvamSpeaker} - ${prosody.vibeDescription})`);
         return sarvamRes;
       }
     } catch {}
 
-    // 3. Microsoft Edge Neural Engine (100% Free & Unlimited Fallback)
-    console.log(`[VoiceBridge] Using Microsoft Edge Neural TTS (${targetVoice})`);
-    const msBuf = await this.textToSpeechBuffer(cleanText, targetVoice);
+    // 3. Microsoft Edge Neural Engine (100% Free & Unlimited Fallback with Affective Prosody)
+    console.log(`[VoiceBridge] Using Microsoft Edge Neural TTS (${targetVoice} - ${prosody.vibeDescription})`);
+    const msBuf = await this.textToSpeechBuffer(textToSpeak, targetVoice, prosody.edgeProsody);
     return { buffer: msBuf, mimeType: "audio/mpeg" };
   }
 
@@ -256,7 +263,8 @@ export class VoiceBridgeService {
    */
   public async textToSpeechBuffer(
     text: string,
-    voice: string = VoiceBridgeService.DEFAULT_VOICE
+    voice: string = VoiceBridgeService.DEFAULT_VOICE,
+    prosodyOptions?: { pitch?: string; rate?: string | number; volume?: string }
   ): Promise<Buffer> {
     const cleanText = text.trim();
     if (!cleanText) throw new Error("Text is empty for TTS");
@@ -264,7 +272,7 @@ export class VoiceBridgeService {
     const tts = new MsEdgeTTS();
     try {
       await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
-      const stream = await tts.toStream(cleanText);
+      const stream = await tts.toStream(cleanText, prosodyOptions ? ({ prosody: prosodyOptions } as any) : undefined);
 
       return await new Promise<Buffer>((resolve, reject) => {
         const chunks: Buffer[] = [];

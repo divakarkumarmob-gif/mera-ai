@@ -1239,7 +1239,7 @@ class WhatsAppBotService {
         try {
           const { voiceBridgeService } = await import("./voiceBridgeService");
           const targetVoice = await voiceBridgeService.getBossGlobalVoice();
-          const speechRes = await voiceBridgeService.generateSpeech(reply, targetVoice);
+          const speechRes = await voiceBridgeService.generateSpeech(reply, targetVoice, { isBoss: true, userPrompt: rawText });
           if (speechRes && speechRes.buffer.length > 0) {
             await this.sendVoiceMessage(replyJid, speechRes.buffer, messageKey, speechRes.mimeType);
             voiceSent = true;

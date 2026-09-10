@@ -2387,7 +2387,7 @@ ${
         try {
           await this.sendChatAction(chatId, "record_voice");
           const targetVoice = await voiceBridgeService.getBossGlobalVoice();
-          const speechRes = await voiceBridgeService.generateSpeech(speechText, targetVoice);
+          const speechRes = await voiceBridgeService.generateSpeech(speechText, targetVoice, { isBoss: isOwner, userPrompt: text });
           await this.sendVoice(chatId, speechRes.buffer, `🔊 "${speechText}"`);
         } catch (e: any) {
           await this.sendMessage(chatId, `❌ Voice generate karne me error: ${e?.message || e}`);
@@ -2464,7 +2464,8 @@ ${
           const targetVoice = await voiceBridgeService.getBossGlobalVoice();
           const speechRes = await voiceBridgeService.generateSpeech(
             replyText,
-            targetVoice
+            targetVoice,
+            { isBoss: isOwner, userPrompt: transcribedText }
           );
           if (speechRes?.buffer && speechRes.buffer.length > 0) {
             await this.sendVoice(chatId, speechRes.buffer, "🎙️ Friday Audio Response");
