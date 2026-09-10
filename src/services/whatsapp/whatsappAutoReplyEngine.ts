@@ -456,8 +456,8 @@ export class WhatsAppAutoReplyEngine {
     const comprehensionContext = await humanComprehensionEngine.compileHumanComprehensionPrompt(senderPhone, senderName, relation);
 
     const isGirlfriend =
-      /girlfriend|gf|crush|wife|partner|jaan|special|hansika|priya/i.test(relation || "") ||
-      /girlfriend|gf|crush|hansika|priya/i.test(senderName || "");
+      /girlfriend|gf|crush|wife|partner|jaan|special|lover|love|sweetheart|babe|darling/i.test(relation || "") ||
+      /girlfriend|gf|crush|jaan|lover|sweetheart/i.test(senderName || "");
 
     const isBestFriend =
       /bestfriend|best\s*friend|bff|close\s*friend|yaar|dost/i.test(relation || "") ||
