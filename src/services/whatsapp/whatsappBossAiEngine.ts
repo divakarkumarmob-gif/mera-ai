@@ -132,8 +132,17 @@ export class WhatsAppBossAiEngine {
     const { aiAdvancedLearningService } = await import("../aiAdvancedLearningService");
     const { frontierCognitionService } = await import("../frontierCognitionService");
     const rlhfContext = await aiAdvancedLearningService.compileRlhfPrompt();
+    const goldenStandardsContext = await aiAdvancedLearningService.compileGoldenStandardsPrompt();
     const bossStyleContext = await aiAdvancedLearningService.compileBossStylePrompt();
     const affinityContext = await frontierCognitionService.compileAffinityPrompt("boss_dk", "Boss DK");
+    const realizationsContext = await frontierCognitionService.compileRealizationsPrompt();
+    const moodContext = frontierCognitionService.compileMoodPrompt();
+
+    // Auto-record to Stream of Consciousness and check Golden Standards
+    frontierCognitionService.recordStreamEvent("Boss DK", messageText, 6).catch(() => {});
+    if (recentBossMsgs.length > 0) {
+      aiAdvancedLearningService.checkAndCurateGoldenStandard(messageText, recentBossMsgs[recentBossMsgs.length - 1]?.text || "", "").catch(() => {});
+    }
 
     const directivesContext = await bossDirectivesService.compileDirectivesPrompt();
     const trainingLessonsContext = await fridayChildTrainingService.compileTrainingPrompt(messageText);
@@ -951,9 +960,15 @@ ${cognitivePass.humanInsightPrompt}
 
 ${rlhfContext}
 
+${goldenStandardsContext}
+
 ${bossStyleContext}
 
 ${affinityContext}
+
+${realizationsContext}
+
+${moodContext}
 
 🧠 HUMAN-LEVEL PRONOUN & INTUITION MANDATE (Theory of Mind & Insaan Jaisi Samajh):
 - Understand pronouns ("isko", "inhe", "ise", "unko", "usko", "use", "in logo ko") like a real, intelligent human companion:

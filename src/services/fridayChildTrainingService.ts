@@ -8,6 +8,8 @@ export interface TrainingLesson {
   forbiddenBehaviors?: string[];  // e.g. ["Do not give dry factual advice", "Do not argue"]
   category: "emotional_comfort" | "relationship_advice" | "social_etiquette" | "task_execution" | "voice_tone";
   practiceScore?: number;         // 1 to 5 rating
+  isAnchor?: boolean;             // Elastic Memory Anchor
+  anchorPriority?: number;        // 1 to 100
   createdAt: number;
   updatedAt: number;
 }
@@ -56,6 +58,8 @@ class FridayChildTrainingService {
       idealSampleResponse?: string;
       forbiddenBehaviors?: string[];
       category?: TrainingLesson["category"];
+      isAnchor?: boolean;
+      anchorPriority?: number;
     }
   ): Promise<TrainingLesson> {
     await this.init();
@@ -68,23 +72,22 @@ class FridayChildTrainingService {
     const lower = `${cleanSituation} ${cleanReaction}`.toLowerCase();
     if (/naraz|gussa|ladai|breakup|manana|sorry|relationship|pyaar|crush|gf/i.test(lower)) {
       category = "relationship_advice";
-    } else if (/tone|voice|awaz|bologe|bolna|gaali|slang|respect|ji|sahab/i.test(lower)) {
-      category = "voice_tone";
-    } else if (/kaam|task|send|msg|message|schedule|remind|automation/i.test(lower)) {
+    } else if (/task|kaam|order|code|file|system|deploy|build/i.test(lower)) {
       category = "task_execution";
-    } else if (/guest|mehmaan|stranger|namaste|hello|manners|etiquette/i.test(lower)) {
-      category = "social_etiquette";
+    } else if (/voice|aawaz|tone|soft|slow|loud|sweet/i.test(lower)) {
+      category = "voice_tone";
     }
 
-    const id = `lesson_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const lesson: TrainingLesson = {
-      id,
+      id: `lesson_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       situationTrigger: cleanSituation,
       taughtReaction: cleanReaction,
-      idealSampleResponse: options?.idealSampleResponse?.trim(),
-      forbiddenBehaviors: options?.forbiddenBehaviors || [],
+      idealSampleResponse: options?.idealSampleResponse,
+      forbiddenBehaviors: options?.forbiddenBehaviors,
       category,
       practiceScore: 5,
+      isAnchor: options?.isAnchor ?? true,
+      anchorPriority: options?.anchorPriority ?? 100,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };

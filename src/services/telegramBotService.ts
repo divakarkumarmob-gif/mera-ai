@@ -1486,9 +1486,15 @@ Provide a 2-4 sentence executive digest of main topics, project updates, member 
     const directivesContext = await bossDirectivesService.compileDirectivesPrompt();
     const trainingContext = await fridayChildTrainingService.compileTrainingPrompt(messageText);
     const rlhfContext = await aiAdvancedLearningService.compileRlhfPrompt();
+    const goldenStandardsContext = await aiAdvancedLearningService.compileGoldenStandardsPrompt();
     const bossStyleContext = await aiAdvancedLearningService.compileBossStylePrompt();
     const affinityContext = await frontierCognitionService.compileAffinityPrompt(isOwner ? "boss_dk" : senderName, senderName);
+    const realizationsContext = await frontierCognitionService.compileRealizationsPrompt();
+    const moodContext = frontierCognitionService.compileMoodPrompt();
     const cognitivePass = humanComprehensionEngine.performCognitivePrePass(messageText, { isOwner });
+
+    // Stream of consciousness logging
+    frontierCognitionService.recordStreamEvent(senderName, messageText, isOwner ? 6 : 4).catch(() => {});
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
@@ -1507,9 +1513,15 @@ ${trainingContext}
 
 ${rlhfContext}
 
+${goldenStandardsContext}
+
 ${bossStyleContext}
 
 ${affinityContext}
+
+${realizationsContext}
+
+${moodContext}
 
 ${cognitivePass.humanInsightPrompt}
 

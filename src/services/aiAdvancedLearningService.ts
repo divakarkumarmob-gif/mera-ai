@@ -11,6 +11,16 @@ export interface RlhfFeedbackEntry {
   timestamp: number;
 }
 
+export interface GoldenStandardExample {
+  id: string;
+  userPrompt: string;
+  idealResponse: string;
+  praiseTrigger: string;
+  category: "boss_praise" | "high_eq" | "witty_reply" | "task_success";
+  score: number; // e.g. 10
+  timestamp: number;
+}
+
 export interface BossStyleProfile {
   slangTokens: string[];
   favoriteEmojis: string[];
@@ -21,10 +31,12 @@ export interface BossStyleProfile {
 }
 
 const RLHF_COLLECTION = "rlhf_rewards";
+const GOLDEN_COLLECTION = "golden_standards";
 const STYLE_DOC = "memory/bossStyleProfile";
 
 class AiAdvancedLearningService {
   private rlhfCache: RlhfFeedbackEntry[] = [];
+  private goldenCache: GoldenStandardExample[] = [];
   private bossStyleCache: BossStyleProfile | null = null;
   private isLoaded = false;
   private loadPromise: Promise<void> | null = null;
@@ -39,12 +51,15 @@ class AiAdvancedLearningService {
 
     this.loadPromise = (async () => {
       try {
-        const [rlhfSnap, styleSnap] = await Promise.all([
+        const [rlhfSnap, goldenSnap, styleSnap] = await Promise.all([
           this.getDb().collection(RLHF_COLLECTION).orderBy("timestamp", "desc").limit(100).get(),
+          this.getDb().collection(GOLDEN_COLLECTION).orderBy("timestamp", "desc").limit(50).get(),
           this.getDb().doc(STYLE_DOC).get(),
         ]);
 
         this.rlhfCache = rlhfSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+        this.goldenCache = goldenSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+
         if (styleSnap.exists) {
           this.bossStyleCache = styleSnap.data() as BossStyleProfile;
         } else {
@@ -58,7 +73,7 @@ class AiAdvancedLearningService {
           };
         }
         this.isLoaded = true;
-        console.log(`[AdvancedLearning] Loaded ${this.rlhfCache.length} RLHF reward events & Boss style profile.`);
+        console.log(`[AdvancedLearning] Loaded ${this.rlhfCache.length} RLHF events, ${this.goldenCache.length} Golden Standards & Boss style profile.`);
       } catch (e: any) {
         console.warn("[AdvancedLearning] Firestore load warning:", e?.message || e);
         this.isLoaded = true;
@@ -145,7 +160,122 @@ class AiAdvancedLearningService {
     return prompt + "\n";
   }
 
-  // ── 2. CONSTITUTIONAL AI SELF-CRITIQUE & REFLECTION LOOP ──────────────────
+  // ── 2. ANTHROPIC-STYLE GOLDEN STANDARDS AUTO-CURATOR ──────────────────────
+
+  /**
+   * Checks if Boss's incoming message is praising a recent AI response, and saves it as a Golden Standard
+   */
+  public async checkAndCurateGoldenStandard(
+    bossMessageText: string,
+    lastAiResponse: string,
+    lastUserQuery: string
+  ): Promise<GoldenStandardExample | null> {
+    await this.init();
+    if (!bossMessageText || !lastAiResponse || lastAiResponse.length < 5) return null;
+
+    const clean = bossMessageText.toLowerCase().trim();
+    const praiseRegex = /^(?:shabash|shabaash|perfect|good\s*job|mast\s*jawab|sahi\s*bola|proud\s*of\s*you|kya\s*baat\s*hai|10\/10|awesome|superb|great\s*friday|ekdum\s*sahi|dil\s*khush\s*kar\s*diya)[!?.]*$/i;
+
+    if (praiseRegex.test(clean) || /(?:mast|perfect|shabash|sahi)\s+(?:jawab|reply|hai\s*friday)/i.test(clean)) {
+      const example: GoldenStandardExample = {
+        id: `golden_${Date.now()}`,
+        userPrompt: lastUserQuery || "Boss question/topic",
+        idealResponse: lastAiResponse,
+        praiseTrigger: bossMessageText,
+        category: "boss_praise",
+        score: 10,
+        timestamp: Date.now(),
+      };
+
+      this.goldenCache.unshift(example);
+      if (this.goldenCache.length > 50) this.goldenCache.pop();
+
+      try {
+        await this.getDb().collection(GOLDEN_COLLECTION).doc(example.id).set(example);
+        console.log(`[AdvancedLearning] 🏆 Golden Standard auto-curated: Boss praised with "${bossMessageText}"!`);
+      } catch (e: any) {
+        console.warn("[AdvancedLearning] Failed to save Golden Standard:", e?.message || e);
+      }
+
+      return example;
+    }
+
+    return null;
+  }
+
+  /**
+   * Compiles Golden Standard few-shot examples for system prompt injection
+   */
+  public async compileGoldenStandardsPrompt(): Promise<string> {
+    await this.init();
+    if (this.goldenCache.length === 0) return "";
+
+    const examples = this.goldenCache.slice(0, 3);
+    return `\n🏆 GOLDEN STANDARD BENCHMARKS (Boss's Highest Rated Responses):\n` +
+      examples.map((g, i) => `Example ${i + 1}:\nUser: "${g.userPrompt}"\nFriday's Perfect Response: "${g.idealResponse}"\n(Boss Praise: "${g.praiseTrigger}")`).join("\n\n") +
+      "\n";
+  }
+
+  // ── 3. OPENAI o1/o3-STYLE INNER MONOLOGUE & SUBCONSCIOUS EVALUATOR ────────
+
+  /**
+   * Evaluates multiple candidate response drafts and selects the highest scoring one
+   */
+  public evaluateCandidateResponses(
+    candidates: string[],
+    criteria: {
+      isToBoss: boolean;
+      recipientName?: string;
+      forbiddenWords?: string[];
+    }
+  ): string {
+    if (!candidates || candidates.length === 0) return "";
+    if (candidates.length === 1) return candidates[0];
+
+    let bestCandidate = candidates[0];
+    let highestScore = -999;
+
+    for (const cand of candidates) {
+      if (!cand || cand.trim().length === 0) continue;
+      let score = 0;
+
+      // Penalize robot leaks
+      if (/as\s+an\s+ai|language\s+model|i\s+do\s+not\s+have\s+feelings|main\s+ek\s+ai\s+language\s+model/i.test(cand)) {
+        score -= 50;
+      }
+
+      // Reward crisp brevity (1-3 sentences for instant messaging)
+      const sentenceCount = cand.split(/[.!?।\n]+/).filter(Boolean).length;
+      if (sentenceCount >= 1 && sentenceCount <= 3) {
+        score += 20;
+      } else if (sentenceCount > 5) {
+        score -= 10;
+      }
+
+      // Check forbidden words
+      if (criteria.forbiddenWords) {
+        for (const w of criteria.forbiddenWords) {
+          if (cand.toLowerCase().includes(w.toLowerCase())) {
+            score -= 100;
+          }
+        }
+      }
+
+      // Boss addressing reward
+      if (criteria.isToBoss && /boss|boss\s*dk/i.test(cand)) {
+        score += 15;
+      }
+
+      if (score > highestScore) {
+        highestScore = score;
+        bestCandidate = cand;
+      }
+    }
+
+    return bestCandidate;
+  }
+
+  // ── 4. CONSTITUTIONAL AI SELF-CRITIQUE & REFLECTION LOOP ──────────────────
 
   /**
    * Evaluates draft text against Friday's Constitution before delivering to user
@@ -174,7 +304,7 @@ class AiAdvancedLearningService {
     return draftText;
   }
 
-  // ── 3. SHADOW MODE / OBSERVATIONAL STYLE LEARNER ──────────────────────────
+  // ── 5. SHADOW MODE / OBSERVATIONAL STYLE LEARNER ──────────────────────────
 
   /**
    * Observes Boss's outgoing chatting messages to learn style, slang, and emojis
@@ -198,7 +328,7 @@ class AiAdvancedLearningService {
     // 2. Extract slangs / frequent Hindi-English words
     const words = clean.toLowerCase().split(/\s+/).filter((w) => w.length >= 3 && !w.startsWith("http"));
     for (const w of words) {
-      if (["bhai", "yaar", "bro", "arre", "acha", "suno", "mast", "tension", "scene", "ghumne", "kaam", "party"].includes(w)) {
+      if (["bhai", "yaar", "bro", "arre", "acha", "suno", "mast", "tension", "scene", "ghumne", "kaam", "party", "bol", "chal"].includes(w)) {
         if (!this.bossStyleCache.slangTokens.includes(w)) {
           this.bossStyleCache.slangTokens.push(w);
         }

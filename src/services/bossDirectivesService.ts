@@ -8,6 +8,8 @@ export interface BossDirective {
   type: BossDirectiveType;
   targetWord?: string;
   replacementWord?: string;
+  isAnchor?: boolean;       // Elastic Memory Anchor (Immune to forgetting)
+  anchorPriority?: number;  // 1 to 100 (100 = foundational absolute rule)
   isActive: boolean;
   createdAt: number;
   updatedAt: number;
@@ -55,6 +57,8 @@ class BossDirectivesService {
       targetWord?: string;
       replacementWord?: string;
       type?: BossDirectiveType;
+      isAnchor?: boolean;
+      anchorPriority?: number;
     }
   ): Promise<BossDirective> {
     await this.init();

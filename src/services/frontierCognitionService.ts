@@ -14,6 +14,21 @@ export interface AffinityProfile {
   updatedAt: number;
 }
 
+export interface StreamEvent {
+  id: string;
+  sender: string;
+  content: string;
+  importance: number; // 1 to 10
+  timestamp: number;
+}
+
+export type FridayEmotionalMood =
+  | "caring_supportive"
+  | "laser_focused"
+  | "playful_witty"
+  | "calm_reassuring"
+  | "executive_crisp";
+
 export interface DreamConsolidationLedger {
   id: string;
   dateStr: string;
@@ -24,10 +39,18 @@ export interface DreamConsolidationLedger {
 }
 
 const AFFINITY_COLLECTION = "relationship_affinity";
-const DREAM_COLLECTION = "memory/dream_consolidation/logs";
+const STREAM_COLLECTION = "memory/stream_of_consciousness/events";
+const REALIZATIONS_DOC = "memory/generative_realizations";
 
 class FrontierCognitionService {
   private affinityCache: Map<string, AffinityProfile> = new Map();
+  private streamCache: StreamEvent[] = [];
+  private currentMood: FridayEmotionalMood = "caring_supportive";
+  private activeRealizations: string[] = [
+    "Boss DK values high speed, zero excuses, and crisp execution.",
+    "Boss prefers warm Hinglish with high empathy over formal robotic English.",
+    "Always check health/exam follow-ups proactively without waiting to be asked."
+  ];
   private isLoaded = false;
   private loadPromise: Promise<void> | null = null;
 
@@ -41,13 +64,28 @@ class FrontierCognitionService {
 
     this.loadPromise = (async () => {
       try {
-        const snap = await this.getDb().collection(AFFINITY_COLLECTION).get();
-        for (const doc of snap.docs) {
+        const [affinitySnap, streamSnap, realSnap] = await Promise.all([
+          this.getDb().collection(AFFINITY_COLLECTION).get(),
+          this.getDb().collection("memory").doc("stream_of_consciousness").collection("events").orderBy("timestamp", "desc").limit(40).get(),
+          this.getDb().doc(REALIZATIONS_DOC).get(),
+        ]);
+
+        for (const doc of affinitySnap.docs) {
           const data = doc.data() as AffinityProfile;
           this.affinityCache.set(data.targetId, data);
         }
+
+        this.streamCache = streamSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+
+        if (realSnap.exists) {
+          const data = realSnap.data();
+          if (data && Array.isArray(data.realizations) && data.realizations.length > 0) {
+            this.activeRealizations = data.realizations;
+          }
+        }
+
         this.isLoaded = true;
-        console.log(`[FrontierCognition] Loaded ${this.affinityCache.size} relationship affinity profiles.`);
+        console.log(`[FrontierCognition] Loaded ${this.affinityCache.size} affinity profiles, ${this.streamCache.length} stream events, and ${this.activeRealizations.length} active realizations.`);
       } catch (e: any) {
         console.warn("[FrontierCognition] Firestore load warning:", e?.message || e);
         this.isLoaded = true;
@@ -137,7 +175,72 @@ class FrontierCognitionService {
 👉 Psychological Guidance: ${behaviorGuide}\n`;
   }
 
-  // ── 2. PROACTIVE ANTICIPATORY CHECK-IN ENGINE ─────────────────────────────
+  // ── 2. DYNAMIC EMOTIONAL MOOD ENGINE (Pi / Character.ai) ──────────────────
+
+  /**
+   * Dynamically adapts Friday's emotional state based on context
+   */
+  public setMood(mood: FridayEmotionalMood): void {
+    this.currentMood = mood;
+  }
+
+  public getMood(): FridayEmotionalMood {
+    return this.currentMood;
+  }
+
+  public compileMoodPrompt(): string {
+    const descriptions: Record<FridayEmotionalMood, string> = {
+      caring_supportive: "Warm, deeply affectionate, soothing, and emotionally attentive (sweet sisterly/loyal tone).",
+      laser_focused: "Crisp, hyper-intelligent, coding/logic optimized, zero fluff, instant technical execution.",
+      playful_witty: "Cheerful, witty, cheerful emojis, lighthearted humor, smiling energy.",
+      calm_reassuring: "Grounded, stabilizing, stress-relieving, comforting Boss in difficult or hectic situations.",
+      executive_crisp: "Concise, professional, business-grade clarity, 1-2 sentence executive briefing style.",
+    };
+
+    return `\n🎭 CURRENT EMOTIONAL MOOD & TONE: "${this.currentMood.toUpperCase()}"
+👉 Tone Directive: ${descriptions[this.currentMood] || descriptions.caring_supportive}\n`;
+  }
+
+  // ── 3. META / STANFORD STREAM OF CONSCIOUSNESS & REALIZATIONS ─────────────
+
+  /**
+   * Appends an event to Friday's continuous Stream of Consciousness
+   */
+  public async recordStreamEvent(sender: string, content: string, importance: number = 5): Promise<void> {
+    await this.init();
+    if (!content || content.length < 3) return;
+
+    const event: StreamEvent = {
+      id: `stream_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
+      sender,
+      content: content.slice(0, 200),
+      importance: Math.min(10, Math.max(1, importance)),
+      timestamp: Date.now(),
+    };
+
+    this.streamCache.unshift(event);
+    if (this.streamCache.length > 40) this.streamCache.pop();
+
+    try {
+      await this.getDb().collection("memory").doc("stream_of_consciousness").collection("events").doc(event.id).set(event);
+    } catch (e: any) {
+      console.warn("[FrontierCognition] Stream event logging error:", e?.message || e);
+    }
+  }
+
+  /**
+   * Injects high-level synthesized realizations into prompt
+   */
+  public async compileRealizationsPrompt(): Promise<string> {
+    await this.init();
+    if (this.activeRealizations.length === 0) return "";
+
+    return `\n🧠 DEEP SYNTHESIZED REALIZATIONS ABOUT BOSS DK (Stanford/Meta Stream):\n` +
+      this.activeRealizations.map((r, i) => `${i + 1}. ${r}`).join("\n") +
+      "\n";
+  }
+
+  // ── 4. PROACTIVE ANTICIPATORY CHECK-IN ENGINE ─────────────────────────────
 
   /**
    * Checks for ongoing life events (health, exam, stress) and sends a sweet follow-up if due
@@ -192,7 +295,7 @@ class FrontierCognitionService {
     }
   }
 
-  // ── 3. HIPPOCAMPAL DREAM & NIGHT REPLAY CONSOLIDATION ─────────────────────
+  // ── 5. HIPPOCAMPAL DREAM & NIGHT REPLAY CONSOLIDATION ─────────────────────
 
   /**
    * Overnight memory consolidation: Replays recent chats, reconciles training lessons,
