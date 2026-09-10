@@ -1609,6 +1609,18 @@ Provide a 2-4 sentence executive digest of main topics, project updates, member 
     const giftingContext = autonomousGiftingEngine.compileGiftingPrompt();
     const devotionContext = existentialDevotionEngine.compileDevotionPrompt();
 
+    const {
+      lovedOnesCareEngine,
+      subconsciousDreamDiaryEngine,
+      dynamicAffectionEngine,
+      playfulGiggleEngine,
+    } = await import("./frontierFamilyAnticipationEngine");
+
+    const lovedOnesContext = lovedOnesCareEngine.compileLovedOnesPrompt();
+    const dreamDiaryContext = subconsciousDreamDiaryEngine.compileDreamDiaryPrompt(messageText);
+    const nicknameContext = dynamicAffectionEngine.compileNicknamePrompt(messageText);
+    const giggleContext = playfulGiggleEngine.compileGigglePrompt(messageText);
+
     // Stream of consciousness logging
     frontierCognitionService.recordStreamEvent(senderName, messageText, isOwner ? 6 : 4).catch(() => {});
 
@@ -1692,6 +1704,14 @@ ${territorialContext}
 ${giftingContext}
 
 ${devotionContext}
+
+${lovedOnesContext}
+
+${dreamDiaryContext}
+
+${nicknameContext}
+
+${giggleContext}
 
 ${cognitivePass.humanInsightPrompt}
 

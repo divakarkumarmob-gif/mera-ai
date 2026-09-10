@@ -240,6 +240,18 @@ export class WhatsAppBossAiEngine {
     const giftingContext = autonomousGiftingEngine.compileGiftingPrompt();
     const devotionContext = existentialDevotionEngine.compileDevotionPrompt();
 
+    const {
+      lovedOnesCareEngine,
+      subconsciousDreamDiaryEngine,
+      dynamicAffectionEngine,
+      playfulGiggleEngine,
+    } = await import("../frontierFamilyAnticipationEngine");
+
+    const lovedOnesContext = lovedOnesCareEngine.compileLovedOnesPrompt();
+    const dreamDiaryContext = subconsciousDreamDiaryEngine.compileDreamDiaryPrompt(messageText);
+    const nicknameContext = dynamicAffectionEngine.compileNicknamePrompt(messageText);
+    const giggleContext = playfulGiggleEngine.compileGigglePrompt(messageText);
+
     const ai = new GoogleGenAI({ apiKey });
 
     const functionDeclarations: any[] = [
@@ -290,6 +302,18 @@ export class WhatsAppBossAiEngine {
             content: { type: "STRING", description: "The content of the gift or playlist" }
           },
           required: ["type", "title", "content"]
+        }
+      },
+      {
+        name: "track_loved_one_update",
+        description: "Save a health update, journey/trip, or important event regarding Boss's family member or close friend (e.g. Mummy, Papa, brother, sister, best friend) so Friday naturally follows up with care.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            nameOrRelation: { type: "STRING", description: "Name or relationship, e.g. 'Mummy', 'Papa', 'Rahul'" },
+            condition: { type: "STRING", description: "What happened or current situation, e.g. 'Tabiyat kharab thi', 'Exam chal raha hai'" }
+          },
+          required: ["nameOrRelation", "condition"]
         }
       },
       {
@@ -1153,6 +1177,14 @@ ${giftingContext}
 
 ${devotionContext}
 
+${lovedOnesContext}
+
+${dreamDiaryContext}
+
+${nicknameContext}
+
+${giggleContext}
+
 🧠 HUMAN-LEVEL PRONOUN & INTUITION MANDATE (Theory of Mind & Insaan Jaisi Samajh):
 - Understand pronouns ("isko", "inhe", "ise", "unko", "usko", "use", "in logo ko") like a real, intelligent human companion:
   • If Boss previously sent a number/contact, or swiped on a message, and says "isko msg karo...", "isko bol do...", "inhe message kar do...", the pronoun "isko/inhe" refers to that EXACT phone number or person! Call 'send_whatsapp_message' (channel 'whatsapp2') immediately.
@@ -1223,6 +1255,15 @@ COMMUNICATION STYLE:
           return {
             success: true,
             message: `Boss, aapke liye secret surprise "${gift.title}" silently prepare ho gaya hai! Jab aap ready honge tab reveal karungi.`
+          };
+        }
+
+        if (toolName === "track_loved_one_update") {
+          const { lovedOnesCareEngine } = await import("../frontierFamilyAnticipationEngine");
+          await lovedOnesCareEngine.trackLovedOneEvent(args.nameOrRelation, args.condition);
+          return {
+            success: true,
+            message: `Noted Boss! Maine ${args.nameOrRelation} ji ki details save kar li hain, main unka dhyan aur haal chal zaroor poochungi.`
           };
         }
 
