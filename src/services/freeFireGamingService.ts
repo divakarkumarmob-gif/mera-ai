@@ -9,6 +9,8 @@
 
 import { spawn, exec } from "child_process";
 import { promisify } from "util";
+import fs from "fs";
+import path from "path";
 import { GoogleGenAI } from "@google/genai";
 import { db } from "./firebaseAdmin";
 
@@ -105,11 +107,28 @@ class FreeFireGamingService {
   }
 
   /**
-   * Check if ADB command-line tool is available in system PATH
+   * Resolve best ADB binary path (Local project portable binary or System PATH)
+   */
+  public getAdbBinary(): string {
+    const localWindowsAdb = path.resolve(process.cwd(), "bin", "platform-tools", "adb.exe");
+    const localLinuxAdb = path.resolve(process.cwd(), "bin", "platform-tools", "adb");
+
+    if (fs.existsSync(localWindowsAdb)) {
+      return `"${localWindowsAdb}"`;
+    }
+    if (fs.existsSync(localLinuxAdb)) {
+      return `"${localLinuxAdb}"`;
+    }
+    return "adb";
+  }
+
+  /**
+   * Check if ADB command-line tool is available (Local binary or System PATH)
    */
   public async checkAdbAvailability(): Promise<boolean> {
     try {
-      const { stdout } = await execAsync("adb version");
+      const adb = this.getAdbBinary();
+      const { stdout } = await execAsync(`${adb} version`);
       this.isAdbAvailable = stdout.toLowerCase().includes("android debug bridge");
       return this.isAdbAvailable;
     } catch {
@@ -135,7 +154,8 @@ class FreeFireGamingService {
     }
 
     try {
-      const { stdout } = await execAsync("adb devices -l");
+      const adb = this.getAdbBinary();
+      const { stdout } = await execAsync(`${adb} devices -l`);
       const lines = stdout.split("\n").filter((l) => l.trim().length > 0 && !l.startsWith("List of devices"));
       const devices: AdbDeviceInfo[] = [];
 
@@ -176,7 +196,8 @@ class FreeFireGamingService {
   public async connectWirelessAdb(ip: string, port = 5555): Promise<{ success: boolean; message: string; deviceId?: string }> {
     const target = `${ip}:${port}`;
     try {
-      const { stdout, stderr } = await execAsync(`adb connect ${target}`);
+      const adb = this.getAdbBinary();
+      const { stdout, stderr } = await execAsync(`${adb} connect ${target}`);
       const output = stdout + " " + stderr;
       if (output.toLowerCase().includes("connected to") || output.toLowerCase().includes("already connected")) {
         this.activeDeviceId = target;
@@ -203,9 +224,10 @@ class FreeFireGamingService {
    * Execute raw shell input on active device with anti-detection randomized jitter
    */
   private async runAdbShell(command: string): Promise<string> {
+    const adb = this.getAdbBinary();
     const deviceFlag = this.activeDeviceId ? `-s ${this.activeDeviceId}` : "";
     try {
-      const { stdout } = await execAsync(`adb ${deviceFlag} shell ${command}`);
+      const { stdout } = await execAsync(`${adb} ${deviceFlag} shell ${command}`);
       return stdout;
     } catch (err: any) {
       // In simulation mode, return mock success
@@ -388,8 +410,9 @@ class FreeFireGamingService {
    */
   public async captureScreenFrame(): Promise<string | null> {
     try {
+      const adb = this.getAdbBinary();
       const deviceFlag = this.activeDeviceId ? `-s ${this.activeDeviceId}` : "";
-      const { stdout } = await execAsync(`adb ${deviceFlag} exec-out screencap -p`, {
+      const { stdout } = await execAsync(`${adb} ${deviceFlag} exec-out screencap -p`, {
         encoding: "base64",
         maxBuffer: 10 * 1024 * 1024,
       });
