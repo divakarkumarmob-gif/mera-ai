@@ -428,6 +428,8 @@ class WhatsAppBotService {
                 aiAdvancedLearningService.processEmojiReaction(reactionEmoji, targetText, msg.pushName || "Boss", isBossReact).catch(() => {});
               });
             }
+            // CRITICAL FIX: Emoji reactions (like 👍, ❤️, 😂) are NOT chat messages! NEVER pass them to handleOwnerWhatsAppMessage!
+            continue;
           }
 
           const senderJid: string = isGroup
@@ -1085,6 +1087,12 @@ class WhatsAppBotService {
     const rawText = (text || "").trim();
     if (!rawText) return;
 
+    // CRITICAL: Drop reaction messages if any slip through
+    if (rawText.startsWith("[Reaction:") || rawText.startsWith("[reaction:") || /^\[Reaction/i.test(rawText)) {
+      console.log(`[WhatsAppBot] Dropping reaction message in handleOwnerWhatsAppMessage: "${rawText}"`);
+      return;
+    }
+
     // ── VIRTUAL GIRLFRIEND MODE ROUTING ──
     const isGfActivationIntent =
       /^(?:@girlfriend|\/girlfriend|@gf|\/gf|girlfriend\s*mode|gf\s*mode|virtual\s*girlfriend|girlfriend)\b/i.test(rawText);
@@ -1495,6 +1503,31 @@ class WhatsAppBotService {
         const oldest = Array.from(this.botSentMessageIds).slice(0, 100);
         oldest.forEach((id) => this.botSentMessageIds.delete(id));
       }
+
+      // Record Friday's reply in whatsappHistoryEngine cache so chat context knows what Friday already said!
+      const ts = Date.now();
+      const botOutgoing: IncomingMessage = {
+        id: result.key.id,
+        senderPhone: "bot",
+        senderName: "Friday",
+        senderDisplayName: "Friday",
+        replyJid: jid,
+        groupId: jid.endsWith("@g.us") ? jid : null,
+        groupName: null,
+        isGroup: jid.endsWith("@g.us"),
+        isUnknownContact: false,
+        text: trimmed,
+        timestamp: ts,
+        dateStr: new Date(ts).toLocaleString("en-IN", {
+          timeZone: "Asia/Kolkata",
+          day: "numeric",
+          month: "short",
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+        isRead: true,
+      };
+      whatsappHistoryEngine.unshiftMessage(botOutgoing);
     }
     return result;
   }

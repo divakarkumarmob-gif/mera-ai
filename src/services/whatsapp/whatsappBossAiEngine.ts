@@ -124,8 +124,9 @@ export class WhatsAppBossAiEngine {
 
     const recentBossMsgs = whatsappHistoryEngine
       .getCachedMessages()
-      .filter((m) => !m.isGroup && (m.senderName.includes("Boss") || m.senderName.includes("DK") || (replyJid && m.replyJid === replyJid)))
-      .slice(0, 5)
+      .filter((m) => !m.isGroup && (m.senderName.includes("Boss") || m.senderName.includes("DK") || m.senderName.includes("Friday") || (replyJid && m.replyJid === replyJid)))
+      .filter((m) => !m.text.startsWith("[Reaction:"))
+      .slice(0, 8)
       .reverse();
 
     const { memoryEngine } = await import("../memoryEngine");
@@ -1338,7 +1339,12 @@ COMMUNICATION STYLE:
 - Format responses cleanly using WhatsApp markdown (*bold*, _italic_, bullet points).
 - If Boss tells you to save a number or contact (e.g. "ye no save karo", "Ram ka number save kar lo"), IMMEDIATELY call 'save_contact' tool and confirm!
 - If Boss asks you to message someone (e.g. "Ram ko msg kar do ki aaj school aana hai", "Radha ko manao"), find the contact and call 'send_whatsapp_message' (using channel 'whatsapp2' by default) and confirm to Boss!
-- If Boss asks you to perform an action (send a message, schedule a message, summarize, translate, generate an image, poll, quiz, check weather, search history, forward to telegram, etc.), call the appropriate tool immediately!`;
+- If Boss asks you to perform an action (send a message, schedule a message, summarize, translate, generate an image, poll, quiz, check weather, search history, forward to telegram, etc.), call the appropriate tool immediately!
+
+🎯 TOPIC HYPER-FOCUS & ZERO TOPIC BLEEDING (CRITICAL):
+- Strictly answer ONLY what Boss is asking in his CURRENT message!
+- NEVER drag, append, or repeat details from previous already-resolved queries (e.g. if Boss previously asked for 'Suraj Pandey ka number' and that was answered, and now Boss says 'Training start', DO NOT mention or repeat Suraj Pandey's phone number!).
+- Never hallucinate past answered queries into new unrelated tasks. Keep each turn laser-focused!`;
 
     const executeTool = async (toolName: string, args: any): Promise<any> => {
       try {
