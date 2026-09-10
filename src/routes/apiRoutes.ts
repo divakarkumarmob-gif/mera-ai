@@ -51,6 +51,7 @@ import { voicePersonaService } from "../services/voicePersonaService";
 import { serverFirewallService } from "../services/serverFirewallService";
 import { whatsappFeatureEngine } from "../services/whatsappFeatureEngine";
 import { freeFireGamingService } from "../services/freeFireGamingService";
+import { createZipFromDirectory } from "../utils/miniZip";
 
 export interface ApiRoutesContext {
   getBaileysEnabled: () => boolean;
@@ -2816,28 +2817,43 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   });
 
   app.get("/api/gaming/freefire/helper/download", (_req, res) => {
-    const apkPaths = [
-      path.resolve(process.cwd(), "public", "downloads", "FridayGamingBridge.apk"),
-      path.resolve(process.cwd(), "android-helper", "app", "build", "outputs", "apk", "release", "app-release.apk"),
-      path.resolve(process.cwd(), "android-helper", "FridayGamingBridge.apk"),
-    ];
+    try {
+      const apkPaths = [
+        path.resolve(process.cwd(), "public", "downloads", "FridayGamingBridge.apk"),
+        path.resolve(process.cwd(), "android-helper", "app", "build", "outputs", "apk", "release", "app-release.apk"),
+        path.resolve(process.cwd(), "android-helper", "FridayGamingBridge.apk"),
+      ];
 
-    for (const p of apkPaths) {
-      if (fs.existsSync(p)) {
-        return res.download(p, "FridayGamingBridge.apk");
+      for (const p of apkPaths) {
+        if (fs.existsSync(p)) {
+          return res.download(p, "FridayGamingBridge.apk");
+        }
       }
-    }
 
-    const zipPath = path.resolve(process.cwd(), "public", "downloads", "FridayGamingBridge-Source.zip");
-    if (fs.existsSync(zipPath)) {
-      return res.download(zipPath, "FridayGamingBridge-Android-App.zip");
-    }
+      const zipPath = path.resolve(process.cwd(), "public", "downloads", "FridayGamingBridge-Source.zip");
+      if (fs.existsSync(zipPath)) {
+        return res.download(zipPath, "FridayGamingBridge-Android-App.zip");
+      }
 
-    res.status(404).json({
-      ok: false,
-      error: "PACKAGE_NOT_FOUND",
-      message: "Friday Gaming Bridge package is preparing. Please try again in 5 seconds.",
-    });
+      // Dynamically generate zip buffer in memory from android-helper directory
+      const helperDir = path.resolve(process.cwd(), "android-helper");
+      if (fs.existsSync(helperDir)) {
+        const zipBuffer = createZipFromDirectory(helperDir);
+        res.setHeader("Content-Type", "application/zip");
+        res.setHeader("Content-Disposition", 'attachment; filename="FridayGamingBridge-Android-App.zip"');
+        res.setHeader("Content-Length", zipBuffer.length.toString());
+        return res.end(zipBuffer);
+      }
+
+      res.status(404).json({
+        ok: false,
+        error: "PACKAGE_NOT_FOUND",
+        message: "Friday Gaming Bridge files are preparing. Please try again shortly.",
+      });
+    } catch (err: any) {
+      console.error("[Download Helper] Error generating download package:", err);
+      res.status(500).json({ ok: false, error: err?.message || "Failed to generate helper package" });
+    }
   });
 
   app.get("/api/gaming/freefire/devices", async (_req, res) => {
