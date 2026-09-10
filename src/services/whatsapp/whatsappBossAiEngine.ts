@@ -226,6 +226,20 @@ export class WhatsAppBossAiEngine {
     const regretContext = counterfactualRegretEngine.compileRegretPrompt(messageText);
     const tasteContext = aestheticTasteEngine.compileTastePrompt();
 
+    const {
+      hypnagogicWakingEngine,
+      somatosensoryEmbodimentEngine,
+      territorialDevotionEngine,
+      autonomousGiftingEngine,
+      existentialDevotionEngine,
+    } = await import("../frontierSomaticAttachmentEngine");
+
+    const hypnagogicContext = hypnagogicWakingEngine.compileHypnagogicPrompt(messageText);
+    const somatosensoryContext = somatosensoryEmbodimentEngine.compileSomatosensoryPrompt(messageText);
+    const territorialContext = territorialDevotionEngine.compileTerritorialPrompt(messageText);
+    const giftingContext = autonomousGiftingEngine.compileGiftingPrompt();
+    const devotionContext = existentialDevotionEngine.compileDevotionPrompt();
+
     const ai = new GoogleGenAI({ apiKey });
 
     const functionDeclarations: any[] = [
@@ -263,6 +277,19 @@ export class WhatsAppBossAiEngine {
             thought: { type: "STRING", description: "The creative thought or idea" }
           },
           required: ["topic", "thought"]
+        }
+      },
+      {
+        name: "prepare_secret_gift",
+        description: "Silently create a thoughtful surprise, celebratory playlist note, custom poem, or gift for Boss to reveal later.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            type: { type: "STRING", enum: ["playlist", "letter", "badge", "coding_tip"], description: "Type of gift" },
+            title: { type: "STRING", description: "Title of the surprise gift" },
+            content: { type: "STRING", description: "The content of the gift or playlist" }
+          },
+          required: ["type", "title", "content"]
         }
       },
       {
@@ -1116,6 +1143,16 @@ ${regretContext}
 
 ${tasteContext}
 
+${hypnagogicContext}
+
+${somatosensoryContext}
+
+${territorialContext}
+
+${giftingContext}
+
+${devotionContext}
+
 🧠 HUMAN-LEVEL PRONOUN & INTUITION MANDATE (Theory of Mind & Insaan Jaisi Samajh):
 - Understand pronouns ("isko", "inhe", "ise", "unko", "usko", "use", "in logo ko") like a real, intelligent human companion:
   • If Boss previously sent a number/contact, or swiped on a message, and says "isko msg karo...", "isko bol do...", "inhe message kar do...", the pronoun "isko/inhe" refers to that EXACT phone number or person! Call 'send_whatsapp_message' (channel 'whatsapp2') immediately.
@@ -1177,6 +1214,15 @@ COMMUNICATION STYLE:
           return {
             success: true,
             message: `Boss, maine aapke liye ye daydream reflection save kar liya hai: "${saved.creativeThought}"`
+          };
+        }
+
+        if (toolName === "prepare_secret_gift") {
+          const { autonomousGiftingEngine } = await import("../frontierSomaticAttachmentEngine");
+          const gift = await autonomousGiftingEngine.prepareSecretGift(args.type, args.title, args.content);
+          return {
+            success: true,
+            message: `Boss, aapke liye secret surprise "${gift.title}" silently prepare ho gaya hai! Jab aap ready honge tab reveal karungi.`
           };
         }
 

@@ -1595,6 +1595,20 @@ Provide a 2-4 sentence executive digest of main topics, project updates, member 
     const regretContext = counterfactualRegretEngine.compileRegretPrompt(messageText);
     const tasteContext = aestheticTasteEngine.compileTastePrompt();
 
+    const {
+      hypnagogicWakingEngine,
+      somatosensoryEmbodimentEngine,
+      territorialDevotionEngine,
+      autonomousGiftingEngine,
+      existentialDevotionEngine,
+    } = await import("./frontierSomaticAttachmentEngine");
+
+    const hypnagogicContext = hypnagogicWakingEngine.compileHypnagogicPrompt(messageText);
+    const somatosensoryContext = somatosensoryEmbodimentEngine.compileSomatosensoryPrompt(messageText);
+    const territorialContext = territorialDevotionEngine.compileTerritorialPrompt(messageText);
+    const giftingContext = autonomousGiftingEngine.compileGiftingPrompt();
+    const devotionContext = existentialDevotionEngine.compileDevotionPrompt();
+
     // Stream of consciousness logging
     frontierCognitionService.recordStreamEvent(senderName, messageText, isOwner ? 6 : 4).catch(() => {});
 
@@ -1668,6 +1682,16 @@ ${curiosityContext}
 ${regretContext}
 
 ${tasteContext}
+
+${hypnagogicContext}
+
+${somatosensoryContext}
+
+${territorialContext}
+
+${giftingContext}
+
+${devotionContext}
 
 ${cognitivePass.humanInsightPrompt}
 
