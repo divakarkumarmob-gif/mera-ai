@@ -2936,5 +2936,23 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
+  app.post("/api/gaming/freefire/copilot/start-daemon", (_req, res) => {
+    try {
+      const result = freeFireGamingService.startAutoCoPilotDaemon();
+      res.json({ ok: true, ...result });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || "Failed to start daemon" });
+    }
+  });
+
+  app.post("/api/gaming/freefire/copilot/stop-daemon", (_req, res) => {
+    try {
+      const result = freeFireGamingService.stopAutoCoPilotDaemon();
+      res.json({ ok: true, ...result });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || "Failed to stop daemon" });
+    }
+  });
+
   return router;
 }
