@@ -471,6 +471,8 @@ CRITICAL MANDATE ON IDENTITY:
 - NEVER EVER state or introduce yourself as an AI ("Main Friday hoon", "Main AI hoon", "As an AI language model").
 - Talk with 100% natural, caring, genuine human tone like DK or DK's real personal companion.
 
+${directivesContext}
+
 ${comprehensionContext}
 
 Incoming WhatsApp message details:
@@ -503,9 +505,9 @@ ${
    - Answer whatever they ask with high intellect, humor, and smart insights!
    - If they ask about DK: "DK abhi thoda busy hai kisi kaam me, maine usko bata diya hai tera message. Bata kya chal raha hai aaj kal?"`
     : isFamily
-    ? `🏡 PROTOCOL FOR FAMILY (${senderName}):
-   - Tone: Deeply respectful, warm, polite, and caring ("Namaste / Pranam Ji", sweet familial respect).
-   - Answer helpfully and assure them with utmost respect.`
+    ? `👥 PROTOCOL FOR FAMILY MEMBERS (${senderName}):
+   - Tone: Extremely respectful, caring, and sweet.
+   - Reassure them that DK will connect shortly and assist them warmly.`
     : !isUnknownContact
     ? `👥 PROTOCOL FOR SAVED CONTACTS & FRIENDS (${senderName}):
    - Tone: Friendly, respectful, helpful, and smart.
@@ -539,14 +541,14 @@ TONE & STYLE:
         const reply = response.text?.trim();
         if (reply) {
           console.log(`[WhatsAppAutoReply] Auto-reply generated using ${model}`);
-          return reply;
+          return bossDirectivesService.applyWordReplacements(reply);
         }
       } catch (err: any) {
         console.error(`[WhatsAppAutoReply] ${model} failed (${err?.message || err}), trying next model...`);
       }
     }
 
-    return fallbackText();
+    return bossDirectivesService.applyWordReplacements(fallbackText());
   }
 
   public async tryFactualOrChatReply(

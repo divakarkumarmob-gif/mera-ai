@@ -360,6 +360,38 @@ export async function dispatchLiveToolCall(call: any, context: ToolDispatchConte
                   } catch (e: any) {
                     result = { success: false, message: `Failed to generate pairing code: ${e?.message || e}` };
                   }
+                } else if (call.name === "add_boss_directive") {
+                  const { ruleText, targetWord, replacementWord, type } = call.args || {};
+                  const { bossDirectivesService } = await import("../services/bossDirectivesService");
+                  const directive = await bossDirectivesService.addDirective(ruleText, {
+                    targetWord,
+                    replacementWord,
+                    type,
+                  });
+                  result = {
+                    success: true,
+                    directive,
+                    message: directive.targetWord && directive.replacementWord
+                      ? `Boss, rule saved: "${directive.targetWord}" ko strictly "${directive.replacementWord}" bola jayega.`
+                      : `Boss, directive saved: "${directive.rule}".`,
+                  };
+                  clientWs.send(JSON.stringify({ type: "boss_directive_saved", directive }));
+                } else if (call.name === "remove_boss_directive") {
+                  const { queryOrKeyword } = call.args || {};
+                  const { bossDirectivesService } = await import("../services/bossDirectivesService");
+                  const remRes = await bossDirectivesService.removeDirective(queryOrKeyword);
+                  result = remRes;
+                  clientWs.send(JSON.stringify({ type: "boss_directive_removed", ...remRes }));
+                } else if (call.name === "list_boss_directives") {
+                  const { bossDirectivesService } = await import("../services/bossDirectivesService");
+                  const directives = await bossDirectivesService.getActiveDirectives();
+                  result = {
+                    success: true,
+                    count: directives.length,
+                    directives,
+                    message: `Found ${directives.length} active directives.`,
+                  };
+                  clientWs.send(JSON.stringify({ type: "boss_directives_list", directives }));
                 } else if (call.name === "set_reminder") {
                   const { title, timeString, durationMinutes } = call.args || {};
                   const reminder = await toolsEngine.addReminder(title, timeString, durationMinutes);

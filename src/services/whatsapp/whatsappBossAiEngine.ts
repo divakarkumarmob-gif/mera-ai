@@ -61,6 +61,32 @@ export class WhatsAppBossAiEngine {
       return res.message;
     }
 
+    // ── FAST DIRECT INTERCEPT: Boss Directives & Strict Word Rules ───────────
+    const { bossDirectivesService } = await import("../bossDirectivesService");
+    const directiveCheck = bossDirectivesService.parseDirectiveCommand(messageText);
+    if (directiveCheck.isDirectiveCommand) {
+      if (directiveCheck.action === "add") {
+        const added = await bossDirectivesService.addDirective(directiveCheck.ruleText || messageText, {
+          targetWord: directiveCheck.targetWord,
+          replacementWord: directiveCheck.replacementWord,
+        });
+        if (added.targetWord && added.replacementWord) {
+          return `Haan Boss! Maine ye rule strictly lock kar liya hai: aage se "${added.targetWord}" ko hamesha "${added.replacementWord}" hi bolungi aur samjhungi. Koi mistake ya purana naam use nahi hoga! 🫡`;
+        }
+        return `Ji Boss! Aapka strict order save ho gaya hai: "${added.rule}". Aage se ye strictly follow hoga! 🫡`;
+      } else if (directiveCheck.action === "remove") {
+        const remRes = await bossDirectivesService.removeDirective(directiveCheck.targetWord || messageText);
+        return remRes.message;
+      } else if (directiveCheck.action === "list") {
+        const active = await bossDirectivesService.getActiveDirectives();
+        if (active.length === 0) {
+          return "Boss, abhi koi custom directive ya word rule active nahi hai. Sab standard normal state me chal raha hai! ✨";
+        }
+        const listStr = active.map((d, i) => d.targetWord && d.replacementWord ? `*${i+1}.* "${d.targetWord}" ➔ "${d.replacementWord}"` : `*${i+1}.* ${d.rule}`).join("\n");
+        return `📋 *Active Boss Directives & Strict Rules:*\n\n${listStr}\n\n_Aap kisi bhi rule ko "[Naam] wala rule hata do" bolkar cancel kar sakte hain._`;
+      }
+    }
+
     const { memoryEngine } = await import("../memoryEngine");
     const { humanComprehensionEngine } = await import("../humanComprehensionEngine");
     const { circadianEnergyEngine } = await import("../circadianEnergyEngine");
@@ -73,6 +99,7 @@ export class WhatsAppBossAiEngine {
     const { multimodalCoPresenceEngine } = await import("../multimodalCoPresenceEngine");
     const { selfEvolutionEngine } = await import("../selfEvolutionEngine");
 
+    const directivesContext = await bossDirectivesService.compileDirectivesPrompt();
     const memoryContext = await memoryEngine.compileLeanMemoryPrompt();
     const humanComprehensionContext = await humanComprehensionEngine.compileHumanComprehensionPrompt("boss_dk", "DK (Boss)", "boss");
     const circadianContext = circadianEnergyEngine.compileCircadianPrompt();
@@ -88,6 +115,40 @@ export class WhatsAppBossAiEngine {
     const ai = new GoogleGenAI({ apiKey });
 
     const functionDeclarations: any[] = [
+      {
+        name: "add_boss_directive",
+        description: "Save a strict Boss directive, training rule, or word-replacement placeholder (e.g. 'aaj se tum mango ko frooti bologe', 'mango ko frooti samjho', 'ye strict rule follow karo: ...'). Friday will strictly obey this across all outputs.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            ruleText: { type: "STRING", description: "The full directive / command text" },
+            targetWord: { type: "STRING", description: "Optional word to replace (e.g. 'mango')" },
+            replacementWord: { type: "STRING", description: "Optional replacement word (e.g. 'frooti')" },
+            type: { type: "STRING", enum: ["word_replacement", "behavior_rule", "strict_order"], description: "Type of directive" },
+          },
+          required: ["ruleText"],
+        },
+      },
+      {
+        name: "remove_boss_directive",
+        description: "Remove, delete, or cancel an active Boss directive or word-replacement rule (e.g. 'mango ko ab frooti mat bolna', 'mango wala rule hata do', 'saare rules clear karo').",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            queryOrKeyword: { type: "STRING", description: "Target word, rule keyword, or 'all' to clear all rules" },
+          },
+          required: ["queryOrKeyword"],
+        },
+      },
+      {
+        name: "list_boss_directives",
+        description: "List all currently active Boss directives, training rules, and word-replacement placeholders.",
+        parameters: {
+          type: "OBJECT",
+          properties: {},
+          required: [],
+        },
+      },
       {
         name: "save_contact",
         description: "Save a new contact (name, phone number, and optional relation) into DK's permanent contacts book. Use when Boss says 'ye no save karo', 'Ram ka number save kar lo', 'save contact...', etc. Once saved, Boss can ask you to message them anytime.",
@@ -771,6 +832,8 @@ You will receive:
 RULE: You MUST FIRST read and understand the PREVIOUS QUOTED MESSAGE, and THEN answer or execute Boss's reply instruction in that exact context! (For example, if Boss quotes a photo and writes "analysis", analyze that photo. If Boss quotes a document or text and asks "iska kya matlab hai?", explain the quoted content).
 
 BOSS IDENTITY & MEMORY:
+${directivesContext}
+
 ${memoryContext}
 
 ${humanComprehensionContext}
@@ -826,6 +889,38 @@ COMMUNICATION STYLE:
           }
           const card = whatsappFeatureEngine.generateLiveVoiceCallCard(senderName, true);
           return { success: true, message: "Incoming call ringing triggered on Boss phone.", card };
+        }
+
+        if (toolName === "add_boss_directive") {
+          const { bossDirectivesService } = await import("../bossDirectivesService");
+          const directive = await bossDirectivesService.addDirective(args.ruleText, {
+            targetWord: args.targetWord,
+            replacementWord: args.replacementWord,
+            type: args.type,
+          });
+          return {
+            success: true,
+            directive,
+            message: directive.targetWord && directive.replacementWord
+              ? `Strict word rule saved: Whenever referring to "${directive.targetWord}", Friday will strictly use "${directive.replacementWord}".`
+              : `Strict directive saved: "${directive.rule}". Friday will follow this unconditionally.`,
+          };
+        }
+
+        if (toolName === "remove_boss_directive") {
+          const { bossDirectivesService } = await import("../bossDirectivesService");
+          const res = await bossDirectivesService.removeDirective(args.queryOrKeyword);
+          return res;
+        }
+
+        if (toolName === "list_boss_directives") {
+          const { bossDirectivesService } = await import("../bossDirectivesService");
+          const directives = await bossDirectivesService.getActiveDirectives();
+          return {
+            success: true,
+            count: directives.length,
+            directives,
+          };
         }
 
         if (toolName === "save_contact") {
@@ -1464,7 +1559,10 @@ ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` 
           }
         }
 
-        if (replyText) return replyText;
+        if (replyText) {
+          const { bossDirectivesService } = await import("../bossDirectivesService");
+          return bossDirectivesService.applyWordReplacements(replyText);
+        }
       } catch (e: any) {
         console.warn(`[WhatsAppBossAI] Model ${model} failed (${e?.message || e}), trying next model...`);
       }
@@ -1480,7 +1578,8 @@ ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` 
         })),
       });
       if (openModelReply) {
-        return openModelReply;
+        const { bossDirectivesService } = await import("../bossDirectivesService");
+        return bossDirectivesService.applyWordReplacements(openModelReply);
       }
     }
 

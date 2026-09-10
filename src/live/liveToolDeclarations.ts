@@ -333,6 +333,60 @@ const rawFunctionDeclarations: any[] = [
     }
   },
   {
+    "name": "add_boss_directive",
+    "description": "Save a strict Boss directive, training order, or word-replacement rule (e.g. 'aaj se tum mango ko frooti bologe', 'mango ko frooti samjho', 'ye strict rule follow karo: ...'). Friday will strictly obey this across all outputs.",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {
+        "ruleText": {
+          "type": "STRING",
+          "description": "The full directive command text"
+        },
+        "targetWord": {
+          "type": "STRING",
+          "description": "Optional word to replace (e.g. 'mango')"
+        },
+        "replacementWord": {
+          "type": "STRING",
+          "description": "Optional replacement word (e.g. 'frooti')"
+        },
+        "type": {
+          "type": "STRING",
+          "enum": ["word_replacement", "behavior_rule", "strict_order"],
+          "description": "Type of directive"
+        }
+      },
+      "required": [
+        "ruleText"
+      ]
+    }
+  },
+  {
+    "name": "remove_boss_directive",
+    "description": "Remove, delete, or cancel an active Boss directive or word-replacement rule (e.g. 'mango ko ab frooti mat bolna', 'mango wala rule hata do', 'saare rules clear karo').",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {
+        "queryOrKeyword": {
+          "type": "STRING",
+          "description": "Target word, rule keyword, or 'all' to clear all rules"
+        }
+      },
+      "required": [
+        "queryOrKeyword"
+      ]
+    }
+  },
+  {
+    "name": "list_boss_directives",
+    "description": "List all currently active Boss directives, training orders, and word-replacement rules.",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
     "name": "set_reminder",
     "description": "Set a reminder or alarm for DK with a specific message and time duration or timestamp.",
     "parameters": {
