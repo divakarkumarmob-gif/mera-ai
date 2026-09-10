@@ -1647,6 +1647,22 @@ Provide a 2-4 sentence executive digest of main topics, project updates, member 
     const reactivationContext = ebbinghausReactivationEngine.compileReactivationPrompt(messageText);
     const visionContext = longTermVisionEngine.compileVisionPrompt();
 
+    const {
+      epistemicHumilityEngine,
+      adaptiveComputeEngine,
+      empathicPerspectiveEngine,
+      autonomicArousalEngine,
+      microHabitLoopEngine,
+      protectiveCarePushbackEngine,
+    } = await import("./frontierAdaptiveHumilityEngine");
+
+    const epistemicContext = epistemicHumilityEngine.compileEpistemicPrompt(messageText);
+    const computeTierContext = adaptiveComputeEngine.compileAdaptiveComputePrompt(messageText);
+    const perspectiveContext = empathicPerspectiveEngine.compilePerspectivePrompt(messageText);
+    const autonomicContext = autonomicArousalEngine.compileAutonomicPrompt(messageText);
+    const habitLoopContext = microHabitLoopEngine.compileHabitPrompt(messageText);
+    const pushbackCareContext = protectiveCarePushbackEngine.compilePushbackPrompt(messageText);
+
     // Stream of consciousness logging
     frontierCognitionService.recordStreamEvent(senderName, messageText, isOwner ? 6 : 4).catch(() => {});
 
@@ -1756,6 +1772,18 @@ ${anchoringContext}
 ${reactivationContext}
 
 ${visionContext}
+
+${epistemicContext}
+
+${computeTierContext}
+
+${perspectiveContext}
+
+${autonomicContext}
+
+${habitLoopContext}
+
+${pushbackCareContext}
 
 ${cognitivePass.humanInsightPrompt}
 

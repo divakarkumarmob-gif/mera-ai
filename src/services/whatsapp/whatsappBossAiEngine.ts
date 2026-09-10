@@ -278,6 +278,22 @@ export class WhatsAppBossAiEngine {
     const reactivationContext = ebbinghausReactivationEngine.compileReactivationPrompt(messageText);
     const visionContext = longTermVisionEngine.compileVisionPrompt();
 
+    const {
+      epistemicHumilityEngine,
+      adaptiveComputeEngine,
+      empathicPerspectiveEngine,
+      autonomicArousalEngine,
+      microHabitLoopEngine,
+      protectiveCarePushbackEngine,
+    } = await import("../frontierAdaptiveHumilityEngine");
+
+    const epistemicContext = epistemicHumilityEngine.compileEpistemicPrompt(messageText);
+    const computeTierContext = adaptiveComputeEngine.compileAdaptiveComputePrompt(messageText);
+    const perspectiveContext = empathicPerspectiveEngine.compilePerspectivePrompt(messageText);
+    const autonomicContext = autonomicArousalEngine.compileAutonomicPrompt(messageText);
+    const habitLoopContext = microHabitLoopEngine.compileHabitPrompt(messageText);
+    const pushbackCareContext = protectiveCarePushbackEngine.compilePushbackPrompt(messageText);
+
     const ai = new GoogleGenAI({ apiKey });
 
     const functionDeclarations: any[] = [
@@ -1228,6 +1244,18 @@ ${anchoringContext}
 ${reactivationContext}
 
 ${visionContext}
+
+${epistemicContext}
+
+${computeTierContext}
+
+${perspectiveContext}
+
+${autonomicContext}
+
+${habitLoopContext}
+
+${pushbackCareContext}
 
 🧠 HUMAN-LEVEL PRONOUN & INTUITION MANDATE (Theory of Mind & Insaan Jaisi Samajh):
 - Understand pronouns ("isko", "inhe", "ise", "unko", "usko", "use", "in logo ko") like a real, intelligent human companion:
