@@ -65,13 +65,33 @@ GENERATE JSON OUTPUT with the following structure:
 }`;
 
     try {
-      const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: prompt,
-        config: { responseMimeType: "application/json" },
-      });
+      const models = [
+        "gemini-3.1-flash-lite",
+        "gemini-3.5-flash-lite",
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3-flash",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
+      ];
+      let rawText = "{}";
+      for (const model of models) {
+        try {
+          const response = await ai.models.generateContent({
+            model,
+            contents: prompt,
+            config: { responseMimeType: "application/json" },
+          });
+          if (response.text?.trim()) {
+            rawText = response.text.trim();
+            break;
+          }
+        } catch {}
+      }
 
-      const parsed = JSON.parse(response.text || "{}");
+      const parsed = JSON.parse(rawText || "{}");
       const insightId = `dream_${Date.now()}`;
       const insight: NightlyDreamInsight = {
         id: insightId,

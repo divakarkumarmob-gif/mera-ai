@@ -476,25 +476,43 @@ Return JSON:
 }`;
 
         const sample = session.recordedSamples[0];
-        const response = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
-          contents: [
-            {
-              role: "user",
-              parts: [
-                { text: prompt },
+        const models = [
+          "gemini-3.1-flash-lite",
+          "gemini-3.5-flash-lite",
+          "gemini-2.5-flash",
+          "gemini-2.5-flash-lite",
+          "gemini-3.6-flash",
+          "gemini-3.5-flash",
+          "gemini-3-flash",
+          "gemini-2.0-flash",
+          "gemini-1.5-flash",
+        ];
+        let raw = "{}";
+        for (const model of models) {
+          try {
+            const response = await ai.models.generateContent({
+              model,
+              contents: [
                 {
-                  inlineData: {
-                    mimeType: "audio/pcm;rate=16000",
-                    data: sample.audioBase64,
-                  },
+                  role: "user",
+                  parts: [
+                    { text: prompt },
+                    {
+                      inlineData: {
+                        mimeType: "audio/pcm;rate=16000",
+                        data: sample.audioBase64,
+                      },
+                    },
+                  ],
                 },
               ],
-            },
-          ],
-        });
-
-        const raw = response.text || "{}";
+            });
+            if (response.text?.trim()) {
+              raw = response.text.trim();
+              break;
+            }
+          } catch {}
+        }
         const jsonMatch = raw.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
           const parsed = JSON.parse(jsonMatch[0]);
@@ -694,25 +712,43 @@ Return JSON:
   "reason": "Brief verification rationale"
 }`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [
-          {
-            role: "user",
-            parts: [
-              { text: prompt },
+      const models = [
+        "gemini-3.1-flash-lite",
+        "gemini-3.5-flash-lite",
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3-flash",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
+      ];
+      let raw = "{}";
+      for (const model of models) {
+        try {
+          const response = await ai.models.generateContent({
+            model,
+            contents: [
               {
-                inlineData: {
-                  mimeType: "audio/pcm;rate=16000",
-                  data: audioBase64,
-                },
+                role: "user",
+                parts: [
+                  { text: prompt },
+                  {
+                    inlineData: {
+                      mimeType: "audio/pcm;rate=16000",
+                      data: audioBase64,
+                    },
+                  },
+                ],
               },
             ],
-          },
-        ],
-      });
-
-      const raw = response.text || "{}";
+          });
+          if (response.text?.trim()) {
+            raw = response.text.trim();
+            break;
+          }
+        } catch {}
+      }
       const jsonMatch = raw.match(/\{[\s\S]*\}/);
       const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
 

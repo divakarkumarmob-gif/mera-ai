@@ -104,22 +104,30 @@ class TelegramBotService {
   private groupProfileCache: Map<number, TelegramGroupProfile> = new Map();
   private customBusyReply: string | null = null;
 
-  // Multi-tier model fallback chain (aligned with WhatsApp)
+  // Multi-tier model fallback chain
   private static readonly MODEL_FALLBACK_CHAIN = [
-    "gemini-3.6-flash",
-    "gemini-3.5-flash",
     "gemini-3.1-flash-lite",
     "gemini-3.5-flash-lite",
     "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
-  ];
-
-  // Chat & Group Summaries model fallback chain: Primary Gemini 3 Flash -> 2.5 Flash -> 2.5 Flash Lite
-  private static readonly SUMMARY_MODEL_CHAIN = [
     "gemini-3.6-flash",
     "gemini-3.5-flash",
+    "gemini-3-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+  ];
+
+  // Chat & Group Summaries model fallback chain
+  private static readonly SUMMARY_MODEL_CHAIN = [
+    "gemini-3.1-flash-lite",
+    "gemini-3.5-flash-lite",
     "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
   ];
 
   constructor() {

@@ -641,26 +641,45 @@ Analyze this in-game Free Fire frame and output ONLY valid JSON matching this sc
   "tacticalAdvice": "Immediate 1-sentence tactical action in Hinglish addressing user as Boss (e.g., 'Boss front me 15m par enemy open me hai, SMG straight head drag lo!')"
 }`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [
-          {
-            role: "user",
-            parts: [
-              { text: prompt },
+      const models = [
+        "gemini-3.1-flash-lite",
+        "gemini-3.5-flash-lite",
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3-flash",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
+      ];
+      let rawText = "";
+      for (const model of models) {
+        try {
+          const response = await ai.models.generateContent({
+            model,
+            contents: [
               {
-                inlineData: {
-                  mimeType: "image/jpeg",
-                  data: imageBase64,
-                },
+                role: "user",
+                parts: [
+                  { text: prompt },
+                  {
+                    inlineData: {
+                      mimeType: "image/jpeg",
+                      data: imageBase64,
+                    },
+                  },
+                ],
               },
             ],
-          },
-        ],
-      });
+          });
+          if (response.text?.trim()) {
+            rawText = response.text.trim();
+            break;
+          }
+        } catch {}
+      }
 
-      const text = response.text || "";
-      const cleanJson = text.replace(/```json/gi, "").replace(/```/g, "").trim();
+      const cleanJson = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
       const parsed = JSON.parse(cleanJson);
 
       const result: LiveRadarFrameResult & {
@@ -818,12 +837,30 @@ Provide a deep technical breakdown in strictly valid JSON:
         }
       }
 
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [{ role: "user", parts: contents }],
-      });
-
-      const text = response.text || "";
+      const models = [
+        "gemini-3.1-flash-lite",
+        "gemini-3.5-flash-lite",
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3-flash",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
+      ];
+      let text = "";
+      for (const model of models) {
+        try {
+          const response = await ai.models.generateContent({
+            model,
+            contents: [{ role: "user", parts: contents }],
+          });
+          if (response.text?.trim()) {
+            text = response.text.trim();
+            break;
+          }
+        } catch {}
+      }
       const cleanJson = text.replace(/```json/gi, "").replace(/```/g, "").trim();
       const parsed = JSON.parse(cleanJson);
 
