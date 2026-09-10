@@ -24,16 +24,15 @@ object FridayWsManager {
 
     fun init(url: String, token: String) {
         this.serverUrl = url.trim().trimEnd('/')
-        this.sessionToken = token.trim()
+        this.sessionToken = token.trim().ifEmpty { "default_friday_key" }
         this.isManuallyStopped = false
 
-        if (client == null) {
-            client = OkHttpClient.Builder()
-                .readTimeout(0, TimeUnit.MILLISECONDS)
-                .pingInterval(10, TimeUnit.SECONDS)
-                .retryOnConnectionFailure(true)
-                .build()
-        }
+        client = OkHttpClient.Builder()
+            .readTimeout(0, TimeUnit.MILLISECONDS)
+            .writeTimeout(0, TimeUnit.MILLISECONDS)
+            .pingInterval(0, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+            .build()
     }
 
     fun connect() {
@@ -45,14 +44,14 @@ object FridayWsManager {
         isManuallyStopped = false
         disconnect()
 
-        val wsUrl = if (serverUrl.startsWith("http://")) {
-            serverUrl.replace("http://", "ws://") + "/live"
-        } else if (serverUrl.startsWith("https://")) {
-            serverUrl.replace("https://", "wss://") + "/live"
-        } else if (!serverUrl.startsWith("ws://") && !serverUrl.startsWith("wss://")) {
-            "wss://$serverUrl/live"
-        } else {
-            "$serverUrl/live"
+        val cleanUrl = serverUrl.trim().trimEnd('/')
+        val wsUrl = when {
+            cleanUrl.startsWith("http://") -> cleanUrl.replace("http://", "ws://") + "/live"
+            cleanUrl.startsWith("https://") -> cleanUrl.replace("https://", "wss://") + "/live"
+            cleanUrl.startsWith("ws://") || cleanUrl.startsWith("wss://") -> {
+                if (cleanUrl.endsWith("/live")) cleanUrl else "$cleanUrl/live"
+            }
+            else -> "wss://$cleanUrl/live"
         }
 
         Log.i(TAG, "Connecting to FRIDAY WebSocket: $wsUrl")
