@@ -107,6 +107,10 @@ object FridayGamingEngine {
         }
     }
 
+    fun triggerAutoRun() {
+        lockProSprint()
+    }
+
     /**
      * Precision Headshot Drag with Hitbox Targeting (Head / Neck / Chest)
      */
