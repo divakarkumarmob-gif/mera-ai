@@ -1631,6 +1631,22 @@ Provide a 2-4 sentence executive digest of main topics, project updates, member 
     const scaffoldingContext = cognitiveScaffoldingEngine.compileScaffoldingPrompt();
     const unlearningContext = machineUnlearningSentinel.compileUnlearningPrompt();
 
+    const {
+      hormonalOscillationEngine,
+      system1HunchEngine,
+      playfulRoastingEngine,
+      silentAnchoringEngine,
+      ebbinghausReactivationEngine,
+      longTermVisionEngine,
+    } = await import("./frontierHormonalIntuitionEngine");
+
+    const hormonalContext = hormonalOscillationEngine.compileHormonalPrompt();
+    const hunchContext = system1HunchEngine.compileHunchPrompt(messageText);
+    const roastingContext = playfulRoastingEngine.compileRoastingPrompt(messageText);
+    const anchoringContext = silentAnchoringEngine.compileAnchoringPrompt(messageText);
+    const reactivationContext = ebbinghausReactivationEngine.compileReactivationPrompt(messageText);
+    const visionContext = longTermVisionEngine.compileVisionPrompt();
+
     // Stream of consciousness logging
     frontierCognitionService.recordStreamEvent(senderName, messageText, isOwner ? 6 : 4).catch(() => {});
 
@@ -1728,6 +1744,18 @@ ${prmContext}
 ${scaffoldingContext}
 
 ${unlearningContext}
+
+${hormonalContext}
+
+${hunchContext}
+
+${roastingContext}
+
+${anchoringContext}
+
+${reactivationContext}
+
+${visionContext}
 
 ${cognitivePass.humanInsightPrompt}
 
