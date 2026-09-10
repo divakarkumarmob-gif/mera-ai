@@ -3840,6 +3840,17 @@ const rawFunctionDeclarations: any[] = [
       },
       "required": ["idOrQuery"]
     }
+  },
+  {
+    "name": "switch_friday_mode",
+    "description": "Switch Friday interaction mode between 'mode_a' (Standard Professional Assistant) and 'mode_b' (Unfiltered, Frank & Uncensored Casual Companion Persona). Use when Boss says 'Friday mode b me baat karo', 'Friday mode b', 'switch to mode b', 'mode a me aao', etc.",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {
+        "mode": { "type": "STRING", "enum": ["mode_a", "mode_b"], "description": "The mode to switch to ('mode_a' or 'mode_b')" }
+      },
+      "required": ["mode"]
+    }
   }
 ];
 

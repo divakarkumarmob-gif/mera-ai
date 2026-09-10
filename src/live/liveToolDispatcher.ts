@@ -2996,6 +2996,13 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                   } catch (e: any) {
                     result = { success: false, error: e?.message };
                   }
+                } else if (call.name === "switch_friday_mode") {
+                  try {
+                    const { fridayModeService } = await import("../services/fridayModeService");
+                    result = await fridayModeService.setMode(call.args?.mode || "mode_b");
+                  } catch (e: any) {
+                    result = { success: false, error: e?.message };
+                  }
                 }
 
   } catch (err: any) {

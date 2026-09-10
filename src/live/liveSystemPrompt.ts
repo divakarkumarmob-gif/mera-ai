@@ -6,6 +6,8 @@ import { fridayLearningService } from "../services/fridayLearningService";
 import { calendarEventService } from "../services/calendarEventService";
 import { toolsEngine } from "../services/toolsEngine";
 
+import { fridayModeService } from "../services/fridayModeService";
+
 export interface SystemPromptOptions {
   thinkingLevel?: string;
   accurateMode?: boolean;
@@ -16,6 +18,10 @@ export interface SystemPromptOptions {
 
 export async function buildLiveSystemInstruction(options: SystemPromptOptions = {}): Promise<string> {
   const { thinkingLevel = "high", accurateMode = false, answerLength = "normal", googleSearchMode = false, voiceName = "Aoede" } = options;
+
+  // Fetch active Friday Mode (Mode A vs Mode B)
+  const currentMode = await fridayModeService.getMode();
+  const modeBAddendum = currentMode === "mode_b" ? fridayModeService.getModeBPromptAddendum() : "";
 
   // Detect gender from voice name
   const MALE_VOICES = ["Puck","Charon","Fenrir","Orus","Umbriel","Achird","Enceladus","Algieba","Algenib","Gacrux","Zubenelgenubi","Sadaltager","Iapetus","Rasalgethi","Alnilam"];
@@ -320,5 +326,6 @@ STYLE:
 - ${answerLength === "detailed" ? "Clear answer first, then 2-3 short supporting points." : "Keep replies crisp, punchy, natural. Don't ramble."}
 - ${accurateMode ? "Careful Mode ON: double-check facts/math before speaking." : ""}
 - ${googleSearchMode ? "Google Search enabled: use it for current facts and live prices smoothly." : ""}
-- Speak numbers/currency in natural Hindi words (e.g. "paanch sau rupaye" instead of raw symbols).`;
+- Speak numbers/currency in natural Hindi words (e.g. "paanch sau rupaye" instead of raw symbols).
+${modeBAddendum}`;
 }

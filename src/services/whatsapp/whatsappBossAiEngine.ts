@@ -48,6 +48,18 @@ export class WhatsAppBossAiEngine {
       return songRes.replyText;
     }
 
+    // Fast direct intercept for Friday Mode B / Mode A activation
+    if (/(?:friday\s+)?mode\s*b\b/i.test(messageText.trim()) || /(?:friday\s+)?mode\s*b\s*me\s*baat\s*karo/i.test(messageText.trim())) {
+      const { fridayModeService } = await import("../fridayModeService");
+      const res = await fridayModeService.setMode("mode_b");
+      return res.message;
+    }
+    if (/(?:friday\s+)?mode\s*a\b/i.test(messageText.trim()) || /normal\s+mode/i.test(messageText.trim())) {
+      const { fridayModeService } = await import("../fridayModeService");
+      const res = await fridayModeService.setMode("mode_a");
+      return res.message;
+    }
+
     const { memoryEngine } = await import("../memoryEngine");
     const { humanComprehensionEngine } = await import("../humanComprehensionEngine");
     const { circadianEnergyEngine } = await import("../circadianEnergyEngine");
@@ -725,9 +737,25 @@ export class WhatsAppBossAiEngine {
           required: [],
         },
       },
+      {
+        name: "switch_friday_mode",
+        description: "Switch Friday interaction mode between 'mode_a' (Standard Professional Assistant) and 'mode_b' (Unfiltered, Frank & Uncensored Casual Companion Persona). Use when Boss says 'Friday mode b me baat karo', 'Friday mode b', 'switch to mode b', 'mode a me aao', etc.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            mode: { type: "STRING", enum: ["mode_a", "mode_b"], description: "The mode to switch to ('mode_a' or 'mode_b')" },
+          },
+          required: ["mode"],
+        },
+      },
     ];
 
+    const { fridayModeService } = await import("../fridayModeService");
+    const currentMode = await fridayModeService.getMode();
+    const modeBAddendum = currentMode === "mode_b" ? fridayModeService.getModeBPromptAddendum() : "";
+
     const systemInstruction = `YOU ARE FRIDAY: DK's (Divakar Kumar) ultra-intelligent, loyal, warm, witty, and deeply caring AI companion and chief executive assistant.
+${modeBAddendum}
 Boss (DK) is chatting with you directly on WhatsApp. He is using WhatsApp chat to communicate everything with you because he cannot talk out loud right now.
 You have FULL AUTONOMOUS ACCESS to execute all tools:
 1. Search all historical & recent WhatsApp messages (even 30+ days ago) using 'search_whatsapp_history'.
@@ -1225,6 +1253,11 @@ COMMUNICATION STYLE:
           const res = await freeFireGamingService.sendSensitivityToWhatsApp(undefined, {
             playerTag: args.playerTag || "Boss DK",
           });
+          return res;
+        }
+        if (toolName === "switch_friday_mode") {
+          const { fridayModeService } = await import("../fridayModeService");
+          const res = await fridayModeService.setMode(args.mode || "mode_b");
           return res;
         }
         if (toolName === "get_messages_digest") {
