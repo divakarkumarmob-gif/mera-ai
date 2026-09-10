@@ -78,17 +78,80 @@ jobs:
             # 2. Add showWhenLocked and turnScreenOn attributes to MainActivity
             sed -i 's/<activity/<activity android:showWhenLocked="true" android:turnScreenOn="true"/g' "$MANIFEST"
 
-            # 3. Register FridayForegroundService with Safe Foreground Service Types
-            SERVICE_TAG='        <service\n            android:name=".FridayForegroundService"\n            android:foregroundServiceType="microphone|mediaPlayback|dataSync"\n            android:exported="false" />'
+            # 3. Register FridayForegroundService & FridayAccessibilityService
+            mkdir -p "android/app/src/main/res/xml"
+            cat << 'XMLEOF' > "android/app/src/main/res/xml/accessibility_service_config.xml"
+<?xml version="1.0" encoding="utf-8"?>
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeAllMask"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows"
+    android:canPerformGestures="true"
+    android:canRetrieveWindowContent="true"
+    android:notificationTimeout="100" />
+XMLEOF
+
+            SERVICE_TAG='        <service\n            android:name=".FridayForegroundService"\n            android:foregroundServiceType="microphone|mediaPlayback|dataSync"\n            android:exported="false" />\n        <service\n            android:name=".FridayAccessibilityService"\n            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"\n            android:exported="true">\n            <intent-filter>\n                <action android:name="android.accessibilityservice.AccessibilityService" />\n            </intent-filter>\n            <meta-data\n                android:name="android.accessibilityservice"\n                android:resource="@xml/accessibility_service_config" />\n        </service>'
             if ! grep -q "FridayForegroundService" "$MANIFEST"; then
               sed -i '/<\/application>/i '"$SERVICE_TAG"'' "$MANIFEST"
             fi
           fi
 
-      - name: 🛡️ Inject Crash-Proof FridayForegroundService & MainActivity
+      - name: 🛡️ Inject Crash-Proof FridayForegroundService, AccessibilityService & MainActivity
         run: |
           PACKAGE_DIR="android/app/src/main/java/com/friday/ai"
           mkdir -p "$PACKAGE_DIR"
+
+          # 0. Create FridayAccessibilityService.java (Zero-ADB Free Fire Screen Touch Driver)
+          cat << 'EOF' > "$PACKAGE_DIR/FridayAccessibilityService.java"
+          package com.friday.ai;
+
+          import android.accessibilityservice.AccessibilityService;
+          import android.accessibilityservice.GestureDescription;
+          import android.graphics.Path;
+          import android.view.accessibility.AccessibilityEvent;
+
+          public class FridayAccessibilityService extends AccessibilityService {
+              public static FridayAccessibilityService instance;
+
+              @Override
+              public void onServiceConnected() {
+                  super.onServiceConnected();
+                  instance = this;
+              }
+
+              @Override
+              public void onAccessibilityEvent(AccessibilityEvent event) {}
+
+              @Override
+              public void onInterrupt() {}
+
+              @Override
+              public void onDestroy() {
+                  if (instance == this) instance = null;
+                  super.onDestroy();
+              }
+
+              public static boolean dispatchTap(float x, float y, long durationMs) {
+                  if (instance == null) return false;
+                  Path path = new Path();
+                  path.moveTo(x, y);
+                  GestureDescription.StrokeDescription stroke = new GestureDescription.StrokeDescription(path, 0, Math.max(20, durationMs));
+                  GestureDescription gesture = new GestureDescription.Builder().addStroke(stroke).build();
+                  return instance.dispatchGesture(gesture, null, null);
+              }
+
+              public static boolean dispatchDrag(float startX, float startY, float endX, float endY, long durationMs) {
+                  if (instance == null) return false;
+                  Path path = new Path();
+                  path.moveTo(startX, startY);
+                  path.lineTo(endX, endY);
+                  GestureDescription.StrokeDescription stroke = new GestureDescription.StrokeDescription(path, 0, Math.max(30, durationMs));
+                  GestureDescription gesture = new GestureDescription.Builder().addStroke(stroke).build();
+                  return instance.dispatchGesture(gesture, null, null);
+              }
+          }
+          EOF
 
           # 1. Create FridayForegroundService.java (100% Crash-Proof & Android 14/15 Compliant)
           cat << 'EOF' > "$PACKAGE_DIR/FridayForegroundService.java"
@@ -348,6 +411,24 @@ jobs:
                               settings.setJavaScriptEnabled(true);
                               settings.setDomStorageEnabled(true);
                               settings.setDatabaseEnabled(true);
+
+                              // Expose Friday Touch Bridge to Web App
+                              webView.addJavascriptInterface(new Object() {
+                                  @android.webkit.JavascriptInterface
+                                  public boolean dispatchTap(float x, float y, long duration) {
+                                      return FridayAccessibilityService.dispatchTap(x, y, duration);
+                                  }
+
+                                  @android.webkit.JavascriptInterface
+                                  public boolean dispatchDrag(float sx, float sy, float ex, float ey, long duration) {
+                                      return FridayAccessibilityService.dispatchDrag(sx, sy, ex, ey, duration);
+                                  }
+
+                                  @android.webkit.JavascriptInterface
+                                  public boolean isAccessibilityActive() {
+                                      return FridayAccessibilityService.instance != null;
+                                  }
+                              }, "AndroidGamingBridge");
                           }
                       }
                   } catch (Throwable e) {
