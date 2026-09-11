@@ -1219,80 +1219,62 @@ export class PhoneIntelligenceService {
         ? 'Suspicious Number'
         : 'High Risk / Telemarketer';
 
-    let card = `📱 *PHONE INTELLIGENCE RADAR (OSINT REPORT)*\n`;
+    let card = `📱 *PHONE INTELLIGENCE RADAR*\n`;
     card += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    card += `📞 *Number:* \`${report.internationalFormat}\`\n`;
-    card += `📶 *Carrier:* *${report.operator}*\n`;
+    card += `📞 *Target:* \`${report.internationalFormat}\`\n`;
+    card += `📶 *Operator:* *${report.operator}* (${report.operatorBrand})\n`;
     card += `📍 *Circle / State:* *${report.telecomCircle}*\n`;
     card += `🌍 *Region:* ${report.country} (${report.countryCode}) • \`${report.timezone}\`\n`;
-    card += `⚡ *Type:* ${report.numberType.toUpperCase()} | E.164: \`${report.e164Format}\`\n\n`;
+    card += `⚡ *Line Type:* ${report.numberType.toUpperCase()} | \`${report.e164Format}\`\n\n`;
 
+    // 👤 Identity & Subscriber Attribution
+    card += `👤 *Subscriber & Identity:*\n`;
     if (report.savedContact) {
-      card += `👤 *Address Book Match:*\n`;
-      card += `• Name: *${report.savedContact.name}*\n`;
-      if (report.savedContact.nickname) card += `• Nickname: ${report.savedContact.nickname}\n`;
-      if (report.savedContact.relationship) card += `• Relation: ${report.savedContact.relationship}\n`;
+      card += `• Name (Address Book): *${report.savedContact.name}*`;
+      if (report.savedContact.relationship) card += ` (${report.savedContact.relationship})`;
       card += `\n`;
+    } else if (report.simOwnership?.inferredOwnerName) {
+      card += `• Name Match: *${report.simOwnership.inferredOwnerName}* (${report.simOwnership.confidence.toUpperCase()})\n`;
+    } else {
+      card += `• Name Match: *Unsaved Mobile Subscriber*\n`;
     }
 
     if (report.whatsappProfile) {
-      card += `💬 *WhatsApp Identity:* ${report.whatsappProfile.isRegistered ? '✅ Registered on WhatsApp' : '⚠️ Standard Mobile'}\n`;
-      if (report.whatsappProfile.pushName) card += `• Name: *${report.whatsappProfile.pushName}*\n`;
-      if (report.whatsappProfile.aboutBio) card += `• Bio: _"${report.whatsappProfile.aboutBio}"_\n`;
-      card += `\n`;
+      card += `• WhatsApp: ${report.whatsappProfile.isRegistered ? '✅ Active on WhatsApp' : '⚠️ Not Verified'}\n`;
+      if (report.whatsappProfile.pushName) card += `• WhatsApp PushName: *${report.whatsappProfile.pushName}*\n`;
     }
+    card += `\n`;
 
-    card += `🛡️ *Spam & Security Risk Rating:*\n`;
+    // 🛡️ Security & Spam Assessment
+    card += `🛡️ *Security & Threat Rating:*\n`;
     card += `• Status: ${spamEmoji} *${spamLabel}* (${report.spamRisk.score}/100)\n`;
     if (report.spamRisk.reasons.length > 0) {
       card += `• Notes: ${report.spamRisk.reasons.join(', ')}\n`;
     }
     card += `\n`;
 
-    if (report.simOwnership) {
-      card += `🆔 *SIM Owner & Identity Attribution:*\n`;
-      if (report.simOwnership.inferredOwnerName) {
-        card += `• Owner / Match: *${report.simOwnership.inferredOwnerName}* (${report.simOwnership.confidence.toUpperCase()})\n`;
-      }
-      card += `• 🏛️ *Aadhaar-Linked SIMs (DoT):* https://tafcop.sancharsaathi.gov.in/\n`;
-      card += `• 🏢 *Business / Director Filings:* ${report.simOwnership.associatedNumbersDorks[1]?.actionUrl || '#'}\n`;
-      card += `\n`;
-    }
-
-    // Leaked Data, Public Dumps & Address Filings
-    card += `🔓 *Leaked Data, Address & Dumps Footprint:*\n`;
-    card += `• 📑 *Address & Public PDF Records:* https://www.google.com/search?q=${encodeURIComponent(
-      `("${report.normalizedNumber}") (filetype:pdf OR filetype:xlsx) ("address" OR "contact" OR "ward")`
-    )}\n`;
-    card += `• 🔓 *Pastebins & Leaked Dumps:* https://www.google.com/search?q=${encodeURIComponent(
-      `("${report.normalizedNumber}") (site:pastebin.com OR site:throwbin.io OR site:justpaste.it OR site:rentry.co)`
-    )}\n`;
-    card += `• 🛡️ *Breach Check (h8mail/SpiderFoot):* \`h8mail -t +${report.e164Format.replace('+', '')}\`\n\n`;
-
+    // 💳 UPI Footprints
     if (report.upiFootprint && report.countryCode === '+91') {
-      card += `💳 *Predicted UPI Handles (GPay/PhonePe/Paytm):*\n`;
+      card += `💳 *Predicted UPI Bank VPAs:*\n`;
       card += `• \`${report.upiFootprint.vpaList.slice(0, 3).join('`, `')}\`\n\n`;
     }
 
+    // 🎯 Decoded Email Candidates
     if (report.unmaskCandidates && report.unmaskCandidates.length > 0) {
-      card += `🎯 *Top Decoded Candidate Emails (Smart OSINT):*\n`;
-      const top3 = report.unmaskCandidates.slice(0, 3);
-      for (const cand of top3) {
+      card += `🎯 *Predicted Email Matches (OSINT):*\n`;
+      const top2 = report.unmaskCandidates.slice(0, 2);
+      for (const cand of top2) {
         card += `• \`${cand.candidateEmail}\` (${cand.confidenceScore}% match - ${cand.permutationType})\n`;
       }
       card += `\n`;
     }
 
-    card += `🌐 *Social & Email OSINT Targets:*\n`;
-    card += `• 📸 *Instagram Dork:* ${report.socialIntelligence[0]?.actionUrl || '#'}\n`;
-    card += `• 👻 *Snapchat Recon:* ${report.socialIntelligence[1]?.actionUrl || '#'}\n`;
-    card += `• 📧 *Google/Gmail Lookup:* https://accounts.google.com/signin/v2/recoveryidentifier\n\n`;
-
-    card += `⚡ *Quick OSINT Scanners & Links:*\n`;
-    card += `• 💬 *WhatsApp Chat:* ${report.whatsappProfile?.directChatUrl || `https://wa.me/${report.e164Format.replace('+', '')}`}\n`;
-    card += `• ✈️ *Telegram Direct:* ${report.telegramProfile?.directChatUrl || `https://t.me/+${report.e164Format.replace('+', '')}`}\n`;
-    card += `• 🔍 *Truecaller OSINT:* ${report.osintScanners[0]?.url || `https://www.truecaller.com/search/in/${report.normalizedNumber}`}\n`;
-    card += `• 🔎 *Google Dork Scan:* ${report.googleDorks[0]?.searchUrl || `https://www.google.com/search?q=%22${report.normalizedNumber}%22`}\n`;
+    // 🌐 Fast Verification Channels
+    card += `🌐 *Quick Verification Links:*\n`;
+    card += `• 💬 *WhatsApp:* ${report.whatsappProfile?.directChatUrl || `https://wa.me/${report.e164Format.replace('+', '')}`}\n`;
+    card += `• ✈️ *Telegram:* ${report.telegramProfile?.directChatUrl || `https://t.me/+${report.e164Format.replace('+', '')}`}\n`;
+    card += `• 🔍 *Truecaller:* https://www.truecaller.com/search/in/${report.normalizedNumber}\n`;
+    card += `• 🏛️ *DoT TAFCOP (Aadhaar SIMs):* https://tafcop.sancharsaathi.gov.in/\n`;
     card += `━━━━━━━━━━━━━━━━━━━━━`;
 
     return card;
