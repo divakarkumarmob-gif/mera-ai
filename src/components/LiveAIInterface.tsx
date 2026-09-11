@@ -844,6 +844,7 @@ function HangingRopeCapsule({
 
     const playGlassCrackSound = useCallback(() => {
         try {
+            if (typeof window !== 'undefined' && (window as any).__FRIDAY_SFX_MUTED__ !== false) return;
             const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
             if (!AudioCtxClass) return;
             const ctx = new AudioCtxClass();
@@ -1099,6 +1100,33 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
         }
         return null;
     });
+
+    // ── Global SFX Sound Mute (Stars, Monkey, Welding, Collisions) ──────────
+    // By default muted (OFF) unless explicitly clicked by user
+    const [isSfxMuted, setIsSfxMuted] = useState<boolean>(() => {
+        if (typeof window !== 'undefined') {
+            const saved = localStorage.getItem('friday_sfx_muted');
+            return saved !== null ? saved === 'true' : true;
+        }
+        return true;
+    });
+
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            (window as any).__FRIDAY_SFX_MUTED__ = isSfxMuted;
+            localStorage.setItem('friday_sfx_muted', String(isSfxMuted));
+            window.dispatchEvent(new CustomEvent('friday_sfx_mute_changed', { detail: { isMuted: isSfxMuted } }));
+        }
+    }, [isSfxMuted]);
+
+    // 🛑 When voice session starts (user speaks / "Hello Friday" wake word activates):
+    // Permanently mute SFX sounds so background SFX never interferes with voice chat!
+    useEffect(() => {
+        if (isRecording) {
+            console.log('[LiveAIInterface] 🎙️ Live Voice Session active -> Auto-muting Stars/Monkey SFX sounds');
+            setIsSfxMuted(true);
+        }
+    }, [isRecording]);
 
     const [isMicMuted, setIsMicMuted] = useState(false);
     const isMicMutedRef = useRef(false);
@@ -3078,10 +3106,27 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                                 </span>
                             )}
                         </h1>
-                        <span className="text-[11px] text-slate-300 font-mono flex items-center gap-1.5 bg-slate-900/30 px-2.5 py-1 rounded-full border border-white/10 shadow-[0_0_15px_rgba(0,0,0,0.5)]">
-                            <span className={`w-2 h-2 rounded-full ${isRecording ? 'bg-red-500 animate-ping' : 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]'}`} />
-                            <span>{isRecording ? 'Listening...' : 'Ready'}</span>
-                        </span>
+                        <div className="flex items-center gap-2">
+                            {/* 🔊 SFX Audio Sound Toggle Button (Stars, Monkey, Welding SFX) */}
+                            <button
+                                type="button"
+                                onClick={() => setIsSfxMuted(prev => !prev)}
+                                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono transition-all cursor-pointer shadow-md active:scale-95 border ${
+                                    isSfxMuted
+                                        ? 'bg-slate-900/60 hover:bg-slate-800 text-slate-400 border-white/10 hover:text-slate-200'
+                                        : 'bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border-cyan-500/50 shadow-[0_0_12px_rgba(6,182,212,0.3)] animate-pulse'
+                                }`}
+                                title={isSfxMuted ? 'SFX Audio: Muted (Click to turn ON Monkey & Star sounds)' : 'SFX Audio: ON (Click to Mute)'}
+                            >
+                                <span className="text-xs">{isSfxMuted ? '🔇' : '🔊'}</span>
+                                <span className="hidden sm:inline">{isSfxMuted ? 'SFX Muted' : 'SFX ON'}</span>
+                            </button>
+
+                            <span className="text-[11px] text-slate-300 font-mono flex items-center gap-1.5 bg-slate-900/30 px-2.5 py-1 rounded-full border border-white/10 shadow-[0_0_15px_rgba(0,0,0,0.5)]">
+                                <span className={`w-2 h-2 rounded-full ${isRecording ? 'bg-red-500 animate-ping' : 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]'}`} />
+                                <span>{isRecording ? 'Listening...' : 'Ready'}</span>
+                            </span>
+                        </div>
                     </div>
 
                     {/* ── Suspended Aerial Rope Capsules (Screen ke Top se Direct Rassi me Latke Hue, Center se Start) ── */}

@@ -26,6 +26,7 @@ function getAudioContext(): AudioContext | null {
  */
 function playFirecrackerSound() {
   try {
+    if (typeof window !== 'undefined' && (window as any).__FRIDAY_SFX_MUTED__ !== false) return;
     const ctx = getAudioContext();
     if (!ctx) return;
 

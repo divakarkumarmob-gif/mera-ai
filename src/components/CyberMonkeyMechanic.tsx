@@ -22,6 +22,7 @@ function getMonkeyAudioCtx(): AudioContext | null {
 // 🐵 Cute Cyber Monkey Jump Chirp
 function playMonkeyJumpSound() {
   try {
+    if (typeof window !== 'undefined' && (window as any).__FRIDAY_SFX_MUTED__ !== false) return;
     const ctx = getMonkeyAudioCtx();
     if (!ctx) return;
     const now = ctx.currentTime;
@@ -46,6 +47,7 @@ function playMonkeyJumpSound() {
 // ⚡ Laser Welding Sizzle Sound
 function playWeldingSound() {
   try {
+    if (typeof window !== 'undefined' && (window as any).__FRIDAY_SFX_MUTED__ !== false) return;
     const ctx = getMonkeyAudioCtx();
     if (!ctx) return;
     const now = ctx.currentTime;

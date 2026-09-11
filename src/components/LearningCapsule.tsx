@@ -149,6 +149,7 @@ export const LearningCapsule: React.FC<LearningCapsuleProps> = ({
   // Synthesize realistic glass crack / energy fracture sound
   const playCrackSound = useCallback(() => {
     try {
+      if (typeof window !== 'undefined' && (window as any).__FRIDAY_SFX_MUTED__ !== false) return;
       const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
       if (!AudioCtxClass) return;
       const ctx = new AudioCtxClass();
