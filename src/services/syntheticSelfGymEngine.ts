@@ -38,7 +38,7 @@ class SyntheticSelfGymEngine {
       selfCritique: "Maine Boss ke live time aur night coding context ko respect kiya, bina fake rigid routine zabardasti thope.",
       criticScore: 10,
       bossVerdict: "good",
-      keyTakeaway: "Respect Boss's dynamic live work hours instead of imposing hardcoded rigid routines.",
+      keyTakeaway: "Boss ke dynamic live work hours ka samman karo, bina kisi fake rigid routine ko zabardasti thope.",
       timestamp: Date.now() - 3600000,
     },
     {
@@ -54,7 +54,7 @@ class SyntheticSelfGymEngine {
       selfCritique: "'isko' ko direct previous number se link kiya bina kisi extra clarification ke.",
       criticScore: 10,
       bossVerdict: "good",
-      keyTakeaway: "Seamlessly resolve 'isko' to the quoted phone number without friction.",
+      keyTakeaway: "Quoted phone number ya contact context me 'isko' ko bina confusion ke direct resolve karo.",
       timestamp: Date.now() - 7200000,
     },
   ];
@@ -153,12 +153,12 @@ YOUR 3-STEP TRAINING DRILL:
 
 OUTPUT MUST BE VALID JSON ONLY:
 {
-  "scenarioTitle": "Short descriptive scenario title (e.g. Boss Stressed After Production Incident)",
-  "simulatedBossQuery": "The simulated query/situation in natural Hindi/Hinglish",
-  "trialResponse": "Friday's trial response in natural Hinglish applying Boss's lesson",
+  "scenarioTitle": "Short descriptive scenario title in Hinglish (e.g. Boss Late Night Par Kaam Kar Raha Hai)",
+  "simulatedBossQuery": "The simulated situation/query in natural conversational Hinglish (Hindi-English mix)",
+  "trialResponse": "Friday's trial response in natural warm Hinglish applying Boss's lesson (1-3 sentences)",
   "selfCriticScore": 9,
-  "selfCritique": "Maine Boss ke sikhaye niyam ko ache se follow kiya kyunki...",
-  "keyTakeaway": "Short summary of what was internalized"
+  "selfCritique": "Maine Boss ke sikhaye niyam ko ache se follow kiya kyunki... (1-2 sentences in Hinglish)",
+  "keyTakeaway": "Ek crisp Hinglish me lesson summary jo Friday ne andar tak internalize ki (e.g. 'Boss ke live work hours ka samman karo, fake routine thopna band karo')"
 }`;
 
     try {
@@ -212,16 +212,41 @@ OUTPUT MUST BE VALID JSON ONLY:
   ): Promise<{ ok: boolean; drill?: GymDrill; message: string }> {
     await this.init();
 
-    const drill = this.recentDrills.find((d) => d.id === drillId);
+    // 1. Try in-memory first (fast path)
+    let drill = this.recentDrills.find((d) => d.id === drillId);
+
+    // 2. If not in memory (server restarted / drill older than 30 loaded), fetch from Firestore
     if (!drill) {
-      return { ok: false, message: "Drill not found" };
+      try {
+        const snap = await this.getDb()
+          .collection("memory")
+          .doc("self_play_gym")
+          .collection("drills")
+          .doc(drillId)
+          .get();
+        if (snap.exists) {
+          drill = { id: snap.id, ...(snap.data() as any) } as GymDrill;
+          // Hot-add into memory so future operations work
+          this.recentDrills.unshift(drill);
+          if (this.recentDrills.length > 40) this.recentDrills.pop();
+          console.log(`[SelfPlayGym] 🔍 Drill fetched from Firestore on-demand: ${drillId}`);
+        }
+      } catch (e: any) {
+        console.warn("[SelfPlayGym] Firestore on-demand fetch error:", e?.message || e);
+      }
+    }
+
+    if (!drill) {
+      console.error(`[SelfPlayGym] ❌ recordBossVerdict: Drill not found in memory or Firestore: ${drillId}`);
+      return { ok: false, message: "Drill nahi mila! Drill reload karke dobara try karo." };
     }
 
     drill.bossVerdict = verdict;
-    drill.bossFeedback = bossFeedback || (verdict === "good" ? "Marked as Good by Boss DK 👍" : "Marked as Bad by Boss DK 👎");
+    drill.bossFeedback = bossFeedback || (verdict === "good" ? "Boss DK ne Good mark kiya 👍" : "Boss DK ne Bad mark kiya 👎");
 
     if (verdict === "good") {
       drill.criticScore = 10;
+      drill.selfCriticScore = 10;
 
       // Automatically enroll into Golden Standards so Friday permanently uses this as a 10/10 few-shot benchmark!
       try {
@@ -230,36 +255,30 @@ OUTPUT MUST BE VALID JSON ONLY:
           drill.trialResponse,
           `Boss Marked Good in Training Capsule (Drill: ${drill.scenarioTitle})`
         );
+        console.log(`[SelfPlayGym] ⭐ Auto-curated into Golden Standards: "${drill.scenarioTitle}"`);
       } catch (err) {
         console.warn("[SelfPlayGym] Could not auto-curate golden standard:", err);
       }
 
       // Log positive RLHF reward
       try {
-        await aiAdvancedLearningService.processEmojiReaction(
-          "👍",
-          drill.trialResponse,
-          "Boss DK",
-          true
-        );
+        await aiAdvancedLearningService.processEmojiReaction("👍", drill.trialResponse, "Boss DK", true);
       } catch {}
     } else {
-      drill.criticScore = Math.min(drill.selfCriticScore, 4);
+      // Bad verdict: downgrade score
+      const prevScore = typeof drill.selfCriticScore === "number" ? drill.selfCriticScore : (drill.criticScore || 5);
+      drill.criticScore = Math.min(prevScore, 4);
 
-      // Log negative RLHF reward
+      // Log negative RLHF signal
       try {
-        await aiAdvancedLearningService.processEmojiReaction(
-          "👎",
-          drill.trialResponse,
-          "Boss DK",
-          true
-        );
+        await aiAdvancedLearningService.processEmojiReaction("👎", drill.trialResponse, "Boss DK", true);
       } catch {}
     }
 
-    // Persist to Firestore
+    // Persist updated drill to Firestore
     try {
       await this.getDb().collection("memory").doc("self_play_gym").collection("drills").doc(drill.id).set(drill);
+      console.log(`[SelfPlayGym] ✅ Verdict '${verdict}' saved for drill: ${drill.id}`);
     } catch (e: any) {
       console.warn("[SelfPlayGym] Firestore update error:", e?.message || e);
     }

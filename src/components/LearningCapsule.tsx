@@ -130,6 +130,7 @@ export const LearningCapsule: React.FC<LearningCapsuleProps> = ({
   const [retryingDrill, setRetryingDrill] = useState<Record<string, boolean>>({});
   const [retryInstruction, setRetryInstruction] = useState<Record<string, string>>({});
   const [showRetryInput, setShowRetryInput] = useState<Record<string, boolean>>({});
+  const [verdictToast, setVerdictToast] = useState<{ msg: string; type: 'good' | 'bad' | 'error' } | null>(null);
 
   // Teach modal form
   const [showTeachModal, setShowTeachModal] = useState(false);
@@ -204,14 +205,23 @@ export const LearningCapsule: React.FC<LearningCapsuleProps> = ({
       const data = await res.json();
       if (data.ok && data.drill) {
         setDrills((prev) => prev.map((d) => (d.id === drillId ? data.drill : d)));
+        // Show toast feedback so Boss knows it worked
+        setVerdictToast({ msg: data.message || (verdict === 'good' ? '👍 Good mark ho gaya!' : '👎 Bad mark ho gaya!'), type: verdict });
+        setTimeout(() => setVerdictToast(null), 4000);
         if (verdict === 'good') {
-          fetchData(); // Refresh to update Golden standards list & approval stats
+          fetchData(); // Refresh golden standards list & approval stats
         } else {
           setShowRetryInput((prev) => ({ ...prev, [drillId]: true }));
         }
+      } else {
+        // Show error toast
+        setVerdictToast({ msg: data.message || 'Kuch error aa gayi, dobara try karo!', type: 'error' });
+        setTimeout(() => setVerdictToast(null), 4000);
       }
     } catch (e) {
       console.error('Failed to mark verdict:', e);
+      setVerdictToast({ msg: 'Network error! Server se connect nahi ho pa raha.', type: 'error' });
+      setTimeout(() => setVerdictToast(null), 4000);
     } finally {
       setMarkingVerdict((prev) => ({ ...prev, [drillId]: false }));
     }
@@ -372,6 +382,28 @@ export const LearningCapsule: React.FC<LearningCapsuleProps> = ({
         {/* Glow Effects */}
         <div className="absolute top-0 left-1/4 w-96 h-32 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute top-0 right-1/4 w-96 h-32 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        {/* ── Verdict Toast Notification ── */}
+        <AnimatePresence>
+          {verdictToast && (
+            <motion.div
+              key="verdict-toast"
+              initial={{ opacity: 0, y: -20, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -10, scale: 0.95 }}
+              className={`absolute top-4 left-1/2 -translate-x-1/2 z-50 px-5 py-2.5 rounded-2xl text-sm font-bold shadow-xl backdrop-blur-xl flex items-center gap-2 border pointer-events-none ${
+                verdictToast.type === 'good'
+                  ? 'bg-emerald-600/90 text-white border-emerald-400/50 shadow-emerald-900/50'
+                  : verdictToast.type === 'bad'
+                  ? 'bg-rose-600/90 text-white border-rose-400/50 shadow-rose-900/50'
+                  : 'bg-slate-700/90 text-white border-white/20'
+              }`}
+            >
+              <span>{verdictToast.type === 'good' ? '🏆' : verdictToast.type === 'bad' ? '👎' : '⚠️'}</span>
+              <span>{verdictToast.msg}</span>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* ── Top Capsule Header ── */}
         <div className="relative flex items-center justify-between px-6 py-4 border-b border-white/10 bg-slate-900/60 backdrop-blur-xl">
