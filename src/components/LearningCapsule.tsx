@@ -440,15 +440,50 @@ export const LearningCapsule: React.FC<LearningCapsuleProps> = ({
                 scale: { duration: 0.3 },
               }
         }
-        className="fixed top-24 sm:top-28 right-3 sm:right-6 z-40 select-none cursor-grab active:cursor-grabbing touch-none"
+        className="fixed top-20 sm:top-24 right-4 sm:right-8 z-40 select-none cursor-grab active:cursor-grabbing touch-none flex flex-col items-center"
+        style={{ transformOrigin: 'top center' }}
       >
+        {/* ── Solid Continuous Glowing Rope extending straight down from the ceiling to the capsule ── */}
         <div
-          className="relative group"
+          className="absolute left-1/2 -translate-x-1/2 pointer-events-none z-0"
+          style={{
+            bottom: 'calc(100% - 10px)',
+            top: '-150vh',
+            width: '2.5px',
+          }}
+        >
+          {/* Main Braided Cable */}
+          <div
+            className="w-full h-full bg-gradient-to-b from-emerald-400/90 via-teal-300 to-emerald-500/90"
+            style={{
+              backgroundImage: `repeating-linear-gradient(45deg, rgba(0,0,0,0.5) 0px, rgba(0,0,0,0.5) 2.5px, rgba(255,255,255,0.3) 2.5px, rgba(255,255,255,0.3) 5px)`,
+            }}
+          />
+          {/* Full Neon Radiance Glow */}
+          <div
+            className="absolute inset-0 w-full h-full pointer-events-none"
+            style={{
+              boxShadow: `0 0 8px 2px rgba(16,185,129,0.5), 0 0 16px 4px rgba(16,185,129,0.35)`,
+            }}
+          />
+        </div>
+
+        {/* Glowing Attachment Node right on top of the capsule */}
+        <div className="relative z-10 flex flex-col items-center -mb-1">
+          <div
+            className="w-2.5 h-2.5 rounded-full bg-slate-950 border-[1.5px] border-emerald-400 flex items-center justify-center pointer-events-none shadow-[0_0_10px_rgba(16,185,129,0.8)]"
+          >
+            <div className="w-1 h-1 rounded-full bg-white animate-pulse" />
+          </div>
+        </div>
+
+        <div
+          className="relative group z-20"
           onDoubleClick={(e) => {
             e.stopPropagation();
             triggerCrackEffect();
           }}
-          title={isCracked ? `⚡ Capsule Cracked! Auto-repairing in ${crackCountdown}s...` : 'Cognition Capsule (Draggable • Double-click to test crack)'}
+          title={isCracked ? `⚡ Training Capsule Cracked! Auto-repairing in ${crackCountdown}s...` : 'Training Capsule (Suspended from ceiling • Double-click to test crack)'}
         >
           {/* Dynamic Antigravity Aura (Fiery burning amber/red warning when cracked, glowing emerald normally) */}
           <div
@@ -481,7 +516,7 @@ export const LearningCapsule: React.FC<LearningCapsuleProps> = ({
               />
             </span>
 
-            {/* Click to open full Cognition Studio */}
+            {/* Click to open full Training Studio */}
             <div
               onClick={() => {
                 if (onExpandToStudio) onExpandToStudio();
@@ -496,7 +531,7 @@ export const LearningCapsule: React.FC<LearningCapsuleProps> = ({
                     : 'bg-gradient-to-r from-emerald-300 via-teal-200 to-cyan-200'
                 }`}
               >
-                {isCracked ? `💥 CRACKED (${crackCountdown}s)` : '🧠 Cognition'}
+                {isCracked ? `💥 CRACKED (${crackCountdown}s)` : '🧠 Training'}
               </span>
               <span
                 className={`text-[10px] sm:text-xs px-1.5 py-0.2 rounded-full font-mono font-semibold whitespace-nowrap border ${
@@ -624,7 +659,7 @@ export const LearningCapsule: React.FC<LearningCapsuleProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-lg font-bold bg-gradient-to-r from-emerald-300 via-cyan-200 to-white bg-clip-text text-transparent">
-                  Friday Autonomous Cognition Capsule
+                  Friday Autonomous Training Capsule
                 </h2>
                 <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-[11px] font-mono text-emerald-300">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />

@@ -3097,7 +3097,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                                             title="Friday Live Autonomous Learning & Cognition Capsule"
                                         >
                                             <span className="text-sm">🧠</span>
-                                            <span>Learning Capsule</span>
+                                            <span>Training</span>
                                         </button>
                                     </HangingRopeCapsule>
 
