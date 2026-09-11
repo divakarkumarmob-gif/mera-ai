@@ -143,31 +143,96 @@ export const LearningCapsule: React.FC<LearningCapsuleProps> = ({
   // 💥 Meteor Impact & 5-Second Auto Nano-Repair States
   const [isCracked, setIsCracked] = useState(false);
   const [isHealing, setIsHealing] = useState(false);
+  const [crackCountdown, setCrackCountdown] = useState(5);
   const crackTimerRef = useRef<any>(null);
+  const countdownIntervalRef = useRef<any>(null);
+
+  // Synthesize realistic glass crack / energy fracture sound
+  const playCrackSound = useCallback(() => {
+    try {
+      const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtxClass) return;
+      const ctx = new AudioCtxClass();
+      if (ctx.state === 'suspended') ctx.resume();
+
+      const now = ctx.currentTime;
+      // High-pitched crystal shatter transient
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(3200, now);
+      osc.frequency.exponentialRampToValueAtTime(450, now + 0.12);
+
+      gain.gain.setValueAtTime(0.35, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.15);
+
+      // Sizzling electric zap
+      const zapOsc = ctx.createOscillator();
+      const zapGain = ctx.createGain();
+      zapOsc.type = 'square';
+      zapOsc.frequency.setValueAtTime(1800, now + 0.04);
+      zapOsc.frequency.exponentialRampToValueAtTime(200, now + 0.2);
+
+      zapGain.gain.setValueAtTime(0.15, now + 0.04);
+      zapGain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+
+      zapOsc.connect(zapGain);
+      zapGain.connect(ctx.destination);
+      zapOsc.start(now + 0.04);
+      zapOsc.stop(now + 0.23);
+    } catch {}
+  }, []);
+
+  const triggerCrackEffect = useCallback(() => {
+    setIsCracked(true);
+    setIsHealing(false);
+    setCrackCountdown(5);
+    playCrackSound();
+
+    if (crackTimerRef.current) clearTimeout(crackTimerRef.current);
+    if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+
+    // 1-second countdown updates
+    let timeLeft = 5;
+    countdownIntervalRef.current = setInterval(() => {
+      timeLeft -= 1;
+      setCrackCountdown(Math.max(0, timeLeft));
+      if (timeLeft <= 0) {
+        clearInterval(countdownIntervalRef.current);
+      }
+    }, 1000);
+
+    // At 4.2s start nanotech laser seal, fully heal at 5.0s
+    crackTimerRef.current = setTimeout(() => {
+      setIsHealing(true);
+      setTimeout(() => {
+        setIsCracked(false);
+        setIsHealing(false);
+        clearInterval(countdownIntervalRef.current);
+      }, 800);
+    }, 4200);
+  }, [playCrackSound]);
 
   useEffect(() => {
-    const handleMeteorHit = () => {
-      setIsCracked(true);
-      setIsHealing(false);
-
-      if (crackTimerRef.current) clearTimeout(crackTimerRef.current);
-
-      // Start healing holographic laser at 4.2s, fully repaired by 5.0s
-      crackTimerRef.current = setTimeout(() => {
-        setIsHealing(true);
-        setTimeout(() => {
-          setIsCracked(false);
-          setIsHealing(false);
-        }, 800);
-      }, 4200);
+    const handleMeteorHit = (e: any) => {
+      console.log('💥 [Cognition Capsule] Hit by Meteor!', e?.detail);
+      triggerCrackEffect();
     };
 
     window.addEventListener('capsule_meteor_hit', handleMeteorHit);
+    (window as any).triggerCapsuleCrack = triggerCrackEffect;
+
     return () => {
       window.removeEventListener('capsule_meteor_hit', handleMeteorHit);
       if (crackTimerRef.current) clearTimeout(crackTimerRef.current);
+      if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
     };
-  }, []);
+  }, [triggerCrackEffect]);
 
   // Fetch all learning data
   const fetchData = useCallback(async () => {
@@ -377,32 +442,41 @@ export const LearningCapsule: React.FC<LearningCapsuleProps> = ({
         }
         className="fixed top-24 sm:top-28 right-3 sm:right-6 z-40 select-none cursor-grab active:cursor-grabbing touch-none"
       >
-        <div className="relative group">
-          {/* Dynamic Antigravity Aura (Changes to fiery amber/red warning when cracked) */}
+        <div
+          className="relative group"
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            triggerCrackEffect();
+          }}
+          title={isCracked ? `⚡ Capsule Cracked! Auto-repairing in ${crackCountdown}s...` : 'Cognition Capsule (Draggable • Double-click to test crack)'}
+        >
+          {/* Dynamic Antigravity Aura (Fiery burning amber/red warning when cracked, glowing emerald normally) */}
           <div
-            className={`absolute -inset-1.5 rounded-full blur-md transition-all duration-500 animate-pulse ${
+            className={`absolute -inset-2 rounded-full blur-lg transition-all duration-500 animate-pulse ${
               isCracked
-                ? 'bg-gradient-to-r from-red-500 via-amber-500 to-orange-500 opacity-95'
+                ? 'bg-gradient-to-r from-red-600 via-amber-500 to-orange-600 opacity-100 shadow-[0_0_35px_rgba(239,68,68,0.9)]'
                 : 'bg-gradient-to-r from-emerald-500/80 via-teal-400/60 to-cyan-500/80 opacity-70 group-hover:opacity-100'
             }`}
           />
 
           {/* Compact Antigravity Floating Pill */}
           <div
-            className={`relative flex items-center gap-2 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-full bg-slate-950/95 backdrop-blur-xl shadow-[0_0_25px_rgba(16,185,129,0.35)] text-slate-100 transition-colors duration-300 border ${
-              isCracked ? 'border-amber-500/80 shadow-[0_0_35px_rgba(245,158,11,0.5)]' : 'border-emerald-400/50'
+            className={`relative flex items-center gap-2 px-3.5 py-2 rounded-full bg-slate-950/95 backdrop-blur-xl text-slate-100 transition-colors duration-300 border ${
+              isCracked
+                ? 'border-amber-400 shadow-[0_0_35px_rgba(245,158,11,0.7)] ring-2 ring-red-500/60'
+                : 'border-emerald-400/50 shadow-[0_0_25px_rgba(16,185,129,0.35)]'
             }`}
           >
             {/* Live Pulsing Brain Dot */}
             <span className="relative flex h-2.5 w-2.5 shrink-0">
               <span
                 className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                  isCracked ? 'bg-amber-400' : 'bg-emerald-400'
+                  isCracked ? 'bg-red-400' : 'bg-emerald-400'
                 }`}
               />
               <span
                 className={`relative inline-flex rounded-full h-2.5 w-2.5 ${
-                  isCracked ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.9)]' : 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.9)]'
+                  isCracked ? 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,1)]' : 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.9)]'
                 }`}
               />
             </span>
@@ -414,21 +488,20 @@ export const LearningCapsule: React.FC<LearningCapsuleProps> = ({
                 else setIsExpanded(true);
               }}
               className="cursor-pointer flex items-center gap-1.5"
-              title="Click to open full Cognition Capsule Studio (Drag to reposition)"
             >
               <span
                 className={`text-xs sm:text-sm font-bold bg-clip-text text-transparent whitespace-nowrap ${
                   isCracked
-                    ? 'bg-gradient-to-r from-amber-300 via-red-200 to-yellow-200'
+                    ? 'bg-gradient-to-r from-amber-300 via-red-300 to-yellow-300 animate-pulse'
                     : 'bg-gradient-to-r from-emerald-300 via-teal-200 to-cyan-200'
                 }`}
               >
-                🧠 {isCracked ? 'CRACKED!' : 'Cognition'}
+                {isCracked ? `💥 CRACKED (${crackCountdown}s)` : '🧠 Cognition'}
               </span>
               <span
                 className={`text-[10px] sm:text-xs px-1.5 py-0.2 rounded-full font-mono font-semibold whitespace-nowrap border ${
                   isCracked
-                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                    ? 'bg-red-500/30 text-amber-200 border-red-500/60'
                     : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
                 }`}
               >
@@ -460,34 +533,34 @@ export const LearningCapsule: React.FC<LearningCapsuleProps> = ({
                 <svg className="w-full h-full absolute inset-0" viewBox="0 0 160 40" preserveAspectRatio="none">
                   {/* Outer glowing fissure outline */}
                   <path
-                    d="M 80 0 L 76 9 L 84 18 L 75 27 L 83 34 L 80 40"
+                    d="M 80 0 L 74 10 L 86 19 L 73 28 L 84 35 L 80 40"
                     fill="none"
-                    stroke="#ff3b00"
-                    strokeWidth="3.2"
+                    stroke="#ff2200"
+                    strokeWidth="4.5"
                     strokeLinecap="round"
-                    style={{ filter: 'drop-shadow(0 0 5px #ff4500)' }}
+                    style={{ filter: 'drop-shadow(0 0 8px #ff4500)' }}
                   />
-                  {/* Sharp white-hot central fracture line */}
+                  {/* Sharp white-hot molten core line */}
                   <path
-                    d="M 80 0 L 76 9 L 84 18 L 75 27 L 83 34 L 80 40"
+                    d="M 80 0 L 74 10 L 86 19 L 73 28 L 84 35 L 80 40"
                     fill="none"
                     stroke="#ffffff"
-                    strokeWidth="1.2"
+                    strokeWidth="1.8"
                     strokeLinecap="round"
                   />
                   {/* Lateral branch micro-cracks */}
                   <path
-                    d="M 76 9 L 66 13 M 75 27 L 64 24 M 84 18 L 94 15 M 83 34 L 93 36"
+                    d="M 74 10 L 60 14 M 73 28 L 58 25 M 86 19 L 100 16 M 84 35 L 98 37"
                     fill="none"
                     stroke="#fbbf24"
-                    strokeWidth="1.0"
+                    strokeWidth="1.4"
                     strokeLinecap="round"
-                    opacity="0.9"
+                    opacity="0.95"
                   />
                 </svg>
 
                 {/* Hot glowing impact sparks point */}
-                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-amber-400/50 animate-ping" />
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-amber-300/80 animate-ping" />
 
                 {/* 5-Second Nano-Repair Holographic Laser Beam (Sweeps at 4.2s - 5.0s to seal the crack) */}
                 {isHealing && (
@@ -495,7 +568,7 @@ export const LearningCapsule: React.FC<LearningCapsuleProps> = ({
                     initial={{ x: '-100%', opacity: 0 }}
                     animate={{ x: '100%', opacity: [0, 1, 1, 0] }}
                     transition={{ duration: 0.8, ease: 'easeInOut' }}
-                    className="absolute inset-0 bg-gradient-to-r from-transparent via-emerald-400/90 to-transparent w-full h-full shadow-[0_0_20px_#10b981]"
+                    className="absolute inset-0 bg-gradient-to-r from-transparent via-emerald-300 to-transparent w-full h-full shadow-[0_0_25px_#10b981]"
                   />
                 )}
               </div>

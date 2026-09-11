@@ -509,37 +509,34 @@ export const StarryBackground: React.FC = () => {
       });
     };
 
-    // 🌟 3. Capsule Target Spawner (Shoots UPWARDS or SIDEWAYS from distance across the sky towards capsules!)
-    const spawnCapsuleTargetMeteor = () => {
+    // 🌟 3. Dedicated Floating Cognition Capsule Target Spawner
+    const spawnFloatingCapsuleTargetMeteor = () => {
       try {
-        const capsules = Array.from(
-          document.querySelectorAll('[data-floating-capsule="true"], [data-hanging-capsule="true"]')
-        );
-        if (capsules.length === 0) return;
+        const floatCap = document.querySelector('[data-floating-capsule="true"]');
+        if (!floatCap) return;
 
-        const targetEl = capsules[Math.floor(Math.random() * capsules.length)];
-        const rect = targetEl.getBoundingClientRect();
+        const rect = floatCap.getBoundingClientRect();
+        // Target center of the floating capsule
         const targetX = rect.left + rect.width / 2;
         const targetY = rect.top + rect.height / 2;
 
-        // Spawn only from Bottom, Left-Bottom, or Right-Bottom so it travels long and visibly!
-        const spawnType = Math.floor(Math.random() * 3);
-        const travelDist = Math.random() * 260 + 340;
-        let startX = targetX;
-        let startY = targetY;
+        // Spawn ONLY from screen edges: 0 = Bottom edge, 1 = Left edge, 2 = Bottom-Left
+        const spawnSide = Math.floor(Math.random() * 3);
+        let startX = 0;
+        let startY = 0;
 
-        if (spawnType === 0) {
-          // Shoot UPWARDS from bottom
-          startX = targetX + (Math.random() - 0.5) * 160;
-          startY = targetY + travelDist;
-        } else if (spawnType === 1) {
-          // Shoot from bottom-LEFT sweeping upwards towards capsule
-          startX = targetX - travelDist * 0.85;
-          startY = targetY + travelDist * 0.65;
+        if (spawnSide === 0) {
+          // Bottom edge flying straight/diagonally up to capsule
+          startX = Math.random() * (width * 0.7) + width * 0.15;
+          startY = height + 35;
+        } else if (spawnSide === 1) {
+          // Left edge flying across to upper-right capsule
+          startX = -35;
+          startY = Math.random() * (height * 0.5) + height * 0.35;
         } else {
-          // Shoot from bottom-RIGHT sweeping upwards towards capsule
-          startX = targetX + travelDist * 0.85;
-          startY = targetY + travelDist * 0.65;
+          // Bottom-left corner flying long trajectory
+          startX = -30;
+          startY = height + 30;
         }
 
         const dx = targetX - startX;
@@ -555,21 +552,70 @@ export const StarryBackground: React.FC = () => {
           y: startY,
           vx: dx / dist,
           vy: dy / dist,
-          length: 85,
-          speed: Math.random() * 0.8 + 2.8,
+          length: Math.random() * 25 + 75,
+          speed: Math.random() * 0.8 + 3.2,
           opacity: 1,
           active: true,
           theme,
-          headRadius: 3.6,
+          headRadius: 3.8,
+          sparks: [],
+        });
+      } catch {}
+    };
+
+    // 🌟 4. Hanging Header Capsules Target Spawner
+    const spawnHangingCapsuleTargetMeteor = () => {
+      try {
+        const hangingCaps = Array.from(document.querySelectorAll('[data-hanging-capsule="true"]'));
+        if (hangingCaps.length === 0) return;
+
+        const targetEl = hangingCaps[Math.floor(Math.random() * hangingCaps.length)];
+        const rect = targetEl.getBoundingClientRect();
+        const targetX = rect.left + rect.width / 2;
+        const targetY = rect.top + rect.height / 2;
+
+        // Spawn from bottom or side border
+        const spawnSide = Math.random() > 0.5 ? 0 : 1;
+        let startX = 0;
+        let startY = 0;
+
+        if (spawnSide === 0) {
+          startX = Math.random() * (width * 0.8) + width * 0.1;
+          startY = height + 35;
+        } else {
+          startX = Math.random() > 0.5 ? -35 : width + 35;
+          startY = Math.random() * (height * 0.4) + height * 0.4;
+        }
+
+        const dx = targetX - startX;
+        const dy = targetY - startY;
+        const dist = Math.hypot(dx, dy) || 1;
+
+        const theme = METEOR_THEMES[themeCounter % METEOR_THEMES.length];
+        themeCounter++;
+
+        shootingStars.push({
+          id: nextMeteorId++,
+          x: startX,
+          y: startY,
+          vx: dx / dist,
+          vy: dy / dist,
+          length: 70,
+          speed: Math.random() * 0.6 + 3.0,
+          opacity: 1,
+          active: true,
+          theme,
+          headRadius: 3.4,
           sparks: [],
         });
       } catch {}
     };
 
     let lastMeteorTime = Date.now();
-    let nextMeteorInterval = 850;
+    let nextMeteorInterval = 800;
     let lastPairTime = Date.now();
-    let lastCapsuleTargetTime = Date.now();
+    let lastFloatingTargetTime = Date.now();
+    let lastHangingTargetTime = Date.now();
 
     const render = () => {
       ctx.clearRect(0, 0, width, height);
@@ -578,25 +624,31 @@ export const StarryBackground: React.FC = () => {
 
       // Routine side and bottom meteors
       if (now - lastMeteorTime > nextMeteorInterval) {
-        if (shootingStars.length < 9) {
+        if (shootingStars.length < 10) {
           shootingStars.push(createSideOrBottomShootingStar());
         }
         lastMeteorTime = now;
-        nextMeteorInterval = Math.random() * 800 + 600;
+        nextMeteorInterval = Math.random() * 700 + 500;
       }
 
       // Mid-air collision pairs every ~3 seconds
       if (now - lastPairTime > 3000) {
-        if (shootingStars.length < 8) {
+        if (shootingStars.length < 9) {
           spawnCollisionPair();
         }
         lastPairTime = now;
       }
 
-      // Long-distance capsule targeted meteors every ~4 seconds
-      if (now - lastCapsuleTargetTime > 4000) {
-        spawnCapsuleTargetMeteor();
-        lastCapsuleTargetTime = now;
+      // Dedicated floating cognition capsule targeted meteor every ~3.5 seconds
+      if (now - lastFloatingTargetTime > 3500) {
+        spawnFloatingCapsuleTargetMeteor();
+        lastFloatingTargetTime = now;
+      }
+
+      // Hanging header capsules targeted meteor every ~5 seconds
+      if (now - lastHangingTargetTime > 5000) {
+        spawnHangingCapsuleTargetMeteor();
+        lastHangingTargetTime = now;
       }
 
       // 1. Draw static & twinkling stars
@@ -678,19 +730,16 @@ export const StarryBackground: React.FC = () => {
         }
       }
 
-      // ── CHECK 2: Meteor vs ALL Capsules (Hanging & Floating) Collisions ─────────
+      // ── CHECK 2: Meteor vs Floating Cognition Capsule Collisions ─────────
       try {
-        const capsules = Array.from(
-          document.querySelectorAll('[data-floating-capsule="true"], [data-hanging-capsule="true"]')
-        );
-
-        for (const capEl of capsules) {
-          const rect = capEl.getBoundingClientRect();
-          const capLeft = rect.left - 12;
-          const capRight = rect.right + 12;
-          const capTop = rect.top - 12;
-          const capBottom = rect.bottom + 12;
-          const isFloatingCognition = capEl.getAttribute('data-floating-capsule') === 'true';
+        const floatCapEl = document.querySelector('[data-floating-capsule="true"]');
+        if (floatCapEl) {
+          const rect = floatCapEl.getBoundingClientRect();
+          // Generous hit box around the floating pill
+          const capLeft = rect.left - 26;
+          const capRight = rect.right + 26;
+          const capTop = rect.top - 26;
+          const capBottom = rect.bottom + 26;
 
           for (let i = 0; i < shootingStars.length; i++) {
             const meteor = shootingStars[i];
@@ -704,14 +753,40 @@ export const StarryBackground: React.FC = () => {
             ) {
               meteor.active = false;
 
-              if (isFloatingCognition) {
-                window.dispatchEvent(
-                  new CustomEvent('capsule_meteor_hit', {
-                    detail: { x: meteor.x, y: meteor.y, theme: meteor.theme.name },
-                  })
-                );
-              }
+              // Fire crack event to Cognition Capsule
+              window.dispatchEvent(
+                new CustomEvent('capsule_meteor_hit', {
+                  detail: { x: meteor.x, y: meteor.y, theme: meteor.theme.name },
+                })
+              );
 
+              triggerFirecrackerExplosion(meteor.x, meteor.y, meteor.theme.fireworkColors);
+            }
+          }
+        }
+      } catch {}
+
+      // ── CHECK 3: Meteor vs Hanging Rope Capsules Collisions ─────────
+      try {
+        const hangingCaps = Array.from(document.querySelectorAll('[data-hanging-capsule="true"]'));
+        for (const hangEl of hangingCaps) {
+          const rect = hangEl.getBoundingClientRect();
+          const capLeft = rect.left - 18;
+          const capRight = rect.right + 18;
+          const capTop = rect.top - 18;
+          const capBottom = rect.bottom + 18;
+
+          for (let i = 0; i < shootingStars.length; i++) {
+            const meteor = shootingStars[i];
+            if (!meteor.active) continue;
+
+            if (
+              meteor.x >= capLeft &&
+              meteor.x <= capRight &&
+              meteor.y >= capTop &&
+              meteor.y <= capBottom
+            ) {
+              meteor.active = false;
               triggerFirecrackerExplosion(meteor.x, meteor.y, meteor.theme.fireworkColors);
             }
           }
