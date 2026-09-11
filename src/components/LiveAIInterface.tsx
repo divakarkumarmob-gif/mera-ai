@@ -3010,9 +3010,9 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
             {/* ── 🌌 Cosmic Starry Constellation Background (Hundreds of twinkling stars + shooting meteors) ── */}
             <StarryBackground />
 
-            <div className="w-full h-full flex flex-col flex-1 overflow-hidden relative z-10">
+            <div className="w-full h-full flex flex-col flex-1 relative z-10" style={{ overflow: 'visible' }}>
                 {/* ── Top Dashboard Header (100% Fully Transparent so all hanging ropes behind it are visible) ── */}
-                <div className="w-full flex flex-col gap-1.5 mb-2 pt-0.5 shrink-0 bg-transparent" style={{ overflowY: 'visible' }}>
+                <div className="w-full flex flex-col gap-1.5 mb-2 pt-0.5 shrink-0 bg-transparent" style={{ overflow: 'visible' }}>
                     <div className="flex items-center justify-between px-1 bg-transparent pointer-events-auto">
                         <h1 className="text-base sm:text-lg font-bold flex items-center gap-2 drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]">
                             <span className="filter drop-shadow-[0_0_8px_rgba(59,130,246,0.6)]">🤖</span>
@@ -3055,8 +3055,8 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
 
                             {/* Center-Aligned Scrollable Suspended Tier 1 (Top 10 Capsules) */}
                             <div
-                                className="capsule-scroll-tier1 w-full overflow-x-auto no-scrollbar scroll-smooth touch-pan-x"
-                                style={{ overflowY: 'visible' }}
+                                className="capsule-scroll-tier1 w-full overflow-visible no-scrollbar scroll-smooth touch-pan-x"
+                                style={{ overflow: 'visible' }}
                                 onWheel={(e) => {
                                     if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
                                         e.currentTarget.scrollLeft += e.deltaY;
@@ -3220,8 +3220,8 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
 
                             {/* Center-Aligned Scrollable Suspended Tier 2 (Remaining Capsules) */}
                             <div
-                                className="capsule-scroll-tier2 w-full overflow-x-auto no-scrollbar scroll-smooth touch-pan-x"
-                                style={{ overflowY: 'visible' }}
+                                className="capsule-scroll-tier2 w-full overflow-visible no-scrollbar scroll-smooth touch-pan-x"
+                                style={{ overflow: 'visible' }}
                                 onWheel={(e) => {
                                     if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
                                         e.currentTarget.scrollLeft += e.deltaY;
