@@ -11,6 +11,62 @@ export interface GoogleDorkItem {
   description: string;
 }
 
+export interface SocialReconItem {
+  id: string;
+  platform: 'Instagram' | 'Snapchat' | 'Google / Gmail' | 'Twitter (X)' | 'Facebook' | 'LinkedIn' | 'Telegram';
+  icon: string;
+  badge: string;
+  queryOrTarget: string;
+  actionUrl: string;
+  osintMethod: string;
+  description: string;
+}
+
+export interface GithubOsintTool {
+  name: string;
+  repo: string;
+  stars: string;
+  description: string;
+  commandDemo: string;
+  url: string;
+  purpose: string;
+}
+
+export interface SmartUnmaskCandidate {
+  candidateEmail: string;
+  confidenceScore: number;
+  permutationType: string;
+  holeheCommand: string;
+  ghuntCommand: string;
+  googleDorkUrl: string;
+  pastebinDorkUrl: string;
+  matchesMask: boolean;
+}
+
+export interface AssociatedNumberReconItem {
+  id: string;
+  source: 'TAFCOP (DoT Sanchar Saathi)' | 'MCA & ZaubaCorp Director Registry' | 'GSTIN & Trade Directory' | 'Truecaller & Crowdsource Pivot' | 'Domain WHOIS & DNS Contact' | 'Public Leaks Directory';
+  icon: string;
+  title: string;
+  badge: string;
+  actionUrl: string;
+  methodDescription: string;
+  dorkQuery?: string;
+  legalNote: string;
+}
+
+export interface SimOwnershipIntelligence {
+  inferredOwnerName?: string;
+  confidence: 'high' | 'medium' | 'low';
+  attributionSources: string[];
+  tafcopPortal: {
+    name: string;
+    url: string;
+    description: string;
+  };
+  associatedNumbersDorks: AssociatedNumberReconItem[];
+}
+
 export interface PhoneIntelligenceReport {
   rawInput: string;
   normalizedNumber: string;
@@ -57,6 +113,10 @@ export interface PhoneIntelligenceReport {
     directChatUrl: string;
     usernameSearchUrl: string;
   };
+  socialIntelligence: SocialReconItem[];
+  githubOsintTools: GithubOsintTool[];
+  unmaskCandidates: SmartUnmaskCandidate[];
+  simOwnership: SimOwnershipIntelligence;
   upiFootprint?: {
     vpaList: string[];
     paymentDeeplink: string;
@@ -292,6 +352,433 @@ const INDIAN_PREFIX_MAP: Record<string, { operator: string; circle: string; bran
 };
 
 export class PhoneIntelligenceService {
+  /**
+   * Generates Social Media (Instagram, Snapchat, Google/Gmail, Twitter, Facebook) Recon Targets.
+   */
+  private generateSocialIntelligence(normalized: string, cleanDigits: string, countryCode: string): SocialReconItem[] {
+    const compact = `${countryCode}${normalized}`;
+    return [
+      {
+        id: 'soc_instagram',
+        platform: 'Instagram',
+        icon: '📸',
+        badge: 'Megadose/Ignorant Spec',
+        queryOrTarget: `@insta (Phone: ${normalized})`,
+        actionUrl: `https://www.google.com/search?q=${encodeURIComponent(
+          `site:instagram.com intext:"${normalized}" OR intext:"${cleanDigits}" OR intext:"${compact}"`
+        )}`,
+        osintMethod: 'Instagram Bio Dork & Recovery Enumeration',
+        description: 'Detects public Instagram handles mentioning this number and opens Google indexing footprint.',
+      },
+      {
+        id: 'soc_snapchat',
+        platform: 'Snapchat',
+        icon: '👻',
+        badge: 'Snapchat Recon',
+        queryOrTarget: `Snapchat (+${cleanDigits})`,
+        actionUrl: `https://www.google.com/search?q=${encodeURIComponent(
+          `site:snapchat.com/add/ OR site:story.snapchat.com intext:"${normalized}" OR intext:"${cleanDigits}"`
+        )}`,
+        osintMethod: 'Snapchat Add & Story Indexing',
+        description: 'Finds public Snapchat add links and story handles associated with this phone identifier.',
+      },
+      {
+        id: 'soc_gmail_google',
+        platform: 'Google / Gmail',
+        icon: '📧',
+        badge: 'GHunt Vector',
+        queryOrTarget: `Google ID / ${normalized}@gmail.com`,
+        actionUrl: `https://accounts.google.com/signin/v2/recoveryidentifier?flowName=GlifWebSignIn&flowEntry=ServiceLogin`,
+        osintMethod: 'Google Account Recovery & GHunt Footprint',
+        description: 'Initiates Google Account recovery verification to check for linked Gmail address hints (e.g. j***@gmail.com).',
+      },
+      {
+        id: 'soc_twitter',
+        platform: 'Twitter (X)',
+        icon: '🐦',
+        badge: 'X Search OSINT',
+        queryOrTarget: `Twitter search (${normalized})`,
+        actionUrl: `https://twitter.com/search?q=${encodeURIComponent(normalized)}&f=user`,
+        osintMethod: 'Twitter/X User Profile Search',
+        description: 'Searches Twitter/X live directory for profiles or public tweets featuring this phone number.',
+      },
+      {
+        id: 'soc_linkedin',
+        platform: 'LinkedIn',
+        icon: '💼',
+        badge: 'Professional DB',
+        queryOrTarget: `LinkedIn Profiles`,
+        actionUrl: `https://www.google.com/search?q=${encodeURIComponent(`site:linkedin.com/in/ intext:"${normalized}"`)}`,
+        osintMethod: 'LinkedIn Contact Search Dork',
+        description: 'Discovers verified professional resumes, employer details, and public contact info on LinkedIn.',
+      },
+      {
+        id: 'soc_facebook',
+        platform: 'Facebook',
+        icon: '📘',
+        badge: 'Meta Discovery',
+        queryOrTarget: `Facebook Profiles`,
+        actionUrl: `https://www.google.com/search?q=${encodeURIComponent(`site:facebook.com intext:"${normalized}"`)}`,
+        osintMethod: 'Facebook Directory Lookup',
+        description: 'Searches public Facebook profile headers, marketplace ads, and contact posts.',
+      },
+    ];
+  }
+
+  /**
+   * Provides top-tier curated GitHub OSINT Tools for deeper investigation.
+   */
+  public getGithubOsintTools(normalized: string, cleanDigits: string): GithubOsintTool[] {
+    return [
+      {
+        name: 'Ignorant (megadose/ignorant)',
+        repo: 'megadose/ignorant',
+        stars: '★ 2.4k+',
+        purpose: 'Phone Number ➔ Instagram, Snapchat, Amazon, Google Account Checker',
+        description: 'Checks if a phone number is registered on Instagram, Snapchat, Google, Amazon, WhatsApp without credentials.',
+        commandDemo: `ignorant +${cleanDigits}`,
+        url: 'https://github.com/megadose/ignorant',
+      },
+      {
+        name: 'Holehe (megadose/holehe)',
+        repo: 'megadose/holehe',
+        stars: '★ 6.5k+',
+        purpose: 'Email & Password-Reset Recovery Phone Token Enumeration (120+ Sites)',
+        description: 'Checks 120+ services for registered emails and displays masked recovery phone numbers & alternate emails.',
+        commandDemo: `holehe target@gmail.com`,
+        url: 'https://github.com/megadose/holehe',
+      },
+      {
+        name: 'GHunt (mxrch/GHunt)',
+        repo: 'mxrch/GHunt',
+        stars: '★ 16.5k+',
+        purpose: 'Google & Gmail Account Deep OSINT (GaiaID, Maps Reviews, Photos, Drive)',
+        description: 'Extracts Google user GaiaID, Google Maps review history, Google Photos albums, and active Google services.',
+        commandDemo: `ghunt email target@gmail.com`,
+        url: 'https://github.com/mxrch/GHunt',
+      },
+      {
+        name: 'PhoneInfoga (sundowndev/phoneinfoga)',
+        repo: 'sundowndev/phoneinfoga',
+        stars: '★ 13.2k+',
+        purpose: 'Advanced Information Gathering & OSINT Framework for Phone Numbers',
+        description: 'Automates Google search dorking, carrier analysis, Numverify scan, and international footprint extraction.',
+        commandDemo: `phoneinfoga scan -n +${cleanDigits}`,
+        url: 'https://github.com/sundowndev/phoneinfoga',
+      },
+      {
+        name: 'Sherlock (sherlock-project/sherlock)',
+        repo: 'sherlock-project/sherlock',
+        stars: '★ 60.5k+',
+        purpose: 'Hunt Social Media Accounts by Username Across 400+ Websites',
+        description: 'Once you find an Instagram or Snapchat handle from phone dorks, Sherlock finds accounts across all platforms.',
+        commandDemo: `sherlock <found_username>`,
+        url: 'https://github.com/sherlock-project/sherlock',
+      },
+      {
+        name: 'Maigret (soxoj/maigret)',
+        repo: 'soxoj/maigret',
+        stars: '★ 11.8k+',
+        purpose: 'Collect Detailed Dossier on a Person by Username across 3000+ Sites',
+        description: 'Advanced fork of Sherlock that extracts bio, avatars, linked tags, and generates an interactive HTML report.',
+        commandDemo: `maigret <found_username> --html`,
+        url: 'https://github.com/soxoj/maigret',
+      },
+      {
+        name: 'h8mail (khast3x/h8mail)',
+        repo: 'khast3x/h8mail',
+        stars: '★ 4.2k+',
+        purpose: 'Email & Target Breach Intelligence & Breach Data Hunter',
+        description: 'Queries HaveIBeenPwned, IntelX, DeHashed, and Hunter.io to find breach logs and exposures.',
+        commandDemo: `h8mail -t +${cleanDigits} -c config.ini`,
+        url: 'https://github.com/khast3x/h8mail',
+      },
+      {
+        name: 'pwnedOrNot (thewhiteh4t/pwnedOrNot)',
+        repo: 'thewhiteh4t/pwnedOrNot',
+        stars: '★ 2.1k+',
+        purpose: 'OSINT Breach & Account Compromise Investigator',
+        description: 'Identifies past data leaks, compromised accounts, pastebins, and exposed breach domain records.',
+        commandDemo: `python3 pwnedornot.py -e target@gmail.com`,
+        url: 'https://github.com/thewhiteh4t/pwnedOrNot',
+      },
+      {
+        name: 'SpiderFoot (smicallef/spiderfoot)',
+        repo: 'smicallef/spiderfoot',
+        stars: '★ 14.5k+',
+        purpose: 'Automated OSINT & Threat Reconnaissance Platform (100+ Modules)',
+        description: 'Scans phone number records, domain names, email exposures, pastebins, and threat intelligence archives.',
+        commandDemo: `python3 sf.py -s +${cleanDigits} -m sfp_phone,sfp_haveibeenpwned`,
+        url: 'https://github.com/smicallef/spiderfoot',
+      },
+      {
+        name: 'IntelX CLI (IntelligenceX/SDK)',
+        repo: 'IntelligenceX/SDK',
+        stars: '★ 1.5k+',
+        purpose: 'Intelligence X Historic Threat Archive & Public Leak Search CLI',
+        description: 'Search engine and data archive for historic pastes, documents, breach hashes, and web records.',
+        commandDemo: `python3 intelx.py search +${cleanDigits}`,
+        url: 'https://github.com/IntelligenceX/SDK',
+      },
+      {
+        name: 'Recon-ng (lanmaster53/recon-ng)',
+        repo: 'lanmaster53/recon-ng',
+        stars: '★ 13.8k+',
+        purpose: 'Full-Featured Modular Web Reconnaissance & OSINT Framework',
+        description: 'Interactive framework with database backing for aggregating contacts, profiles, domains, and leak logs.',
+        commandDemo: `recon-ng -w investigation_workspace`,
+        url: 'https://github.com/lanmaster53/recon-ng',
+      },
+    ];
+  }
+
+  /**
+   * Smart OSINT Email Permutation & Unmasker Engine.
+   * Correlates Name, Nickname, Phone Digits, and Mask Pattern (e.g. 'r***a@gmail.com')
+   * into ranked candidate emails ready for 1-click GHunt/Holehe/Dork execution.
+   */
+  public decodeMaskedEmail(params: {
+    name?: string;
+    nickname?: string;
+    phoneDigits: string;
+    maskPattern?: string;
+    targetDomain?: string;
+  }): SmartUnmaskCandidate[] {
+    const rawName = (params.name || '').trim().toLowerCase();
+    const rawNick = (params.nickname || '').trim().toLowerCase();
+    const phone = params.phoneDigits.replace(/\D/g, '');
+    const phoneLast4 = phone.slice(-4);
+    const phoneLast2 = phone.slice(-2);
+    const mask = (params.maskPattern || '').trim().toLowerCase();
+
+    // Default domains
+    const domains = params.targetDomain
+      ? [params.targetDomain.toLowerCase().replace(/^@/, '')]
+      : mask.includes('@')
+      ? [mask.split('@')[1]]
+      : ['gmail.com', 'yahoo.com', 'outlook.com'];
+
+    // Extract name parts
+    const cleanName = rawName.replace(/[^a-z0-9\s]/g, '');
+    const parts = cleanName.split(/\s+/).filter(Boolean);
+    const first = parts[0] || (rawNick ? rawNick.replace(/[^a-z0-9]/g, '') : 'user');
+    const last = parts.length > 1 ? parts[parts.length - 1] : '';
+    const middle = parts.length > 2 ? parts[1] : '';
+
+    const baseUsernames: Array<{ handle: string; type: string; baseScore: number }> = [];
+
+    if (first && last) {
+      baseUsernames.push({ handle: `${first}.${last}`, type: 'Firstname.Lastname', baseScore: 90 });
+      baseUsernames.push({ handle: `${first}${last}`, type: 'FirstnameLastname', baseScore: 88 });
+      baseUsernames.push({ handle: `${first[0]}${last}`, type: 'FirstInitialLastname', baseScore: 85 });
+      baseUsernames.push({ handle: `${first}_${last}`, type: 'First_Last', baseScore: 82 });
+      baseUsernames.push({ handle: `${first}${last[0]}`, type: 'FirstnameLastInitial', baseScore: 78 });
+      baseUsernames.push({ handle: `${last}.${first}`, type: 'Lastname.Firstname', baseScore: 75 });
+      baseUsernames.push({ handle: `${last}${first}`, type: 'LastnameFirstname', baseScore: 72 });
+      baseUsernames.push({ handle: `${first}.${last}${phoneLast2}`, type: 'First.Last + Phone(2)', baseScore: 80 });
+      baseUsernames.push({ handle: `${first}${last}${phoneLast4}`, type: 'FirstLast + Phone(4)', baseScore: 76 });
+      baseUsernames.push({ handle: `${first[0]}${last}${phoneLast2}`, type: 'InitialLast + Phone(2)', baseScore: 74 });
+      if (middle) {
+        baseUsernames.push({ handle: `${first}.${middle}.${last}`, type: 'First.Middle.Last', baseScore: 70 });
+        baseUsernames.push({ handle: `${first[0]}${middle[0]}${last}`, type: 'Initials + Last', baseScore: 68 });
+      }
+    } else if (first && first !== 'user') {
+      baseUsernames.push({ handle: `${first}`, type: 'Single Name', baseScore: 80 });
+      baseUsernames.push({ handle: `${first}${phoneLast2}`, type: 'Name + Phone(2)', baseScore: 82 });
+      baseUsernames.push({ handle: `${first}${phoneLast4}`, type: 'Name + Phone(4)', baseScore: 80 });
+      baseUsernames.push({ handle: `${first}_${phoneLast2}`, type: 'Name_Phone(2)', baseScore: 75 });
+      baseUsernames.push({ handle: `${first}123`, type: 'Name + 123', baseScore: 70 });
+    } else {
+      // Fallback on phone-based aliases
+      baseUsernames.push({ handle: `user${phoneLast4}`, type: 'Phone Alias', baseScore: 60 });
+      baseUsernames.push({ handle: `contact${phoneLast2}`, type: 'Phone Handle', baseScore: 55 });
+    }
+
+    if (rawNick && rawNick !== first) {
+      baseUsernames.push({ handle: `${rawNick}`, type: 'Nickname', baseScore: 84 });
+      baseUsernames.push({ handle: `${rawNick}${phoneLast2}`, type: 'Nickname + Phone', baseScore: 80 });
+    }
+
+    // Parse mask pattern if supplied (e.g. "r***a@gmail.com" or "r...m@gmail.com")
+    let maskPrefix = '';
+    let maskSuffix = '';
+    let maskLength = -1;
+    let maskDomain = '';
+
+    if (mask) {
+      const [maskUser, mDom] = mask.split('@');
+      maskDomain = mDom || '';
+      const cleanMaskUser = maskUser.replace(/\./g, '*');
+      const starsMatch = cleanMaskUser.match(/^([a-z0-9]+)(\*+)([a-z0-9]+)$/);
+      if (starsMatch) {
+        maskPrefix = starsMatch[1];
+        maskSuffix = starsMatch[3];
+        maskLength = cleanMaskUser.length;
+      } else {
+        const starIdx = cleanMaskUser.indexOf('*');
+        if (starIdx > 0) {
+          maskPrefix = cleanMaskUser.slice(0, starIdx);
+        }
+      }
+    }
+
+    const seenEmails = new Set<string>();
+    const candidates: SmartUnmaskCandidate[] = [];
+
+    for (const item of baseUsernames) {
+      for (const dom of domains) {
+        const email = `${item.handle}@${dom}`.toLowerCase();
+        if (seenEmails.has(email)) continue;
+        seenEmails.add(email);
+
+        let matchesMask = false;
+        let finalScore = item.baseScore;
+
+        if (mask) {
+          const userPart = item.handle;
+          const starts = maskPrefix ? userPart.startsWith(maskPrefix) : true;
+          const ends = maskSuffix ? userPart.endsWith(maskSuffix) : true;
+          const lenMatch = maskLength > 0 ? userPart.length === maskLength : true;
+          const domMatch = maskDomain ? dom === maskDomain : true;
+
+          if (starts && ends && domMatch) {
+            matchesMask = true;
+            finalScore = lenMatch ? 98 : 92;
+          } else if (starts && domMatch) {
+            finalScore = 75;
+          } else {
+            finalScore = Math.max(20, finalScore - 40);
+          }
+        }
+
+        candidates.push({
+          candidateEmail: email,
+          confidenceScore: finalScore,
+          permutationType: item.type,
+          holeheCommand: `holehe ${email}`,
+          ghuntCommand: `ghunt email ${email}`,
+          googleDorkUrl: `https://www.google.com/search?q=${encodeURIComponent(
+            `"${email}" OR ("${phone}" "${email}")`
+          )}`,
+          pastebinDorkUrl: `https://www.google.com/search?q=${encodeURIComponent(
+            `(site:pastebin.com OR site:throwbin.io OR site:justpaste.it OR site:ghostbin.com) "${email}"`
+          )}`,
+          matchesMask,
+        });
+      }
+    }
+
+    return candidates.sort((a, b) => b.confidenceScore - a.confidenceScore);
+  }
+
+  /**
+   * Generates SIM Registration & Associated Numbers OSINT Intelligence Matrix.
+   * Leverages DoT TAFCOP, MCA Registry, GSTIN, WHOIS, and Cross-Platform Correlation.
+   */
+  public generateSimOwnershipIntelligence(params: {
+    normalized: string;
+    cleanDigits: string;
+    savedName?: string;
+    whatsappName?: string;
+    circle: string;
+  }): SimOwnershipIntelligence {
+    const inferredOwner = (params.savedName || params.whatsappName || '').trim();
+    const queryName = inferredOwner || 'Subscriber';
+
+    const sources: string[] = [];
+    if (params.savedName) sources.push('Boss Verified Address Book');
+    if (params.whatsappName) sources.push('WhatsApp PushName Identity');
+    sources.push('Telecom HLR Circle Allocation');
+    sources.push('NPCI UPI Bank Identity VPA');
+
+    const associatedNumbersDorks: AssociatedNumberReconItem[] = [
+      {
+        id: 'tafcop_dot_portal',
+        source: 'TAFCOP (DoT Sanchar Saathi)',
+        icon: '🏛️',
+        title: 'DoT TAFCOP Portal (SIMs on Aadhaar / KYC)',
+        badge: 'Govt Official Portal',
+        actionUrl: 'https://tafcop.sancharsaathi.gov.in/',
+        methodDescription: 'Official Department of Telecommunications portal to see and manage ALL active mobile numbers registered against your Aadhaar/KYC identity.',
+        legalNote: 'Requires OTP verification sent to registered mobile number.',
+      },
+      {
+        id: 'zaubacorp_director_recon',
+        source: 'MCA & ZaubaCorp Director Registry',
+        icon: '🏢',
+        title: 'MCA Director & Corporate Alternate Numbers',
+        badge: 'Corporate Database',
+        actionUrl: `https://www.google.com/search?q=${encodeURIComponent(
+          `site:zaubacorp.com OR site:tofler.in intext:"${queryName}" ("mobile" OR "phone" OR "+91" OR "contact")`
+        )}`,
+        dorkQuery: `site:zaubacorp.com OR site:tofler.in intext:"${queryName}" ("mobile" OR "phone" OR "+91" OR "contact")`,
+        methodDescription: 'Scans Ministry of Corporate Affairs (MCA) filings and director profiles for alternate corporate phone numbers.',
+        legalNote: 'Public MCA Company Disclosures.',
+      },
+      {
+        id: 'gstin_trade_directory',
+        source: 'GSTIN & Trade Directory',
+        icon: '📑',
+        title: 'GSTIN & Commercial Filings Contact Dork',
+        badge: 'Tax / GST Records',
+        actionUrl: `https://www.google.com/search?q=${encodeURIComponent(
+          `"${queryName}" ("GSTIN" OR "proprietor" OR "trade name" OR "enterprise") ("+91" OR "phone" OR "mobile")`
+        )}`,
+        dorkQuery: `"${queryName}" ("GSTIN" OR "proprietor" OR "trade name" OR "enterprise") ("+91" OR "phone" OR "mobile")`,
+        methodDescription: 'Extracts alternate commercial numbers submitted during GST registration and business trade licenses.',
+        legalNote: 'Public Business Registries.',
+      },
+      {
+        id: 'truecaller_crowdsource_pivot',
+        source: 'Truecaller & Crowdsource Pivot',
+        icon: '👥',
+        title: 'Crowdsourced Name-to-Numbers Pivot',
+        badge: 'Crowdsourced DB',
+        actionUrl: `https://www.truecaller.com/search/in/${params.normalized}`,
+        methodDescription: 'Uses Truecaller name tags and mutual contact lists to find co-occurring numbers and family/business ties.',
+        legalNote: 'Crowdsourced Caller Data.',
+      },
+      {
+        id: 'whois_dns_registry',
+        source: 'Domain WHOIS & DNS Contact',
+        icon: '🌐',
+        title: 'Domain WHOIS Registrant Phone Lines',
+        badge: 'WHOIS Database',
+        actionUrl: `https://www.google.com/search?q=${encodeURIComponent(
+          `site:whois.com OR site:domaintools.com intext:"${queryName}" ("phone" OR "tel:" OR "+91")`
+        )}`,
+        dorkQuery: `site:whois.com OR site:domaintools.com intext:"${queryName}" ("phone" OR "tel:" OR "+91")`,
+        methodDescription: 'Finds secondary phone numbers and emergency contacts listed during website domain registrations.',
+        legalNote: 'ICANN / Registry Public WHOIS.',
+      },
+      {
+        id: 'breach_cross_leak',
+        source: 'Public Leaks Directory',
+        icon: '🔓',
+        title: 'Multi-Number Breach Correlation',
+        badge: 'Leak Logs',
+        actionUrl: `https://www.google.com/search?q=${encodeURIComponent(
+          `(site:pastebin.com OR site:throwbin.io) ("${queryName}" AND ("+91" OR "phone"))`
+        )}`,
+        dorkQuery: `(site:pastebin.com OR site:throwbin.io) ("${queryName}" AND ("+91" OR "phone"))`,
+        methodDescription: 'Discovers text dumps and leak logs where multiple contact numbers are attached to the same name.',
+        legalNote: 'Public Pastebins OSINT.',
+      },
+    ];
+
+    return {
+      inferredOwnerName: inferredOwner || undefined,
+      confidence: inferredOwner ? 'high' : 'medium',
+      attributionSources: sources,
+      tafcopPortal: {
+        name: 'DoT Sanchar Saathi TAFCOP',
+        url: 'https://tafcop.sancharsaathi.gov.in/',
+        description: 'Check & report all SIM cards active on your Aadhaar card.',
+      },
+      associatedNumbersDorks,
+    };
+  }
+
   /**
    * Generates a PhoneInfoga-grade Google Dorking Recon Matrix for a phone number.
    */
@@ -649,6 +1136,26 @@ export class PhoneIntelligenceService {
       },
     ];
 
+    // 9. Social & GitHub OSINT Frameworks
+    const socialIntelligence = this.generateSocialIntelligence(normalized, cleanDigits, countryCode);
+    const githubOsintTools = this.getGithubOsintTools(normalized, cleanDigits);
+
+    // 10. Smart Email Unmasker Candidates
+    const unmaskCandidates = this.decodeMaskedEmail({
+      name: savedContact?.name,
+      nickname: savedContact?.nickname,
+      phoneDigits: normalized,
+    });
+
+    // 11. SIM Registration & Associated Numbers OSINT Matrix
+    const simOwnership = this.generateSimOwnershipIntelligence({
+      normalized,
+      cleanDigits,
+      savedName: savedContact?.name,
+      whatsappName: whatsappProfile?.pushName,
+      circle: telecomCircle,
+    });
+
     return {
       rawInput: phoneInput,
       normalizedNumber: normalized,
@@ -679,6 +1186,10 @@ export class PhoneIntelligenceService {
       savedContact,
       whatsappProfile,
       telegramProfile,
+      socialIntelligence,
+      githubOsintTools,
+      unmaskCandidates,
+      simOwnership,
       upiFootprint,
       spamRisk: {
         score: Math.min(100, Math.max(0, spamScore)),
@@ -738,12 +1249,33 @@ export class PhoneIntelligenceService {
     }
     card += `\n`;
 
+    if (report.simOwnership && report.simOwnership.inferredOwnerName) {
+      card += `🆔 *Subscriber & Associated Numbers Recon:*\n`;
+      card += `• Inferred Name: *${report.simOwnership.inferredOwnerName}* (${report.simOwnership.confidence.toUpperCase()})\n`;
+      card += `• 🏛️ *DoT TAFCOP Portal:* https://tafcop.sancharsaathi.gov.in/\n`;
+      card += `• 🏢 *MCA / ZaubaCorp Alternate Numbers:* ${report.simOwnership.associatedNumbersDorks[1]?.actionUrl || '#'}\n\n`;
+    }
+
     if (report.upiFootprint && report.countryCode === '+91') {
       card += `💳 *Predicted UPI Handles (GPay/PhonePe/Paytm):*\n`;
       card += `• \`${report.upiFootprint.vpaList.slice(0, 3).join('`, `')}\`\n\n`;
     }
 
-    card += `🌐 *OSINT Footprints & Quick Lookups:*\n`;
+    if (report.unmaskCandidates && report.unmaskCandidates.length > 0) {
+      card += `🎯 *Top Decoded Candidate Emails (Smart OSINT):*\n`;
+      const top3 = report.unmaskCandidates.slice(0, 3);
+      for (const cand of top3) {
+        card += `• \`${cand.candidateEmail}\` (${cand.confidenceScore}% match - ${cand.permutationType})\n`;
+      }
+      card += `\n`;
+    }
+
+    card += `🌐 *Social & Email OSINT Targets:*\n`;
+    card += `• 📸 *Instagram Dork:* ${report.socialIntelligence[0]?.actionUrl || '#'}\n`;
+    card += `• 👻 *Snapchat Recon:* ${report.socialIntelligence[1]?.actionUrl || '#'}\n`;
+    card += `• 📧 *Google/Gmail Lookup:* https://accounts.google.com/signin/v2/recoveryidentifier\n\n`;
+
+    card += `⚡ *Quick OSINT Scanners & Links:*\n`;
     card += `• 💬 *WhatsApp Chat:* ${report.whatsappProfile?.directChatUrl || `https://wa.me/${report.e164Format.replace('+', '')}`}\n`;
     card += `• ✈️ *Telegram Direct:* ${report.telegramProfile?.directChatUrl || `https://t.me/+${report.e164Format.replace('+', '')}`}\n`;
     card += `• 🔍 *Truecaller OSINT:* ${report.osintScanners[0]?.url || `https://www.truecaller.com/search/in/${report.normalizedNumber}`}\n`;

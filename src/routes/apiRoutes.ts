@@ -2046,6 +2046,28 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
+  /** POST /api/phone-intelligence/unmask-email — Smart OSINT Email Permutation & Unmasker
+   *  Body: { phone: string, name?: string, nickname?: string, maskPattern?: string, targetDomain?: string }
+   */
+  app.post("/api/phone-intelligence/unmask-email", async (req, res) => {
+    try {
+      const { phone, name, nickname, maskPattern, targetDomain } = req.body || {};
+      if (!phone) {
+        return res.status(400).json({ ok: false, error: "phone is required" });
+      }
+      const candidates = phoneIntelligenceService.decodeMaskedEmail({
+        phoneDigits: String(phone),
+        name,
+        nickname,
+        maskPattern,
+        targetDomain,
+      });
+      res.json({ ok: true, candidates });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "unmask_failed" });
+    }
+  });
+
   // 🔍 OSINT Tool #1: Sherlock — Username Intelligence (300+ Platforms)
   // Source: https://github.com/sherlock-project/sherlock
   // Install: pip install sherlock-project

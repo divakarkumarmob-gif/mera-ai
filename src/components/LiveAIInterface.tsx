@@ -3360,15 +3360,15 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                                         </button>
                                     </HangingRopeCapsule>
 
-                                    {/* 14. 📱 Phone Radar & Truecaller OSINT */}
+                                    {/* 14. 📱 Phone Info (Deep OSINT & Carrier Radar) */}
                                     <HangingRopeCapsule rowTier="lower" ropeHeight={35} swayIndex={14} ropeColor="from-cyan-400/90 via-blue-300 to-cyan-500/90" glowColor="rgba(6,182,212,0.4)">
                                         <button
                                             onClick={() => setShowPhoneIntelligence(true)}
-                                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/50 text-cyan-300 text-xs font-semibold shadow-[0_0_15px_rgba(6,182,212,0.25)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
-                                            title="Phone Intelligence, Carrier & Truecaller OSINT Radar"
+                                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-gradient-to-r from-cyan-500/25 via-blue-500/25 to-cyan-500/25 hover:from-cyan-500/35 hover:to-blue-500/35 border border-cyan-400/60 text-cyan-200 text-xs font-bold shadow-[0_0_20px_rgba(6,182,212,0.35)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
+                                            title="Phone Info — Deep OSINT, Carrier HLR, Social Recon & Breach Radar"
                                         >
-                                            <Phone className="w-3.5 h-3.5 text-cyan-400" />
-                                            <span>Phone Radar</span>
+                                            <Phone className="w-3.5 h-3.5 text-cyan-300 animate-pulse" />
+                                            <span className="bg-gradient-to-r from-cyan-200 to-white bg-clip-text text-transparent font-bold">Phone Info</span>
                                         </button>
                                     </HangingRopeCapsule>
 
