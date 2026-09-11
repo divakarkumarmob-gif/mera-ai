@@ -937,7 +937,7 @@ function HangingRopeCapsule({
             <div
                 className="absolute left-1/2 -translate-x-1/2 pointer-events-none z-0"
                 style={{
-                    bottom: 'calc(100% - 28px)',
+                    bottom: 'calc(100% - 10px)',
                     top: '-150vh',
                     width: '2.5px',
                 }}
@@ -963,7 +963,7 @@ function HangingRopeCapsule({
             {/* Glowing Attachment Node right on top of the capsule */}
             <div className="relative z-10 flex flex-col items-center -mb-1">
                 <div
-                    className="w-2.5 h-2.5 rounded-full bg-slate-950 border-[1.5px] flex items-center justify-center pointer-events-none transition-colors duration-300"
+                    className="w-2.5 h-2.5 rounded-full bg-slate-950 border-[1.5px] flex items-center justify-center pointer-events-none transition-colors duration-300 shadow-[0_0_10px_rgba(255,255,255,0.4)]"
                     style={{
                         borderColor: isCracked ? '#ef4444' : glowColor,
                         boxShadow: isCracked ? `0 0 12px #ef4444` : `0 0 10px ${glowColor}`,
@@ -3034,9 +3034,9 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                     </div>
 
                     {/* ── Suspended Aerial Rope Capsules (Screen ke Top se Direct Rassi me Latke Hue, Center se Start) ── */}
-                    <div className="w-full flex flex-col gap-2 select-none items-center overflow-x-hidden" style={{ overflowY: 'visible' }}>
+                    <div className="w-full flex flex-col gap-2 select-none items-center" style={{ overflow: 'visible' }}>
                         {/* ── TIER 1: Upper 10 Aerial Capsules Hanging Direct from Ceiling, Centered ── */}
-                        <div className="relative w-full flex items-center justify-center group/capsules1" style={{ overflowY: 'visible' }}>
+                        <div className="relative w-full flex items-center justify-center group/capsules1" style={{ overflow: 'visible' }}>
                             {/* Left Scroll Arrow */}
                             <button
                                 type="button"
@@ -3053,13 +3053,14 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                             {/* Center-Aligned Scrollable Suspended Tier 1 (Top 10 Capsules) */}
                             <div
                                 className="capsule-scroll-tier1 w-full overflow-x-auto no-scrollbar scroll-smooth touch-pan-x"
+                                style={{ overflowY: 'visible' }}
                                 onWheel={(e) => {
                                     if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
                                         e.currentTarget.scrollLeft += e.deltaY;
                                     }
                                 }}
                             >
-                                <div className="inline-flex items-start justify-center min-w-full w-max gap-3.5 px-6 pt-0 pb-1.5 mx-auto">
+                                <div className="inline-flex items-start justify-center min-w-full w-max gap-3.5 px-6 pt-0 pb-1.5 mx-auto" style={{ overflow: 'visible' }}>
                                     {/* 1. Wi-Fi Radar */}
                                     <HangingRopeCapsule ropeHeight={34} swayIndex={1} ropeColor="from-cyan-400/90 via-cyan-300 to-cyan-500/90" glowColor="rgba(6,182,212,0.4)">
                                         <button
@@ -3200,7 +3201,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                         </div>
 
                         {/* ── TIER 2: Remaining Capsules Hanging Directly Below, Centered ── */}
-                        <div className="relative w-full flex items-center justify-center group/capsules2" style={{ overflowY: 'visible' }}>
+                        <div className="relative w-full flex items-center justify-center group/capsules2" style={{ overflow: 'visible' }}>
                             {/* Left Scroll Arrow */}
                             <button
                                 type="button"
@@ -3217,13 +3218,14 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                             {/* Center-Aligned Scrollable Suspended Tier 2 (Remaining Capsules) */}
                             <div
                                 className="capsule-scroll-tier2 w-full overflow-x-auto no-scrollbar scroll-smooth touch-pan-x"
+                                style={{ overflowY: 'visible' }}
                                 onWheel={(e) => {
                                     if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
                                         e.currentTarget.scrollLeft += e.deltaY;
                                     }
                                 }}
                             >
-                                <div className="inline-flex items-start justify-center min-w-full w-max gap-3.5 px-6 pt-0 pb-1.5 mx-auto">
+                                <div className="inline-flex items-start justify-center min-w-full w-max gap-3.5 px-6 pt-0 pb-1.5 mx-auto" style={{ overflow: 'visible' }}>
                                     {/* 11. 🧠 Learning & Cognition Capsule */}
                                     <HangingRopeCapsule ropeHeight={35} swayIndex={11} ropeColor="from-emerald-400/90 via-teal-300 to-emerald-500/90" glowColor="rgba(16,185,129,0.45)">
                                         <button
