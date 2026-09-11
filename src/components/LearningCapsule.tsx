@@ -314,95 +314,71 @@ export const LearningCapsule: React.FC<LearningCapsuleProps> = ({
   if (isFloatingWidgetOnly && !isExpanded) {
     return (
       <motion.div
-        initial={{ y: 20, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        exit={{ y: 20, opacity: 0 }}
-        className="fixed bottom-24 right-6 z-40"
+        drag
+        dragMomentum={false}
+        whileDrag={{ scale: 1.08, cursor: 'grabbing' }}
+        initial={{ y: 0, opacity: 0, scale: 0.9 }}
+        animate={{
+          opacity: 1,
+          scale: 1,
+          y: [-6, 6, -6],
+          x: [-2, 2, -2],
+          rotate: [-1.8, 1.8, -1.8],
+        }}
+        transition={{
+          y: { repeat: Infinity, duration: 3.8, ease: 'easeInOut' },
+          x: { repeat: Infinity, duration: 4.6, ease: 'easeInOut' },
+          rotate: { repeat: Infinity, duration: 4.2, ease: 'easeInOut' },
+          opacity: { duration: 0.3 },
+          scale: { duration: 0.3 },
+        }}
+        className="fixed top-24 sm:top-28 right-3 sm:right-6 z-40 select-none cursor-grab active:cursor-grabbing touch-none"
       >
-        {/* ── Two upward hanging rope lines extending to the top of screen ── */}
-        {/* Left rope */}
-        <div
-          className="absolute pointer-events-none"
-          style={{
-            left: '22%',
-            bottom: '100%',
-            top: '-100vh',
-            width: '2px',
-            maskImage: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.1) 10%, rgba(0,0,0,0.6) 30%, rgba(0,0,0,1) 65%)',
-            WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.1) 10%, rgba(0,0,0,0.6) 30%, rgba(0,0,0,1) 65%)',
-          }}
-        >
-          <div className="w-full h-full bg-gradient-to-b from-emerald-400/0 via-emerald-400/60 to-emerald-500/90"
-            style={{ boxShadow: '0 0 6px 1px rgba(16,185,129,0.45)' }} />
-        </div>
-        {/* Right rope */}
-        <div
-          className="absolute pointer-events-none"
-          style={{
-            right: '22%',
-            bottom: '100%',
-            top: '-100vh',
-            width: '2px',
-            maskImage: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.1) 10%, rgba(0,0,0,0.6) 30%, rgba(0,0,0,1) 65%)',
-            WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.1) 10%, rgba(0,0,0,0.6) 30%, rgba(0,0,0,1) 65%)',
-          }}
-        >
-          <div className="w-full h-full bg-gradient-to-b from-cyan-400/0 via-cyan-400/60 to-cyan-500/90"
-            style={{ boxShadow: '0 0 6px 1px rgba(6,182,212,0.45)' }} />
-        </div>
-        {/* Glowing nodes at top of panel where ropes attach */}
-        <div className="absolute -top-1.5 left-[22%] -translate-x-1/2 w-2 h-2 rounded-full bg-slate-900 border border-emerald-400 pointer-events-none"
-          style={{ boxShadow: '0 0 8px rgba(16,185,129,0.7)' }}>
-          <div className="w-1 h-1 rounded-full bg-emerald-300 animate-pulse m-auto mt-[1px]" />
-        </div>
-        <div className="absolute -top-1.5 right-[22%] translate-x-1/2 w-2 h-2 rounded-full bg-slate-900 border border-cyan-400 pointer-events-none"
-          style={{ boxShadow: '0 0 8px rgba(6,182,212,0.7)' }}>
-          <div className="w-1 h-1 rounded-full bg-cyan-300 animate-pulse m-auto mt-[1px]" />
-        </div>
-
         <div className="relative group">
-          <div className="absolute -inset-1 rounded-full bg-gradient-to-r from-emerald-500 via-cyan-500 to-indigo-500 opacity-70 blur-md group-hover:opacity-100 transition duration-500 animate-pulse" />
-          <div className="relative flex items-center gap-3 px-4 py-2.5 rounded-full bg-slate-950/90 border border-emerald-500/40 backdrop-blur-xl shadow-[0_0_30px_rgba(16,185,129,0.3)] text-slate-100">
-            <span className="relative flex h-3 w-3">
+          {/* Subtle Dynamic Antigravity Glow Aura */}
+          <div className="absolute -inset-1 rounded-full bg-gradient-to-r from-emerald-500/80 via-teal-400/60 to-cyan-500/80 opacity-70 blur-md group-hover:opacity-100 transition duration-500 animate-pulse" />
+
+          {/* Compact Antigravity Floating Pill */}
+          <div className="relative flex items-center gap-2 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-full bg-slate-950/90 border border-emerald-400/50 backdrop-blur-xl shadow-[0_0_25px_rgba(16,185,129,0.35)] text-slate-100">
+            {/* Live Pulsing Brain Dot */}
+            <span className="relative flex h-2.5 w-2.5 shrink-0">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500" />
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.9)]" />
             </span>
 
+            {/* Click to open full Cognition Studio */}
             <div
               onClick={() => {
                 if (onExpandToStudio) onExpandToStudio();
                 else setIsExpanded(true);
               }}
-              className="cursor-pointer flex items-center gap-2"
+              className="cursor-pointer flex items-center gap-1.5"
+              title="Click to open full Cognition Capsule Studio (Drag to reposition)"
             >
-              <span className="text-sm font-bold bg-gradient-to-r from-emerald-300 via-cyan-200 to-white bg-clip-text text-transparent">
-                🧠 Cognition Capsule
+              <span className="text-xs sm:text-sm font-bold bg-gradient-to-r from-emerald-300 via-teal-200 to-cyan-200 bg-clip-text text-transparent whitespace-nowrap">
+                🧠 Cognition
               </span>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-mono">
-                {stats?.totalLessons || 0} Lessons
-              </span>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-mono hidden sm:inline">
-                {stats?.totalDrills || 0} Drills
+              <span className="text-[10px] sm:text-xs px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-mono font-semibold whitespace-nowrap">
+                {stats?.totalLessons || 0}L
               </span>
             </div>
 
+            {/* Quick Practice Drill Trigger */}
             <button
-              onClick={handleRunPracticeDrill}
-              disabled={drillingNow}
-              title="Trigger instant self-practice drill"
-              className="p-1.5 rounded-full hover:bg-emerald-500/20 text-emerald-400 transition"
-            >
-              {drillingNow ? <span className="animate-spin text-xs">⚡</span> : <span className="text-xs">🏋️</span>}
-            </button>
-
-            <button
-              onClick={() => {
-                if (onExpandToStudio) onExpandToStudio();
-                else setIsExpanded(true);
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleRunPracticeDrill();
               }}
-              className="px-2.5 py-1 rounded-full bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-xs font-semibold text-white shadow transition"
+              disabled={drillingNow}
+              title="Run instant AI practice drill"
+              className="p-1 rounded-full bg-emerald-500/10 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-300 transition active:scale-90 cursor-pointer"
             >
-              View All ↗
+              {drillingNow ? (
+                <span className="animate-spin text-[10px] block">⚡</span>
+              ) : (
+                <span className="text-[11px] block">🏋️</span>
+              )}
             </button>
           </div>
         </div>
