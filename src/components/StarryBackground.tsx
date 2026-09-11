@@ -671,9 +671,8 @@ export const StarryBackground: React.FC = () => {
 
     let lastMeteorTime = Date.now();
     let lastPairTime = Date.now();
-    let lastFloatingTargetTime = Date.now();
-    let lastUpperDepthTargetTime = Date.now();
-    let lastLowerTargetTime = Date.now();
+    let lastTargetLoopTime = Date.now();
+    let targetRotationIndex = 0;
 
     const render = () => {
       ctx.clearRect(0, 0, width, height);
@@ -694,22 +693,20 @@ export const StarryBackground: React.FC = () => {
         lastPairTime = now;
       }
 
-      // 3. Dedicated floating training capsule targeted meteor: every ~5 seconds
-      if (now - lastFloatingTargetTime > 5000) {
-        spawnFloatingCapsuleTargetMeteor();
-        lastFloatingTargetTime = now;
-      }
+      // 3. 💥 Rhythmic 4-Second Capsule Crack Loop (User requested: "har 4 sec me ek naya capsule phode")
+      // Cycles seamlessly between Upper Tier Depth, Lower Tier, and Floating Training Capsule!
+      if (now - lastTargetLoopTime > 4000) {
+        const step = targetRotationIndex % 4;
+        targetRotationIndex++;
+        lastTargetLoopTime = now;
 
-      // 4. 🌌 DEPTH LIGHTING METEOR -> Bypasses lower row & cracks UPPER ROW capsules: every ~4.5 seconds
-      if (now - lastUpperDepthTargetTime > 4500) {
-        spawnUpperRowDepthMeteor();
-        lastUpperDepthTargetTime = now;
-      }
-
-      // 5. Lower row hanging capsules targeted meteor: every ~5.5 seconds
-      if (now - lastLowerTargetTime > 5500) {
-        spawnLowerRowMeteor();
-        lastLowerTargetTime = now;
+        if (step === 0 || step === 2) {
+          spawnUpperRowDepthMeteor(); // Deep Space Meteor hits Upper Row
+        } else if (step === 1) {
+          spawnLowerRowMeteor(); // Hits Lower Row
+        } else {
+          spawnFloatingCapsuleTargetMeteor(); // Hits Floating Training Capsule
+        }
       }
 
       // 1. Draw static & twinkling stars

@@ -30,6 +30,7 @@ import IncomingCallScreen from './IncomingCallScreen';
 import InCallActiveScreen from './InCallActiveScreen';
 import { ShoppingBag } from 'lucide-react';
 import StarryBackground from './StarryBackground';
+import { CyberMonkeyMechanic } from './CyberMonkeyMechanic';
 
 interface LiveAIInterfaceProps {
     onClose: () => void;
@@ -3041,6 +3042,9 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
         >
             {/* ── 🌌 Cosmic Starry Constellation Background (Hundreds of twinkling stars + shooting meteors) ── */}
             <StarryBackground />
+
+            {/* ── 🐵 3D Cyber Mini Monkey Mechanic (Sits on capsules, jumps capsule-to-capsule, repairs in 5s) ── */}
+            <CyberMonkeyMechanic />
 
             <div className="w-full h-full flex flex-col flex-1 relative z-10" style={{ overflow: 'visible' }}>
                 {/* ── Top Dashboard Header (100% Fully Transparent so all hanging ropes behind it are visible) ── */}
