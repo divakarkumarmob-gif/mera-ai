@@ -814,12 +814,12 @@ async function playAudioChunk(
     }
 }
 
-// ── Suspended Aerial Rope Capsule Component (Upper Screen se Rassi se Latka Hua) ──
+// ── Suspended Aerial Rope Capsule Component (Upper Screen se Direct Rassi se Latka Hua) ──
 function HangingRopeCapsule({
-    ropeHeight = 26,
+    ropeHeight = 34,
     swayIndex = 0,
-    ropeColor = 'from-amber-400/80 via-amber-300/90 to-amber-500/80',
-    glowColor = 'rgba(251,191,36,0.35)',
+    ropeColor = 'from-amber-400/90 via-amber-300 to-amber-500/90',
+    glowColor = 'rgba(251,191,36,0.4)',
     children,
 }: {
     ropeHeight?: number;
@@ -831,7 +831,7 @@ function HangingRopeCapsule({
     // Stagger natural sway frequency and angle so each capsule sways naturally in the air
     const delay = (swayIndex * 0.28) % 2.4;
     const duration = 3.6 + (swayIndex % 3) * 0.4;
-    const maxAngle = 1.2 + (swayIndex % 2) * 0.5;
+    const maxAngle = 1.3 + (swayIndex % 2) * 0.5;
 
     return (
         <motion.div
@@ -853,28 +853,33 @@ function HangingRopeCapsule({
             }}
             style={{ transformOrigin: 'top center' }}
         >
-            {/* Top Ceiling Anchor Mount Node */}
-            <div className="w-2.5 h-2.5 rounded-full bg-slate-850 border-2 border-amber-300/80 shadow-[0_0_8px_rgba(251,191,36,0.5)] z-10 shrink-0 flex items-center justify-center">
-                <div className="w-1 h-1 rounded-full bg-white animate-pulse" />
+            {/* Top Ceiling Anchor Mount Rivet (Screen ke Top se Direct Attach) */}
+            <div className="flex flex-col items-center shrink-0 z-10">
+                <div className="w-3.5 h-1.5 rounded-t-sm bg-gradient-to-b from-slate-700 to-slate-850 border-t border-x border-amber-400/60 shadow-[0_-2px_6px_rgba(251,191,36,0.3)]" />
+                <div className="w-2.5 h-2.5 rounded-full bg-slate-900 border-[1.5px] border-amber-300 shadow-[0_0_8px_rgba(251,191,36,0.6)] flex items-center justify-center -mt-0.5">
+                    <div className="w-1 h-1 rounded-full bg-white animate-pulse" />
+                </div>
             </div>
 
-            {/* Braided Hanging Rope (Rassi) */}
+            {/* Braided Hanging Rope (Rassi - Direct Vertical Suspension) */}
             <div
-                className={`w-[2.5px] bg-gradient-to-b ${ropeColor} relative shadow-[0_0_6px_${glowColor}]`}
+                className={`w-[3px] bg-gradient-to-b ${ropeColor} relative shadow-[0_0_8px_${glowColor}]`}
                 style={{
                     height: `${ropeHeight}px`,
                     backgroundImage:
-                        'repeating-linear-gradient(45deg, rgba(0,0,0,0.38), rgba(0,0,0,0.38) 2px, transparent 2px, transparent 4px)',
+                        'repeating-linear-gradient(45deg, rgba(0,0,0,0.5) 0px, rgba(0,0,0,0.5) 2.5px, rgba(255,255,255,0.2) 2.5px, rgba(255,255,255,0.2) 5px)',
                 }}
             >
                 {/* Micro-fiber light shimmer */}
-                <div className="absolute inset-0 w-full h-full bg-white/20 opacity-70" />
+                <div className="absolute inset-0 w-full h-full bg-amber-100/15 pointer-events-none" />
             </div>
 
             {/* Rope Knot & Carabiner Clip Ring */}
             <div className="relative -mt-0.5 z-10 flex flex-col items-center">
-                <div className="w-2.5 h-1.5 rounded-sm bg-amber-600/90 border border-amber-300 shadow-[0_0_5px_rgba(245,158,11,0.5)]" />
-                <div className="w-1.5 h-1 rounded-full border border-slate-400 -mt-0.5" />
+                <div className="w-3 h-2 rounded-sm bg-gradient-to-b from-amber-700 to-amber-950 border border-amber-400/90 shadow-[0_0_6px_rgba(245,158,11,0.5)] flex items-center justify-center">
+                    <div className="w-2 h-[1px] bg-amber-300/80" />
+                </div>
+                <div className="w-2 h-1.5 rounded-full border-[1.5px] border-slate-300 -mt-0.5 bg-slate-850/90 shadow-sm" />
             </div>
 
             {/* The Suspended Capsule Button */}
@@ -2881,17 +2886,10 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                         </span>
                     </div>
 
-                    {/* ── Suspended Aerial Rope Capsules (Upper Screen se Rassi se Latka Hua) ── */}
-                    <div className="w-full flex flex-col gap-1.5 select-none">
-                        {/* ── TIER 1: Upper 10 Aerial Capsules Hanging from Ceiling Ropes ── */}
-                        <div className="relative w-full flex flex-col group/capsules1">
-                            {/* Glowing Overhead Suspension Track 1 */}
-                            <div className="w-full flex items-center gap-1 px-3 mb-[-3px] opacity-75">
-                                <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-[0_0_6px_#22d3ee]" />
-                                <div className="h-[1.5px] flex-1 bg-gradient-to-r from-cyan-500/30 via-amber-400/50 to-purple-500/30" />
-                                <div className="w-1.5 h-1.5 rounded-full bg-purple-400 shadow-[0_0_6px_#c084fc]" />
-                            </div>
-
+                    {/* ── Suspended Aerial Rope Capsules (Screen ke Top se Direct Rassi me Latke Hue, Center se Start) ── */}
+                    <div className="w-full flex flex-col gap-2 select-none items-center">
+                        {/* ── TIER 1: Upper 10 Aerial Capsules Hanging Direct from Ceiling, Centered ── */}
+                        <div className="relative w-full flex items-center justify-center group/capsules1">
                             {/* Left Scroll Arrow */}
                             <button
                                 type="button"
@@ -2899,143 +2897,145 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                                     const container = e.currentTarget.parentElement?.querySelector('.capsule-scroll-tier1');
                                     container?.scrollBy({ left: -260, behavior: 'smooth' });
                                 }}
-                                className="hidden md:flex absolute left-0 top-1/2 -translate-y-1/2 z-30 p-1.5 rounded-full bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-white/10 shadow-lg backdrop-blur-sm -translate-x-2 opacity-0 group-hover/capsules1:opacity-100 transition-all cursor-pointer active:scale-95"
+                                className="hidden md:flex absolute left-2 top-1/2 -translate-y-1/2 z-30 p-1.5 rounded-full bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-white/10 shadow-lg backdrop-blur-sm opacity-0 group-hover/capsules1:opacity-100 transition-all cursor-pointer active:scale-95"
                                 title="Scroll Left (Tier 1)"
                             >
                                 <ChevronLeft className="w-3.5 h-3.5" />
                             </button>
 
-                            {/* Scrollable Suspended Tier 1 (10 Capsules) */}
+                            {/* Center-Aligned Scrollable Suspended Tier 1 (Top 10 Capsules) */}
                             <div
-                                className="capsule-scroll-tier1 w-full overflow-x-auto no-scrollbar scroll-smooth flex items-start gap-3.5 pt-0 pb-1 px-2 touch-pan-x"
+                                className="capsule-scroll-tier1 w-full overflow-x-auto no-scrollbar scroll-smooth touch-pan-x"
                                 onWheel={(e) => {
                                     if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
                                         e.currentTarget.scrollLeft += e.deltaY;
                                     }
                                 }}
                             >
-                                {/* 1. Wi-Fi Radar */}
-                                <HangingRopeCapsule ropeHeight={26} swayIndex={1} ropeColor="from-cyan-400/80 via-cyan-300/90 to-cyan-500/80" glowColor="rgba(6,182,212,0.35)">
-                                    <button
-                                        onClick={() => setShowWifiRadar(true)}
-                                        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/50 text-cyan-300 text-xs font-semibold shadow-[0_0_15px_rgba(6,182,212,0.25)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
-                                        title="Wi-Fi Radar & Connected Devices"
-                                    >
-                                        <Radio className="w-3.5 h-3.5 text-cyan-400" />
-                                        <span>Wi-Fi Radar</span>
-                                    </button>
-                                </HangingRopeCapsule>
+                                <div className="inline-flex items-start justify-center min-w-full w-max gap-3.5 px-6 pt-0 pb-1.5 mx-auto">
+                                    {/* 1. Wi-Fi Radar */}
+                                    <HangingRopeCapsule ropeHeight={34} swayIndex={1} ropeColor="from-cyan-400/90 via-cyan-300 to-cyan-500/90" glowColor="rgba(6,182,212,0.4)">
+                                        <button
+                                            onClick={() => setShowWifiRadar(true)}
+                                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/50 text-cyan-300 text-xs font-semibold shadow-[0_0_15px_rgba(6,182,212,0.25)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
+                                            title="Wi-Fi Radar & Connected Devices"
+                                        >
+                                            <Radio className="w-3.5 h-3.5 text-cyan-400" />
+                                            <span>Wi-Fi Radar</span>
+                                        </button>
+                                    </HangingRopeCapsule>
 
-                                {/* 2. 🔥 Perchance Studio */}
-                                <HangingRopeCapsule ropeHeight={30} swayIndex={2} ropeColor="from-pink-400/80 via-rose-300/90 to-amber-400/80" glowColor="rgba(244,63,94,0.35)">
-                                    <button
-                                        onClick={() => setShowPerchanceStudio(true)}
-                                        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-gradient-to-r from-pink-500/25 via-rose-500/25 to-amber-500/25 hover:from-pink-500/40 hover:to-amber-500/40 border border-pink-400/60 text-pink-200 text-xs font-bold shadow-[0_0_20px_rgba(244,63,94,0.35)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
-                                        title="🔥 Perchance AI Photo Generator & Live Diagnostics Studio"
-                                    >
-                                        <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-spin" style={{ animationDuration: '4s' }} />
-                                        <span>🔥 Perchance Studio</span>
-                                    </button>
-                                </HangingRopeCapsule>
+                                    {/* 2. 🔥 Perchance Studio */}
+                                    <HangingRopeCapsule ropeHeight={38} swayIndex={2} ropeColor="from-pink-400/90 via-rose-300 to-amber-400/90" glowColor="rgba(244,63,94,0.4)">
+                                        <button
+                                            onClick={() => setShowPerchanceStudio(true)}
+                                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-gradient-to-r from-pink-500/25 via-rose-500/25 to-amber-500/25 hover:from-pink-500/40 hover:to-amber-500/40 border border-pink-400/60 text-pink-200 text-xs font-bold shadow-[0_0_20px_rgba(244,63,94,0.35)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
+                                            title="🔥 Perchance AI Photo Generator & Live Diagnostics Studio"
+                                        >
+                                            <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-spin" style={{ animationDuration: '4s' }} />
+                                            <span>🔥 Perchance Studio</span>
+                                        </button>
+                                    </HangingRopeCapsule>
 
-                                {/* 3. Backup & Vault */}
-                                <HangingRopeCapsule ropeHeight={24} swayIndex={3} ropeColor="from-amber-400/80 via-amber-300/90 to-amber-500/80" glowColor="rgba(245,158,11,0.35)">
-                                    <button
-                                        onClick={() => setShowBackupModal(true)}
-                                        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 text-amber-300 text-xs font-semibold shadow-[0_0_15px_rgba(245,158,11,0.25)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
-                                        title="Memory Backup Download & Security Hub"
-                                    >
-                                        <Download className="w-3.5 h-3.5" />
-                                        <span>Backup & Vault</span>
-                                    </button>
-                                </HangingRopeCapsule>
+                                    {/* 3. Backup & Vault */}
+                                    <HangingRopeCapsule ropeHeight={32} swayIndex={3} ropeColor="from-amber-400/90 via-amber-300 to-amber-500/90" glowColor="rgba(245,158,11,0.4)">
+                                        <button
+                                            onClick={() => setShowBackupModal(true)}
+                                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 text-amber-300 text-xs font-semibold shadow-[0_0_15px_rgba(245,158,11,0.25)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
+                                            title="Memory Backup Download & Security Hub"
+                                        >
+                                            <Download className="w-3.5 h-3.5" />
+                                            <span>Backup & Vault</span>
+                                        </button>
+                                    </HangingRopeCapsule>
 
-                                {/* 4. Security Shield */}
-                                <HangingRopeCapsule ropeHeight={28} swayIndex={4} ropeColor="from-rose-400/80 via-rose-300/90 to-rose-500/80" glowColor="rgba(244,63,94,0.35)">
-                                    <button
-                                        onClick={() => setShowBackupModal(true)}
-                                        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/50 text-rose-300 text-xs font-semibold shadow-[0_0_15px_rgba(244,63,94,0.25)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
-                                        title="Intrusion Shield & Blocked Devices"
-                                    >
-                                        <Shield className="w-3.5 h-3.5" />
-                                        <span>Security Shield</span>
-                                    </button>
-                                </HangingRopeCapsule>
+                                    {/* 4. Security Shield */}
+                                    <HangingRopeCapsule ropeHeight={36} swayIndex={4} ropeColor="from-rose-400/90 via-rose-300 to-rose-500/90" glowColor="rgba(244,63,94,0.4)">
+                                        <button
+                                            onClick={() => setShowBackupModal(true)}
+                                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/50 text-rose-300 text-xs font-semibold shadow-[0_0_15px_rgba(244,63,94,0.25)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
+                                            title="Intrusion Shield & Blocked Devices"
+                                        >
+                                            <Shield className="w-3.5 h-3.5" />
+                                            <span>Security Shield</span>
+                                        </button>
+                                    </HangingRopeCapsule>
 
-                                {/* 5. WhatsApp */}
-                                <HangingRopeCapsule ropeHeight={25} swayIndex={5} ropeColor="from-emerald-400/80 via-emerald-300/90 to-emerald-500/80" glowColor="rgba(16,185,129,0.35)">
-                                    <button
-                                        onClick={() => setShowWhatsAppModal(true)}
-                                        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 text-xs font-semibold shadow-[0_0_15px_rgba(16,185,129,0.25)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
-                                        title="WhatsApp Link Assistant"
-                                    >
-                                        <span>📲</span>
-                                        <span>WhatsApp</span>
-                                    </button>
-                                </HangingRopeCapsule>
+                                    {/* 5. WhatsApp */}
+                                    <HangingRopeCapsule ropeHeight={33} swayIndex={5} ropeColor="from-emerald-400/90 via-emerald-300 to-emerald-500/90" glowColor="rgba(16,185,129,0.4)">
+                                        <button
+                                            onClick={() => setShowWhatsAppModal(true)}
+                                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 text-xs font-semibold shadow-[0_0_15px_rgba(16,185,129,0.25)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
+                                            title="WhatsApp Link Assistant"
+                                        >
+                                            <span>📲</span>
+                                            <span>WhatsApp</span>
+                                        </button>
+                                    </HangingRopeCapsule>
 
-                                {/* 6. Crawler */}
-                                <HangingRopeCapsule ropeHeight={29} swayIndex={6} ropeColor="from-cyan-400/80 via-cyan-300/90 to-blue-500/80" glowColor="rgba(6,182,212,0.35)">
-                                    <button
-                                        onClick={() => setShowWebCrawler(true)}
-                                        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/50 text-cyan-300 text-xs font-semibold shadow-[0_0_15px_rgba(6,182,212,0.25)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
-                                        title="Web Crawler & AI Research Studio"
-                                    >
-                                        <span>🕷️</span>
-                                        <span>Crawler</span>
-                                    </button>
-                                </HangingRopeCapsule>
+                                    {/* 6. Crawler */}
+                                    <HangingRopeCapsule ropeHeight={37} swayIndex={6} ropeColor="from-cyan-400/90 via-cyan-300 to-blue-500/90" glowColor="rgba(6,182,212,0.4)">
+                                        <button
+                                            onClick={() => setShowWebCrawler(true)}
+                                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/50 text-cyan-300 text-xs font-semibold shadow-[0_0_15px_rgba(6,182,212,0.25)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
+                                            title="Web Crawler & AI Research Studio"
+                                        >
+                                            <span>🕷️</span>
+                                            <span>Crawler</span>
+                                        </button>
+                                    </HangingRopeCapsule>
 
-                                {/* 7. Music Studio */}
-                                <HangingRopeCapsule ropeHeight={26} swayIndex={7} ropeColor="from-cyan-400/80 via-fuchsia-300/90 to-pink-500/80" glowColor="rgba(217,70,239,0.35)">
-                                    <button
-                                        onClick={() => setShowMusicStudio(true)}
-                                        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-gradient-to-r from-cyan-500/20 to-fuchsia-500/20 hover:from-cyan-500/30 hover:to-fuchsia-500/30 border border-cyan-400/50 text-cyan-300 text-xs font-semibold shadow-[0_0_15px_rgba(6,182,212,0.25)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
-                                        title="JioSaavn 320kbps HD Music Studio"
-                                    >
-                                        <span>🎵</span>
-                                        <span>Music Studio</span>
-                                    </button>
-                                </HangingRopeCapsule>
+                                    {/* 7. Music Studio */}
+                                    <HangingRopeCapsule ropeHeight={34} swayIndex={7} ropeColor="from-cyan-400/90 via-fuchsia-300 to-pink-500/90" glowColor="rgba(217,70,239,0.4)">
+                                        <button
+                                            onClick={() => setShowMusicStudio(true)}
+                                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-gradient-to-r from-cyan-500/20 to-fuchsia-500/20 hover:from-cyan-500/30 hover:to-fuchsia-500/30 border border-cyan-400/50 text-cyan-300 text-xs font-semibold shadow-[0_0_15px_rgba(6,182,212,0.25)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
+                                            title="JioSaavn 320kbps HD Music Studio"
+                                        >
+                                            <span>🎵</span>
+                                            <span>Music Studio</span>
+                                        </button>
+                                    </HangingRopeCapsule>
 
-                                {/* 8. YouTube AI */}
-                                <HangingRopeCapsule ropeHeight={31} swayIndex={8} ropeColor="from-red-400/80 via-rose-300/90 to-red-500/80" glowColor="rgba(239,68,68,0.35)">
-                                    <button
-                                        onClick={() => setShowYouTubeStudio(true)}
-                                        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 text-red-300 text-xs font-semibold shadow-[0_0_15px_rgba(239,68,68,0.25)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
-                                        title="YouTube Intelligence & Ask Gemini Studio"
-                                    >
-                                        <span>🎬</span>
-                                        <span>YouTube AI</span>
-                                    </button>
-                                </HangingRopeCapsule>
+                                    {/* 8. YouTube AI */}
+                                    <HangingRopeCapsule ropeHeight={39} swayIndex={8} ropeColor="from-red-400/90 via-rose-300 to-red-500/90" glowColor="rgba(239,68,68,0.4)">
+                                        <button
+                                            onClick={() => setShowYouTubeStudio(true)}
+                                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 text-red-300 text-xs font-semibold shadow-[0_0_15px_rgba(239,68,68,0.25)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
+                                            title="YouTube Intelligence & Ask Gemini Studio"
+                                        >
+                                            <span>🎬</span>
+                                            <span>YouTube AI</span>
+                                        </button>
+                                    </HangingRopeCapsule>
 
-                                {/* 9. Screen Vision */}
-                                <HangingRopeCapsule ropeHeight={25} swayIndex={9} ropeColor="from-indigo-400/80 via-blue-300/90 to-indigo-500/80" glowColor="rgba(99,102,241,0.35)">
-                                    <button
-                                        onClick={toggleScreenShare}
-                                        className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold shrink-0 whitespace-nowrap transition-all cursor-pointer active:scale-95 ${
-                                            isScreenSharing
-                                                ? 'bg-red-500/20 border border-red-500/60 text-red-300 shadow-[0_0_15px_rgba(239,68,68,0.3)] animate-pulse'
-                                                : 'bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 shadow-[0_0_15px_rgba(99,102,241,0.25)] hover:bg-indigo-500/30'
-                                        }`}
-                                        title={isScreenSharing ? 'Stop Screen Sharing' : 'Share Screen with Friday for Vision AI'}
-                                    >
-                                        <span>{isScreenSharing ? '🔴 Vision ON' : '🖥️ Vision'}</span>
-                                    </button>
-                                </HangingRopeCapsule>
+                                    {/* 9. Screen Vision */}
+                                    <HangingRopeCapsule ropeHeight={33} swayIndex={9} ropeColor="from-indigo-400/90 via-blue-300 to-indigo-500/90" glowColor="rgba(99,102,241,0.4)">
+                                        <button
+                                            onClick={toggleScreenShare}
+                                            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold shrink-0 whitespace-nowrap transition-all cursor-pointer active:scale-95 ${
+                                                isScreenSharing
+                                                    ? 'bg-red-500/20 border border-red-500/60 text-red-300 shadow-[0_0_15px_rgba(239,68,68,0.3)] animate-pulse'
+                                                    : 'bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 shadow-[0_0_15px_rgba(99,102,241,0.25)] hover:bg-indigo-500/30'
+                                            }`}
+                                            title={isScreenSharing ? 'Stop Screen Sharing' : 'Share Screen with Friday for Vision AI'}
+                                        >
+                                            <span>{isScreenSharing ? '🔴 Vision ON' : '🖥️ Vision'}</span>
+                                        </button>
+                                    </HangingRopeCapsule>
 
-                                {/* 10. 🛸 3D Lab */}
-                                <HangingRopeCapsule ropeHeight={28} swayIndex={10} ropeColor="from-cyan-400/80 via-teal-300/90 to-cyan-500/80" glowColor="rgba(6,182,212,0.35)">
-                                    <button
-                                        onClick={() => setShowHologramLab(true)}
-                                        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/50 text-cyan-300 text-xs font-semibold shadow-[0_0_18px_rgba(6,182,212,0.3)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
-                                        title="JARVIS Holographic 3D Hand Tracking & CAD Lab"
-                                    >
-                                        <Cpu className="w-3.5 h-3.5 animate-pulse text-cyan-300" />
-                                        <span>🛸 3D Lab</span>
-                                    </button>
-                                </HangingRopeCapsule>
+                                    {/* 10. 🛸 3D Lab */}
+                                    <HangingRopeCapsule ropeHeight={36} swayIndex={10} ropeColor="from-cyan-400/90 via-teal-300 to-cyan-500/90" glowColor="rgba(6,182,212,0.4)">
+                                        <button
+                                            onClick={() => setShowHologramLab(true)}
+                                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/50 text-cyan-300 text-xs font-semibold shadow-[0_0_18px_rgba(6,182,212,0.3)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
+                                            title="JARVIS Holographic 3D Hand Tracking & CAD Lab"
+                                        >
+                                            <Cpu className="w-3.5 h-3.5 animate-pulse text-cyan-300" />
+                                            <span>🛸 3D Lab</span>
+                                        </button>
+                                    </HangingRopeCapsule>
+                                </div>
                             </div>
 
                             {/* Right Scroll Arrow */}
@@ -3045,22 +3045,15 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                                     const container = e.currentTarget.parentElement?.querySelector('.capsule-scroll-tier1');
                                     container?.scrollBy({ left: 260, behavior: 'smooth' });
                                 }}
-                                className="hidden md:flex absolute right-0 top-1/2 -translate-y-1/2 z-30 p-1.5 rounded-full bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-white/10 shadow-lg backdrop-blur-sm translate-x-2 opacity-0 group-hover/capsules1:opacity-100 transition-all cursor-pointer active:scale-95"
+                                className="hidden md:flex absolute right-2 top-1/2 -translate-y-1/2 z-30 p-1.5 rounded-full bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-white/10 shadow-lg backdrop-blur-sm opacity-0 group-hover/capsules1:opacity-100 transition-all cursor-pointer active:scale-95"
                                 title="Scroll Right (Tier 1)"
                             >
                                 <ChevronRight className="w-3.5 h-3.5" />
                             </button>
                         </div>
 
-                        {/* ── TIER 2: Remaining Capsules Hanging Below Upper Tier from Ropes ── */}
-                        <div className="relative w-full flex flex-col group/capsules2">
-                            {/* Overhead Suspension Track 2 */}
-                            <div className="w-full flex items-center gap-1 px-3 mb-[-3px] opacity-60">
-                                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399]" />
-                                <div className="h-[1.5px] flex-1 bg-gradient-to-r from-emerald-500/30 via-teal-400/40 to-rose-500/30" />
-                                <div className="w-1.5 h-1.5 rounded-full bg-rose-400 shadow-[0_0_6px_#fb7185]" />
-                            </div>
-
+                        {/* ── TIER 2: Remaining Capsules Hanging Directly Below, Centered ── */}
+                        <div className="relative w-full flex items-center justify-center group/capsules2">
                             {/* Left Scroll Arrow */}
                             <button
                                 type="button"
@@ -3068,96 +3061,98 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                                     const container = e.currentTarget.parentElement?.querySelector('.capsule-scroll-tier2');
                                     container?.scrollBy({ left: -260, behavior: 'smooth' });
                                 }}
-                                className="hidden md:flex absolute left-0 top-1/2 -translate-y-1/2 z-30 p-1.5 rounded-full bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-white/10 shadow-lg backdrop-blur-sm -translate-x-2 opacity-0 group-hover/capsules2:opacity-100 transition-all cursor-pointer active:scale-95"
+                                className="hidden md:flex absolute left-2 top-1/2 -translate-y-1/2 z-30 p-1.5 rounded-full bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-white/10 shadow-lg backdrop-blur-sm opacity-0 group-hover/capsules2:opacity-100 transition-all cursor-pointer active:scale-95"
                                 title="Scroll Left (Tier 2)"
                             >
                                 <ChevronLeft className="w-3.5 h-3.5" />
                             </button>
 
-                            {/* Scrollable Suspended Tier 2 (Remaining Capsules) */}
+                            {/* Center-Aligned Scrollable Suspended Tier 2 (Remaining Capsules) */}
                             <div
-                                className="capsule-scroll-tier2 w-full overflow-x-auto no-scrollbar scroll-smooth flex items-start gap-3.5 pt-0 pb-1 px-2 touch-pan-x"
+                                className="capsule-scroll-tier2 w-full overflow-x-auto no-scrollbar scroll-smooth touch-pan-x"
                                 onWheel={(e) => {
                                     if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
                                         e.currentTarget.scrollLeft += e.deltaY;
                                     }
                                 }}
                             >
-                                {/* 11. 🧠 Learning & Cognition Capsule */}
-                                <HangingRopeCapsule ropeHeight={28} swayIndex={11} ropeColor="from-emerald-400/80 via-teal-300/90 to-emerald-500/80" glowColor="rgba(16,185,129,0.4)">
-                                    <button
-                                        onClick={() => setShowLearningCapsule(true)}
-                                        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 text-xs font-semibold shadow-[0_0_15px_rgba(16,185,129,0.3)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
-                                        title="Friday Live Autonomous Learning & Cognition Capsule"
-                                    >
-                                        <span className="text-sm">🧠</span>
-                                        <span>Learning Capsule</span>
-                                    </button>
-                                </HangingRopeCapsule>
+                                <div className="inline-flex items-start justify-center min-w-full w-max gap-3.5 px-6 pt-0 pb-1.5 mx-auto">
+                                    {/* 11. 🧠 Learning & Cognition Capsule */}
+                                    <HangingRopeCapsule ropeHeight={35} swayIndex={11} ropeColor="from-emerald-400/90 via-teal-300 to-emerald-500/90" glowColor="rgba(16,185,129,0.45)">
+                                        <button
+                                            onClick={() => setShowLearningCapsule(true)}
+                                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 text-xs font-semibold shadow-[0_0_15px_rgba(16,185,129,0.3)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
+                                            title="Friday Live Autonomous Learning & Cognition Capsule"
+                                        >
+                                            <span className="text-sm">🧠</span>
+                                            <span>Learning Capsule</span>
+                                        </button>
+                                    </HangingRopeCapsule>
 
-                                {/* 12. Code Agent */}
-                                <HangingRopeCapsule ropeHeight={26} swayIndex={12} ropeColor="from-purple-400/80 via-violet-300/90 to-purple-500/80" glowColor="rgba(168,85,247,0.35)">
-                                    <button
-                                        onClick={() => setShowCodeAgent(true)}
-                                        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/50 text-purple-300 text-xs font-semibold shadow-[0_0_15px_rgba(168,85,247,0.25)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
-                                        title="Coding Agent & Diagnostics Logs"
-                                    >
-                                        <Code2 className="w-3.5 h-3.5" />
-                                        <span>Code Agent</span>
-                                    </button>
-                                </HangingRopeCapsule>
+                                    {/* 12. Code Agent */}
+                                    <HangingRopeCapsule ropeHeight={33} swayIndex={12} ropeColor="from-purple-400/90 via-violet-300 to-purple-500/90" glowColor="rgba(168,85,247,0.4)">
+                                        <button
+                                            onClick={() => setShowCodeAgent(true)}
+                                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/50 text-purple-300 text-xs font-semibold shadow-[0_0_15px_rgba(168,85,247,0.25)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
+                                            title="Coding Agent & Diagnostics Logs"
+                                        >
+                                            <Code2 className="w-3.5 h-3.5" />
+                                            <span>Code Agent</span>
+                                        </button>
+                                    </HangingRopeCapsule>
 
-                                {/* 13. Chat History */}
-                                <HangingRopeCapsule ropeHeight={30} swayIndex={13} ropeColor="from-blue-400/80 via-sky-300/90 to-blue-500/80" glowColor="rgba(59,130,246,0.35)">
-                                    <button
-                                        onClick={() => setShowChatHistory(true)}
-                                        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/50 text-blue-300 text-xs font-semibold shadow-[0_0_15px_rgba(59,130,246,0.25)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
-                                        title="Encrypted Chat History"
-                                    >
-                                        <MessageSquare className="w-3.5 h-3.5" />
-                                        <span>Chat History</span>
-                                    </button>
-                                </HangingRopeCapsule>
+                                    {/* 13. Chat History */}
+                                    <HangingRopeCapsule ropeHeight={38} swayIndex={13} ropeColor="from-blue-400/90 via-sky-300 to-blue-500/90" glowColor="rgba(59,130,246,0.4)">
+                                        <button
+                                            onClick={() => setShowChatHistory(true)}
+                                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/50 text-blue-300 text-xs font-semibold shadow-[0_0_15px_rgba(59,130,246,0.25)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
+                                            title="Encrypted Chat History"
+                                        >
+                                            <MessageSquare className="w-3.5 h-3.5" />
+                                            <span>Chat History</span>
+                                        </button>
+                                    </HangingRopeCapsule>
 
-                                {/* 14. Captions */}
-                                <HangingRopeCapsule ropeHeight={25} swayIndex={14} ropeColor="from-slate-400/80 via-slate-300/90 to-emerald-400/80" glowColor="rgba(148,163,184,0.35)">
-                                    <button
-                                        onClick={() => setShowCaptions(!showCaptions)}
-                                        className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold shrink-0 whitespace-nowrap transition-all cursor-pointer active:scale-95 ${
-                                            showCaptions
-                                                ? 'bg-emerald-500/25 border border-emerald-500/60 text-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.25)]'
-                                                : 'bg-slate-800/80 border border-slate-700 text-slate-300 hover:bg-slate-700'
-                                        }`}
-                                        title={showCaptions ? 'Captions ON' : 'Captions OFF'}
-                                    >
-                                        <Captions className="w-3.5 h-3.5" />
-                                        <span>Captions</span>
-                                    </button>
-                                </HangingRopeCapsule>
+                                    {/* 14. Captions */}
+                                    <HangingRopeCapsule ropeHeight={32} swayIndex={14} ropeColor="from-slate-400/90 via-slate-300 to-emerald-400/90" glowColor="rgba(148,163,184,0.4)">
+                                        <button
+                                            onClick={() => setShowCaptions(!showCaptions)}
+                                            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold shrink-0 whitespace-nowrap transition-all cursor-pointer active:scale-95 ${
+                                                showCaptions
+                                                    ? 'bg-emerald-500/25 border border-emerald-500/60 text-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.25)]'
+                                                    : 'bg-slate-800/80 border border-slate-700 text-slate-300 hover:bg-slate-700'
+                                            }`}
+                                            title={showCaptions ? 'Captions ON' : 'Captions OFF'}
+                                        >
+                                            <Captions className="w-3.5 h-3.5" />
+                                            <span>Captions</span>
+                                        </button>
+                                    </HangingRopeCapsule>
 
-                                {/* 15. Settings */}
-                                <HangingRopeCapsule ropeHeight={29} swayIndex={15} ropeColor="from-slate-400/80 via-zinc-300/90 to-slate-500/80" glowColor="rgba(148,163,184,0.3)">
-                                    <button
-                                        onClick={() => setShowSettings(!showSettings)}
-                                        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-slate-800/80 hover:bg-slate-700 border border-slate-600 text-slate-200 text-xs font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
-                                        title="Settings"
-                                    >
-                                        <Settings className="w-3.5 h-3.5" />
-                                        <span>Settings</span>
-                                    </button>
-                                </HangingRopeCapsule>
+                                    {/* 15. Settings */}
+                                    <HangingRopeCapsule ropeHeight={36} swayIndex={15} ropeColor="from-slate-400/90 via-zinc-300 to-slate-500/90" glowColor="rgba(148,163,184,0.35)">
+                                        <button
+                                            onClick={() => setShowSettings(!showSettings)}
+                                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-slate-800/80 hover:bg-slate-700 border border-slate-600 text-slate-200 text-xs font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
+                                            title="Settings"
+                                        >
+                                            <Settings className="w-3.5 h-3.5" />
+                                            <span>Settings</span>
+                                        </button>
+                                    </HangingRopeCapsule>
 
-                                {/* 16. Minimize / Close */}
-                                <HangingRopeCapsule ropeHeight={27} swayIndex={16} ropeColor="from-rose-400/80 via-red-300/90 to-rose-500/80" glowColor="rgba(244,63,94,0.35)">
-                                    <button
-                                        onClick={handleClose}
-                                        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/50 text-rose-300 text-xs font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
-                                        title="Close / Minimize"
-                                    >
-                                        <X className="w-3.5 h-3.5" />
-                                        <span>Close</span>
-                                    </button>
-                                </HangingRopeCapsule>
+                                    {/* 16. Minimize / Close */}
+                                    <HangingRopeCapsule ropeHeight={34} swayIndex={16} ropeColor="from-rose-400/90 via-red-300 to-rose-500/90" glowColor="rgba(244,63,94,0.4)">
+                                        <button
+                                            onClick={handleClose}
+                                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/50 text-rose-300 text-xs font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
+                                            title="Close / Minimize"
+                                        >
+                                            <X className="w-3.5 h-3.5" />
+                                            <span>Close</span>
+                                        </button>
+                                    </HangingRopeCapsule>
+                                </div>
                             </div>
 
                             {/* Right Scroll Arrow */}
@@ -3167,7 +3162,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                                     const container = e.currentTarget.parentElement?.querySelector('.capsule-scroll-tier2');
                                     container?.scrollBy({ left: 260, behavior: 'smooth' });
                                 }}
-                                className="hidden md:flex absolute right-0 top-1/2 -translate-y-1/2 z-30 p-1.5 rounded-full bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-white/10 shadow-lg backdrop-blur-sm translate-x-2 opacity-0 group-hover/capsules2:opacity-100 transition-all cursor-pointer active:scale-95"
+                                className="hidden md:flex absolute right-2 top-1/2 -translate-y-1/2 z-30 p-1.5 rounded-full bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-white/10 shadow-lg backdrop-blur-sm opacity-0 group-hover/capsules2:opacity-100 transition-all cursor-pointer active:scale-95"
                                 title="Scroll Right (Tier 2)"
                             >
                                 <ChevronRight className="w-3.5 h-3.5" />
