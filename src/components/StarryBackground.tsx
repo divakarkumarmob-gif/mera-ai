@@ -388,24 +388,39 @@ export const StarryBackground: React.FC = () => {
       }
     };
 
-    // 1. Standard single shooting star (Reduced slower speed: 2.8 - 4.2 px/frame)
-    const createShootingStar = (fromSide?: 'left' | 'right'): ShootingStar => {
-      const isLeft = fromSide ? fromSide === 'left' : Math.random() > 0.45;
-      let startX: number;
-      let startY: number;
-      let targetX: number;
-      let targetY: number;
+    // 🌟 1. OMNI-DIRECTIONAL 360° Shooting Star Spawner (Comes from Top, Bottom, Left, Right & All Diagonals!)
+    const createOmniShootingStar = (): ShootingStar => {
+      // Pick random spawn border: 0 = Top, 1 = Bottom, 2 = Left, 3 = Right
+      const spawnSide = Math.floor(Math.random() * 4);
+      let startX = 0;
+      let startY = 0;
+      let targetX = 0;
+      let targetY = 0;
 
-      if (isLeft) {
-        startX = Math.random() * (width * 0.4) - 40;
-        startY = Math.random() * (height * 0.4) - 20;
-        targetX = startX + Math.random() * 500 + 400;
-        targetY = startY + Math.random() * 400 + 300;
+      if (spawnSide === 0) {
+        // From TOP edge -> travelling downwards
+        startX = Math.random() * width;
+        startY = -30;
+        targetX = Math.random() * width;
+        targetY = height + 30;
+      } else if (spawnSide === 1) {
+        // From BOTTOM edge -> travelling upwards
+        startX = Math.random() * width;
+        startY = height + 30;
+        targetX = Math.random() * width;
+        targetY = -30;
+      } else if (spawnSide === 2) {
+        // From LEFT edge -> travelling rightwards
+        startX = -30;
+        startY = Math.random() * height;
+        targetX = width + 30;
+        targetY = Math.random() * height;
       } else {
-        startX = width - (Math.random() * (width * 0.4) - 40);
-        startY = Math.random() * (height * 0.4) - 20;
-        targetX = startX - (Math.random() * 500 + 400);
-        targetY = startY + Math.random() * 400 + 300;
+        // From RIGHT edge -> travelling leftwards
+        startX = width + 30;
+        startY = Math.random() * height;
+        targetX = -30;
+        targetY = Math.random() * height;
       }
 
       const dx = targetX - startX;
@@ -423,8 +438,8 @@ export const StarryBackground: React.FC = () => {
         y: startY,
         vx,
         vy,
-        length: Math.random() * 70 + 75,
-        speed: Math.random() * 1.4 + 2.8, // 🌟 Slower, clearly visible speed!
+        length: Math.random() * 65 + 75,
+        speed: Math.random() * 1.4 + 2.6, // Smooth slower speed
         opacity: 1,
         active: true,
         theme,
@@ -433,26 +448,42 @@ export const StarryBackground: React.FC = () => {
       };
     };
 
-    // 2. Guaranteed Mid-Air Collision Pair Generator (Spawns 2 meteors on exact intercept path!)
+    // 🌟 2. OMNI-DIRECTIONAL Mid-Air Collision Pair Generator (Horizontal, Vertical & Diagonal Intercepts!)
     const spawnCollisionPair = () => {
-      const meetX = Math.random() * (width * 0.5) + width * 0.25;
-      const meetY = Math.random() * (height * 0.35) + 80;
-      const travelDist = Math.random() * 250 + 300;
-      const baseSpeed = Math.random() * 0.8 + 3.2;
+      const meetX = Math.random() * (width * 0.6) + width * 0.2;
+      const meetY = Math.random() * (height * 0.5) + height * 0.15;
+      const travelDist = Math.random() * 200 + 260;
+      const baseSpeed = Math.random() * 0.8 + 3.0;
 
-      // Meteor 1 (from top-left)
-      const start1X = meetX - travelDist * 0.85;
-      const start1Y = meetY - travelDist * 0.6;
-      const dx1 = meetX - start1X;
-      const dy1 = meetY - start1Y;
-      const d1 = Math.hypot(dx1, dy1) || 1;
+      // Pattern: 0 = Horizontal head-on (Left vs Right), 1 = Vertical head-on (Top vs Bottom), 2 = Diagonal Cross
+      const pattern = Math.floor(Math.random() * 3);
+      let s1X = 0;
+      let s1Y = 0;
+      let s2X = 0;
+      let s2Y = 0;
 
-      // Meteor 2 (from top-right)
-      const start2X = meetX + travelDist * 0.85;
-      const start2Y = meetY - travelDist * 0.6;
-      const dx2 = meetX - start2X;
-      const dy2 = meetY - start2Y;
-      const d2 = Math.hypot(dx2, dy2) || 1;
+      if (pattern === 0) {
+        // Left vs Right
+        s1X = meetX - travelDist;
+        s1Y = meetY + (Math.random() - 0.5) * 40;
+        s2X = meetX + travelDist;
+        s2Y = meetY + (Math.random() - 0.5) * 40;
+      } else if (pattern === 1) {
+        // Top vs Bottom
+        s1X = meetX + (Math.random() - 0.5) * 40;
+        s1Y = meetY - travelDist;
+        s2X = meetX + (Math.random() - 0.5) * 40;
+        s2Y = meetY + travelDist;
+      } else {
+        // Diagonal cross
+        s1X = meetX - travelDist * 0.7;
+        s1Y = meetY - travelDist * 0.7;
+        s2X = meetX + travelDist * 0.7;
+        s2Y = meetY - travelDist * 0.7;
+      }
+
+      const d1 = Math.hypot(meetX - s1X, meetY - s1Y) || 1;
+      const d2 = Math.hypot(meetX - s2X, meetY - s2Y) || 1;
 
       const theme1 = METEOR_THEMES[themeCounter % METEOR_THEMES.length];
       themeCounter++;
@@ -461,11 +492,11 @@ export const StarryBackground: React.FC = () => {
 
       shootingStars.push({
         id: nextMeteorId++,
-        x: start1X,
-        y: start1Y,
-        vx: dx1 / d1,
-        vy: dy1 / d1,
-        length: 85,
+        x: s1X,
+        y: s1Y,
+        vx: (meetX - s1X) / d1,
+        vy: (meetY - s1Y) / d1,
+        length: 80,
         speed: baseSpeed,
         opacity: 1,
         active: true,
@@ -476,11 +507,11 @@ export const StarryBackground: React.FC = () => {
 
       shootingStars.push({
         id: nextMeteorId++,
-        x: start2X,
-        y: start2Y,
-        vx: dx2 / d2,
-        vy: dy2 / d2,
-        length: 85,
+        x: s2X,
+        y: s2Y,
+        vx: (meetX - s2X) / d2,
+        vy: (meetY - s2Y) / d2,
+        length: 80,
         speed: baseSpeed,
         opacity: 1,
         active: true,
@@ -490,7 +521,7 @@ export const StarryBackground: React.FC = () => {
       });
     };
 
-    // 3. Guaranteed Capsule Target Spawner (Aimed directly at a capsule on screen!)
+    // 🌟 3. OMNI-DIRECTIONAL Capsule Target Spawner (Hits from Above, Below, Left, or Right!)
     const spawnCapsuleTargetMeteor = () => {
       try {
         const capsules = Array.from(
@@ -503,10 +534,28 @@ export const StarryBackground: React.FC = () => {
         const targetX = rect.left + rect.width / 2;
         const targetY = rect.top + rect.height / 2;
 
-        const fromLeft = Math.random() > 0.5;
-        const travelDist = Math.random() * 200 + 260;
-        const startX = fromLeft ? targetX - travelDist * 0.8 : targetX + travelDist * 0.8;
-        const startY = targetY - travelDist * 0.65;
+        const side = Math.floor(Math.random() * 4);
+        const travelDist = Math.random() * 180 + 240;
+        let startX = targetX;
+        let startY = targetY;
+
+        if (side === 0) {
+          // Strike from TOP
+          startX = targetX + (Math.random() - 0.5) * 120;
+          startY = targetY - travelDist;
+        } else if (side === 1) {
+          // Strike from BOTTOM
+          startX = targetX + (Math.random() - 0.5) * 120;
+          startY = targetY + travelDist;
+        } else if (side === 2) {
+          // Strike from LEFT
+          startX = targetX - travelDist;
+          startY = targetY + (Math.random() - 0.5) * 80;
+        } else {
+          // Strike from RIGHT
+          startX = targetX + travelDist;
+          startY = targetY + (Math.random() - 0.5) * 80;
+        }
 
         const dx = targetX - startX;
         const dy = targetY - startY;
@@ -533,7 +582,7 @@ export const StarryBackground: React.FC = () => {
     };
 
     let lastMeteorTime = Date.now();
-    let nextMeteorInterval = 900;
+    let nextMeteorInterval = 800;
     let lastPairTime = Date.now();
     let lastCapsuleTargetTime = Date.now();
 
@@ -542,25 +591,25 @@ export const StarryBackground: React.FC = () => {
 
       const now = Date.now();
 
-      // Routine meteors
+      // Routine 360-degree omni-directional meteors
       if (now - lastMeteorTime > nextMeteorInterval) {
-        if (shootingStars.length < 8) {
-          shootingStars.push(createShootingStar());
+        if (shootingStars.length < 9) {
+          shootingStars.push(createOmniShootingStar());
         }
         lastMeteorTime = now;
-        nextMeteorInterval = Math.random() * 900 + 700;
+        nextMeteorInterval = Math.random() * 800 + 600;
       }
 
-      // Intercepted collision pairs every ~3 seconds
-      if (now - lastPairTime > 3200) {
-        if (shootingStars.length < 7) {
+      // Mid-air collision pairs every ~2.8 seconds
+      if (now - lastPairTime > 2800) {
+        if (shootingStars.length < 8) {
           spawnCollisionPair();
         }
         lastPairTime = now;
       }
 
-      // Capsule-targeted meteors every ~4 seconds
-      if (now - lastCapsuleTargetTime > 4000) {
+      // Targeted capsule strikes every ~3.5 seconds
+      if (now - lastCapsuleTargetTime > 3500) {
         spawnCapsuleTargetMeteor();
         lastCapsuleTargetTime = now;
       }
@@ -634,7 +683,6 @@ export const StarryBackground: React.FC = () => {
           const hitRadius = m1.headRadius + m2.headRadius + 22;
 
           if (distSq < hitRadius * hitRadius) {
-            // BOOM! Two shooting stars collide in sky!
             m1.active = false;
             m2.active = false;
             const collisionX = (m1.x + m2.x) / 2;
@@ -671,7 +719,6 @@ export const StarryBackground: React.FC = () => {
             ) {
               meteor.active = false;
 
-              // If it's the floating Cognition Capsule, trigger middle crack & 5s repair
               if (isFloatingCognition) {
                 window.dispatchEvent(
                   new CustomEvent('capsule_meteor_hit', {
@@ -680,7 +727,6 @@ export const StarryBackground: React.FC = () => {
                 );
               }
 
-              // Explosive spark burst at collision
               triggerFirecrackerExplosion(meteor.x, meteor.y, meteor.theme.fireworkColors);
             }
           }
@@ -695,7 +741,6 @@ export const StarryBackground: React.FC = () => {
           continue;
         }
 
-        // Advance position in velocity direction
         meteor.x += meteor.vx * meteor.speed;
         meteor.y += meteor.vy * meteor.speed;
         meteor.opacity -= 0.007;
@@ -786,7 +831,6 @@ export const StarryBackground: React.FC = () => {
         const headY = meteor.y;
         const baseR = meteor.headRadius;
 
-        // Layer 1: Outermost combustion flame corona
         const flameCorona = ctx.createRadialGradient(
           headX,
           headY,
@@ -805,7 +849,6 @@ export const StarryBackground: React.FC = () => {
         ctx.arc(headX, headY, baseR * 5.2, 0, Math.PI * 2);
         ctx.fill();
 
-        // Layer 2: Mid burning flame ball
         const flameMidBall = ctx.createRadialGradient(
           headX,
           headY,
@@ -825,14 +868,12 @@ export const StarryBackground: React.FC = () => {
         ctx.arc(headX, headY, baseR * 2.6, 0, Math.PI * 2);
         ctx.fill();
 
-        // Layer 3: Blazing Thermonuclear White-Hot Fire Core
         ctx.globalAlpha = Math.max(0, Math.min(1, meteor.opacity));
         ctx.fillStyle = '#ffffff';
         ctx.beginPath();
         ctx.arc(headX, headY, baseR * 0.9, 0, Math.PI * 2);
         ctx.fill();
 
-        // Cross-fire gleam
         ctx.strokeStyle = `rgba(255, 255, 255, ${meteor.opacity * 0.8})`;
         ctx.lineWidth = 1.0;
         ctx.beginPath();
