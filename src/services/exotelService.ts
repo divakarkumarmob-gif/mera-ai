@@ -165,7 +165,7 @@ class ExotelService {
     this.activeSessions.set(callSid, session);
 
     // Initial greeting in Hindi
-    const greetingText = "नमस्ते! मैं Boss की AI असिस्टेंट Friday बोल रही हूँ। बताइए मैं आपकी क्या मदद कर सकती हूँ?";
+    const greetingText = "नमस्ते Boss! मैं आपकी AI असिस्टेंट Friday बोल रही हूँ। बताइए मैं आपकी क्या मदद कर सकती हूँ?";
     session.turns.push({
       speaker: "friday",
       text: greetingText,
@@ -191,8 +191,8 @@ class ExotelService {
     } else {
       exml += `  <Say voice="female">${greetingText}</Say>\n`;
     }
-    // Record up to 15 seconds of caller speech
-    exml += `  <Record action="${callbackUrl}" method="POST" maxLength="15" timeout="4" />\n`;
+    // Record up to 20 seconds of caller speech with 5 seconds silence timeout
+    exml += `  <Record action="${callbackUrl}" method="POST" maxLength="20" timeout="5" />\n`;
     exml += `</Response>`;
 
     return { exml, session };
@@ -288,7 +288,7 @@ class ExotelService {
 
     if (!isGoodbye && session.turns.length < 20) {
       // Continue recording next turn
-      exml += `  <Record action="${callbackUrl}" method="POST" maxLength="15" timeout="4" />\n`;
+      exml += `  <Record action="${callbackUrl}" method="POST" maxLength="20" timeout="5" />\n`;
     } else {
       // Hang up call gracefully
       exml += `  <Hangup />\n`;

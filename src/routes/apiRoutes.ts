@@ -3270,19 +3270,47 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  // 4. Serve Dynamic Friday Voice MP3 Audio to Exotel
-  app.get("/api/exotel/audio/:audioId", (req, res) => {
+  // 4. Serve Dynamic Friday Voice MP3 Audio to Exotel (Full HTTP 206 Range & Telephony HEAD Support)
+  app.all("/api/exotel/audio/:audioId", (req, res) => {
     const audioId = req.params.audioId;
     const audio = exotelService.getAudio(audioId);
     if (!audio) {
       return res.status(404).send("Audio expired or not found");
     }
+
+    const totalLength = audio.buffer.length;
+    const rangeHeader = req.headers.range;
+
     res.set({
-      "Content-Type": audio.mimeType,
-      "Content-Length": audio.buffer.length.toString(),
+      "Content-Type": audio.mimeType || "audio/mpeg",
+      "Accept-Ranges": "bytes",
       "Cache-Control": "public, max-age=1800",
+      "Content-Disposition": "inline",
+      "Connection": "keep-alive",
     });
-    res.send(audio.buffer);
+
+    if (req.method === "HEAD") {
+      res.set("Content-Length", totalLength.toString());
+      return res.status(200).end();
+    }
+
+    if (rangeHeader) {
+      const parts = rangeHeader.replace(/bytes=/, "").split("-");
+      const start = parseInt(parts[0], 10) || 0;
+      const end = parts[1] ? parseInt(parts[1], 10) : totalLength - 1;
+      const chunksize = end - start + 1;
+      const slicedBuffer = audio.buffer.subarray(start, end + 1);
+
+      res.status(206);
+      res.set({
+        "Content-Range": `bytes ${start}-${end}/${totalLength}`,
+        "Content-Length": chunksize.toString(),
+      });
+      return res.end(slicedBuffer);
+    }
+
+    res.set("Content-Length", totalLength.toString());
+    return res.status(200).end(audio.buffer);
   });
 
   // 5. Exotel Config Management
