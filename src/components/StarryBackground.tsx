@@ -330,7 +330,7 @@ export const StarryBackground: React.FC = () => {
     let explosionBursts: ExplosionBurst[] = [];
     let nextMeteorId = 1;
 
-    const STAR_COUNT = Math.min(Math.floor((width * height) / 3800), 300);
+    const STAR_COUNT = Math.min(Math.floor((width * height) / 6000), 160);
 
     const initStars = () => {
       stars = [];
@@ -669,44 +669,44 @@ export const StarryBackground: React.FC = () => {
       } catch {}
     };
 
-    let lastMeteorTime = Date.now();
-    let lastPairTime = Date.now();
-    let lastTargetLoopTime = Date.now();
     let targetRotationIndex = 0;
+    let lastAmbientTime = Date.now();
+
+    const spawnRotatingTargetMeteor = () => {
+      const step = targetRotationIndex % 4;
+      targetRotationIndex++;
+      if (step === 0 || step === 2) {
+        spawnUpperRowDepthMeteor(); // Deep Space Meteor hits Upper Row Tier 1
+      } else if (step === 1) {
+        spawnLowerRowMeteor(); // Hits Lower Row Tier 2
+      } else {
+        spawnFloatingCapsuleTargetMeteor(); // Hits Floating Training Capsule
+      }
+    };
+
+    // 🚀 Step 1: Initial Start at EXACTLY 3 Seconds -> 2 Stars (1 ambient, 1 hits capsule)
+    const initialStartTimer = setTimeout(() => {
+      shootingStars.push(createSideOrBottomShootingStar());
+      spawnRotatingTargetMeteor();
+    }, 3000);
+
+    // 🚀 Step 2: Listen for Monkey's 3rd-second repair trigger to launch the next edge meteor
+    const handleMonkeySpawnTrigger = () => {
+      spawnRotatingTargetMeteor();
+    };
+    window.addEventListener('monkey_spawn_next_meteor', handleMonkeySpawnTrigger);
 
     const render = () => {
       ctx.clearRect(0, 0, width, height);
 
       const now = Date.now();
 
-      // 1. Ambient shooting star: EXACTLY 1 every 2 seconds (user requested: "har do 2 sec me 1")
-      if (now - lastMeteorTime > 2000) {
-        if (shootingStars.filter((s) => s.targetType === 'ambient').length < 2) {
+      // Gentle ambient sky star: 1 every 12 seconds (harmless, hits no capsules)
+      if (now - lastAmbientTime > 12000) {
+        if (shootingStars.filter((s) => s.targetType === 'ambient').length < 1) {
           shootingStars.push(createSideOrBottomShootingStar());
         }
-        lastMeteorTime = now;
-      }
-
-      // 2. Colliding pair: EXACTLY 2 stars every 5 seconds (user requested: "jo takrne bali hogi har 5 sec me 2")
-      if (now - lastPairTime > 5000) {
-        spawnCollisionPair();
-        lastPairTime = now;
-      }
-
-      // 3. 💥 Rhythmic 4-Second Capsule Crack Loop (User requested: "har 4 sec me ek naya capsule phode")
-      // Cycles seamlessly between Upper Tier Depth, Lower Tier, and Floating Training Capsule!
-      if (now - lastTargetLoopTime > 4000) {
-        const step = targetRotationIndex % 4;
-        targetRotationIndex++;
-        lastTargetLoopTime = now;
-
-        if (step === 0 || step === 2) {
-          spawnUpperRowDepthMeteor(); // Deep Space Meteor hits Upper Row
-        } else if (step === 1) {
-          spawnLowerRowMeteor(); // Hits Lower Row
-        } else {
-          spawnFloatingCapsuleTargetMeteor(); // Hits Floating Training Capsule
-        }
+        lastAmbientTime = now;
       }
 
       // 1. Draw static & twinkling stars
@@ -1202,6 +1202,8 @@ export const StarryBackground: React.FC = () => {
 
     return () => {
       window.removeEventListener('resize', handleResize);
+      window.removeEventListener('monkey_spawn_next_meteor', handleMonkeySpawnTrigger);
+      clearTimeout(initialStartTimer);
       cancelAnimationFrame(animationFrameId);
     };
   }, []);

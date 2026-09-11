@@ -870,11 +870,14 @@ function HangingRopeCapsule({
         setIsCracked(true);
         setHealProgress(0);
         playGlassCrackSound();
+        if (healAnimFrameRef.current) cancelAnimationFrame(healAnimFrameRef.current);
+    }, [playGlassCrackSound]);
 
+    const startMonkeyRepair = useCallback(() => {
         if (healAnimFrameRef.current) cancelAnimationFrame(healAnimFrameRef.current);
 
         const startTime = performance.now();
-        const animDuration = 5000; // 5.0 seconds smooth continuous healing
+        const animDuration = 5000; // 5.0 seconds monkey repair duration
 
         const step = (currentTime: number) => {
             const elapsed = currentTime - startTime;
@@ -890,7 +893,7 @@ function HangingRopeCapsule({
         };
 
         healAnimFrameRef.current = requestAnimationFrame(step);
-    }, [playGlassCrackSound]);
+    }, []);
 
     useEffect(() => {
         const el = capsuleRef.current;
@@ -900,12 +903,18 @@ function HangingRopeCapsule({
             triggerCrack();
         };
 
+        const handleRepair = () => {
+            startMonkeyRepair();
+        };
+
         el.addEventListener('capsule_crack_hit', handleHit);
+        el.addEventListener('monkey_repair_start', handleRepair);
         return () => {
             el.removeEventListener('capsule_crack_hit', handleHit);
+            el.removeEventListener('monkey_repair_start', handleRepair);
             if (healAnimFrameRef.current) cancelAnimationFrame(healAnimFrameRef.current);
         };
-    }, [triggerCrack]);
+    }, [triggerCrack, startMonkeyRepair]);
 
     return (
         <motion.div
@@ -913,15 +922,18 @@ function HangingRopeCapsule({
             data-hanging-capsule="true"
             data-capsule-row={rowTier}
             className="relative flex flex-col items-center shrink-0 group/hanging select-none pt-7"
+            initial={{ opacity: 1 }}
             animate={
                 isCracked
                     ? {
+                          opacity: 1,
                           x: [-7, 7, -5, 5, -2, 2, 0],
                           y: [-3, 3, -1, 1, 0],
                           rotate: [-3.5, 3.5, -2, 2, 0],
                           scale: [0.95, 1.05, 0.98, 1],
                       }
                     : {
+                          opacity: 1,
                           rotate: [-maxAngle, maxAngle, -maxAngle],
                           y: [0, -3, 0],
                       }

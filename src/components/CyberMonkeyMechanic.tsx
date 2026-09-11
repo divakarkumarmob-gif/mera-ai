@@ -30,16 +30,16 @@ function playMonkeyJumpSound() {
     const gain = ctx.createGain();
     osc.type = 'sine';
     osc.frequency.setValueAtTime(440, now);
-    osc.frequency.exponentialRampToValueAtTime(880, now + 0.12);
-    osc.frequency.exponentialRampToValueAtTime(1320, now + 0.22);
+    osc.frequency.exponentialRampToValueAtTime(880, now + 0.1);
+    osc.frequency.exponentialRampToValueAtTime(1200, now + 0.2);
 
     gain.gain.setValueAtTime(0.12, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
 
     osc.connect(gain);
     gain.connect(ctx.destination);
     osc.start(now);
-    osc.stop(now + 0.26);
+    osc.stop(now + 0.23);
   } catch {}
 }
 
@@ -69,7 +69,6 @@ function playWeldingSound() {
 interface MonkeyPosition {
   x: number;
   y: number;
-  capsuleId?: string;
 }
 
 export const CyberMonkeyMechanic: React.FC = () => {
@@ -82,11 +81,14 @@ export const CyberMonkeyMechanic: React.FC = () => {
   const isBusyRef = useRef(false);
   const currentCapRef = useRef<HTMLElement | null>(null);
   const sparkIdCounter = useRef(1);
+  const posRef = useRef(pos);
+  posRef.current = pos;
 
-  // Find a valid starting capsule on mount
+  // Initialize monkey sitting on the first Upper Row capsule
   useEffect(() => {
     const findInitialCapsule = () => {
-      const capsules = Array.from(document.querySelectorAll('[data-hanging-capsule="true"]'));
+      const upperCaps = Array.from(document.querySelectorAll('[data-capsule-row="upper"]'));
+      const capsules = upperCaps.length > 0 ? upperCaps : Array.from(document.querySelectorAll('[data-hanging-capsule="true"]'));
       if (capsules.length > 0) {
         const first = capsules[0] as HTMLElement;
         const rect = first.getBoundingClientRect();
@@ -102,61 +104,154 @@ export const CyberMonkeyMechanic: React.FC = () => {
     return () => clearTimeout(timer);
   }, []);
 
-  // Acrobatic Leap & Repair Execution Engine
-  const leapToCapsule = useCallback((targetEl: HTMLElement) => {
+  // Compute step-by-step capsule hopping path
+  const computeCapsulePath = useCallback((fromEl: HTMLElement, toEl: HTMLElement): HTMLElement[] => {
+    if (!fromEl || !toEl || fromEl === toEl) return [toEl];
+
+    const upperCaps = Array.from(document.querySelectorAll('[data-capsule-row="upper"]')) as HTMLElement[];
+    const lowerCaps = Array.from(document.querySelectorAll('[data-capsule-row="lower"]')) as HTMLElement[];
+    const floatCap = document.querySelector('[data-floating-capsule="true"]') as HTMLElement | null;
+
+    const fromInUpper = upperCaps.indexOf(fromEl);
+    const fromInLower = lowerCaps.indexOf(fromEl);
+    const toInUpper = upperCaps.indexOf(toEl);
+    const toInLower = lowerCaps.indexOf(toEl);
+
+    const path: HTMLElement[] = [];
+
+    // Case 1: Both in Upper Tier
+    if (fromInUpper !== -1 && toInUpper !== -1) {
+      const step = toInUpper > fromInUpper ? 1 : -1;
+      for (let i = fromInUpper + step; i !== toInUpper + step; i += step) {
+        if (upperCaps[i]) path.push(upperCaps[i]);
+      }
+      return path.length > 0 ? path : [toEl];
+    }
+
+    // Case 2: Both in Lower Tier
+    if (fromInLower !== -1 && toInLower !== -1) {
+      const step = toInLower > fromInLower ? 1 : -1;
+      for (let i = fromInLower + step; i !== toInLower + step; i += step) {
+        if (lowerCaps[i]) path.push(lowerCaps[i]);
+      }
+      return path.length > 0 ? path : [toEl];
+    }
+
+    // Case 3: Upper to Lower Tier
+    if (fromInUpper !== -1 && toInLower !== -1) {
+      // Map index proportionally to lower tier
+      const targetUpperIdx = Math.min(upperCaps.length - 1, Math.max(0, Math.round((toInLower / (lowerCaps.length - 1 || 1)) * (upperCaps.length - 1))));
+      const step1 = targetUpperIdx >= fromInUpper ? 1 : -1;
+      for (let i = fromInUpper + step1; i !== targetUpperIdx + step1; i += step1) {
+        if (upperCaps[i]) path.push(upperCaps[i]);
+      }
+      // Hop down to target in lower tier
+      if (lowerCaps[toInLower]) path.push(lowerCaps[toInLower]);
+      return path.length > 0 ? path : [toEl];
+    }
+
+    // Case 4: Lower to Upper Tier
+    if (fromInLower !== -1 && toInUpper !== -1) {
+      const targetLowerIdx = Math.min(lowerCaps.length - 1, Math.max(0, Math.round((toInUpper / (upperCaps.length - 1 || 1)) * (lowerCaps.length - 1))));
+      const step1 = targetLowerIdx >= fromInLower ? 1 : -1;
+      for (let i = fromInLower + step1; i !== targetLowerIdx + step1; i += step1) {
+        if (lowerCaps[i]) path.push(lowerCaps[i]);
+      }
+      if (upperCaps[toInUpper]) path.push(upperCaps[toInUpper]);
+      return path.length > 0 ? path : [toEl];
+    }
+
+    // Case 5: Moving to/from Floating Capsule
+    if (toEl === floatCap) {
+      if (upperCaps.length > 0) path.push(upperCaps[upperCaps.length - 1]);
+      path.push(toEl);
+      return path;
+    }
+    if (fromEl === floatCap) {
+      if (upperCaps.length > 0) path.push(upperCaps[upperCaps.length - 1]);
+      path.push(toEl);
+      return path;
+    }
+
+    return [toEl];
+  }, []);
+
+  // Step-by-step capsule hopping & 5s repair execution
+  const executeHoppingJourney = useCallback(async (targetEl: HTMLElement) => {
     if (!targetEl) return;
     isBusyRef.current = true;
-    currentCapRef.current = targetEl;
 
-    const targetRect = targetEl.getBoundingClientRect();
-    const targetX = targetRect.left + targetRect.width / 2;
-    const targetY = targetRect.top - 8;
+    const fromEl = currentCapRef.current || targetEl;
+    const path = computeCapsulePath(fromEl, targetEl);
 
-    setFacingLeft(targetX < pos.x);
-    setIsJumping(true);
-    setIsWelding(false);
-    playMonkeyJumpSound();
+    // Hop capsule-by-capsule with 0.5s pause on each intermediate capsule
+    for (let i = 0; i < path.length; i++) {
+      const stepEl = path[i];
+      const isFinalTarget = i === path.length - 1;
+      const rect = stepEl.getBoundingClientRect();
+      const nextX = rect.left + rect.width / 2;
+      const nextY = rect.top - 8;
 
-    // Perform smooth parabolic jump
-    setPos({ x: targetX, y: targetY });
+      setFacingLeft(nextX < posRef.current.x);
+      setIsJumping(true);
+      setIsWelding(false);
+      playMonkeyJumpSound();
+      setPos({ x: nextX, y: nextY });
+      currentCapRef.current = stepEl;
 
-    // After jump landing (700ms)
-    setTimeout(() => {
+      // Jump flight animation duration (380ms)
+      await new Promise((r) => setTimeout(r, 380));
       setIsJumping(false);
-      setIsWelding(true);
 
-      // Start 5-second active welding animation
-      const weldingInterval = setInterval(() => {
-        playWeldingSound();
-        // Spawn lively welding spark particles
-        const newSparks = Array.from({ length: 4 }).map(() => ({
-          id: sparkIdCounter.current++,
-          x: (Math.random() - 0.5) * 16,
-          y: (Math.random() - 0.5) * 10 + 12,
-          vx: (Math.random() - 0.5) * 4,
-          vy: -Math.random() * 4 - 1,
-          color: Math.random() > 0.4 ? '#34d399' : '#fbbf24',
-        }));
-        setWeldingSparks((prev) => [...prev.slice(-16), ...newSparks]);
-      }, 250);
+      if (!isFinalTarget) {
+        // ⏱️ User requirement: Pause on intermediate capsule for EXACTLY 0.5s!
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    }
 
-      // Finish welding after 4.8s (just before full 5s seal)
-      setTimeout(() => {
-        clearInterval(weldingInterval);
-        setIsWelding(false);
-        setWeldingSparks([]);
-        isBusyRef.current = false;
+    // Now landed on cracked capsule -> Begin 5s Nanotech Laser Welding!
+    setIsWelding(true);
 
-        // Check if another cracked capsule is queued up
-        if (targetQueueRef.current.length > 0) {
-          const nextTarget = targetQueueRef.current.shift();
-          if (nextTarget) {
-            setTimeout(() => leapToCapsule(nextTarget), 300);
-          }
-        }
-      }, 4800);
-    }, 700);
-  }, [pos.x]);
+    // ⚡ Tell the target capsule to begin its 5-second repair now that Monkey is actively welding it!
+    targetEl.dispatchEvent(new CustomEvent('monkey_repair_start', { bubbles: true }));
+    window.dispatchEvent(new CustomEvent('monkey_repair_floating_capsule'));
+
+    // 🌟 At 3.0s into repair, trigger next edge meteor!
+    const meteorTriggerTimeout = setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('monkey_spawn_next_meteor'));
+    }, 3000);
+
+    // Active welding sparks & sizzle sound
+    const weldingInterval = setInterval(() => {
+      playWeldingSound();
+      const newSparks = Array.from({ length: 4 }).map(() => ({
+        id: sparkIdCounter.current++,
+        x: (Math.random() - 0.5) * 16,
+        y: (Math.random() - 0.5) * 10 + 12,
+        vx: (Math.random() - 0.5) * 4,
+        vy: -Math.random() * 4 - 1,
+        color: Math.random() > 0.4 ? '#34d399' : '#fbbf24',
+      }));
+      setWeldingSparks((prev) => [...prev.slice(-16), ...newSparks]);
+    }, 250);
+
+    // 5-second complete repair duration
+    await new Promise((r) => setTimeout(r, 5000));
+
+    clearTimeout(meteorTriggerTimeout);
+    clearInterval(weldingInterval);
+    setIsWelding(false);
+    setWeldingSparks([]);
+    isBusyRef.current = false;
+
+    // If another capsule cracked while welding, start hopping to it!
+    if (targetQueueRef.current.length > 0) {
+      const nextTarget = targetQueueRef.current.shift();
+      if (nextTarget) {
+        executeHoppingJourney(nextTarget);
+      }
+    }
+  }, [computeCapsulePath]);
 
   // Listen to custom capsule crack events
   useEffect(() => {
@@ -168,9 +263,8 @@ export const CyberMonkeyMechanic: React.FC = () => {
       if (!capsuleTarget) return;
 
       if (!isBusyRef.current) {
-        leapToCapsule(capsuleTarget);
+        executeHoppingJourney(capsuleTarget);
       } else {
-        // Queue target if monkey is currently in middle of welding another
         if (!targetQueueRef.current.includes(capsuleTarget)) {
           targetQueueRef.current.push(capsuleTarget);
         }
@@ -181,7 +275,7 @@ export const CyberMonkeyMechanic: React.FC = () => {
       const floatCap = document.querySelector('[data-floating-capsule="true"]') as HTMLElement;
       if (floatCap) {
         if (!isBusyRef.current) {
-          leapToCapsule(floatCap);
+          executeHoppingJourney(floatCap);
         } else {
           if (!targetQueueRef.current.includes(floatCap)) {
             targetQueueRef.current.push(floatCap);
@@ -197,7 +291,7 @@ export const CyberMonkeyMechanic: React.FC = () => {
       window.removeEventListener('capsule_crack_hit', handleCrackHit);
       window.removeEventListener('capsule_meteor_hit', handleFloatingCrack);
     };
-  }, [leapToCapsule]);
+  }, [executeHoppingJourney]);
 
   if (pos.x < 0) return null;
 
@@ -214,27 +308,21 @@ export const CyberMonkeyMechanic: React.FC = () => {
         transition={
           isJumping
             ? {
-                x: { duration: 0.68, ease: [0.25, 1, 0.5, 1] },
-                y: {
-                  duration: 0.68,
-                  times: [0, 0.45, 1],
-                  ease: 'easeInOut',
-                },
+                x: { duration: 0.38, ease: [0.25, 1, 0.5, 1] },
+                y: { duration: 0.38, times: [0, 0.5, 1], ease: 'easeInOut' },
               }
-            : { duration: 0.2 }
+            : { duration: 0.15 }
         }
         className="absolute top-0 left-0 w-11 h-11 pointer-events-auto cursor-grab select-none"
-        style={{
-          transformStyle: 'preserve-3d',
-        }}
+        style={{ transformStyle: 'preserve-3d' }}
       >
         {/* Acrobatic Jump Somersault & Parabolic Arc */}
         <motion.div
           animate={
             isJumping
               ? {
-                  y: [-35, -55, 0],
-                  rotate: facingLeft ? [-40, -360] : [40, 360],
+                  y: [-30, -50, 0],
+                  rotate: facingLeft ? [-30, -360] : [30, 360],
                   scale: [1, 1.25, 0.95, 1],
                 }
               : isWelding
@@ -249,7 +337,7 @@ export const CyberMonkeyMechanic: React.FC = () => {
           }
           transition={
             isJumping
-              ? { duration: 0.68, ease: 'easeInOut' }
+              ? { duration: 0.38, ease: 'easeInOut' }
               : isWelding
               ? { repeat: Infinity, duration: 0.35, ease: 'easeInOut' }
               : { repeat: Infinity, duration: 3.2, ease: 'easeInOut' }
@@ -257,12 +345,12 @@ export const CyberMonkeyMechanic: React.FC = () => {
           className="relative w-full h-full flex items-center justify-center"
           style={{ transform: facingLeft ? 'scaleX(-1)' : 'scaleX(1)' }}
         >
-          {/* ⚡ Alert Emote Exclamation (Pops when crack happens) */}
+          {/* ⚡ Alert Emote Exclamation */}
           {isJumping && (
             <motion.div
               initial={{ scale: 0, opacity: 0, y: 0 }}
               animate={{ scale: [0, 1.4, 1], opacity: [0, 1, 0], y: -24 }}
-              transition={{ duration: 0.65 }}
+              transition={{ duration: 0.38 }}
               className="absolute -top-4 left-1/2 -translate-x-1/2 px-1.5 py-0.5 rounded-full bg-amber-400 text-black text-[10px] font-black shadow-[0_0_12px_#fbbf24] flex items-center gap-0.5"
             >
               <span>⚡</span>

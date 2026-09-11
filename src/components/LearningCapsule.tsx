@@ -192,11 +192,14 @@ export const LearningCapsule: React.FC<LearningCapsuleProps> = ({
     setHealProgress(0);
     setCrackCountdown(5);
     playCrackSound();
+    if (healAnimFrameRef.current) cancelAnimationFrame(healAnimFrameRef.current);
+  }, [playCrackSound]);
 
+  const startMonkeyRepair = useCallback(() => {
     if (healAnimFrameRef.current) cancelAnimationFrame(healAnimFrameRef.current);
 
     const startTime = performance.now();
-    const duration = 5000; // 5.0 seconds smooth continuous healing
+    const duration = 5000; // 5.0 seconds monkey repair duration
 
     const step = (currentTime: number) => {
       const elapsed = currentTime - startTime;
@@ -214,7 +217,7 @@ export const LearningCapsule: React.FC<LearningCapsuleProps> = ({
     };
 
     healAnimFrameRef.current = requestAnimationFrame(step);
-  }, [playCrackSound]);
+  }, []);
 
   useEffect(() => {
     const handleMeteorHit = (e: any) => {
@@ -222,14 +225,20 @@ export const LearningCapsule: React.FC<LearningCapsuleProps> = ({
       triggerCrackEffect();
     };
 
+    const handleMonkeyRepair = () => {
+      startMonkeyRepair();
+    };
+
     window.addEventListener('capsule_meteor_hit', handleMeteorHit);
+    window.addEventListener('monkey_repair_floating_capsule', handleMonkeyRepair);
     (window as any).triggerCapsuleCrack = triggerCrackEffect;
 
     return () => {
       window.removeEventListener('capsule_meteor_hit', handleMeteorHit);
+      window.removeEventListener('monkey_repair_floating_capsule', handleMonkeyRepair);
       if (healAnimFrameRef.current) cancelAnimationFrame(healAnimFrameRef.current);
     };
-  }, [triggerCrackEffect]);
+  }, [triggerCrackEffect, startMonkeyRepair]);
 
   // Fetch all learning data
   const fetchData = useCallback(async () => {
@@ -409,14 +418,15 @@ export const LearningCapsule: React.FC<LearningCapsuleProps> = ({
         drag
         dragMomentum={false}
         whileDrag={{ scale: 1.08, cursor: 'grabbing' }}
-        initial={{ y: 0, opacity: 0, scale: 0.9 }}
+        initial={{ y: 0, opacity: 1, scale: 1 }}
         animate={
           isCracked
             ? {
-                x: [-10, 10, -8, 8, -4, 4, 0],
-                y: [-4, 4, -2, 2, 0],
-                rotate: [-4, 4, -2, 2, 0],
-                scale: [0.94, 1.06, 0.97, 1],
+                opacity: 1,
+                x: [-8, 8, -6, 6, -3, 3, 0],
+                y: [-3, 3, -1, 1, 0],
+                rotate: [-3.5, 3.5, -2, 2, 0],
+                scale: [0.95, 1.05, 0.98, 1],
               }
             : {
                 opacity: 1,
@@ -433,12 +443,12 @@ export const LearningCapsule: React.FC<LearningCapsuleProps> = ({
                 y: { repeat: Infinity, duration: 3.8, ease: 'easeInOut' },
                 x: { repeat: Infinity, duration: 4.6, ease: 'easeInOut' },
                 rotate: { repeat: Infinity, duration: 4.2, ease: 'easeInOut' },
-                opacity: { duration: 0.3 },
-                scale: { duration: 0.3 },
+                opacity: { duration: 0.2 },
+                scale: { duration: 0.2 },
               }
         }
         className="fixed top-20 sm:top-24 right-4 sm:right-8 z-40 select-none cursor-grab active:cursor-grabbing touch-none flex flex-col items-center"
-        style={{ transformOrigin: 'top center' }}
+        style={{ transformOrigin: 'top center', opacity: 1 }}
       >
         {/* ── Solid Continuous Glowing Rope extending straight down from the ceiling to the capsule ── */}
         <div
