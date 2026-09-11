@@ -2293,12 +2293,13 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
       return;
     }
 
-    // 2.0B2 Handle Phone Number Intelligence & Lookup ("/lookup <number>", "/phone <number>", "lookup <number>", "98xxxx ki details", etc.)
+    // 2.0B2 Handle Phone Number Intelligence & Lookup ("/lookup <number>", "/phone <number>", "<number> info", "98xxxx ki details", etc.)
     const isPhoneLookupIntent =
-      /^(?:\/lookup|\/phone|phone\s*lookup|lookup|trace)\b/i.test(text) ||
-      /(?:phone|number|no|kiska)\s+(?:details?|kiska|trace|check|lookup|radar)\b/i.test(text) ||
-      /\b([6-9]\d{9})\b\s*(?:ki\s+details|kiska\s+number|kiska\s+hai|check\s*karo|trace\s*karo|kaun\s*hai)/i.test(text) ||
-      /(?:ye|yeh|is)\s*(?:number|no)\s*(?:ki\s+details|kiska\s+hai|trace|check)/i.test(text);
+      /^(?:\/lookup|\/phone|\/info|phone\s*lookup|lookup|trace|info)\b/i.test(text) ||
+      /([+0-9\s-]{10,15})\s*(?:info|details?|trace|check|lookup|radar|kiska)/i.test(text) ||
+      /(?:phone|number|no|kiska)\s+(?:details?|kiska|trace|check|lookup|radar|info)\b/i.test(text) ||
+      /\b([6-9]\d{9})\b\s*(?:ki\s+details|kiska\s+number|kiska\s+hai|check\s*karo|trace\s*karo|kaun\s*hai|info)/i.test(text) ||
+      /(?:ye|yeh|is)\s*(?:number|no)\s*(?:ki\s+details|kiska\s+hai|trace|check|info)/i.test(text);
 
     if (isPhoneLookupIntent) {
       const extractedNumber = text.match(/(?:\+91[\s-]?)?[6-9]\d{9}/) || text.match(/\b\d{10,12}\b/);
@@ -2313,8 +2314,8 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
           const inlineKeyboard = {
             inline_keyboard: [
               [
-                { text: "💬 Open WhatsApp Chat", url: report.osintFootprints.whatsappDirectUrl },
-                { text: "🔍 Truecaller OSINT", url: report.osintFootprints.truecallerWebUrl },
+                { text: "💬 Open WhatsApp Chat", url: report.whatsappProfile?.directChatUrl || `https://wa.me/${report.e164Format.replace("+", "")}` },
+                { text: "🔍 Truecaller OSINT", url: report.osintScanners[0]?.url || `https://www.truecaller.com/search/in/${report.normalizedNumber}` },
               ],
             ],
           };

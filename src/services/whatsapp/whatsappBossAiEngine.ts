@@ -82,10 +82,11 @@ export class WhatsAppBossAiEngine {
 
     // ── FAST DIRECT INTERCEPT: Phone Intelligence & Carrier/Spam Lookup ─────────
     const isPhoneLookupIntent =
-      /^(?:\/lookup|\/phone|phone|lookup|trace)\s+([+0-9\s-]{10,15})/i.test(messageText.trim()) ||
-      /(?:phone|number|no|kiska)\s+(?:details?|kiska|trace|check|lookup|radar)\b/i.test(messageText.trim()) ||
-      /\b([6-9]\d{9})\b\s*(?:ki\s+details|kiska\s+number|kiska\s+hai|check\s*karo|trace\s*karo|kaun\s*hai)/i.test(messageText.trim()) ||
-      /(?:ye|yeh|is)\s*(?:number|no)\s*(?:ki\s+details|kiska\s+hai|trace|check)/i.test(messageText.trim());
+      /^(?:\/lookup|\/phone|\/info|phone|lookup|trace|info)\s+([+0-9\s-]{10,15})/i.test(messageText.trim()) ||
+      /([+0-9\s-]{10,15})\s*(?:info|details?|trace|check|lookup|radar|kiska)/i.test(messageText.trim()) ||
+      /(?:phone|number|no|kiska)\s+(?:details?|kiska|trace|check|lookup|radar|info)\b/i.test(messageText.trim()) ||
+      /\b([6-9]\d{9})\b\s*(?:ki\s+details|kiska\s+number|kiska\s+hai|check\s*karo|trace\s*karo|kaun\s*hai|info)/i.test(messageText.trim()) ||
+      /(?:ye|yeh|is)\s*(?:number|no)\s*(?:ki\s+details|kiska\s+hai|trace|check|info)/i.test(messageText.trim());
 
     if (isPhoneLookupIntent) {
       const extractedNumber = messageText.match(/(?:\+91[\s-]?)?[6-9]\d{9}/) || messageText.match(/\b\d{10,12}\b/);

@@ -1249,12 +1249,25 @@ export class PhoneIntelligenceService {
     }
     card += `\n`;
 
-    if (report.simOwnership && report.simOwnership.inferredOwnerName) {
-      card += `🆔 *Subscriber & Associated Numbers Recon:*\n`;
-      card += `• Inferred Name: *${report.simOwnership.inferredOwnerName}* (${report.simOwnership.confidence.toUpperCase()})\n`;
-      card += `• 🏛️ *DoT TAFCOP Portal:* https://tafcop.sancharsaathi.gov.in/\n`;
-      card += `• 🏢 *MCA / ZaubaCorp Alternate Numbers:* ${report.simOwnership.associatedNumbersDorks[1]?.actionUrl || '#'}\n\n`;
+    if (report.simOwnership) {
+      card += `🆔 *SIM Owner & Identity Attribution:*\n`;
+      if (report.simOwnership.inferredOwnerName) {
+        card += `• Owner / Match: *${report.simOwnership.inferredOwnerName}* (${report.simOwnership.confidence.toUpperCase()})\n`;
+      }
+      card += `• 🏛️ *Aadhaar-Linked SIMs (DoT):* https://tafcop.sancharsaathi.gov.in/\n`;
+      card += `• 🏢 *Business / Director Filings:* ${report.simOwnership.associatedNumbersDorks[1]?.actionUrl || '#'}\n`;
+      card += `\n`;
     }
+
+    // Leaked Data, Public Dumps & Address Filings
+    card += `🔓 *Leaked Data, Address & Dumps Footprint:*\n`;
+    card += `• 📑 *Address & Public PDF Records:* https://www.google.com/search?q=${encodeURIComponent(
+      `("${report.normalizedNumber}") (filetype:pdf OR filetype:xlsx) ("address" OR "contact" OR "ward")`
+    )}\n`;
+    card += `• 🔓 *Pastebins & Leaked Dumps:* https://www.google.com/search?q=${encodeURIComponent(
+      `("${report.normalizedNumber}") (site:pastebin.com OR site:throwbin.io OR site:justpaste.it OR site:rentry.co)`
+    )}\n`;
+    card += `• 🛡️ *Breach Check (h8mail/SpiderFoot):* \`h8mail -t +${report.e164Format.replace('+', '')}\`\n\n`;
 
     if (report.upiFootprint && report.countryCode === '+91') {
       card += `💳 *Predicted UPI Handles (GPay/PhonePe/Paytm):*\n`;
