@@ -483,7 +483,9 @@ Generate Friday's direct spoken response (without emojis, markdown asterisks, or
 
     const cleanTo = to.replace(/\D/g, "");
     const cleanVirtual = (virtualNumber || "").replace(/\D/g, "");
-    const exotelUrl = `https://${apiKey}:${apiToken}@${subdomain}/v1/Accounts/${accountSid}/Calls/connect.json`;
+    const cleanSubdomain = (subdomain || "api.exotel.com").replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+    const exotelUrl = `https://${cleanSubdomain}/v1/Accounts/${accountSid}/Calls/connect.json`;
+    const basicAuth = `Basic ${Buffer.from(`${apiKey}:${apiToken}`).toString("base64")}`;
 
     try {
       const formData = new URLSearchParams();
@@ -512,6 +514,7 @@ Generate Friday's direct spoken response (without emojis, markdown asterisks, or
       const response = await fetch(exotelUrl, {
         method: "POST",
         headers: {
+          Authorization: basicAuth,
           "Content-Type": "application/x-www-form-urlencoded",
         },
         body: formData.toString(),
