@@ -319,6 +319,47 @@ export const LearningCapsule: React.FC<LearningCapsuleProps> = ({
         exit={{ y: 20, opacity: 0 }}
         className="fixed bottom-24 right-6 z-40"
       >
+        {/* ── Two upward hanging rope lines extending to the top of screen ── */}
+        {/* Left rope */}
+        <div
+          className="absolute pointer-events-none"
+          style={{
+            left: '22%',
+            bottom: '100%',
+            top: '-100vh',
+            width: '2px',
+            maskImage: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.1) 10%, rgba(0,0,0,0.6) 30%, rgba(0,0,0,1) 65%)',
+            WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.1) 10%, rgba(0,0,0,0.6) 30%, rgba(0,0,0,1) 65%)',
+          }}
+        >
+          <div className="w-full h-full bg-gradient-to-b from-emerald-400/0 via-emerald-400/60 to-emerald-500/90"
+            style={{ boxShadow: '0 0 6px 1px rgba(16,185,129,0.45)' }} />
+        </div>
+        {/* Right rope */}
+        <div
+          className="absolute pointer-events-none"
+          style={{
+            right: '22%',
+            bottom: '100%',
+            top: '-100vh',
+            width: '2px',
+            maskImage: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.1) 10%, rgba(0,0,0,0.6) 30%, rgba(0,0,0,1) 65%)',
+            WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.1) 10%, rgba(0,0,0,0.6) 30%, rgba(0,0,0,1) 65%)',
+          }}
+        >
+          <div className="w-full h-full bg-gradient-to-b from-cyan-400/0 via-cyan-400/60 to-cyan-500/90"
+            style={{ boxShadow: '0 0 6px 1px rgba(6,182,212,0.45)' }} />
+        </div>
+        {/* Glowing nodes at top of panel where ropes attach */}
+        <div className="absolute -top-1.5 left-[22%] -translate-x-1/2 w-2 h-2 rounded-full bg-slate-900 border border-emerald-400 pointer-events-none"
+          style={{ boxShadow: '0 0 8px rgba(16,185,129,0.7)' }}>
+          <div className="w-1 h-1 rounded-full bg-emerald-300 animate-pulse m-auto mt-[1px]" />
+        </div>
+        <div className="absolute -top-1.5 right-[22%] translate-x-1/2 w-2 h-2 rounded-full bg-slate-900 border border-cyan-400 pointer-events-none"
+          style={{ boxShadow: '0 0 8px rgba(6,182,212,0.7)' }}>
+          <div className="w-1 h-1 rounded-full bg-cyan-300 animate-pulse m-auto mt-[1px]" />
+        </div>
+
         <div className="relative group">
           <div className="absolute -inset-1 rounded-full bg-gradient-to-r from-emerald-500 via-cyan-500 to-indigo-500 opacity-70 blur-md group-hover:opacity-100 transition duration-500 animate-pulse" />
           <div className="relative flex items-center gap-3 px-4 py-2.5 rounded-full bg-slate-950/90 border border-emerald-500/40 backdrop-blur-xl shadow-[0_0_30px_rgba(16,185,129,0.3)] text-slate-100">

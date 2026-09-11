@@ -853,33 +853,57 @@ function HangingRopeCapsule({
             }}
             style={{ transformOrigin: 'top center' }}
         >
-            {/* Top Ceiling Anchor Mount Rivet (Screen ke Top se Direct Attach) */}
-            <div className="flex flex-col items-center shrink-0 z-10">
-                <div className="w-3.5 h-1.5 rounded-t-sm bg-gradient-to-b from-slate-700 to-slate-850 border-t border-x border-amber-400/60 shadow-[0_-2px_6px_rgba(251,191,36,0.3)]" />
-                <div className="w-2.5 h-2.5 rounded-full bg-slate-900 border-[1.5px] border-amber-300 shadow-[0_0_8px_rgba(251,191,36,0.6)] flex items-center justify-center -mt-0.5">
-                    <div className="w-1 h-1 rounded-full bg-white animate-pulse" />
-                </div>
-            </div>
-
-            {/* Braided Hanging Rope (Rassi - Direct Vertical Suspension) */}
+            {/* ── Rope extending UPWARD beyond the top of the screen ─────────────
+                This absolutely-positioned rope goes from the capsule up through
+                100vh+ above it, so it is ALWAYS cropped by the browser viewport
+                top edge — creating the illusion it hangs from outside the screen. */}
             <div
-                className={`w-[3px] bg-gradient-to-b ${ropeColor} relative shadow-[0_0_8px_${glowColor}]`}
+                className="absolute left-1/2 -translate-x-1/2 pointer-events-none z-0"
                 style={{
-                    height: `${ropeHeight}px`,
-                    backgroundImage:
-                        'repeating-linear-gradient(45deg, rgba(0,0,0,0.5) 0px, rgba(0,0,0,0.5) 2.5px, rgba(255,255,255,0.2) 2.5px, rgba(255,255,255,0.2) 5px)',
+                    // Start from just above the capsule's top, extend 100vh upward
+                    bottom: `calc(100% - 4px)`,
+                    top: '-100vh',
+                    width: '3px',
                 }}
             >
-                {/* Micro-fiber light shimmer */}
-                <div className="absolute inset-0 w-full h-full bg-amber-100/15 pointer-events-none" />
+                {/* Main rope — gradient from transparent at very top → solid color → blends into node */}
+                <div
+                    className={`w-full h-full bg-gradient-to-b ${ropeColor}`}
+                    style={{
+                        // Fade in from the screen top so it looks like it comes from outside
+                        maskImage: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.15) 8%, rgba(0,0,0,0.6) 25%, rgba(0,0,0,1) 55%, rgba(0,0,0,1) 100%)',
+                        WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.15) 8%, rgba(0,0,0,0.6) 25%, rgba(0,0,0,1) 55%, rgba(0,0,0,1) 100%)',
+                        backgroundImage: `repeating-linear-gradient(45deg, rgba(0,0,0,0.5) 0px, rgba(0,0,0,0.5) 2.5px, rgba(255,255,255,0.2) 2.5px, rgba(255,255,255,0.2) 5px)`,
+                    }}
+                />
+                {/* Rope glow — softly radiates the rope color, also fades in from top */}
+                <div
+                    className="absolute inset-0 w-full h-full pointer-events-none"
+                    style={{
+                        boxShadow: `0 0 8px 2px ${glowColor}`,
+                        maskImage: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.2) 15%, rgba(0,0,0,0.8) 40%, rgba(0,0,0,1) 70%)',
+                        WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.2) 15%, rgba(0,0,0,0.8) 40%, rgba(0,0,0,1) 70%)',
+                    }}
+                />
             </div>
 
-            {/* Rope Knot & Carabiner Clip Ring */}
-            <div className="relative -mt-0.5 z-10 flex flex-col items-center">
-                <div className="w-3 h-2 rounded-sm bg-gradient-to-b from-amber-700 to-amber-950 border border-amber-400/90 shadow-[0_0_6px_rgba(245,158,11,0.5)] flex items-center justify-center">
-                    <div className="w-2 h-[1px] bg-amber-300/80" />
+            {/* Small glowing node — sits right at the TOP of the capsule, where rope meets capsule */}
+            <div className="relative z-10 flex flex-col items-center">
+                <div
+                    className="w-2.5 h-2.5 rounded-full bg-slate-900 border-[1.5px] flex items-center justify-center"
+                    style={{ borderColor: glowColor, boxShadow: `0 0 10px ${glowColor}, 0 0 4px ${glowColor}` }}
+                >
+                    <div className="w-1 h-1 rounded-full bg-white animate-pulse" />
                 </div>
-                <div className="w-2 h-1.5 rounded-full border-[1.5px] border-slate-300 -mt-0.5 bg-slate-850/90 shadow-sm" />
+                {/* Short connector from node down to capsule */}
+                <div
+                    className={`w-[3px] bg-gradient-to-b ${ropeColor}`}
+                    style={{
+                        height: `${ropeHeight}px`,
+                        backgroundImage: `repeating-linear-gradient(45deg, rgba(0,0,0,0.5) 0px, rgba(0,0,0,0.5) 2.5px, rgba(255,255,255,0.2) 2.5px, rgba(255,255,255,0.2) 5px)`,
+                        boxShadow: `0 0 8px ${glowColor}`,
+                    }}
+                />
             </div>
 
             {/* The Suspended Capsule Button */}
@@ -889,6 +913,7 @@ function HangingRopeCapsule({
         </motion.div>
     );
 }
+
 
 export default function LiveAIInterface({ onClose, isCallMode, callSession }: LiveAIInterfaceProps) {
     const [isRecording, setIsRecording] = useState(false);
@@ -2862,7 +2887,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
         >
             <div className="w-full h-full flex flex-col flex-1 overflow-hidden">
                 {/* ── Top Dashboard Header & Horizontally Slideable Capsule Buttons ── */}
-                <div className="w-full flex flex-col gap-2 mb-4 pt-2 shrink-0">
+                <div className="w-full flex flex-col gap-2 mb-4 pt-2 shrink-0 overflow-x-hidden" style={{ overflowY: 'visible' }}>
                     <div className="flex items-center justify-between px-1">
                         <h1 className="text-base sm:text-lg font-bold flex items-center gap-2">
                             <span>🤖</span>
@@ -2887,9 +2912,9 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                     </div>
 
                     {/* ── Suspended Aerial Rope Capsules (Screen ke Top se Direct Rassi me Latke Hue, Center se Start) ── */}
-                    <div className="w-full flex flex-col gap-2 select-none items-center">
+                    <div className="w-full flex flex-col gap-2 select-none items-center overflow-x-hidden" style={{ overflowY: 'visible' }}>
                         {/* ── TIER 1: Upper 10 Aerial Capsules Hanging Direct from Ceiling, Centered ── */}
-                        <div className="relative w-full flex items-center justify-center group/capsules1">
+                        <div className="relative w-full flex items-center justify-center group/capsules1" style={{ overflowY: 'visible' }}>
                             {/* Left Scroll Arrow */}
                             <button
                                 type="button"
@@ -3053,7 +3078,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                         </div>
 
                         {/* ── TIER 2: Remaining Capsules Hanging Directly Below, Centered ── */}
-                        <div className="relative w-full flex items-center justify-center group/capsules2">
+                        <div className="relative w-full flex items-center justify-center group/capsules2" style={{ overflowY: 'visible' }}>
                             {/* Left Scroll Arrow */}
                             <button
                                 type="button"
