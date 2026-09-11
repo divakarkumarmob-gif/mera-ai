@@ -817,7 +817,7 @@ async function playAudioChunk(
 
 // ── Suspended Aerial Rope Capsule Component (Upper Screen se Direct Rassi se Latka Hua) ──
 function HangingRopeCapsule({
-    ropeHeight = 34,
+    ropeHeight = 36,
     swayIndex = 0,
     ropeColor = 'from-amber-400/90 via-amber-300 to-amber-500/90',
     glowColor = 'rgba(251,191,36,0.4)',
@@ -836,10 +836,10 @@ function HangingRopeCapsule({
 
     return (
         <motion.div
-            className="relative flex flex-col items-center shrink-0 group/hanging select-none"
+            className="relative flex flex-col items-center shrink-0 group/hanging select-none pt-7"
             animate={{
                 rotate: [-maxAngle, maxAngle, -maxAngle],
-                y: [0, -2.5, 0],
+                y: [0, -3, 0],
             }}
             transition={{
                 duration,
@@ -854,61 +854,43 @@ function HangingRopeCapsule({
             }}
             style={{ transformOrigin: 'top center' }}
         >
-            {/* ── Rope extending UPWARD beyond the top of the screen ─────────────
-                This absolutely-positioned rope goes from the capsule up through
-                100vh+ above it, so it is ALWAYS cropped by the browser viewport
-                top edge — creating the illusion it hangs from outside the screen. */}
+            {/* ── Solid Continuous Glowing Rope extending from the top ceiling straight down to the capsule ── */}
             <div
                 className="absolute left-1/2 -translate-x-1/2 pointer-events-none z-0"
                 style={{
-                    // Start from just above the capsule's top, extend 100vh upward
-                    bottom: `calc(100% - 4px)`,
-                    top: '-100vh',
-                    width: '3px',
+                    bottom: 'calc(100% - 28px)',
+                    top: '-150vh',
+                    width: '2.5px',
                 }}
             >
-                {/* Main rope — gradient from transparent at very top → solid color → blends into node */}
+                {/* Main Braided Cable */}
                 <div
                     className={`w-full h-full bg-gradient-to-b ${ropeColor}`}
                     style={{
-                        // Fade in from the screen top so it looks like it comes from outside
-                        maskImage: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.15) 8%, rgba(0,0,0,0.6) 25%, rgba(0,0,0,1) 55%, rgba(0,0,0,1) 100%)',
-                        WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.15) 8%, rgba(0,0,0,0.6) 25%, rgba(0,0,0,1) 55%, rgba(0,0,0,1) 100%)',
-                        backgroundImage: `repeating-linear-gradient(45deg, rgba(0,0,0,0.5) 0px, rgba(0,0,0,0.5) 2.5px, rgba(255,255,255,0.2) 2.5px, rgba(255,255,255,0.2) 5px)`,
+                        backgroundImage: `repeating-linear-gradient(45deg, rgba(0,0,0,0.5) 0px, rgba(0,0,0,0.5) 2.5px, rgba(255,255,255,0.3) 2.5px, rgba(255,255,255,0.3) 5px)`,
                     }}
                 />
-                {/* Rope glow — softly radiates the rope color, also fades in from top */}
+                {/* Full Neon Radiance Glow — NO clipping or fading */}
                 <div
                     className="absolute inset-0 w-full h-full pointer-events-none"
                     style={{
-                        boxShadow: `0 0 8px 2px ${glowColor}`,
-                        maskImage: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.2) 15%, rgba(0,0,0,0.8) 40%, rgba(0,0,0,1) 70%)',
-                        WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.2) 15%, rgba(0,0,0,0.8) 40%, rgba(0,0,0,1) 70%)',
+                        boxShadow: `0 0 8px 2px ${glowColor}, 0 0 16px 4px ${glowColor}`,
                     }}
                 />
             </div>
 
-            {/* Small glowing node — sits right at the TOP of the capsule, where rope meets capsule */}
-            <div className="relative z-10 flex flex-col items-center">
+            {/* Glowing Attachment Node right on top of the capsule */}
+            <div className="relative z-10 flex flex-col items-center -mb-1">
                 <div
-                    className="w-2.5 h-2.5 rounded-full bg-slate-900 border-[1.5px] flex items-center justify-center"
+                    className="w-2.5 h-2.5 rounded-full bg-slate-950 border-[1.5px] flex items-center justify-center pointer-events-none"
                     style={{ borderColor: glowColor, boxShadow: `0 0 10px ${glowColor}, 0 0 4px ${glowColor}` }}
                 >
                     <div className="w-1 h-1 rounded-full bg-white animate-pulse" />
                 </div>
-                {/* Short connector from node down to capsule */}
-                <div
-                    className={`w-[3px] bg-gradient-to-b ${ropeColor}`}
-                    style={{
-                        height: `${ropeHeight}px`,
-                        backgroundImage: `repeating-linear-gradient(45deg, rgba(0,0,0,0.5) 0px, rgba(0,0,0,0.5) 2.5px, rgba(255,255,255,0.2) 2.5px, rgba(255,255,255,0.2) 5px)`,
-                        boxShadow: `0 0 8px ${glowColor}`,
-                    }}
-                />
             </div>
 
             {/* The Suspended Capsule Button */}
-            <div className="relative -mt-0.5 z-20">
+            <div className="relative z-20">
                 {children}
             </div>
         </motion.div>
@@ -2891,7 +2873,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
 
             <div className="w-full h-full flex flex-col flex-1 overflow-hidden relative z-10">
                 {/* ── Top Dashboard Header & Horizontally Slideable Capsule Buttons ── */}
-                <div className="w-full flex flex-col gap-2 mb-4 pt-2 shrink-0 overflow-x-hidden" style={{ overflowY: 'visible' }}>
+                <div className="w-full flex flex-col gap-1.5 mb-2 pt-0.5 shrink-0 overflow-x-hidden" style={{ overflowY: 'visible' }}>
                     <div className="flex items-center justify-between px-1">
                         <h1 className="text-base sm:text-lg font-bold flex items-center gap-2">
                             <span>🤖</span>
