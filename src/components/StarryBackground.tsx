@@ -525,41 +525,38 @@ export const StarryBackground: React.FC = () => {
       }
 
       // ── CHECK 2: Meteor vs Floating Capsule Collision ─────────
-      // Find bounding rectangle of the floating cognition capsule
-      const floatingCapsuleEl = document.querySelector('[data-floating-capsule="true"]');
-      if (floatingCapsuleEl) {
-        const rect = floatingCapsuleEl.getBoundingClientRect();
-        // Add slight padding around capsule for satisfying hit detection
-        const capLeft = rect.left - 8;
-        const capRight = rect.right + 8;
-        const capTop = rect.top - 8;
-        const capBottom = rect.bottom + 8;
+      try {
+        const floatingCapsuleEl = document.querySelector('[data-floating-capsule="true"]');
+        if (floatingCapsuleEl) {
+          const rect = floatingCapsuleEl.getBoundingClientRect();
+          const capLeft = rect.left - 8;
+          const capRight = rect.right + 8;
+          const capTop = rect.top - 8;
+          const capBottom = rect.bottom + 8;
 
-        for (let i = 0; i < shootingStars.length; i++) {
-          const meteor = shootingStars[i];
-          if (!meteor.active) continue;
+          for (let i = 0; i < shootingStars.length; i++) {
+            const meteor = shootingStars[i];
+            if (!meteor.active) continue;
 
-          if (
-            meteor.x >= capLeft &&
-            meteor.x <= capRight &&
-            meteor.y >= capTop &&
-            meteor.y <= capBottom
-          ) {
-            // DIRECT IMPACT! Meteor hits the floating capsule!
-            meteor.active = false;
+            if (
+              meteor.x >= capLeft &&
+              meteor.x <= capRight &&
+              meteor.y >= capTop &&
+              meteor.y <= capBottom
+            ) {
+              meteor.active = false;
 
-            // Trigger crack event on the capsule
-            window.dispatchEvent(
-              new CustomEvent('capsule_meteor_hit', {
-                detail: { x: meteor.x, y: meteor.y, theme: meteor.theme.name },
-              })
-            );
+              window.dispatchEvent(
+                new CustomEvent('capsule_meteor_hit', {
+                  detail: { x: meteor.x, y: meteor.y, theme: meteor.theme.name },
+                })
+              );
 
-            // Explosive spark shower at impact
-            triggerFirecrackerExplosion(meteor.x, meteor.y, meteor.theme.fireworkColors);
+              triggerFirecrackerExplosion(meteor.x, meteor.y, meteor.theme.fireworkColors);
+            }
           }
         }
-      }
+      } catch {}
 
       // 2. Draw Shooting Stars with Fiery Burning Heads & Sparks
       for (let i = shootingStars.length - 1; i >= 0; i--) {

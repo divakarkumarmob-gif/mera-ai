@@ -566,7 +566,7 @@ export const LearningCapsule: React.FC<LearningCapsuleProps> = ({
 
           <div className="flex items-center gap-2">
             <button
-              onClick={handleRunPracticeDrill}
+              onClick={() => handleRunPracticeDrill()}
               disabled={drillingNow}
               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-xs font-semibold text-white shadow-lg shadow-emerald-900/30 transition disabled:opacity-50"
             >
@@ -791,7 +791,7 @@ export const LearningCapsule: React.FC<LearningCapsuleProps> = ({
                   </p>
                 </div>
                 <button
-                  onClick={handleRunPracticeDrill}
+                  onClick={() => handleRunPracticeDrill()}
                   disabled={drillingNow}
                   className="px-3 py-1.5 rounded-xl bg-cyan-600/30 border border-cyan-500/40 text-cyan-200 hover:bg-cyan-500/30 text-xs font-semibold flex items-center gap-1.5 transition"
                 >
@@ -805,7 +805,7 @@ export const LearningCapsule: React.FC<LearningCapsuleProps> = ({
                   <div className="text-3xl mb-2">🏋️</div>
                   <p>Abhi tak koi drill record nahi hui hai.</p>
                   <button
-                    onClick={handleRunPracticeDrill}
+                    onClick={() => handleRunPracticeDrill()}
                     className="mt-3 px-4 py-1.5 rounded-xl bg-cyan-600 text-white text-xs font-semibold hover:bg-cyan-500 transition"
                   >
                     Run First Practice Drill
