@@ -819,6 +819,39 @@ class ToolsEngine {
       message: `Boss, maine ${report.normalizedNumber} ki details nikal li hain: Operator ${report.operator}, Circle ${report.telecomCircle}${report.savedContact ? `, Saved Name: ${report.savedContact.name}` : ''}. Spam Risk: ${report.spamRisk.level}.`,
     };
   }
+
+  /**
+   * 📞 Trigger Real Outbound Phone Call via Exotel Indian Cloud Telephony
+   */
+  public async makePhoneCall(phoneNumber: string, customMessage?: string) {
+    const { exotelService } = await import("./exotelService");
+    const result = await exotelService.makeOutboundCall({
+      to: phoneNumber,
+      customMessage,
+    });
+    return {
+      success: result.success,
+      phoneNumber,
+      callSid: result.callSid,
+      message: result.success
+        ? `Boss, maine ${phoneNumber} par call laga di hai (CallSid: ${result.callSid}).`
+        : `Call lagane me dikkat aayi: ${result.message}`,
+    };
+  }
+
+  /**
+   * 📋 Get Recent Telephony Call Logs & Summaries
+   */
+  public async getPhoneCallLogs(limit: number = 10) {
+    const { exotelService } = await import("./exotelService");
+    const logs = exotelService.getCallLogs(limit);
+    return {
+      success: true,
+      count: logs.length,
+      logs,
+      message: `Boss, recent ${logs.length} calls ki history fetched successfully.`,
+    };
+  }
 }
 
 export const toolsEngine = new ToolsEngine();

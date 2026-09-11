@@ -54,6 +54,7 @@ import { serverFirewallService } from "../services/serverFirewallService";
 import { whatsappFeatureEngine } from "../services/whatsappFeatureEngine";
 import { freeFireGamingService } from "../services/freeFireGamingService";
 import { phoneIntelligenceService } from "../services/phoneIntelligenceService";
+import { exotelService } from "../services/exotelService";
 import { createZipFromDirectory } from "../utils/miniZip";
 
 export interface ApiRoutesContext {
@@ -3201,6 +3202,131 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err?.message || "Failed to stop daemon" });
     }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // EXOTEL INDIAN CLOUD TELEPHONY (+91 VIRTUAL NUMBER) WEBHOOKS & REST APIS
+  // ══════════════════════════════════════════════════════════════════════════
+
+  // 1. Inbound Call Webhook (Exotel Passthru Applet Entrypoint)
+  app.all(["/api/exotel/incoming-call", "/api/exotel/passthru"], async (req, res) => {
+    try {
+      const callSid = String(req.query.CallSid || req.body.CallSid || `call_${Date.now()}`);
+      const from = String(req.query.From || req.body.From || req.query.CallFrom || req.body.CallFrom || "Unknown");
+      const to = String(req.query.To || req.body.To || req.query.CallTo || req.body.CallTo || "Friday");
+      const host = req.get("host") || "localhost:3000";
+      const protocol = req.protocol === "https" || req.headers["x-forwarded-proto"] === "https" ? "https" : "http";
+      const baseUrl = `${protocol}://${host}`;
+
+      const { exml } = await exotelService.handleIncomingCall({ callSid, from, to, baseUrl });
+      res.set("Content-Type", "text/xml");
+      res.send(exml);
+    } catch (e: any) {
+      console.error("[ExotelRoute] Incoming call webhook error:", e);
+      res.set("Content-Type", "text/xml");
+      res.send(`<?xml version="1.0" encoding="UTF-8"?><Response><Say language="hi-IN">नमस्ते! मैं शुक्रवार हूँ, कुछ ही समय में आपसे संपर्क करूँगी।</Say><Hangup/></Response>`);
+    }
+  });
+
+  // 2. Process Caller's Voice Speech (Multi-Turn Voice Dialogue Loop)
+  app.all("/api/exotel/process-speech", async (req, res) => {
+    try {
+      const callSid = String(req.query.callSid || req.query.CallSid || req.body.CallSid || "");
+      const recordingUrl = String(req.query.RecordingUrl || req.body.RecordingUrl || req.body.RecordingURL || req.query.RecordingURL || "");
+      const digits = String(req.query.Digits || req.body.Digits || "");
+      const host = req.get("host") || "localhost:3000";
+      const protocol = req.protocol === "https" || req.headers["x-forwarded-proto"] === "https" ? "https" : "http";
+      const baseUrl = `${protocol}://${host}`;
+
+      const { exml } = await exotelService.handleSpeechInput({ callSid, recordingUrl, digits, baseUrl });
+      res.set("Content-Type", "text/xml");
+      res.send(exml);
+    } catch (e: any) {
+      console.error("[ExotelRoute] Process speech webhook error:", e);
+      res.set("Content-Type", "text/xml");
+      res.send(`<?xml version="1.0" encoding="UTF-8"?><Response><Say language="hi-IN">धन्यवाद, मैंने आपकी बात नोट कर ली है।</Say><Hangup/></Response>`);
+    }
+  });
+
+  // 3. Status Callback (Call Ended, Duration, and Recording Delivered)
+  app.all("/api/exotel/call-status", async (req, res) => {
+    try {
+      const callSid = String(req.query.CallSid || req.body.CallSid || "");
+      const status = String(req.query.Status || req.body.Status || req.query.CallStatus || req.body.CallStatus || "completed");
+      const duration = req.query.Duration || req.body.Duration || req.query.Legs?.[0]?.Duration || 0;
+      const recordingUrl = String(req.query.RecordingUrl || req.body.RecordingUrl || "");
+
+      const session = await exotelService.handleCallStatus({
+        callSid,
+        status,
+        duration: Number(duration),
+        recordingUrl: recordingUrl || undefined,
+      });
+
+      res.json({ ok: true, session });
+    } catch (e: any) {
+      console.error("[ExotelRoute] Call status callback error:", e);
+      res.status(500).json({ ok: false, error: e?.message });
+    }
+  });
+
+  // 4. Serve Dynamic Friday Voice MP3 Audio to Exotel
+  app.get("/api/exotel/audio/:audioId", (req, res) => {
+    const audioId = req.params.audioId;
+    const audio = exotelService.getAudio(audioId);
+    if (!audio) {
+      return res.status(404).send("Audio expired or not found");
+    }
+    res.set({
+      "Content-Type": audio.mimeType,
+      "Content-Length": audio.buffer.length.toString(),
+      "Cache-Control": "public, max-age=1800",
+    });
+    res.send(audio.buffer);
+  });
+
+  // 5. Exotel Config Management
+  app.get("/api/exotel/config", (_req, res) => {
+    res.json({ ok: true, config: exotelService.getConfig() });
+  });
+
+  app.post("/api/exotel/config", (req, res) => {
+    try {
+      const result = exotelService.saveConfig(req.body || {});
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
+    }
+  });
+
+  // 6. Outbound Phone Call Trigger
+  app.post("/api/exotel/make-call", async (req, res) => {
+    try {
+      const { to, customMessage } = req.body || {};
+      if (!to) {
+        return res.status(400).json({ ok: false, error: "Phone number 'to' is required" });
+      }
+      const host = req.get("host") || "localhost:3000";
+      const protocol = req.protocol === "https" || req.headers["x-forwarded-proto"] === "https" ? "https" : "http";
+      const result = await exotelService.makeOutboundCall({
+        to: String(to),
+        customMessage: customMessage ? String(customMessage) : undefined,
+        baseUrl: `${protocol}://${host}`,
+      });
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "Outbound call failed" });
+    }
+  });
+
+  // 7. Call Logs Management
+  app.get("/api/exotel/call-logs", (req, res) => {
+    const limit = Number(req.query.limit) || 50;
+    res.json({ ok: true, logs: exotelService.getCallLogs(limit) });
+  });
+
+  app.post("/api/exotel/call-logs/clear", (_req, res) => {
+    res.json({ ok: exotelService.clearCallLogs() });
   });
 
   return router;

@@ -13,7 +13,8 @@ import WifiRadarModal from './WifiRadarModal';
 import { HolographicLabModal } from './HolographicLabModal';
 import { FreeFireCoachModal } from './FreeFireCoachModal';
 import PhoneIntelligenceModal from './PhoneIntelligenceModal';
-import { Gamepad2 } from 'lucide-react';
+import { ExotelTelephonyModal } from './ExotelTelephonyModal';
+import { Gamepad2, PhoneCall } from 'lucide-react';
 import { getWsUrl, getApiUrl } from '@/utils/api';
 import { wakeWordManager } from '@/utils/wakeWord';
 import { getAppToken, clearAppSession } from '@/utils/appSecurityClient';
@@ -1233,6 +1234,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
     const [hologramInitialModel, setHologramInitialModel] = useState('arc_reactor');
     const [showLearningCapsule, setShowLearningCapsule] = useState(false);
     const [showPhoneIntelligence, setShowPhoneIntelligence] = useState(false);
+    const [showExotelModal, setShowExotelModal] = useState(false);
     const [showFreeFireCoach, setShowFreeFireCoach] = useState(false);
     const [showSongPreviewModal, setShowSongPreviewModal] = useState(false);
     const [previewQuery, setPreviewQuery] = useState('');
@@ -4195,6 +4197,30 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
 
                                             {/* Friday Instagram Direct Bot Card */}
                                             <InstagramBotCard />
+
+                                            {/* 🇮🇳 Friday Indian Cloud Telephony (+91 Exotel) Card */}
+                                            <div className="p-3.5 rounded-2xl bg-gradient-to-r from-cyan-950/40 via-slate-900 to-indigo-950/40 border border-cyan-500/30 flex items-center justify-between">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="p-2.5 rounded-xl bg-cyan-500/20 border border-cyan-400/40 text-cyan-400 shadow-[0_0_12px_rgba(6,182,212,0.3)]">
+                                                        <PhoneCall className="w-4 h-4" />
+                                                    </div>
+                                                    <div>
+                                                        <div className="flex items-center gap-2">
+                                                            <h5 className="text-xs font-bold text-white">Indian Telephony Gateway (+91)</h5>
+                                                            <span className="px-1.5 py-0.2 rounded-full text-[9px] font-bold bg-orange-500/20 border border-orange-500/30 text-orange-400">
+                                                                Exotel Inbound & Outbound
+                                                            </span>
+                                                        </div>
+                                                        <p className="text-[10px] text-slate-400">Live AI Call Receptionist, Dialer & Voice Transcripts</p>
+                                                    </div>
+                                                </div>
+                                                <button
+                                                    onClick={() => setShowExotelModal(true)}
+                                                    className="px-3 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs shadow-md transition-all cursor-pointer flex items-center gap-1"
+                                                >
+                                                    <span>Open Gateway</span>
+                                                </button>
+                                            </div>
                                         </motion.div>
                                     )}
                                 </AnimatePresence>
@@ -4308,6 +4334,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
             <HolographicLabModal isOpen={showHologramLab} onClose={() => setShowHologramLab(false)} initialModelId={hologramInitialModel} />
             <FreeFireCoachModal isOpen={showFreeFireCoach} onClose={() => setShowFreeFireCoach(false)} />
             <PhoneIntelligenceModal isOpen={showPhoneIntelligence} onClose={() => setShowPhoneIntelligence(false)} />
+            <ExotelTelephonyModal isOpen={showExotelModal} onClose={() => setShowExotelModal(false)} />
             {showLearningCapsule && <LearningCapsule onClose={() => setShowLearningCapsule(false)} />}
             {!showLearningCapsule && (
                 <LearningCapsule

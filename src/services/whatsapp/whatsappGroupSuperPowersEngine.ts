@@ -1747,6 +1747,36 @@ Bhagwan aapko lambi umar, beshumar khushiyan, aur bohot saari success de! 🚀�
       return await this.handleLiveTranslator(rawText, quotedMessage, senderName);
     }
 
+    // 13B. Instant Exotel Phone Call Intent ("call karo", "mujhe call karo", "call me", "call boss", "phone karo", etc.)
+    if (
+      /(?:call\s*karo|mujhe\s*call\s*karo|call\s*me|call\s*boss|phone\s*karo|call\s*lagao|phone\s*lagao|call\s*kar\s*do|phone\s*mila|call\s*mila)\b/i.test(clean) ||
+      /^(?:friday|hey\s*friday)?\s*(?:call|phone)\s*(?:karo|lagao|kijiye|kar\s*do)\b/i.test(clean) ||
+      /\bcall\s+(?:\+91[\s-]?)?[6-9]\d{9}\b/i.test(clean)
+    ) {
+      const extractedNumber = rawText.match(/(?:\+91[\s-]?)?[6-9]\d{9}/) || rawText.match(/\b\d{10,12}\b/);
+      const { exotelService } = await import("../exotelService");
+      const config = exotelService.getConfig();
+      const targetPhone = extractedNumber
+        ? extractedNumber[0].replace(/\D/g, "")
+        : (isOwner && senderPhone ? senderPhone : config.bossNotificationNumber || process.env.BOSS_WHATSAPP_NUMBER || "919315570187").replace(/\D/g, "");
+
+      const callRes = await exotelService.makeOutboundCall({
+        to: targetPhone,
+        customMessage: "Boss, aapne WhatsApp par call karne ko bola tha, isliye maine call lagayi hai.",
+      });
+
+      if (callRes.success) {
+        return {
+          handled: true,
+          replyText: `📞 *Ji Boss! Main abhi aapko (+${targetPhone}) par Exotel Telephony se call laga rahi hoon... Phone uthaiye!* ⚡`,
+        };
+      } else {
+        return {
+          handled: true,
+          replyText: `⚠️ *Call connect nahi ho paayi:* ${callRes.message}\n_Kripya Exotel settings me API keys aur Virtual number check karein._`,
+        };
+      }
+    }
 
     // 14. Vibe Radar, Icebreaker & Joke Intent
     if (/(?:vibe\s*check|icebreaker|joke\s*sunao|chutkula\s*sunao|group\s*ka\s*mahaul|ladai\s*rok|jhagda\s*rok|bore\s*ho\s*raha)/i.test(clean)) {

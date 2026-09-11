@@ -2328,6 +2328,38 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
       }
     }
 
+    // 2.0B3 Handle Instant Exotel Phone Call Intent ("call karo", "mujhe call karo", "call me", "call boss", "call 98xxxx", "/call")
+    const isOutboundCallIntent =
+      /^(?:\/call|\/phone_call|call\s*karo|mujhe\s*call\s*karo|call\s*me|call\s*boss|phone\s*karo|call\s*lagao|phone\s*lagao|call\s*kar\s*do|phone\s*mila|call\s*mila)\b/i.test(text) ||
+      /\b(?:call|phone)\s*(?:karo|lagao|kijiye|kar\s*do)\b/i.test(text);
+
+    if (isOutboundCallIntent) {
+      const extractedNumber = text.match(/(?:\+91[\s-]?)?[6-9]\d{9}/) || text.match(/\b\d{10,12}\b/);
+      const { exotelService } = await import("./exotelService");
+      const config = exotelService.getConfig();
+      const targetPhone = extractedNumber
+        ? extractedNumber[0].replace(/\D/g, "")
+        : (config.bossNotificationNumber || process.env.BOSS_WHATSAPP_NUMBER || "919315570187").replace(/\D/g, "");
+
+      await this.sendMessage(
+        chatId,
+        `📞 *Ji Boss! Main abhi aapko (+${targetPhone}) par Exotel Telephony se call laga rahi hoon... Phone uthaiye!* ⚡`
+      );
+
+      const callRes = await exotelService.makeOutboundCall({
+        to: targetPhone,
+        customMessage: "Boss, aapne Telegram se call karne ko bola tha, isliye maine call lagayi hai.",
+      });
+
+      if (!callRes.success) {
+        await this.sendMessage(
+          chatId,
+          `⚠️ *Call connect nahi ho paayi:* ${callRes.message}\n_Kripya Exotel settings me API keys aur Virtual number check karein._`
+        );
+      }
+      return;
+    }
+
     // 2.0C Handle YouTube Video Analysis & Timestamps ("https://youtube.com/..." / "https://youtu.be/..." / "yt ...")
     const { youtubeService } = await import("./youtubeService");
     const ytVideoId = youtubeService.extractVideoId(text);
