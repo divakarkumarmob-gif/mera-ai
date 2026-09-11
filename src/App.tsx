@@ -4,6 +4,7 @@ import LiveAIInterface from './components/LiveAIInterface';
 import AgentFace from './components/AgentFace';
 import AppKeyLockModal from './components/AppKeyLockModal';
 import IncomingCallScreen from './components/IncomingCallScreen';
+import StarryBackground from './components/StarryBackground';
 import { getStoredAppSession, saveAppSession } from '@/utils/appSecurityClient';
 import { getApiUrl } from '@/utils/api';
 import { wakeWordManager } from '@/utils/wakeWord';
@@ -154,18 +155,19 @@ export default function App() {
     }
 
     return (
-        <div className="fixed inset-0 bg-[#0a0f24] flex flex-col items-center justify-center gap-4">
+        <div className="fixed inset-0 bg-[#060a19] flex flex-col items-center justify-center gap-4 overflow-hidden">
+            <StarryBackground />
             <motion.button
                 whileTap={{ scale: 0.92 }}
                 whileHover={{ scale: 1.05 }}
                 onClick={() => {
                     setIsOpen(true);
                 }}
-                className="cursor-pointer relative flex flex-col items-center group"
+                className="cursor-pointer relative z-10 flex flex-col items-center group"
             >
                 <AgentFace status="" volume={0} size={95} colorIndex={0} />
             </motion.button>
-            <div className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-xs text-cyan-300 shadow-[0_0_20px_rgba(6,182,212,0.2)] animate-pulse">
+            <div className="relative z-10 flex items-center gap-2 px-4 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-xs text-cyan-300 shadow-[0_0_20px_rgba(6,182,212,0.2)] animate-pulse">
                 <span className="w-2 h-2 rounded-full bg-cyan-400" />
                 <span>Say <b>"Hello Friday"</b> or tap to activate</span>
             </div>

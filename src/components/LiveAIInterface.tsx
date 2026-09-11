@@ -29,6 +29,7 @@ import EcommerceAccountsSection from './EcommerceAccountsSection';
 import IncomingCallScreen from './IncomingCallScreen';
 import InCallActiveScreen from './InCallActiveScreen';
 import { ShoppingBag } from 'lucide-react';
+import StarryBackground from './StarryBackground';
 
 interface LiveAIInterfaceProps {
     onClose: () => void;
@@ -2883,9 +2884,12 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
 
     return (
         <div
-            className="fixed inset-0 z-[1000] bg-gradient-to-b from-[#0a0f24] via-[#0a0f24] via-60% to-black text-white flex flex-col items-center pt-[env(safe-area-inset-top,0px)] px-6 pb-[max(env(safe-area-inset-bottom,0px),12px)] overflow-hidden"
+            className="fixed inset-0 z-[1000] bg-gradient-to-b from-[#060a19] via-[#080d22] via-60% to-[#030611] text-white flex flex-col items-center pt-[env(safe-area-inset-top,0px)] px-6 pb-[max(env(safe-area-inset-bottom,0px),12px)] overflow-hidden"
         >
-            <div className="w-full h-full flex flex-col flex-1 overflow-hidden">
+            {/* ── 🌌 Cosmic Starry Constellation Background (Hundreds of twinkling stars + shooting meteors) ── */}
+            <StarryBackground />
+
+            <div className="w-full h-full flex flex-col flex-1 overflow-hidden relative z-10">
                 {/* ── Top Dashboard Header & Horizontally Slideable Capsule Buttons ── */}
                 <div className="w-full flex flex-col gap-2 mb-4 pt-2 shrink-0 overflow-x-hidden" style={{ overflowY: 'visible' }}>
                     <div className="flex items-center justify-between px-1">
