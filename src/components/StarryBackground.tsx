@@ -493,7 +493,7 @@ export const StarryBackground: React.FC = () => {
           ctx.moveTo(star.x - star.radius * 2.5, star.y);
           ctx.lineTo(star.x + star.radius * 2.5, star.y);
           ctx.moveTo(star.x, star.y - star.radius * 2.5);
-          ctx.lineTo(star.x + star.radius * 2.5);
+          ctx.lineTo(star.x, star.y + star.radius * 2.5);
           ctx.stroke();
         }
 
