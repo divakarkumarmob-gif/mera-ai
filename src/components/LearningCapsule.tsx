@@ -17,11 +17,18 @@ export interface LearningStats {
 
 export interface GymDrill {
   id: string;
+  lessonId?: string;
+  sourceLessonTitle?: string;
+  sourceRule?: string;
   scenarioTitle: string;
-  category: 'emotional_empathy' | 'crisis_rescue' | 'coding_architecture' | 'diplomatic_handling';
+  category: 'boss_taught_lesson' | 'emotional_empathy' | 'crisis_rescue' | 'coding_architecture' | 'diplomatic_handling' | string;
   simulatedBossQuery: string;
   trialResponse: string;
+  selfCriticScore?: number;
+  selfCritique?: string;
   criticScore: number;
+  bossVerdict?: 'good' | 'bad' | 'unreviewed';
+  bossFeedback?: string;
   keyTakeaway: string;
   timestamp: number;
 }
@@ -88,16 +95,20 @@ export interface DreamLedger {
 }
 
 interface LearningCapsuleProps {
+  isOpen?: boolean;
   onClose?: () => void;
   isFloatingWidgetOnly?: boolean;
   onExpandToStudio?: () => void;
 }
 
 export const LearningCapsule: React.FC<LearningCapsuleProps> = ({
+  isOpen = true,
   onClose,
   isFloatingWidgetOnly = false,
   onExpandToStudio,
 }) => {
+  if (isOpen === false) return null;
+
   const [isExpanded, setIsExpanded] = useState(!isFloatingWidgetOnly);
   const [activeTab, setActiveTab] = useState<'drills' | 'golden' | 'lessons' | 'rlhf' | 'style' | 'groups' | 'dreams'>('drills');
   const [loading, setLoading] = useState(false);
@@ -113,6 +124,12 @@ export const LearningCapsule: React.FC<LearningCapsuleProps> = ({
   const [groupProfiles, setGroupProfiles] = useState<GroupProfile[]>([]);
   const [realizations, setRealizations] = useState<string[]>([]);
   const [dreamLogs, setDreamLogs] = useState<DreamLedger[]>([]);
+
+  // Boss verdict & retry states
+  const [markingVerdict, setMarkingVerdict] = useState<Record<string, boolean>>({});
+  const [retryingDrill, setRetryingDrill] = useState<Record<string, boolean>>({});
+  const [retryInstruction, setRetryInstruction] = useState<Record<string, string>>({});
+  const [showRetryInput, setShowRetryInput] = useState<Record<string, boolean>>({});
 
   // Teach modal form
   const [showTeachModal, setShowTeachModal] = useState(false);
@@ -152,12 +169,16 @@ export const LearningCapsule: React.FC<LearningCapsuleProps> = ({
     return () => clearInterval(interval);
   }, [fetchData]);
 
-  // Run autonomous practice drill on-demand
-  const handleRunPracticeDrill = async () => {
+  // Run autonomous practice drill on-demand (from taught lessons)
+  const handleRunPracticeDrill = async (lessonParam?: { lessonId?: string; trigger?: string; rule?: string }) => {
     if (drillingNow) return;
     setDrillingNow(true);
     try {
-      const res = await fetch('/api/learning/practice-drill', { method: 'POST' });
+      const res = await fetch('/api/learning/practice-drill', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(lessonParam || {}),
+      });
       const data = await res.json();
       if (data.ok && data.drill) {
         setDrills((prev) => [data.drill, ...prev]);
@@ -169,6 +190,63 @@ export const LearningCapsule: React.FC<LearningCapsuleProps> = ({
     } finally {
       setDrillingNow(false);
     }
+  };
+
+  // Boss marks response with Good (👍) or Bad (👎) reaction
+  const handleMarkVerdict = async (drillId: string, verdict: 'good' | 'bad', feedback?: string) => {
+    setMarkingVerdict((prev) => ({ ...prev, [drillId]: true }));
+    try {
+      const res = await fetch(`/api/learning/drills/${drillId}/verdict`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ verdict, feedback }),
+      });
+      const data = await res.json();
+      if (data.ok && data.drill) {
+        setDrills((prev) => prev.map((d) => (d.id === drillId ? data.drill : d)));
+        if (verdict === 'good') {
+          fetchData(); // Refresh to update Golden standards list & approval stats
+        } else {
+          setShowRetryInput((prev) => ({ ...prev, [drillId]: true }));
+        }
+      }
+    } catch (e) {
+      console.error('Failed to mark verdict:', e);
+    } finally {
+      setMarkingVerdict((prev) => ({ ...prev, [drillId]: false }));
+    }
+  };
+
+  // Re-generate response when Boss marks bad or wants correction
+  const handleRetryDrill = async (drillId: string) => {
+    setRetryingDrill((prev) => ({ ...prev, [drillId]: true }));
+    try {
+      const customInstruction = retryInstruction[drillId] || '';
+      const res = await fetch(`/api/learning/drills/${drillId}/retry`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customInstruction }),
+      });
+      const data = await res.json();
+      if (data.ok && data.drill) {
+        setDrills((prev) => prev.map((d) => (d.id === drillId ? data.drill : d)));
+        setShowRetryInput((prev) => ({ ...prev, [drillId]: false }));
+        setRetryInstruction((prev) => ({ ...prev, [drillId]: '' }));
+      }
+    } catch (e) {
+      console.error('Failed to retry drill:', e);
+    } finally {
+      setRetryingDrill((prev) => ({ ...prev, [drillId]: false }));
+    }
+  };
+
+  // Run drill from a specific lesson taught by Boss
+  const handlePracticeSpecificLesson = async (lesson: TrainingLesson) => {
+    await handleRunPracticeDrill({
+      lessonId: lesson.id,
+      trigger: lesson.situationTrigger,
+      rule: lesson.taughtReaction,
+    });
   };
 
   // Run dream consolidation
@@ -571,13 +649,22 @@ export const LearningCapsule: React.FC<LearningCapsuleProps> = ({
                       !searchQuery ||
                       d.scenarioTitle.toLowerCase().includes(searchQuery.toLowerCase()) ||
                       d.keyTakeaway.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                      d.trialResponse.toLowerCase().includes(searchQuery.toLowerCase())
+                      d.trialResponse.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                      (d.sourceLessonTitle && d.sourceLessonTitle.toLowerCase().includes(searchQuery.toLowerCase()))
                     )
                     .map((drill) => (
                       <div
                         key={drill.id}
-                        className="p-4 rounded-2xl bg-slate-900/70 border border-cyan-500/20 hover:border-cyan-500/40 transition shadow-sm space-y-3"
+                        className="p-4 rounded-2xl bg-slate-900/80 border border-cyan-500/20 hover:border-cyan-500/40 transition shadow-sm space-y-3"
                       >
+                        {/* Source Lesson Badge if drill was synthesized from Boss's lesson */}
+                        {drill.sourceLessonTitle && (
+                          <div className="flex items-center gap-1.5 text-xs text-amber-300 font-semibold bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-lg">
+                            <span>🎯 Based on Boss's Lesson:</span>
+                            <span className="truncate italic">"{drill.sourceLessonTitle}"</span>
+                          </div>
+                        )}
+
                         <div className="flex items-start justify-between gap-2">
                           <div>
                             <span className="px-2 py-0.5 rounded-md text-[10px] font-mono uppercase bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
@@ -585,27 +672,137 @@ export const LearningCapsule: React.FC<LearningCapsuleProps> = ({
                             </span>
                             <h4 className="text-sm font-bold text-slate-100 mt-1">{drill.scenarioTitle}</h4>
                           </div>
-                          <div className="flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-xs font-bold font-mono">
-                            ★ {drill.criticScore}/10
+
+                          {/* Friday's Self-Critic Rating */}
+                          <div className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-xs font-bold font-mono">
+                            ★ {drill.selfCriticScore || drill.criticScore}/10
                           </div>
                         </div>
 
-                        <div className="p-2.5 rounded-xl bg-slate-950/80 border border-white/5 space-y-1.5 text-xs">
-                          <div className="text-slate-400">
-                            <span className="font-semibold text-slate-300">Simulated Situation:</span> "{drill.simulatedBossQuery}"
+                        {/* Situation Created by Friday */}
+                        <div className="p-3 rounded-xl bg-slate-950/80 border border-cyan-500/20 space-y-1">
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-cyan-400 flex items-center gap-1">
+                            <span>⚡</span> Situation Created by Friday (Autonomous Test)
                           </div>
-                          <div className="text-cyan-200">
-                            <span className="font-semibold text-cyan-400">Friday's Response:</span> "{drill.trialResponse}"
-                          </div>
+                          <p className="text-xs text-slate-200 font-medium leading-relaxed">
+                            "{drill.simulatedBossQuery}"
+                          </p>
                         </div>
 
-                        <div className="p-2.5 rounded-xl bg-gradient-to-r from-emerald-950/40 to-cyan-950/40 border border-emerald-500/30 text-xs text-emerald-200">
-                          <span className="font-semibold text-emerald-400">💡 Key Lesson Internalized:</span> {drill.keyTakeaway}
+                        {/* Friday's Trial Response */}
+                        <div className="p-3 rounded-xl bg-slate-950/80 border border-indigo-500/20 space-y-1">
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-1">
+                            <span>🤖</span> Friday's Trial Response
+                          </div>
+                          <p className="text-xs text-slate-200 italic leading-relaxed">
+                            "{drill.trialResponse}"
+                          </p>
                         </div>
 
-                        <div className="text-[10px] text-slate-500 flex justify-between items-center">
+                        {/* Friday's Self Critique */}
+                        <div className="p-2.5 rounded-xl bg-slate-900/90 border border-white/10 space-y-1">
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                            <span>🔍</span> Friday's Self-Evaluation & Critique
+                          </div>
+                          <p className="text-xs text-slate-300">
+                            {drill.selfCritique || drill.keyTakeaway}
+                          </p>
+                        </div>
+
+                        {/* Key Lesson Internalized */}
+                        <div className="p-2 rounded-xl bg-gradient-to-r from-emerald-950/40 to-cyan-950/40 border border-emerald-500/20 text-xs text-emerald-200">
+                          <span className="font-semibold text-emerald-400">💡 Internalized Takeaway:</span> {drill.keyTakeaway}
+                        </div>
+
+                        {/* Boss Review & Reaction Marking (Good / Bad) */}
+                        <div className="pt-2 border-t border-white/5 space-y-2">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-1.5 text-xs">
+                              <span className="text-slate-400 font-medium text-[11px]">👑 Boss Verdict:</span>
+                              {drill.bossVerdict === 'good' ? (
+                                <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-bold text-[11px] flex items-center gap-1">
+                                  <span>👍 Passed (Curated 10/10)</span>
+                                </span>
+                              ) : drill.bossVerdict === 'bad' ? (
+                                <span className="px-2 py-0.5 rounded-md bg-rose-500/20 border border-rose-500/40 text-rose-300 font-bold text-[11px] flex items-center gap-1">
+                                  <span>👎 Needs Fix</span>
+                                </span>
+                              ) : (
+                                <span className="text-[11px] text-slate-500 italic">Unreviewed</span>
+                              )}
+                            </div>
+
+                            {/* Good / Bad Reaction Action Buttons */}
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                onClick={() => handleMarkVerdict(drill.id, 'good')}
+                                disabled={markingVerdict[drill.id]}
+                                title="Mark Good: Approves response and saves to Best Answers"
+                                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 ${
+                                  drill.bossVerdict === 'good'
+                                    ? 'bg-emerald-600 text-white shadow-md shadow-emerald-900/40 ring-1 ring-emerald-400'
+                                    : 'bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30'
+                                }`}
+                              >
+                                <span>👍 Good</span>
+                              </button>
+
+                              <button
+                                onClick={() => handleMarkVerdict(drill.id, 'bad')}
+                                disabled={markingVerdict[drill.id]}
+                                title="Mark Bad: Downvote and prompt Friday to retry & correct"
+                                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 ${
+                                  drill.bossVerdict === 'bad'
+                                    ? 'bg-rose-600 text-white shadow-md shadow-rose-900/40 ring-1 ring-rose-400'
+                                    : 'bg-rose-500/15 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30'
+                                }`}
+                              >
+                                <span>👎 Bad</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Inline Retry & Fix Box (shown on Bad or when Boss wants to adjust) */}
+                          {(showRetryInput[drill.id] || drill.bossVerdict === 'bad') && (
+                            <div className="p-2.5 rounded-xl bg-rose-950/30 border border-rose-500/30 space-y-2 text-xs">
+                              <div className="text-[11px] font-semibold text-rose-300 flex items-center gap-1">
+                                <span>✍️</span> Boss Correction Feedback:
+                              </div>
+                              <div className="flex gap-2">
+                                <input
+                                  type="text"
+                                  value={retryInstruction[drill.id] || ''}
+                                  onChange={(e) =>
+                                    setRetryInstruction((prev) => ({ ...prev, [drill.id]: e.target.value }))
+                                  }
+                                  placeholder="e.g. Zyada polite bolo, direct answer do..."
+                                  className="flex-1 px-2.5 py-1.5 rounded-lg bg-slate-900 border border-white/10 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-rose-500"
+                                />
+                                <button
+                                  onClick={() => handleRetryDrill(drill.id)}
+                                  disabled={retryingDrill[drill.id]}
+                                  className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs transition disabled:opacity-50 flex items-center gap-1"
+                                >
+                                  {retryingDrill[drill.id] ? (
+                                    <span className="animate-spin">⚡</span>
+                                  ) : (
+                                    <span>⚡ Retry & Fix</span>
+                                  )}
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="text-[10px] text-slate-500 flex justify-between items-center pt-1">
                           <span>Autonomous Simulation</span>
-                          <span>{new Date(drill.timestamp).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'short', timeStyle: 'short' })}</span>
+                          <span>
+                            {new Date(drill.timestamp).toLocaleString('en-IN', {
+                              timeZone: 'Asia/Kolkata',
+                              dateStyle: 'short',
+                              timeStyle: 'short',
+                            })}
+                          </span>
                         </div>
                       </div>
                     ))}
@@ -741,8 +938,19 @@ export const LearningCapsule: React.FC<LearningCapsuleProps> = ({
                           )}
                         </div>
 
-                        <div className="text-[10px] text-slate-500 text-right">
-                          {new Date(lesson.updatedAt || Date.now()).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })}
+                        <div className="pt-2 border-t border-white/5 flex items-center justify-between">
+                          <span className="text-[10px] text-slate-500">
+                            {new Date(lesson.updatedAt || Date.now()).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })}
+                          </span>
+                          <button
+                            onClick={() => handlePracticeSpecificLesson(lesson)}
+                            disabled={drillingNow}
+                            className="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-[11px] font-semibold flex items-center gap-1 transition disabled:opacity-50"
+                            title="Ask Friday to create a situation and practice this exact lesson"
+                          >
+                            <span>🏋️</span>
+                            <span>Practice This Lesson</span>
+                          </button>
                         </div>
                       </div>
                     ))}

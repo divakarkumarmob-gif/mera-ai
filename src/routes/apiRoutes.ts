@@ -580,16 +580,44 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/learning/practice-drill", async (_req, res) => {
+  app.post("/api/learning/practice-drill", async (req, res) => {
     try {
       const { syntheticSelfGymEngine } = await import("../services/syntheticSelfGymEngine");
-      const drill = await syntheticSelfGymEngine.runAutonomousDrill();
+      const { lessonId, trigger, rule, whatBossTaught } = req.body || {};
+      const drill = await syntheticSelfGymEngine.runAutonomousDrill(
+        lessonId || trigger || rule ? { lessonId, trigger, rule, whatBossTaught } : undefined
+      );
       if (!drill) {
         return res.status(500).json({ ok: false, message: "Drill generation failed or API key missing" });
       }
       res.json({ ok: true, drill });
     } catch (e: any) {
       res.status(500).json({ ok: false, error: e?.message || "Drill error" });
+    }
+  });
+
+  app.post("/api/learning/drills/:id/verdict", async (req, res) => {
+    try {
+      const { syntheticSelfGymEngine } = await import("../services/syntheticSelfGymEngine");
+      const { verdict, feedback } = req.body || {};
+      if (verdict !== "good" && verdict !== "bad") {
+        return res.status(400).json({ ok: false, error: "Verdict must be 'good' or 'bad'" });
+      }
+      const result = await syntheticSelfGymEngine.recordBossVerdict(req.params.id, verdict, feedback);
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "Failed to record verdict" });
+    }
+  });
+
+  app.post("/api/learning/drills/:id/retry", async (req, res) => {
+    try {
+      const { syntheticSelfGymEngine } = await import("../services/syntheticSelfGymEngine");
+      const { customInstruction } = req.body || {};
+      const result = await syntheticSelfGymEngine.retryDrill(req.params.id, customInstruction);
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "Failed to retry drill" });
     }
   });
 
