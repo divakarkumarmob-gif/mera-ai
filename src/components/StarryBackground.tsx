@@ -772,22 +772,37 @@ export const StarryBackground: React.FC = () => {
         const hangingCaps = Array.from(document.querySelectorAll('[data-hanging-capsule="true"]'));
         for (const hangEl of hangingCaps) {
           const rect = hangEl.getBoundingClientRect();
-          const capLeft = rect.left - 18;
-          const capRight = rect.right + 18;
-          const capTop = rect.top - 18;
-          const capBottom = rect.bottom + 18;
+          const capCenterX = rect.left + rect.width / 2;
+          const capCenterY = rect.top + rect.height / 2;
+          const hitRadius = Math.max(rect.width, rect.height) / 2 + 16;
+
+          const capLeft = rect.left - 20;
+          const capRight = rect.right + 20;
+          const capTop = rect.top - 20;
+          const capBottom = rect.bottom + 20;
 
           for (let i = 0; i < shootingStars.length; i++) {
             const meteor = shootingStars[i];
             if (!meteor.active) continue;
 
-            if (
+            const distToCenter = Math.hypot(meteor.x - capCenterX, meteor.y - capCenterY);
+            const isInsideBox =
               meteor.x >= capLeft &&
               meteor.x <= capRight &&
               meteor.y >= capTop &&
-              meteor.y <= capBottom
-            ) {
+              meteor.y <= capBottom;
+
+            if (distToCenter <= hitRadius || isInsideBox) {
               meteor.active = false;
+
+              // Fire crack event to this specific hanging capsule element!
+              hangEl.dispatchEvent(
+                new CustomEvent('capsule_crack_hit', {
+                  bubbles: true,
+                  detail: { x: meteor.x, y: meteor.y, theme: meteor.theme.name },
+                })
+              );
+
               triggerFirecrackerExplosion(meteor.x, meteor.y, meteor.theme.fireworkColors);
             }
           }
@@ -806,7 +821,11 @@ export const StarryBackground: React.FC = () => {
         meteor.y += meteor.vy * meteor.speed;
 
         // Targeted & Pair meteors maintain 100% full opacity (NEVER vanish mid-flight!)
-        if (meteor.targetType === 'floating_capsule' || meteor.targetType === 'pair') {
+        if (
+          meteor.targetType === 'floating_capsule' ||
+          meteor.targetType === 'hanging_capsule' ||
+          meteor.targetType === 'pair'
+        ) {
           meteor.opacity = 1.0;
         } else {
           // Ambient stars fade very slowly across hundreds of frames

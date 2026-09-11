@@ -815,7 +815,7 @@ async function playAudioChunk(
     }
 }
 
-// ── Suspended Aerial Rope Capsule Component (Upper Screen se Direct Rassi se Latka Hua) ──
+// ── Suspended Aerial Rope Capsule Component with Meteor Impact Fracture & 5s Nano-Repair ──
 function HangingRopeCapsule({
     ropeHeight = 36,
     swayIndex = 0,
@@ -834,26 +834,104 @@ function HangingRopeCapsule({
     const duration = 3.6 + (swayIndex % 3) * 0.4;
     const maxAngle = 1.3 + (swayIndex % 2) * 0.5;
 
+    const [isCracked, setIsCracked] = useState(false);
+    const [isHealing, setIsHealing] = useState(false);
+    const crackTimerRef = useRef<any>(null);
+    const capsuleRef = useRef<HTMLDivElement>(null);
+
+    const playGlassCrackSound = useCallback(() => {
+        try {
+            const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+            if (!AudioCtxClass) return;
+            const ctx = new AudioCtxClass();
+            if (ctx.state === 'suspended') ctx.resume();
+
+            const now = ctx.currentTime;
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(3400, now);
+            osc.frequency.exponentialRampToValueAtTime(400, now + 0.12);
+
+            gain.gain.setValueAtTime(0.3, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
+
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(now);
+            osc.stop(now + 0.15);
+        } catch {}
+    }, []);
+
+    const triggerCrack = useCallback(() => {
+        setIsCracked(true);
+        setIsHealing(false);
+        playGlassCrackSound();
+
+        if (crackTimerRef.current) clearTimeout(crackTimerRef.current);
+
+        crackTimerRef.current = setTimeout(() => {
+            setIsHealing(true);
+            setTimeout(() => {
+                setIsCracked(false);
+                setIsHealing(false);
+            }, 800);
+        }, 4200);
+    }, [playGlassCrackSound]);
+
+    useEffect(() => {
+        const el = capsuleRef.current;
+        if (!el) return;
+
+        const handleHit = () => {
+            triggerCrack();
+        };
+
+        el.addEventListener('capsule_crack_hit', handleHit);
+        return () => {
+            el.removeEventListener('capsule_crack_hit', handleHit);
+            if (crackTimerRef.current) clearTimeout(crackTimerRef.current);
+        };
+    }, [triggerCrack]);
+
     return (
         <motion.div
+            ref={capsuleRef}
             data-hanging-capsule="true"
             className="relative flex flex-col items-center shrink-0 group/hanging select-none pt-7"
-            animate={{
-                rotate: [-maxAngle, maxAngle, -maxAngle],
-                y: [0, -3, 0],
-            }}
-            transition={{
-                duration,
-                repeat: Infinity,
-                ease: 'easeInOut',
-                delay,
-            }}
+            animate={
+                isCracked
+                    ? {
+                          x: [-7, 7, -5, 5, -2, 2, 0],
+                          y: [-3, 3, -1, 1, 0],
+                          rotate: [-3.5, 3.5, -2, 2, 0],
+                          scale: [0.95, 1.05, 0.98, 1],
+                      }
+                    : {
+                          rotate: [-maxAngle, maxAngle, -maxAngle],
+                          y: [0, -3, 0],
+                      }
+            }
+            transition={
+                isCracked
+                    ? { duration: 0.5, ease: 'easeOut' }
+                    : {
+                          duration,
+                          repeat: Infinity,
+                          ease: 'easeInOut',
+                          delay,
+                      }
+            }
             whileHover={{
                 scale: 1.06,
                 rotate: [0, -2.5, 2.5, 0],
                 transition: { duration: 0.35 },
             }}
             style={{ transformOrigin: 'top center' }}
+            onDoubleClick={(e) => {
+                e.stopPropagation();
+                triggerCrack();
+            }}
         >
             {/* ── Solid Continuous Glowing Rope extending from the top ceiling straight down to the capsule ── */}
             <div
@@ -875,7 +953,9 @@ function HangingRopeCapsule({
                 <div
                     className="absolute inset-0 w-full h-full pointer-events-none"
                     style={{
-                        boxShadow: `0 0 8px 2px ${glowColor}, 0 0 16px 4px ${glowColor}`,
+                        boxShadow: isCracked
+                            ? `0 0 12px 3px rgba(239,68,68,0.7), 0 0 20px 6px rgba(245,158,11,0.5)`
+                            : `0 0 8px 2px ${glowColor}, 0 0 16px 4px ${glowColor}`,
                     }}
                 />
             </div>
@@ -883,16 +963,71 @@ function HangingRopeCapsule({
             {/* Glowing Attachment Node right on top of the capsule */}
             <div className="relative z-10 flex flex-col items-center -mb-1">
                 <div
-                    className="w-2.5 h-2.5 rounded-full bg-slate-950 border-[1.5px] flex items-center justify-center pointer-events-none"
-                    style={{ borderColor: glowColor, boxShadow: `0 0 10px ${glowColor}, 0 0 4px ${glowColor}` }}
+                    className="w-2.5 h-2.5 rounded-full bg-slate-950 border-[1.5px] flex items-center justify-center pointer-events-none transition-colors duration-300"
+                    style={{
+                        borderColor: isCracked ? '#ef4444' : glowColor,
+                        boxShadow: isCracked ? `0 0 12px #ef4444` : `0 0 10px ${glowColor}`,
+                    }}
                 >
-                    <div className="w-1 h-1 rounded-full bg-white animate-pulse" />
+                    <div className={`w-1 h-1 rounded-full ${isCracked ? 'bg-red-400' : 'bg-white'} animate-pulse`} />
                 </div>
             </div>
 
-            {/* The Suspended Capsule Button */}
+            {/* The Suspended Capsule Button with Dynamic Crack Overlay */}
             <div className="relative z-20">
+                {/* Fiery warning aura when cracked */}
+                {isCracked && (
+                    <div className="absolute -inset-1 rounded-full bg-gradient-to-r from-red-600 via-amber-500 to-orange-600 opacity-90 blur-sm animate-pulse pointer-events-none" />
+                )}
+
                 {children}
+
+                {/* 💥 Center Glass-Fracture Crack Overlay on ANY hanging capsule */}
+                {isCracked && (
+                    <div className="absolute inset-0 pointer-events-none z-30 overflow-hidden rounded-full flex items-center justify-center">
+                        <svg className="w-full h-full absolute inset-0" viewBox="0 0 140 36" preserveAspectRatio="none">
+                            {/* Outer glowing fissure outline */}
+                            <path
+                                d="M 70 0 L 64 9 L 76 17 L 63 25 L 74 32 L 70 36"
+                                fill="none"
+                                stroke="#ff2200"
+                                strokeWidth="4.2"
+                                strokeLinecap="round"
+                                style={{ filter: 'drop-shadow(0 0 6px #ff4500)' }}
+                            />
+                            {/* Sharp white-hot molten core line */}
+                            <path
+                                d="M 70 0 L 64 9 L 76 17 L 63 25 L 74 32 L 70 36"
+                                fill="none"
+                                stroke="#ffffff"
+                                strokeWidth="1.6"
+                                strokeLinecap="round"
+                            />
+                            {/* Lateral branch micro-cracks */}
+                            <path
+                                d="M 64 9 L 52 13 M 63 25 L 50 22 M 76 17 L 88 14 M 74 32 L 86 34"
+                                fill="none"
+                                stroke="#fbbf24"
+                                strokeWidth="1.2"
+                                strokeLinecap="round"
+                                opacity="0.95"
+                            />
+                        </svg>
+
+                        {/* Hot glowing impact sparks point */}
+                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-amber-300/80 animate-ping" />
+
+                        {/* 5-Second Nano-Repair Holographic Laser Beam */}
+                        {isHealing && (
+                            <motion.div
+                                initial={{ x: '-100%', opacity: 0 }}
+                                animate={{ x: '100%', opacity: [0, 1, 1, 0] }}
+                                transition={{ duration: 0.8, ease: 'easeInOut' }}
+                                className="absolute inset-0 bg-gradient-to-r from-transparent via-emerald-300 to-transparent w-full h-full shadow-[0_0_20px_#10b981]"
+                            />
+                        )}
+                    </div>
+                )}
             </div>
         </motion.div>
     );
