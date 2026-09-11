@@ -188,7 +188,7 @@ class ExotelService {
     if (audioUrl) {
       exml += `  <Play>${audioUrl}</Play>\n`;
     } else {
-      exml += `  <Say language="hi-IN" voice="female">${greetingText}</Say>\n`;
+      exml += `  <Say voice="female">${greetingText}</Say>\n`;
     }
     // Record up to 10 seconds of caller speech, finish on silence or timeout
     exml += `  <Record action="${callbackUrl}" method="POST" maxLength="12" timeout="3" playBeep="false" finishOnKey="#" />\n`;
@@ -282,7 +282,7 @@ class ExotelService {
     if (audioUrl) {
       exml += `  <Play>${audioUrl}</Play>\n`;
     } else {
-      exml += `  <Say language="hi-IN" voice="female">${fridayReply}</Say>\n`;
+      exml += `  <Say voice="female">${fridayReply}</Say>\n`;
     }
 
     if (!isGoodbye && session.turns.length < 20) {
@@ -463,6 +463,27 @@ Generate Friday's direct spoken response (without emojis, markdown asterisks, or
     }
   }
 
+  /**
+   * Resolves the public base URL for Exotel webhooks (Render / Custom domain)
+   */
+  public resolvePublicBaseUrl(providedUrl?: string): string {
+    if (providedUrl && providedUrl.startsWith("http") && !providedUrl.includes("localhost")) {
+      return providedUrl.replace(/\/$/, "");
+    }
+    const renderUrl = process.env.RENDER_EXTERNAL_URL?.trim();
+    if (renderUrl && renderUrl.startsWith("http")) {
+      return renderUrl.replace(/\/$/, "");
+    }
+    if (process.env.RENDER_EXTERNAL_HOSTNAME?.trim()) {
+      return `https://${process.env.RENDER_EXTERNAL_HOSTNAME.trim().replace(/\/$/, "")}`;
+    }
+    const appUrl = process.env.APP_BASE_URL?.trim() || process.env.PUBLIC_URL?.trim() || process.env.HOST_URL?.trim();
+    if (appUrl && appUrl.startsWith("http")) {
+      return appUrl.replace(/\/$/, "");
+    }
+    return "";
+  }
+
   // ──────────────────────────────────────────────────────────────────────────
   // OUTBOUND CALL INITIATION (Friday Dials a Real Phone Number)
   // ──────────────────────────────────────────────────────────────────────────
@@ -487,29 +508,43 @@ Generate Friday's direct spoken response (without emojis, markdown asterisks, or
     const exotelUrl = `https://${cleanSubdomain}/v1/Accounts/${accountSid}/Calls/connect.json`;
     const basicAuth = `Basic ${Buffer.from(`${apiKey}:${apiToken}`).toString("base64")}`;
 
+    const effectiveBaseUrl = this.resolvePublicBaseUrl(baseUrl);
+    const flowUrl = `${effectiveBaseUrl}/api/exotel/incoming-call`;
+    const statusCallbackUrl = `${effectiveBaseUrl}/api/exotel/call-status`;
+
     try {
       const formData = new URLSearchParams();
-      formData.append("From", cleanTo); // Recipient phone number (Boss or target contact)
 
-      // In Exotel: 'To' can be an ExoPhone number, an App ID, or a destination URL
+      // Ensure Indian 10-digit number is prefixed with '0' for Exotel compatibility
+      let formattedFrom = cleanTo;
+      if (formattedFrom.length === 10) {
+        formattedFrom = `0${formattedFrom}`;
+      }
+      formData.append("From", formattedFrom); // Recipient phone number
+
+      // Set CallerId if valid virtual ExoPhone is configured
+      if (cleanVirtual && cleanVirtual.length >= 8 && !/^0+$/.test(cleanVirtual) && !cleanVirtual.includes("x")) {
+        let formattedCallerId = cleanVirtual;
+        if (formattedCallerId.length === 10) formattedCallerId = `0${formattedCallerId}`;
+        formData.append("CallerId", formattedCallerId);
+      }
+
+      // If user has created a flow Applet ID in Exotel App Bazaar
       if (appId && appId.trim()) {
         formData.append("To", appId.trim());
-      } else if (cleanVirtual && cleanVirtual.length >= 8) {
-        formData.append("To", cleanVirtual);
-        formData.append("CallerId", cleanVirtual);
-      } else {
-        // Trial Mode: Use target number as To or default Applet flow URL
-        formData.append("To", cleanTo);
       }
 
-      if (baseUrl) {
-        const flowUrl = `${baseUrl.replace(/\/$/, "")}/api/exotel/incoming-call`;
+      // ⚡ CRITICAL: Attach Friday AI Voice Flow Webhook URL so Exotel speaks immediately on answer without hold music!
+      if (effectiveBaseUrl && effectiveBaseUrl.startsWith("http") && !effectiveBaseUrl.includes("localhost")) {
         formData.append("Url", flowUrl);
-        formData.append("StatusCallback", `${baseUrl.replace(/\/$/, "")}/api/exotel/call-status`);
+        formData.append("StatusCallback", statusCallbackUrl);
       }
 
+      formData.append("CallType", "trans");
       formData.append("TimeLimit", "300"); // 5 mins max
       formData.append("Record", "true");
+
+      console.log(`[ExotelService] 📞 Dialing outbound call to ${formattedFrom} (ExML Flow: ${flowUrl})`);
 
       const response = await fetch(exotelUrl, {
         method: "POST",
