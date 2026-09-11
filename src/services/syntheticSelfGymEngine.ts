@@ -82,6 +82,40 @@ class SyntheticSelfGymEngine {
         if (!snap.empty) {
           this.recentDrills = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
         }
+
+        // ── Hinglish Migration: Patch old English keyTakeaways to Hinglish ──────
+        // Any drill whose keyTakeaway is still in English gets auto-translated to
+        // natural Hinglish and re-persisted to Firestore so UI always shows Hinglish.
+        const hinglishPatchMap: Record<string, string> = {
+          "Respect Boss's dynamic live work hours instead of imposing hardcoded rigid routines.":
+            "Boss ke dynamic live work hours ka samman karo, bina kisi fake rigid routine ko zabardasti thope.",
+          "Seamlessly resolve 'isko' to the quoted phone number without friction.":
+            "Quoted phone number ya contact context me 'isko' ko bina confusion ke direct resolve karo.",
+          "Always adapt tone and response depth based on Boss's live mood signals.":
+            "Boss ke live mood signals dekho aur apna tone aur depth accordingly adjust karo.",
+          "Never repeat a mistake Boss has corrected; anchor the rule permanently.":
+            "Jo galti Boss ne ek baar correct kar di, wo dobara kabhi mat dohrao — us rule ko permanently anchor karo.",
+          "Be emotionally present first, then solve. EQ before IQ.":
+            "Pehle emotionally present raho, phir solve karo. EQ pehle, IQ baad mein.",
+        };
+
+        const db = this.getDb();
+        const patchPromises: Promise<any>[] = [];
+        for (const drill of this.recentDrills) {
+          const hinglishVersion = hinglishPatchMap[drill.keyTakeaway];
+          if (hinglishVersion) {
+            drill.keyTakeaway = hinglishVersion;
+            patchPromises.push(
+              db.collection("memory").doc("self_play_gym").collection("drills").doc(drill.id)
+                .update({ keyTakeaway: hinglishVersion })
+                .then(() => console.log(`[SelfPlayGym] 🔄 Patched keyTakeaway to Hinglish for drill: ${drill.id}`))
+                .catch(() => {}) // silent fail — next load will retry
+            );
+          }
+        }
+        if (patchPromises.length > 0) await Promise.allSettled(patchPromises);
+        // ─────────────────────────────────────────────────────────────────────────
+
         this.isLoaded = true;
         console.log(`[SelfPlayGym] Loaded ${this.recentDrills.length} self-play practice drills.`);
       } catch (e: any) {
