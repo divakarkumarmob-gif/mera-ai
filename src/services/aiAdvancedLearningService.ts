@@ -361,6 +361,21 @@ class AiAdvancedLearningService {
 - Boss's Favorite Emojis: ${this.bossStyleCache.favoriteEmojis.slice(0, 6).join(" ")}
 - Tone Style: Natural, confident, brotherly/caring Hinglish flow.\n`;
   }
+
+  public async getRlhfHistory(): Promise<RlhfFeedbackEntry[]> {
+    await this.init();
+    return [...this.rlhfCache];
+  }
+
+  public async getGoldenStandards(): Promise<GoldenStandardExample[]> {
+    await this.init();
+    return [...this.goldenCache];
+  }
+
+  public async getBossStyleProfile(): Promise<BossStyleProfile | null> {
+    await this.init();
+    return this.bossStyleCache ? { ...this.bossStyleCache } : null;
+  }
 }
 
 export const aiAdvancedLearningService = new AiAdvancedLearningService();

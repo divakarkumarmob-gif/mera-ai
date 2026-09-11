@@ -147,6 +147,14 @@ Generate a short, high-EQ self-training drill in JSON format:
       topDrills.map((d, i) => `${i + 1}. [${d.scenarioTitle}]: Learned ➔ "${d.keyTakeaway}" (Response Model: "${d.trialResponse}")`).join("\n") +
       "\n";
   }
+
+  /**
+   * Returns recent drills for the learning dashboard
+   */
+  public async getDrills(): Promise<GymDrill[]> {
+    await this.init();
+    return [...this.recentDrills];
+  }
 }
 
 export const syntheticSelfGymEngine = new SyntheticSelfGymEngine();

@@ -511,6 +511,118 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
+  // ── Friday Autonomous Learning & Cognition Capsule APIs ────────────────────
+  app.get("/api/learning/dashboard-stats", async (_req, res) => {
+    try {
+      const { syntheticSelfGymEngine } = await import("../services/syntheticSelfGymEngine");
+      const { aiAdvancedLearningService } = await import("../services/aiAdvancedLearningService");
+      const { frontierCognitionService } = await import("../services/frontierCognitionService");
+      const { fridayChildTrainingService } = await import("../services/fridayChildTrainingService");
+      const { groupCollectiveLearningService } = await import("../services/groupCollectiveLearningService");
+      const { bossDirectivesService } = await import("../services/bossDirectivesService");
+
+      const [
+        drills,
+        goldenStandards,
+        rlhfHistory,
+        bossStyle,
+        realizations,
+        streamEvents,
+        dreamLogs,
+        lessons,
+        groupProfiles,
+        directives,
+      ] = await Promise.all([
+        syntheticSelfGymEngine.getDrills().catch(() => []),
+        aiAdvancedLearningService.getGoldenStandards().catch(() => []),
+        aiAdvancedLearningService.getRlhfHistory().catch(() => []),
+        aiAdvancedLearningService.getBossStyleProfile().catch(() => null),
+        frontierCognitionService.getRealizations().catch(() => []),
+        frontierCognitionService.getStreamEvents().catch(() => []),
+        frontierCognitionService.getRecentDreamLogs().catch(() => []),
+        fridayChildTrainingService.getAllLessons().catch(() => []),
+        groupCollectiveLearningService.getAllProfiles().catch(() => []),
+        bossDirectivesService.getActiveDirectives().catch(() => []),
+      ]);
+
+      const positiveCount = rlhfHistory.filter((r) => r.sentiment === "positive" || r.sentiment === "humor").length;
+      const approvalRate = rlhfHistory.length > 0 ? Math.round((positiveCount / rlhfHistory.length) * 100) : 100;
+
+      res.json({
+        ok: true,
+        stats: {
+          totalLessons: lessons.length,
+          totalDrills: drills.length,
+          totalGolden: goldenStandards.length,
+          totalRlhf: rlhfHistory.length,
+          approvalRate,
+          observedSamples: bossStyle?.observedSampleCount || 0,
+          currentMood: frontierCognitionService.getCurrentMood(),
+          activeGroups: groupProfiles.length,
+          activeDirectives: directives.length,
+          cognitionTier: "Tier 5 (Autonomous Adaptive)",
+          lastUpdated: Date.now(),
+        },
+        drills,
+        goldenStandards,
+        rlhfHistory,
+        bossStyle,
+        realizations,
+        streamEvents,
+        dreamLogs,
+        lessons,
+        groupProfiles,
+        directives,
+      });
+    } catch (e: any) {
+      console.error("[ApiRoutes] Failed to fetch learning dashboard stats:", e);
+      res.status(500).json({ ok: false, error: e?.message || "Failed to fetch stats" });
+    }
+  });
+
+  app.post("/api/learning/practice-drill", async (_req, res) => {
+    try {
+      const { syntheticSelfGymEngine } = await import("../services/syntheticSelfGymEngine");
+      const drill = await syntheticSelfGymEngine.runAutonomousDrill();
+      if (!drill) {
+        return res.status(500).json({ ok: false, message: "Drill generation failed or API key missing" });
+      }
+      res.json({ ok: true, drill });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "Drill error" });
+    }
+  });
+
+  app.post("/api/learning/teach-lesson", async (req, res) => {
+    try {
+      const { situationTrigger, taughtReaction, idealSampleResponse, forbiddenBehaviors, category, isAnchor, anchorPriority } = req.body;
+      if (!situationTrigger || !taughtReaction) {
+        return res.status(400).json({ ok: false, error: "situationTrigger and taughtReaction are required" });
+      }
+      const { fridayChildTrainingService } = await import("../services/fridayChildTrainingService");
+      const lesson = await fridayChildTrainingService.teachLesson(situationTrigger, taughtReaction, {
+        idealSampleResponse,
+        forbiddenBehaviors: Array.isArray(forbiddenBehaviors) ? forbiddenBehaviors : forbiddenBehaviors ? [forbiddenBehaviors] : undefined,
+        category,
+        isAnchor: isAnchor !== false,
+        anchorPriority: Number(anchorPriority) || 100,
+      });
+      res.json({ ok: true, lesson });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "Teach error" });
+    }
+  });
+
+  app.post("/api/learning/dream-consolidate", async (_req, res) => {
+    try {
+      const { frontierCognitionService } = await import("../services/frontierCognitionService");
+      const ledger = await frontierCognitionService.runNightDreamConsolidation();
+      res.json({ ok: true, ledger });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "Dream consolidation error" });
+    }
+  });
+
   // ── Audio Proxy for JioSaavn / CDN streams (HTTP 206 Range Stream Support) ──
   app.get("/api/music/proxy-stream", async (req, res) => {
     const rawUrl = String(req.query.url || "");

@@ -219,6 +219,11 @@ Keep it warm, executive, clean, and engaging!`;
       return `📊 *Group Summary (${profile.groupTitle}):*\n\n${profile.recentConversations.slice(-5).map((c) => `• *${c.sender}:* ${c.text}`).join("\n")}`;
     }
   }
+
+  public async getAllProfiles(): Promise<GroupCollectiveProfile[]> {
+    await this.init();
+    return Array.from(this.cache.values());
+  }
 }
 
 export const groupCollectiveLearningService = new GroupCollectiveLearningService();

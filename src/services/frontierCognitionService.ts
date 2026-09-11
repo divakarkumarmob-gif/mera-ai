@@ -336,6 +336,36 @@ class FrontierCognitionService {
       };
     }
   }
+
+  public async getRealizations(): Promise<string[]> {
+    await this.init();
+    return [...this.activeRealizations];
+  }
+
+  public async getStreamEvents(): Promise<StreamEvent[]> {
+    await this.init();
+    return [...this.streamCache];
+  }
+
+  public getCurrentMood(): FridayEmotionalMood {
+    return this.currentMood;
+  }
+
+  public async getRecentDreamLogs(): Promise<DreamConsolidationLedger[]> {
+    try {
+      const snap = await this.getDb()
+        .collection("memory")
+        .doc("dream_consolidation")
+        .collection("logs")
+        .orderBy("timestamp", "desc")
+        .limit(10)
+        .get();
+      if (!snap.empty) {
+        return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+      }
+    } catch {}
+    return [];
+  }
 }
 
 export const frontierCognitionService = new FrontierCognitionService();

@@ -19,6 +19,7 @@ import { getAppToken, clearAppSession } from '@/utils/appSecurityClient';
 import { screenWakeLock } from '@/utils/screenWakeLock';
 import { mobileNotificationService } from '@/utils/mobileNotificationService';
 import { MusicCapsule } from './MusicCapsule';
+import { LearningCapsule } from './LearningCapsule';
 import { MusicStudioModal } from './MusicStudioModal';
 import { SongPreviewModal, PreviewCandidate } from './SongPreviewModal';
 import { ProductDeckCarousel } from './ProductDeckCarousel';
@@ -933,6 +934,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
     const [showPerchanceStudio, setShowPerchanceStudio] = useState(false);
     const [showHologramLab, setShowHologramLab] = useState(false);
     const [hologramInitialModel, setHologramInitialModel] = useState('arc_reactor');
+    const [showLearningCapsule, setShowLearningCapsule] = useState(false);
     const [showFreeFireCoach, setShowFreeFireCoach] = useState(false);
     const [showSongPreviewModal, setShowSongPreviewModal] = useState(false);
     const [previewQuery, setPreviewQuery] = useState('');
@@ -2958,6 +2960,16 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                             <span>Captions</span>
                         </button>
 
+                        {/* 8.5 Learning & Cognition Capsule */}
+                        <button
+                            onClick={() => setShowLearningCapsule(true)}
+                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 text-xs font-semibold shadow-[0_0_15px_rgba(16,185,129,0.3)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95 hover:scale-105"
+                            title="Friday Live Autonomous Learning & Cognition Capsule"
+                        >
+                            <span className="text-sm">🧠</span>
+                            <span>Learning Capsule</span>
+                        </button>
+
                         {/* 9. Code Agent Capsule */}
                         <button
                             onClick={() => setShowCodeAgent(true)}
@@ -3881,6 +3893,13 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
             {showWifiRadar && <WifiRadarModal onClose={() => setShowWifiRadar(false)} />}
             <HolographicLabModal isOpen={showHologramLab} onClose={() => setShowHologramLab(false)} initialModelId={hologramInitialModel} />
             <FreeFireCoachModal isOpen={showFreeFireCoach} onClose={() => setShowFreeFireCoach(false)} />
+            {showLearningCapsule && <LearningCapsule onClose={() => setShowLearningCapsule(false)} />}
+            {!showLearningCapsule && (
+                <LearningCapsule
+                    isFloatingWidgetOnly
+                    onExpandToStudio={() => setShowLearningCapsule(true)}
+                />
+            )}
 
             {/* Deep Research Report Modal */}
             <AnimatePresence>
