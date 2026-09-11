@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { X, Mic, Plus, Loader2, Settings, ChevronDown, ChevronLeft, ChevronRight, Captions, MessageSquare, Square, Code2, Terminal, Shield, ShieldCheck, Trash2, Key, Check, AlertCircle, Send, Instagram, Download, Radio, Music, Sparkles, Sliders, Volume2, Bot, Layers, Cpu } from 'lucide-react';
+import { X, Mic, Plus, Loader2, Settings, ChevronDown, ChevronLeft, ChevronRight, Captions, MessageSquare, Square, Code2, Terminal, Shield, ShieldCheck, Trash2, Key, Check, AlertCircle, Send, Instagram, Download, Radio, Music, Sparkles, Sliders, Volume2, Bot, Layers, Cpu, Phone } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import AgentFace from './AgentFace';
 import ChatHistoryModal from './ChatHistoryModal';
@@ -12,6 +12,7 @@ import MemoryBackupModal from './MemoryBackupModal';
 import WifiRadarModal from './WifiRadarModal';
 import { HolographicLabModal } from './HolographicLabModal';
 import { FreeFireCoachModal } from './FreeFireCoachModal';
+import PhoneIntelligenceModal from './PhoneIntelligenceModal';
 import { Gamepad2 } from 'lucide-react';
 import { getWsUrl, getApiUrl } from '@/utils/api';
 import { wakeWordManager } from '@/utils/wakeWord';
@@ -1231,6 +1232,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
     const [showHologramLab, setShowHologramLab] = useState(false);
     const [hologramInitialModel, setHologramInitialModel] = useState('arc_reactor');
     const [showLearningCapsule, setShowLearningCapsule] = useState(false);
+    const [showPhoneIntelligence, setShowPhoneIntelligence] = useState(false);
     const [showFreeFireCoach, setShowFreeFireCoach] = useState(false);
     const [showSongPreviewModal, setShowSongPreviewModal] = useState(false);
     const [previewQuery, setPreviewQuery] = useState('');
@@ -3358,6 +3360,18 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                                         </button>
                                     </HangingRopeCapsule>
 
+                                    {/* 14. 📱 Phone Radar & Truecaller OSINT */}
+                                    <HangingRopeCapsule rowTier="lower" ropeHeight={35} swayIndex={14} ropeColor="from-cyan-400/90 via-blue-300 to-cyan-500/90" glowColor="rgba(6,182,212,0.4)">
+                                        <button
+                                            onClick={() => setShowPhoneIntelligence(true)}
+                                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/50 text-cyan-300 text-xs font-semibold shadow-[0_0_15px_rgba(6,182,212,0.25)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
+                                            title="Phone Intelligence, Carrier & Truecaller OSINT Radar"
+                                        >
+                                            <Phone className="w-3.5 h-3.5 text-cyan-400" />
+                                            <span>Phone Radar</span>
+                                        </button>
+                                    </HangingRopeCapsule>
+
                                     {/* 14. Captions */}
                                     <HangingRopeCapsule rowTier="lower" ropeHeight={32} swayIndex={14} ropeColor="from-slate-400/90 via-slate-300 to-emerald-400/90" glowColor="rgba(148,163,184,0.4)">
                                         <button
@@ -4293,6 +4307,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
             {showWifiRadar && <WifiRadarModal onClose={() => setShowWifiRadar(false)} />}
             <HolographicLabModal isOpen={showHologramLab} onClose={() => setShowHologramLab(false)} initialModelId={hologramInitialModel} />
             <FreeFireCoachModal isOpen={showFreeFireCoach} onClose={() => setShowFreeFireCoach(false)} />
+            <PhoneIntelligenceModal isOpen={showPhoneIntelligence} onClose={() => setShowPhoneIntelligence(false)} />
             {showLearningCapsule && <LearningCapsule onClose={() => setShowLearningCapsule(false)} />}
             {!showLearningCapsule && (
                 <LearningCapsule

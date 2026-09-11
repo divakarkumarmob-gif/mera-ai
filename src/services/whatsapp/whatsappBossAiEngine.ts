@@ -80,6 +80,23 @@ export class WhatsAppBossAiEngine {
       return `🎙️ *Voice Recording Tone Updated!* ⚡\n\n• New Voice: *${res.voiceName}* (\`${res.voice}\`)\n\nBoss, ab WhatsApp aur Telegram par aane wale sabhi voice note replies is nayi aawaz me deliver honge! ✨\n\n💡 *Quick Commands:* \`/voice female\` (Swara), \`/voice male\` (Madhur), \`/voice english\` (Prabhat)`;
     }
 
+    // ── FAST DIRECT INTERCEPT: Phone Intelligence & Carrier/Spam Lookup ─────────
+    const isPhoneLookupIntent =
+      /^(?:\/lookup|\/phone|phone|lookup|trace)\s+([+0-9\s-]{10,15})/i.test(messageText.trim()) ||
+      /(?:phone|number|no|kiska)\s+(?:details?|kiska|trace|check|lookup|radar)\b/i.test(messageText.trim()) ||
+      /\b([6-9]\d{9})\b\s*(?:ki\s+details|kiska\s+number|kiska\s+hai|check\s*karo|trace\s*karo|kaun\s*hai)/i.test(messageText.trim()) ||
+      /(?:ye|yeh|is)\s*(?:number|no)\s*(?:ki\s+details|kiska\s+hai|trace|check)/i.test(messageText.trim());
+
+    if (isPhoneLookupIntent) {
+      const extractedNumber = messageText.match(/(?:\+91[\s-]?)?[6-9]\d{9}/) || messageText.match(/\b\d{10,12}\b/);
+      const targetNumber = extractedNumber ? extractedNumber[0] : quotedMessage?.senderPhone || quotedMessage?.text || "";
+      if (targetNumber && targetNumber.replace(/\D/g, "").length >= 10) {
+        const { phoneIntelligenceService } = await import("../phoneIntelligenceService");
+        const report = await phoneIntelligenceService.lookup(targetNumber);
+        return phoneIntelligenceService.formatReportMarkdown(report, "whatsapp");
+      }
+    }
+
     // ── FAST DIRECT INTERCEPT: Boss Directives & Strict Word Rules ───────────
     const { bossDirectivesService } = await import("../bossDirectivesService");
     const directiveCheck = bossDirectivesService.parseDirectiveCommand(messageText);
@@ -344,6 +361,17 @@ export class WhatsAppBossAiEngine {
     const ai = new GoogleGenAI({ apiKey });
 
     const functionDeclarations: any[] = [
+      {
+        name: "lookup_phone_number_details",
+        description: "Perform telecom intelligence, carrier/circle extraction, Truecaller OSINT lookup, contact match, WhatsApp identity, and spam risk analysis on any phone number (e.g. 10-digit Indian mobile number). Use whenever Boss asks 'ye number kiska hai', '98xxxx ki details nikalo', 'check phone number', 'lookup 98xxxx', etc.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            phoneNumber: { type: "STRING", description: "The phone number or mobile number to investigate" }
+          },
+          required: ["phoneNumber"]
+        }
+      },
       {
         name: "set_friday_voice_tone",
         description: "Change or switch Friday's spoken voice note recording tone across WhatsApp and Telegram (e.g. 'female / ladki ki aawaz (Swara)', 'male / ladke ki aawaz (Madhur)', 'english / Indian English (Prabhat)').",
@@ -1366,6 +1394,18 @@ COMMUNICATION STYLE:
           }
           const card = whatsappFeatureEngine.generateLiveVoiceCallCard(senderName, true);
           return { success: true, message: "Incoming call ringing triggered on Boss phone.", card };
+        }
+
+        if (toolName === "lookup_phone_number_details") {
+          const { phoneIntelligenceService } = await import("../phoneIntelligenceService");
+          const report = await phoneIntelligenceService.lookup(args.phoneNumber);
+          const card = phoneIntelligenceService.formatReportMarkdown(report, "whatsapp");
+          return {
+            success: true,
+            report,
+            formattedCard: card,
+            message: `Phone intelligence completed for ${report.internationalFormat}. Operator: ${report.operator}, Circle: ${report.telecomCircle}, Spam Risk: ${report.spamRisk.level}`
+          };
         }
 
         if (toolName === "set_friday_voice_tone") {

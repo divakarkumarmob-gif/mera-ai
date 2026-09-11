@@ -1807,6 +1807,13 @@ export async function dispatchLiveToolCall(call: any, context: ToolDispatchConte
                   } catch (e: any) {
                     result = { success: false, message: `Messenger role update fail hua: ${e?.message || e}` };
                   }
+                } else if (call.name === "lookup_phone_number_details") {
+                  const { phoneNumber } = call.args || {};
+                  try {
+                    result = await toolsEngine.lookupPhoneDetails(String(phoneNumber || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Phone lookup fail hua: ${e?.message || e}` };
+                  }
                 } else if (call.name === "stop_music") {
                   try {
                     result = await publicApisService.stopMusic();

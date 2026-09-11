@@ -5,6 +5,22 @@
 
 const rawFunctionDeclarations: any[] = [
   {
+    "name": "lookup_phone_number_details",
+    "description": "Deep phone number intelligence and Truecaller OSINT lookup. Extracts telecom operator (Jio, Airtel, Vi, BSNL), telecom circle / state, validity, saved contact info (name, nickname, relation), WhatsApp registration, and spam risk score. Use whenever user asks 'is number ki details nikalo', 'kiska number hai', 'phone number details', 'lookup this phone number'.",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {
+        "phoneNumber": {
+          "type": "STRING",
+          "description": "The 10-digit mobile number or full international phone number to analyze (e.g. '9876543210' or '+919876543210')"
+        }
+      },
+      "required": [
+        "phoneNumber"
+      ]
+    }
+  },
+  {
     "name": "generate_ai_photo",
     "description": "Generate an ultra-realistic 4K AI portrait/landscape photograph using Cloudflare Workers AI FLUX / SDXL. Use whenever Boss DK or user asks 'ek photo banao', 'ladki ka photo banao jo jungle me ho', 'generate a 4k portrait photo', 'make an image of...', 'ai photo generate karo'. Automatically displays the image in the dashboard's left side popup card and can automatically send it to Boss on WhatsApp.",
     "parameters": {

@@ -791,6 +791,34 @@ class ToolsEngine {
       message: res.message,
     };
   }
+
+  /**
+   * 📱 Deep Phone Number Intelligence & Truecaller OSINT Lookup
+   */
+  public async lookupPhoneDetails(phoneInput: string) {
+    const { phoneIntelligenceService } = await import("./phoneIntelligenceService");
+    const report = await phoneIntelligenceService.lookup(phoneInput);
+
+    let summaryText = `📱 *Phone Intelligence Report* for ${report.internationalFormat}:\n`;
+    summaryText += `• *Country & Circle:* ${report.country} (${report.telecomCircle})\n`;
+    summaryText += `• *Operator:* ${report.operator}\n`;
+    summaryText += `• *Number Type:* ${report.numberType.toUpperCase()} (Valid: ${report.isValid ? 'Yes ✅' : 'No ❌'})\n`;
+
+    if (report.savedContact) {
+      summaryText += `• *Saved Contact:* ${report.savedContact.name}${report.savedContact.relationship ? ` (${report.savedContact.relationship})` : ''}\n`;
+    }
+    if (report.whatsappProfile) {
+      summaryText += `• *WhatsApp Registered:* ${report.whatsappProfile.isRegistered ? 'Yes ✅' : 'No'}\n`;
+    }
+    summaryText += `• *Spam Risk:* ${report.spamRisk.level.toUpperCase()} (Risk Score: ${report.spamRisk.score}/100)\n`;
+
+    return {
+      success: true,
+      report,
+      summaryText,
+      message: `Boss, maine ${report.normalizedNumber} ki details nikal li hain: Operator ${report.operator}, Circle ${report.telecomCircle}${report.savedContact ? `, Saved Name: ${report.savedContact.name}` : ''}. Spam Risk: ${report.spamRisk.level}.`,
+    };
+  }
 }
 
 export const toolsEngine = new ToolsEngine();

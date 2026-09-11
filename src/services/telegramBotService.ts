@@ -246,6 +246,7 @@ class TelegramBotService {
           { command: "voice_group", description: "🎙️ Voice Notes & Audio Transcripts Hub" },
           { command: "media_search", description: "🔍 Instant Search Photos, Videos & Files" },
           { command: "vault_stats", description: "📊 View Media Vault Statistics" },
+          { command: "lookup", description: "📱 Carrier, Circle & Spam Phone Radar" },
         ],
       });
       console.log("[TelegramBot] ✅ Bot Menu Commands registered successfully with Telegram API.");
@@ -2290,6 +2291,40 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
         await this.sendMessage(chatId, searchRes.summary);
       }
       return;
+    }
+
+    // 2.0B2 Handle Phone Number Intelligence & Lookup ("/lookup <number>", "/phone <number>", "lookup <number>", "98xxxx ki details", etc.)
+    const isPhoneLookupIntent =
+      /^(?:\/lookup|\/phone|phone\s*lookup|lookup|trace)\b/i.test(text) ||
+      /(?:phone|number|no|kiska)\s+(?:details?|kiska|trace|check|lookup|radar)\b/i.test(text) ||
+      /\b([6-9]\d{9})\b\s*(?:ki\s+details|kiska\s+number|kiska\s+hai|check\s*karo|trace\s*karo|kaun\s*hai)/i.test(text) ||
+      /(?:ye|yeh|is)\s*(?:number|no)\s*(?:ki\s+details|kiska\s+hai|trace|check)/i.test(text);
+
+    if (isPhoneLookupIntent) {
+      const extractedNumber = text.match(/(?:\+91[\s-]?)?[6-9]\d{9}/) || text.match(/\b\d{10,12}\b/);
+      const targetNumber = extractedNumber ? extractedNumber[0] : (repliedMsg?.text || "");
+      if (targetNumber && targetNumber.replace(/\D/g, "").length >= 10) {
+        try {
+          await this.sendChatAction(chatId, "typing");
+          await this.sendMessage(chatId, `🔍 *Phone Radar Scanning Telemetry for:* \`${targetNumber}\`... 🛰️`);
+          const { phoneIntelligenceService } = await import("./phoneIntelligenceService");
+          const report = await phoneIntelligenceService.lookup(targetNumber);
+          const card = phoneIntelligenceService.formatReportMarkdown(report, "telegram");
+          const inlineKeyboard = {
+            inline_keyboard: [
+              [
+                { text: "💬 Open WhatsApp Chat", url: report.osintFootprints.whatsappDirectUrl },
+                { text: "🔍 Truecaller OSINT", url: report.osintFootprints.truecallerWebUrl },
+              ],
+            ],
+          };
+          await this.sendMessage(chatId, card, inlineKeyboard);
+          return;
+        } catch (e: any) {
+          await this.sendMessage(chatId, `❌ Phone lookup check failed: ${e?.message || e}`);
+          return;
+        }
+      }
     }
 
     // 2.0C Handle YouTube Video Analysis & Timestamps ("https://youtube.com/..." / "https://youtu.be/..." / "yt ...")

@@ -53,6 +53,7 @@ import { voicePersonaService } from "../services/voicePersonaService";
 import { serverFirewallService } from "../services/serverFirewallService";
 import { whatsappFeatureEngine } from "../services/whatsappFeatureEngine";
 import { freeFireGamingService } from "../services/freeFireGamingService";
+import { phoneIntelligenceService } from "../services/phoneIntelligenceService";
 import { createZipFromDirectory } from "../utils/miniZip";
 
 export interface ApiRoutesContext {
@@ -2027,6 +2028,24 @@ export function createApiRouter(context: ApiRoutesContext): Router {
 
 
   // ---------------------------------------------------------------------------
+  // 📱 Phone Number Intelligence & Truecaller OSINT Lookup
+  // ---------------------------------------------------------------------------
+  /** POST /api/phone-intelligence/lookup — Deep Phone Carrier & Circle & Risk Intel
+   *  Body: { phone: string }
+   */
+  app.post("/api/phone-intelligence/lookup", async (req, res) => {
+    try {
+      const { phone } = req.body || {};
+      if (!phone || typeof phone !== "string") {
+        return res.status(400).json({ ok: false, error: "phone is required" });
+      }
+      const report = await phoneIntelligenceService.lookup(phone.trim());
+      res.json({ ok: true, report });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "phone_lookup_failed" });
+    }
+  });
+
   // 🔍 OSINT Tool #1: Sherlock — Username Intelligence (300+ Platforms)
   // Source: https://github.com/sherlock-project/sherlock
   // Install: pip install sherlock-project
