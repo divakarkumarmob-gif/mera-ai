@@ -287,6 +287,7 @@ interface ShootingStar {
   theme: MeteorTheme;
   headRadius: number;
   sparks: Spark[];
+  targetType?: 'floating_capsule' | 'hanging_capsule' | 'pair' | 'ambient';
 }
 
 export const StarryBackground: React.FC = () => {
@@ -388,9 +389,8 @@ export const StarryBackground: React.FC = () => {
       }
     };
 
-    // 🌟 1. Shooting Star Spawner — STRICTLY FROM SIDES (LEFT/RIGHT) & BOTTOM ONLY (No top edge spawns!)
+    // 🌟 1. Routine Shooting Star — STRICTLY SIDES & BOTTOM (1 every 2s)
     const createSideOrBottomShootingStar = (): ShootingStar => {
-      // 0 = Bottom Edge, 1 = Left Edge, 2 = Right Edge
       const spawnSide = Math.floor(Math.random() * 3);
       let startX = 0;
       let startY = 0;
@@ -398,19 +398,19 @@ export const StarryBackground: React.FC = () => {
       let targetY = 0;
 
       if (spawnSide === 0) {
-        // From BOTTOM edge -> travelling upwards across the night sky
+        // Bottom edge -> traveling up across sky
         startX = Math.random() * width;
         startY = height + 30;
         targetX = Math.random() * width;
         targetY = Math.random() * (height * 0.5) + 50;
       } else if (spawnSide === 1) {
-        // From LEFT edge -> travelling rightwards and slightly up/across
+        // Left edge
         startX = -30;
         startY = Math.random() * (height * 0.7) + height * 0.25;
         targetX = width + 30;
         targetY = Math.random() * (height * 0.6);
       } else {
-        // From RIGHT edge -> travelling leftwards and slightly up/across
+        // Right edge
         startX = width + 30;
         startY = Math.random() * (height * 0.7) + height * 0.25;
         targetX = -30;
@@ -433,23 +433,23 @@ export const StarryBackground: React.FC = () => {
         vx,
         vy,
         length: Math.random() * 65 + 75,
-        speed: Math.random() * 1.4 + 2.6, // Slower visible speed
+        speed: Math.random() * 1.2 + 2.8,
         opacity: 1,
         active: true,
         theme,
-        headRadius: Math.random() * 1.8 + 3.0,
+        headRadius: Math.random() * 1.5 + 3.2,
         sparks: [],
+        targetType: 'ambient',
       };
     };
 
-    // 🌟 2. Mid-Air Collision Pair (Spawns from Left vs Right or Bottom-Upwards into the sky!)
+    // 🌟 2. Mid-Air Collision Pair (2 colliding stars every 5s)
     const spawnCollisionPair = () => {
-      const meetX = Math.random() * (width * 0.6) + width * 0.2;
-      const meetY = Math.random() * (height * 0.4) + height * 0.3; // Safely below top header
-      const travelDist = Math.random() * 220 + 260;
-      const baseSpeed = Math.random() * 0.8 + 3.0;
+      const meetX = Math.random() * (width * 0.5) + width * 0.25;
+      const meetY = Math.random() * (height * 0.4) + height * 0.35;
+      const travelDist = Math.random() * 200 + 260;
+      const baseSpeed = Math.random() * 0.6 + 3.2;
 
-      // Pattern: 0 = Left vs Right, 1 = Bottom-Left vs Bottom-Right
       const pattern = Math.random() > 0.5 ? 0 : 1;
       let s1X = 0;
       let s1Y = 0;
@@ -457,17 +457,15 @@ export const StarryBackground: React.FC = () => {
       let s2Y = 0;
 
       if (pattern === 0) {
-        // Left vs Right sweeping across
         s1X = meetX - travelDist;
-        s1Y = meetY + (Math.random() - 0.5) * 60;
+        s1Y = meetY + (Math.random() - 0.5) * 40;
         s2X = meetX + travelDist;
-        s2Y = meetY + (Math.random() - 0.5) * 60;
+        s2Y = meetY + (Math.random() - 0.5) * 40;
       } else {
-        // From lower screen flying upwards to meet
-        s1X = meetX - travelDist * 0.8;
-        s1Y = meetY + travelDist * 0.7;
-        s2X = meetX + travelDist * 0.8;
-        s2Y = meetY + travelDist * 0.7;
+        s1X = meetX - travelDist * 0.75;
+        s1Y = meetY + travelDist * 0.75;
+        s2X = meetX + travelDist * 0.75;
+        s2Y = meetY + travelDist * 0.75;
       }
 
       const d1 = Math.hypot(meetX - s1X, meetY - s1Y) || 1;
@@ -491,6 +489,7 @@ export const StarryBackground: React.FC = () => {
         theme: theme1,
         headRadius: 3.8,
         sparks: [],
+        targetType: 'pair',
       });
 
       shootingStars.push({
@@ -506,37 +505,37 @@ export const StarryBackground: React.FC = () => {
         theme: theme2,
         headRadius: 3.8,
         sparks: [],
+        targetType: 'pair',
       });
     };
 
-    // 🌟 3. Dedicated Floating Cognition Capsule Target Spawner
+    // 🌟 3. Dedicated Floating Cognition Capsule Target Spawner (Flies ALL the way without disappearing!)
     const spawnFloatingCapsuleTargetMeteor = () => {
       try {
         const floatCap = document.querySelector('[data-floating-capsule="true"]');
         if (!floatCap) return;
 
         const rect = floatCap.getBoundingClientRect();
-        // Target center of the floating capsule
+        // Target exact live center of the floating capsule
         const targetX = rect.left + rect.width / 2;
         const targetY = rect.top + rect.height / 2;
 
-        // Spawn ONLY from screen edges: 0 = Bottom edge, 1 = Left edge, 2 = Bottom-Left
         const spawnSide = Math.floor(Math.random() * 3);
         let startX = 0;
         let startY = 0;
 
         if (spawnSide === 0) {
-          // Bottom edge flying straight/diagonally up to capsule
-          startX = Math.random() * (width * 0.7) + width * 0.15;
+          // Bottom edge flying straight up across screen
+          startX = Math.random() * (width * 0.6) + width * 0.2;
           startY = height + 35;
         } else if (spawnSide === 1) {
           // Left edge flying across to upper-right capsule
           startX = -35;
           startY = Math.random() * (height * 0.5) + height * 0.35;
         } else {
-          // Bottom-left corner flying long trajectory
-          startX = -30;
-          startY = height + 30;
+          // Right edge flying in
+          startX = width + 35;
+          startY = Math.random() * (height * 0.4) + height * 0.4;
         }
 
         const dx = targetX - startX;
@@ -552,13 +551,14 @@ export const StarryBackground: React.FC = () => {
           y: startY,
           vx: dx / dist,
           vy: dy / dist,
-          length: Math.random() * 25 + 75,
-          speed: Math.random() * 0.8 + 3.2,
-          opacity: 1,
+          length: Math.random() * 20 + 80,
+          speed: Math.random() * 0.6 + 3.4,
+          opacity: 1, // Will stay 1.0 full brightness until impact!
           active: true,
           theme,
-          headRadius: 3.8,
+          headRadius: 4.2,
           sparks: [],
+          targetType: 'floating_capsule',
         });
       } catch {}
     };
@@ -574,7 +574,6 @@ export const StarryBackground: React.FC = () => {
         const targetX = rect.left + rect.width / 2;
         const targetY = rect.top + rect.height / 2;
 
-        // Spawn from bottom or side border
         const spawnSide = Math.random() > 0.5 ? 0 : 1;
         let startX = 0;
         let startY = 0;
@@ -607,12 +606,12 @@ export const StarryBackground: React.FC = () => {
           theme,
           headRadius: 3.4,
           sparks: [],
+          targetType: 'hanging_capsule',
         });
       } catch {}
     };
 
     let lastMeteorTime = Date.now();
-    let nextMeteorInterval = 800;
     let lastPairTime = Date.now();
     let lastFloatingTargetTime = Date.now();
     let lastHangingTargetTime = Date.now();
@@ -622,31 +621,28 @@ export const StarryBackground: React.FC = () => {
 
       const now = Date.now();
 
-      // Routine side and bottom meteors
-      if (now - lastMeteorTime > nextMeteorInterval) {
-        if (shootingStars.length < 10) {
+      // 1. Ambient shooting star: EXACTLY 1 every 2 seconds (user requested: "har do 2 sec me 1")
+      if (now - lastMeteorTime > 2000) {
+        if (shootingStars.filter((s) => s.targetType === 'ambient').length < 2) {
           shootingStars.push(createSideOrBottomShootingStar());
         }
         lastMeteorTime = now;
-        nextMeteorInterval = Math.random() * 700 + 500;
       }
 
-      // Mid-air collision pairs every ~3 seconds
-      if (now - lastPairTime > 3000) {
-        if (shootingStars.length < 9) {
-          spawnCollisionPair();
-        }
+      // 2. Colliding pair: EXACTLY 2 stars every 5 seconds (user requested: "jo takrne bali hogi har 5 sec me 2")
+      if (now - lastPairTime > 5000) {
+        spawnCollisionPair();
         lastPairTime = now;
       }
 
-      // Dedicated floating cognition capsule targeted meteor every ~3.5 seconds
-      if (now - lastFloatingTargetTime > 3500) {
+      // 3. Dedicated floating cognition capsule targeted meteor: every ~5 seconds
+      if (now - lastFloatingTargetTime > 5000) {
         spawnFloatingCapsuleTargetMeteor();
         lastFloatingTargetTime = now;
       }
 
-      // Hanging header capsules targeted meteor every ~5 seconds
-      if (now - lastHangingTargetTime > 5000) {
+      // 4. Hanging header capsules targeted meteor: every ~8 seconds
+      if (now - lastHangingTargetTime > 8000) {
         spawnHangingCapsuleTargetMeteor();
         lastHangingTargetTime = now;
       }
@@ -717,7 +713,7 @@ export const StarryBackground: React.FC = () => {
           const dx = m1.x - m2.x;
           const dy = m1.y - m2.y;
           const distSq = dx * dx + dy * dy;
-          const hitRadius = m1.headRadius + m2.headRadius + 22;
+          const hitRadius = m1.headRadius + m2.headRadius + 24;
 
           if (distSq < hitRadius * hitRadius) {
             m1.active = false;
@@ -735,22 +731,27 @@ export const StarryBackground: React.FC = () => {
         const floatCapEl = document.querySelector('[data-floating-capsule="true"]');
         if (floatCapEl) {
           const rect = floatCapEl.getBoundingClientRect();
-          // Generous hit box around the floating pill
-          const capLeft = rect.left - 26;
-          const capRight = rect.right + 26;
-          const capTop = rect.top - 26;
-          const capBottom = rect.bottom + 26;
+          const capCenterX = rect.left + rect.width / 2;
+          const capCenterY = rect.top + rect.height / 2;
+          const hitRadius = Math.max(rect.width, rect.height) / 2 + 18;
+
+          const capLeft = rect.left - 24;
+          const capRight = rect.right + 24;
+          const capTop = rect.top - 24;
+          const capBottom = rect.bottom + 24;
 
           for (let i = 0; i < shootingStars.length; i++) {
             const meteor = shootingStars[i];
             if (!meteor.active) continue;
 
-            if (
+            const distToCenter = Math.hypot(meteor.x - capCenterX, meteor.y - capCenterY);
+            const isInsideBox =
               meteor.x >= capLeft &&
               meteor.x <= capRight &&
               meteor.y >= capTop &&
-              meteor.y <= capBottom
-            ) {
+              meteor.y <= capBottom;
+
+            if (distToCenter <= hitRadius || isInsideBox) {
               meteor.active = false;
 
               // Fire crack event to Cognition Capsule
@@ -803,14 +804,21 @@ export const StarryBackground: React.FC = () => {
 
         meteor.x += meteor.vx * meteor.speed;
         meteor.y += meteor.vy * meteor.speed;
-        meteor.opacity -= 0.007;
+
+        // Targeted & Pair meteors maintain 100% full opacity (NEVER vanish mid-flight!)
+        if (meteor.targetType === 'floating_capsule' || meteor.targetType === 'pair') {
+          meteor.opacity = 1.0;
+        } else {
+          // Ambient stars fade very slowly across hundreds of frames
+          meteor.opacity -= 0.002;
+        }
 
         if (
           meteor.opacity <= 0 ||
-          meteor.x < -180 ||
-          meteor.x > width + 180 ||
-          meteor.y > height + 180 ||
-          meteor.y < -180
+          meteor.x < -200 ||
+          meteor.x > width + 200 ||
+          meteor.y > height + 200 ||
+          meteor.y < -200
         ) {
           meteor.active = false;
           continue;
