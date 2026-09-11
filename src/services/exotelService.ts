@@ -481,7 +481,7 @@ Generate Friday's direct spoken response (without emojis, markdown asterisks, or
     if (appUrl && appUrl.startsWith("http")) {
       return appUrl.replace(/\/$/, "");
     }
-    return "";
+    return "https://mera-ai-3496.onrender.com";
   }
 
   // ──────────────────────────────────────────────────────────────────────────
