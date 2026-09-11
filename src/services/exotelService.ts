@@ -551,17 +551,8 @@ Friday's spoken response:`;
         formData.append("CallerId", formattedCallerId);
       }
 
-      const activeAppId = (appId || this.config.appId || process.env.EXOTEL_APP_ID || "").trim();
-
-      if (activeAppId) {
-        // Official Exotel Applet Flow endpoint: http://my.exotel.com/{account_sid}/exoml/start_voice/{app_id}
-        const exotelFlowUrl = `http://my.exotel.com/${accountSid}/exoml/start_voice/${activeAppId}`;
-        formData.append("Url", exotelFlowUrl);
-        console.log(`[ExotelService] 🔗 Using Exotel App Bazaar Voice Flow: ${exotelFlowUrl}`);
-      } else if (effectiveBaseUrl && effectiveBaseUrl.startsWith("http") && !effectiveBaseUrl.includes("localhost")) {
-        // Direct webhook URL
-        formData.append("Url", flowUrl);
-      }
+      // ⚡ Direct Pure ExML Voice Engine: Exotel runs pure dynamic ExML loop without visual flow premature hangup
+      formData.append("Url", flowUrl);
 
       if (effectiveBaseUrl && effectiveBaseUrl.startsWith("http") && !effectiveBaseUrl.includes("localhost")) {
         formData.append("StatusCallback", statusCallbackUrl);

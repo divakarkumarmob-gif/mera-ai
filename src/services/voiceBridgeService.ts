@@ -246,9 +246,9 @@ export class VoiceBridgeService {
       }
     } catch {}
 
-    // 2. Sarvam AI TTS (Specialized Indian Hindi & Regional Languages)
+    // 2. Sarvam AI TTS (Specialized Indian Hindi & Regional Languages - bulbul:v2)
     try {
-      const sarvamSpeaker = isMale ? "kabir" : isEnglish ? "amartya" : "meera";
+      const sarvamSpeaker = isMale ? "abhilash" : isEnglish ? "amartya" : "anushka";
       const sarvamLang = isEnglish ? "en-IN" : "hi-IN";
       const sarvamRes = await this.sarvamTTS(textToSpeak, sarvamLang, sarvamSpeaker, prosody.sarvamProsody);
       if (sarvamRes && sarvamRes.buffer.length > 0) {
