@@ -289,6 +289,7 @@ interface ShootingStar {
   sparks: Spark[];
   depthLevel?: number; // 1 = Deep Cosmic Plane (flies behind lower row to hit upper row), 0 = Foreground Plane
   targetType?: 'floating_capsule' | 'hanging_upper' | 'hanging_lower' | 'pair' | 'ambient';
+  targetElement?: HTMLElement | null;
 }
 
 export const StarryBackground: React.FC = () => {
@@ -560,6 +561,7 @@ export const StarryBackground: React.FC = () => {
           sparks: [],
           depthLevel: 0,
           targetType: 'floating_capsule',
+          targetElement: floatCap as HTMLElement,
         });
       } catch {}
     };
@@ -571,7 +573,7 @@ export const StarryBackground: React.FC = () => {
         const upperCaps = Array.from(document.querySelectorAll('[data-capsule-row="upper"]'));
         if (upperCaps.length === 0) return;
 
-        const targetEl = upperCaps[Math.floor(Math.random() * upperCaps.length)];
+        const targetEl = upperCaps[Math.floor(Math.random() * upperCaps.length)] as HTMLElement;
         const rect = targetEl.getBoundingClientRect();
         const targetX = rect.left + rect.width / 2;
         const targetY = rect.top + rect.height / 2;
@@ -616,6 +618,7 @@ export const StarryBackground: React.FC = () => {
           sparks: [],
           depthLevel: 1, // ✨ 3D Deep Space Cosmic Layer: Ignores Lower Row, Hits Upper Row!
           targetType: 'hanging_upper',
+          targetElement: targetEl,
         });
       } catch {}
     };
@@ -626,7 +629,7 @@ export const StarryBackground: React.FC = () => {
         const lowerCaps = Array.from(document.querySelectorAll('[data-capsule-row="lower"]'));
         if (lowerCaps.length === 0) return;
 
-        const targetEl = lowerCaps[Math.floor(Math.random() * lowerCaps.length)];
+        const targetEl = lowerCaps[Math.floor(Math.random() * lowerCaps.length)] as HTMLElement;
         const rect = targetEl.getBoundingClientRect();
         const targetX = rect.left + rect.width / 2;
         const targetY = rect.top + rect.height / 2;
@@ -665,6 +668,7 @@ export const StarryBackground: React.FC = () => {
           sparks: [],
           depthLevel: 0,
           targetType: 'hanging_lower',
+          targetElement: targetEl,
         });
       } catch {}
     };
@@ -790,30 +794,22 @@ export const StarryBackground: React.FC = () => {
 
       // ── CHECK 2: Meteor vs Floating Cognition Capsule Collisions ─────────
       try {
-        const floatCapEl = document.querySelector('[data-floating-capsule="true"]');
+        const floatCapEl = document.querySelector('[data-floating-capsule="true"]') as HTMLElement | null;
         if (floatCapEl) {
           const rect = floatCapEl.getBoundingClientRect();
           const capCenterX = rect.left + rect.width / 2;
           const capCenterY = rect.top + rect.height / 2;
           const hitRadius = Math.max(rect.width, rect.height) / 2 + 18;
 
-          const capLeft = rect.left - 24;
-          const capRight = rect.right + 24;
-          const capTop = rect.top - 24;
-          const capBottom = rect.bottom + 24;
-
           for (let i = 0; i < shootingStars.length; i++) {
             const meteor = shootingStars[i];
             if (!meteor.active) continue;
 
-            const distToCenter = Math.hypot(meteor.x - capCenterX, meteor.y - capCenterY);
-            const isInsideBox =
-              meteor.x >= capLeft &&
-              meteor.x <= capRight &&
-              meteor.y >= capTop &&
-              meteor.y <= capBottom;
+            // 🛑 ONLY meteors specifically aimed at Floating Capsule can hit it! Ambient stars NEVER hit!
+            if (meteor.targetType !== 'floating_capsule') continue;
 
-            if (distToCenter <= hitRadius || isInsideBox) {
+            const distToCenter = Math.hypot(meteor.x - capCenterX, meteor.y - capCenterY);
+            if (distToCenter <= hitRadius) {
               meteor.active = false;
 
               // Fire crack event to Cognition / Training Capsule
@@ -830,34 +826,26 @@ export const StarryBackground: React.FC = () => {
       } catch {}
 
       // ── CHECK 3A: Upper Row Hanging Capsules Hit Check (Tier 1) ─────────
-      // Can be hit by Depth Meteors (targetType: 'hanging_upper' / depthLevel: 1) or ambient meteors
+      // ONLY hit when meteor.targetType === 'hanging_upper' AND meteor.targetElement matches this exact element!
       try {
-        const upperCaps = Array.from(document.querySelectorAll('[data-capsule-row="upper"]'));
+        const upperCaps = Array.from(document.querySelectorAll('[data-capsule-row="upper"]')) as HTMLElement[];
         for (const hangEl of upperCaps) {
           const rect = hangEl.getBoundingClientRect();
           const capCenterX = rect.left + rect.width / 2;
           const capCenterY = rect.top + rect.height / 2;
           const hitRadius = Math.max(rect.width, rect.height) / 2 + 18;
 
-          const capLeft = rect.left - 22;
-          const capRight = rect.right + 22;
-          const capTop = rect.top - 22;
-          const capBottom = rect.bottom + 22;
-
           for (let i = 0; i < shootingStars.length; i++) {
             const meteor = shootingStars[i];
             if (!meteor.active) continue;
-            // Lower row targeted or floating targeted meteors don't hit upper row
-            if (meteor.targetType === 'hanging_lower' || meteor.targetType === 'floating_capsule') continue;
+
+            // 🛑 STRICT TARGET LOCK: ONLY explode on the exact chosen target element!
+            if (meteor.targetType !== 'hanging_upper' || meteor.targetElement !== hangEl) {
+              continue;
+            }
 
             const distToCenter = Math.hypot(meteor.x - capCenterX, meteor.y - capCenterY);
-            const isInsideBox =
-              meteor.x >= capLeft &&
-              meteor.x <= capRight &&
-              meteor.y >= capTop &&
-              meteor.y <= capBottom;
-
-            if (distToCenter <= hitRadius || isInsideBox) {
+            if (distToCenter <= hitRadius) {
               meteor.active = false;
 
               // Fire crack event to this specific Upper Row capsule!
@@ -875,42 +863,26 @@ export const StarryBackground: React.FC = () => {
       } catch {}
 
       // ── CHECK 3B: Lower Row Hanging Capsules Hit Check (Tier 2) ─────────
-      // ONLY hit by Lower Row targeted meteors (targetType: 'hanging_lower') or foreground ambient meteors
-      // ✨ CRUCIAL: Depth meteors (depthLevel: 1 or targetType: 'hanging_upper') NEVER collide with Lower Row! They fly right behind!
+      // ONLY hit when meteor.targetType === 'hanging_lower' AND meteor.targetElement matches this exact element!
       try {
-        const lowerCaps = Array.from(document.querySelectorAll('[data-capsule-row="lower"]'));
+        const lowerCaps = Array.from(document.querySelectorAll('[data-capsule-row="lower"]')) as HTMLElement[];
         for (const hangEl of lowerCaps) {
           const rect = hangEl.getBoundingClientRect();
           const capCenterX = rect.left + rect.width / 2;
           const capCenterY = rect.top + rect.height / 2;
           const hitRadius = Math.max(rect.width, rect.height) / 2 + 18;
 
-          const capLeft = rect.left - 22;
-          const capRight = rect.right + 22;
-          const capTop = rect.top - 22;
-          const capBottom = rect.bottom + 22;
-
           for (let i = 0; i < shootingStars.length; i++) {
             const meteor = shootingStars[i];
             if (!meteor.active) continue;
 
-            // ✨ DEPTH PASS-THROUGH: Skip depth meteors targeting upper row! They fly in deep cosmic plane!
-            if (
-              meteor.depthLevel === 1 ||
-              meteor.targetType === 'hanging_upper' ||
-              meteor.targetType === 'floating_capsule'
-            ) {
+            // 🛑 STRICT TARGET LOCK: ONLY explode on the exact chosen target element!
+            if (meteor.targetType !== 'hanging_lower' || meteor.targetElement !== hangEl) {
               continue;
             }
 
             const distToCenter = Math.hypot(meteor.x - capCenterX, meteor.y - capCenterY);
-            const isInsideBox =
-              meteor.x >= capLeft &&
-              meteor.x <= capRight &&
-              meteor.y >= capTop &&
-              meteor.y <= capBottom;
-
-            if (distToCenter <= hitRadius || isInsideBox) {
+            if (distToCenter <= hitRadius) {
               meteor.active = false;
 
               // Fire crack event to this specific Lower Row capsule!
