@@ -490,9 +490,9 @@ Generate Friday's direct spoken response (without emojis, markdown asterisks, or
       formData.append("From", cleanTo); // Recipient phone number (Boss or target contact)
 
       // In Exotel: 'To' can be an ExoPhone number, an App ID, or a destination URL
-      if (appId) {
-        formData.append("To", appId);
-      } else if (cleanVirtual) {
+      if (appId && appId.trim()) {
+        formData.append("To", appId.trim());
+      } else if (cleanVirtual && cleanVirtual.length >= 8) {
         formData.append("To", cleanVirtual);
         formData.append("CallerId", cleanVirtual);
       } else {
