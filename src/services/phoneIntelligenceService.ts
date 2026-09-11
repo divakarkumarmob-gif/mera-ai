@@ -215,7 +215,38 @@ const INDIAN_PREFIX_MAP: Record<string, { operator: string; circle: string; bran
   '9939': { operator: 'Bharti Airtel', circle: 'Bihar & Jharkhand', brand: 'Airtel' },
   '9940': { operator: 'Bharti Airtel', circle: 'Chennai', brand: 'Airtel' },
   '9944': { operator: 'Bharti Airtel', circle: 'Tamil Nadu', brand: 'Airtel' },
+  '9953': { operator: 'Vodafone Idea', circle: 'Delhi NCR', brand: 'Vi' },
+  '9954': { operator: 'Bharti Airtel', circle: 'Assam', brand: 'Airtel' },
   '9955': { operator: 'Bharti Airtel', circle: 'Bihar & Jharkhand', brand: 'Airtel' },
+  '9958': { operator: 'Bharti Airtel', circle: 'Delhi NCR', brand: 'Airtel' },
+  '9971': { operator: 'Bharti Airtel', circle: 'Delhi NCR', brand: 'Airtel' },
+  '9972': { operator: 'Bharti Airtel', circle: 'Karnataka', brand: 'Airtel' },
+  '9973': { operator: 'Bharti Airtel', circle: 'Bihar & Jharkhand', brand: 'Airtel' },
+  '9980': { operator: 'Bharti Airtel', circle: 'Karnataka', brand: 'Airtel' },
+  '9981': { operator: 'Bharti Airtel', circle: 'Madhya Pradesh', brand: 'Airtel' },
+  '9982': { operator: 'Bharti Airtel', circle: 'Rajasthan', brand: 'Airtel' },
+  '9983': { operator: 'Vodafone Idea', circle: 'Rajasthan', brand: 'Vi' },
+  '9984': { operator: 'Vodafone Idea', circle: 'UP East', brand: 'Vi' },
+  '9985': { operator: 'Bharti Airtel', circle: 'Andhra Pradesh & Telangana', brand: 'Airtel' },
+  '9986': { operator: 'Bharti Airtel', circle: 'Karnataka', brand: 'Airtel' },
+  '9987': { operator: 'Bharti Airtel', circle: 'Mumbai', brand: 'Airtel' },
+  '9988': { operator: 'Bharti Airtel', circle: 'Punjab', brand: 'Airtel' },
+  '8800': { operator: 'Vodafone Idea', circle: 'Delhi NCR', brand: 'Vi' },
+  '8826': { operator: 'Bharti Airtel', circle: 'Delhi NCR', brand: 'Airtel' },
+  '8860': { operator: 'Vodafone Idea', circle: 'Delhi NCR', brand: 'Vi' },
+  '8750': { operator: 'Vodafone Idea', circle: 'Delhi NCR', brand: 'Vi' },
+  '8744': { operator: 'Vodafone Idea', circle: 'Delhi NCR', brand: 'Vi' },
+  '8745': { operator: 'Vodafone Idea', circle: 'Delhi NCR', brand: 'Vi' },
+  '8130': { operator: 'Bharti Airtel', circle: 'Delhi NCR', brand: 'Airtel' },
+  '8178': { operator: 'Reliance Jio', circle: 'Delhi NCR', brand: 'Jio' },
+  '8448': { operator: 'Reliance Jio', circle: 'Delhi NCR', brand: 'Jio' },
+  '8447': { operator: 'Vodafone Idea', circle: 'Delhi NCR', brand: 'Vi' },
+  '9136': { operator: 'Reliance Jio', circle: 'Delhi NCR', brand: 'Jio' },
+  '9310': { operator: 'Reliance Jio', circle: 'Delhi NCR', brand: 'Jio' },
+  '9311': { operator: 'Reliance Jio', circle: 'Delhi NCR', brand: 'Jio' },
+  '9312': { operator: 'Reliance Jio', circle: 'Delhi NCR', brand: 'Jio' },
+  '9313': { operator: 'Reliance Jio', circle: 'Delhi NCR', brand: 'Jio' },
+  '9315': { operator: 'Reliance Jio', circle: 'Delhi NCR', brand: 'Jio' },
 
   // BSNL / MTNL Mobile Prefixes (94xx)
   '9410': { operator: 'BSNL Mobile', circle: 'UP West', brand: 'BSNL' },
@@ -400,18 +431,30 @@ export class PhoneIntelligenceService {
           telecomCircle = INDIAN_PREFIX_MAP[prefix4].circle;
           operatorBrand = INDIAN_PREFIX_MAP[prefix4].brand;
           stateOrRegion = INDIAN_PREFIX_MAP[prefix4].circle;
-        } else if (['98', '99', '94', '70', '79', '62'].includes(prefix2)) {
-          if (['70', '79', '62'].includes(prefix2)) {
-            operator = 'Reliance Jio 4G/5G';
-            operatorBrand = 'Jio';
-          } else if (prefix2 === '94') {
-            operator = 'BSNL Mobile 4G/3G';
-            operatorBrand = 'BSNL';
-          } else {
-            operator = 'Bharti Airtel / Vi Mobile';
-            operatorBrand = 'Airtel';
-          }
-          telecomCircle = 'National Indian Mobile Series';
+        } else if (['62', '63', '70', '72', '73', '74', '75', '76', '77', '78', '79'].includes(prefix2)) {
+          operator = 'Reliance Jio 4G/5G';
+          operatorBrand = 'Jio';
+          telecomCircle = 'National Indian Jio Mobile Series';
+          stateOrRegion = 'India';
+        } else if (['94', '89', '93'].includes(prefix2)) {
+          operator = 'BSNL Mobile 4G/3G';
+          operatorBrand = 'BSNL';
+          telecomCircle = 'National Indian BSNL Mobile Series';
+          stateOrRegion = 'India';
+        } else if (['87', '88', '92', '95'].includes(prefix2)) {
+          operator = 'Vodafone Idea (Vi)';
+          operatorBrand = 'Vi';
+          telecomCircle = 'National Indian Vi Mobile Series';
+          stateOrRegion = 'India';
+        } else if (['80', '81', '82', '83', '84', '85', '86', '90', '91', '96', '97', '98', '99'].includes(prefix2)) {
+          operator = 'Bharti Airtel 4G/5G';
+          operatorBrand = 'Airtel';
+          telecomCircle = 'National Indian Airtel Mobile Series';
+          stateOrRegion = 'India';
+        } else {
+          operator = 'Indian GSM/LTE Mobile Network';
+          operatorBrand = 'Unknown';
+          telecomCircle = 'All-India Mobile Series';
           stateOrRegion = 'India';
         }
       } else if (normalized.startsWith('140') || normalized.startsWith('160')) {
