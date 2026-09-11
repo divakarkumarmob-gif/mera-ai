@@ -819,14 +819,14 @@ export const StarryBackground: React.FC = () => {
             if (distToCenter <= hitRadius || isInsideBox) {
               meteor.active = false;
 
-              // Fire crack event to Cognition Capsule
+              // Fire crack event to Cognition / Training Capsule
               window.dispatchEvent(
                 new CustomEvent('capsule_meteor_hit', {
-                  detail: { x: meteor.x, y: meteor.y, theme: meteor.theme.name },
+                  detail: { x: capCenterX, y: capCenterY, theme: meteor.theme.name },
                 })
               );
 
-              triggerFirecrackerExplosion(meteor.x, meteor.y, meteor.theme.fireworkColors);
+              triggerFirecrackerExplosion(capCenterX, capCenterY, meteor.theme.fireworkColors);
             }
           }
         }
@@ -867,11 +867,11 @@ export const StarryBackground: React.FC = () => {
               hangEl.dispatchEvent(
                 new CustomEvent('capsule_crack_hit', {
                   bubbles: true,
-                  detail: { x: meteor.x, y: meteor.y, theme: meteor.theme.name },
+                  detail: { x: capCenterX, y: capCenterY, theme: meteor.theme.name },
                 })
               );
 
-              triggerFirecrackerExplosion(meteor.x, meteor.y, meteor.theme.fireworkColors);
+              triggerFirecrackerExplosion(capCenterX, capCenterY, meteor.theme.fireworkColors);
             }
           }
         }
@@ -920,11 +920,11 @@ export const StarryBackground: React.FC = () => {
               hangEl.dispatchEvent(
                 new CustomEvent('capsule_crack_hit', {
                   bubbles: true,
-                  detail: { x: meteor.x, y: meteor.y, theme: meteor.theme.name },
+                  detail: { x: capCenterX, y: capCenterY, theme: meteor.theme.name },
                 })
               );
 
-              triggerFirecrackerExplosion(meteor.x, meteor.y, meteor.theme.fireworkColors);
+              triggerFirecrackerExplosion(capCenterX, capCenterY, meteor.theme.fireworkColors);
             }
           }
         }

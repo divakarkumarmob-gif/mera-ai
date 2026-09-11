@@ -837,8 +837,8 @@ function HangingRopeCapsule({
     const maxAngle = 1.3 + (swayIndex % 2) * 0.5;
 
     const [isCracked, setIsCracked] = useState(false);
-    const [isHealing, setIsHealing] = useState(false);
-    const crackTimerRef = useRef<any>(null);
+    const [healProgress, setHealProgress] = useState(0); // 0.0 to 1.0 continuous healing
+    const healAnimFrameRef = useRef<number | null>(null);
     const capsuleRef = useRef<HTMLDivElement>(null);
 
     const playGlassCrackSound = useCallback(() => {
@@ -867,18 +867,28 @@ function HangingRopeCapsule({
 
     const triggerCrack = useCallback(() => {
         setIsCracked(true);
-        setIsHealing(false);
+        setHealProgress(0);
         playGlassCrackSound();
 
-        if (crackTimerRef.current) clearTimeout(crackTimerRef.current);
+        if (healAnimFrameRef.current) cancelAnimationFrame(healAnimFrameRef.current);
 
-        crackTimerRef.current = setTimeout(() => {
-            setIsHealing(true);
-            setTimeout(() => {
+        const startTime = performance.now();
+        const animDuration = 5000; // 5.0 seconds smooth continuous healing
+
+        const step = (currentTime: number) => {
+            const elapsed = currentTime - startTime;
+            const progress = Math.min(1, elapsed / animDuration);
+            setHealProgress(progress);
+
+            if (progress < 1) {
+                healAnimFrameRef.current = requestAnimationFrame(step);
+            } else {
                 setIsCracked(false);
-                setIsHealing(false);
-            }, 800);
-        }, 4200);
+                setHealProgress(0);
+            }
+        };
+
+        healAnimFrameRef.current = requestAnimationFrame(step);
     }, [playGlassCrackSound]);
 
     useEffect(() => {
@@ -892,7 +902,7 @@ function HangingRopeCapsule({
         el.addEventListener('capsule_crack_hit', handleHit);
         return () => {
             el.removeEventListener('capsule_crack_hit', handleHit);
-            if (crackTimerRef.current) clearTimeout(crackTimerRef.current);
+            if (healAnimFrameRef.current) cancelAnimationFrame(healAnimFrameRef.current);
         };
     }, [triggerCrack]);
 
@@ -968,67 +978,89 @@ function HangingRopeCapsule({
                 <div
                     className="w-2.5 h-2.5 rounded-full bg-slate-950 border-[1.5px] flex items-center justify-center pointer-events-none transition-colors duration-300 shadow-[0_0_10px_rgba(255,255,255,0.4)]"
                     style={{
-                        borderColor: isCracked ? '#ef4444' : glowColor,
-                        boxShadow: isCracked ? `0 0 12px #ef4444` : `0 0 10px ${glowColor}`,
+                        borderColor: isCracked ? (healProgress > 0.5 ? '#10b981' : '#ef4444') : glowColor,
+                        boxShadow: isCracked ? (healProgress > 0.5 ? `0 0 12px #10b981` : `0 0 12px #ef4444`) : `0 0 10px ${glowColor}`,
                     }}
                 >
-                    <div className={`w-1 h-1 rounded-full ${isCracked ? 'bg-red-400' : 'bg-white'} animate-pulse`} />
+                    <div className={`w-1 h-1 rounded-full ${isCracked && healProgress < 0.6 ? 'bg-red-400' : 'bg-white'} animate-pulse`} />
                 </div>
             </div>
 
-            {/* The Suspended Capsule Button with Dynamic Crack Overlay */}
+            {/* The Suspended Capsule Button with Dynamic Progressive Crack Overlay */}
             <div className="relative z-20">
-                {/* Fiery warning aura when cracked */}
+                {/* Fiery warning aura when cracked (smoothly fades away over 5s) */}
                 {isCracked && (
-                    <div className="absolute -inset-1 rounded-full bg-gradient-to-r from-red-600 via-amber-500 to-orange-600 opacity-90 blur-sm animate-pulse pointer-events-none" />
+                    <div
+                        className="absolute -inset-1 rounded-full bg-gradient-to-r from-red-600 via-amber-500 to-orange-600 blur-sm pointer-events-none transition-opacity duration-300"
+                        style={{ opacity: Math.max(0, 0.9 * (1 - healProgress)) }}
+                    />
                 )}
 
                 {children}
 
-                {/* 💥 Center Glass-Fracture Crack Overlay on ANY hanging capsule */}
+                {/* 💥 Center Glass-Fracture Crack Overlay (Progressively heals over 5s) */}
                 {isCracked && (
-                    <div className="absolute inset-0 pointer-events-none z-30 overflow-hidden rounded-full flex items-center justify-center">
+                    <div
+                        className="absolute inset-0 pointer-events-none z-30 overflow-hidden rounded-full flex items-center justify-center transition-opacity duration-300"
+                        style={{ opacity: Math.max(0, 1 - healProgress) }}
+                    >
                         <svg className="w-full h-full absolute inset-0" viewBox="0 0 140 36" preserveAspectRatio="none">
-                            {/* Outer glowing fissure outline */}
+                            {/* Outer glowing fissure outline - narrows and shifts color from red to emerald */}
                             <path
                                 d="M 70 0 L 64 9 L 76 17 L 63 25 L 74 32 L 70 36"
                                 fill="none"
-                                stroke="#ff2200"
-                                strokeWidth="4.2"
+                                stroke={healProgress > 0.4 ? '#10b981' : '#ff2200'}
+                                strokeWidth={Math.max(0.8, 4.2 * (1 - healProgress * 0.75))}
                                 strokeLinecap="round"
-                                style={{ filter: 'drop-shadow(0 0 6px #ff4500)' }}
+                                style={{
+                                    filter: healProgress > 0.4 ? 'drop-shadow(0 0 5px #10b981)' : 'drop-shadow(0 0 6px #ff4500)',
+                                    transition: 'stroke 0.4s ease',
+                                }}
                             />
                             {/* Sharp white-hot molten core line */}
                             <path
                                 d="M 70 0 L 64 9 L 76 17 L 63 25 L 74 32 L 70 36"
                                 fill="none"
                                 stroke="#ffffff"
-                                strokeWidth="1.6"
+                                strokeWidth={Math.max(0.4, 1.6 * (1 - healProgress * 0.75))}
                                 strokeLinecap="round"
                             />
-                            {/* Lateral branch micro-cracks */}
-                            <path
-                                d="M 64 9 L 52 13 M 63 25 L 50 22 M 76 17 L 88 14 M 74 32 L 86 34"
-                                fill="none"
-                                stroke="#fbbf24"
-                                strokeWidth="1.2"
-                                strokeLinecap="round"
-                                opacity="0.95"
-                            />
+                            {/* Lateral branch micro-cracks (fades away by 55% progress) */}
+                            {healProgress < 0.55 && (
+                                <path
+                                    d="M 64 9 L 52 13 M 63 25 L 50 22 M 76 17 L 88 14 M 74 32 L 86 34"
+                                    fill="none"
+                                    stroke="#fbbf24"
+                                    strokeWidth={Math.max(0.4, 1.2 * (1 - healProgress * 1.5))}
+                                    strokeLinecap="round"
+                                    opacity={Math.max(0, 1 - healProgress * 1.8)}
+                                />
+                            )}
                         </svg>
 
-                        {/* Hot glowing impact sparks point */}
-                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-amber-300/80 animate-ping" />
+                        {/* Hot glowing impact spark point */}
+                        <div
+                            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full animate-ping pointer-events-none"
+                            style={{
+                                width: `${Math.max(4, 16 * (1 - healProgress))}px`,
+                                height: `${Math.max(4, 16 * (1 - healProgress))}px`,
+                                backgroundColor: healProgress > 0.5 ? 'rgba(52, 211, 153, 0.8)' : 'rgba(251, 191, 36, 0.9)',
+                            }}
+                        />
 
-                        {/* 5-Second Nano-Repair Holographic Laser Beam */}
-                        {isHealing && (
-                            <motion.div
-                                initial={{ x: '-100%', opacity: 0 }}
-                                animate={{ x: '100%', opacity: [0, 1, 1, 0] }}
-                                transition={{ duration: 0.8, ease: 'easeInOut' }}
-                                className="absolute inset-0 bg-gradient-to-r from-transparent via-emerald-300 to-transparent w-full h-full shadow-[0_0_20px_#10b981]"
-                            />
-                        )}
+                        {/* 5-Second Continuous Nano-Repair Welding Beam (Sweeps smoothly across the crack) */}
+                        <motion.div
+                            animate={{
+                                x: ['-120%', '120%'],
+                                opacity: [0.3, 0.9, 0.3],
+                            }}
+                            transition={{
+                                repeat: Infinity,
+                                duration: 1.1,
+                                ease: 'easeInOut',
+                            }}
+                            className="absolute inset-0 bg-gradient-to-r from-transparent via-emerald-300 to-transparent w-full h-full shadow-[0_0_20px_#10b981] pointer-events-none"
+                        />
                     </div>
                 )}
             </div>
