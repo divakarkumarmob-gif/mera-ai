@@ -54,6 +54,7 @@ class ExotelService {
     apiToken: process.env.EXOTEL_API_TOKEN || "",
     subdomain: process.env.EXOTEL_SUBDOMAIN || "api.exotel.com",
     virtualNumber: process.env.EXOTEL_VIRTUAL_NUMBER || "",
+    appId: process.env.EXOTEL_APP_ID || "",
     isLive: false,
     bossNotificationNumber: process.env.BOSS_WHATSAPP_NUMBER || "",
   };
@@ -529,14 +530,19 @@ Generate Friday's direct spoken response (without emojis, markdown asterisks, or
         formData.append("CallerId", formattedCallerId);
       }
 
-      // If user has created a flow Applet ID in Exotel App Bazaar
-      if (appId && appId.trim()) {
-        formData.append("To", appId.trim());
+      const activeAppId = (appId || this.config.appId || process.env.EXOTEL_APP_ID || "").trim();
+
+      if (activeAppId) {
+        // Official Exotel Applet Flow endpoint: http://my.exotel.com/{account_sid}/exoml/start_voice/{app_id}
+        const exotelFlowUrl = `http://my.exotel.com/${accountSid}/exoml/start_voice/${activeAppId}`;
+        formData.append("Url", exotelFlowUrl);
+        console.log(`[ExotelService] 🔗 Using Exotel App Bazaar Voice Flow: ${exotelFlowUrl}`);
+      } else if (effectiveBaseUrl && effectiveBaseUrl.startsWith("http") && !effectiveBaseUrl.includes("localhost")) {
+        // Direct webhook URL
+        formData.append("Url", flowUrl);
       }
 
-      // ⚡ CRITICAL: Attach Friday AI Voice Flow Webhook URL so Exotel speaks immediately on answer without hold music!
       if (effectiveBaseUrl && effectiveBaseUrl.startsWith("http") && !effectiveBaseUrl.includes("localhost")) {
-        formData.append("Url", flowUrl);
         formData.append("StatusCallback", statusCallbackUrl);
       }
 
