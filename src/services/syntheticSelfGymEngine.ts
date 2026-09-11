@@ -283,15 +283,21 @@ OUTPUT MUST BE VALID JSON ONLY:
       drill.selfCriticScore = 10;
 
       // Automatically enroll into Golden Standards so Friday permanently uses this as a 10/10 few-shot benchmark!
+      // Direct Firestore insert into golden_standards collection (the correct path)
       try {
-        await aiAdvancedLearningService.curateGoldenStandard(
-          drill.simulatedBossQuery,
-          drill.trialResponse,
-          `Boss Marked Good in Training Capsule (Drill: ${drill.scenarioTitle})`
-        );
-        console.log(`[SelfPlayGym] ⭐ Auto-curated into Golden Standards: "${drill.scenarioTitle}"`);
+        const goldenEntry = {
+          id: `golden_drill_${drill.id}`,
+          userPrompt: drill.simulatedBossQuery,
+          idealResponse: drill.trialResponse,
+          praiseTrigger: `Boss Marked Good in Training Capsule (Drill: ${drill.scenarioTitle})`,
+          category: "boss_praise",
+          score: 10,
+          timestamp: Date.now(),
+        };
+        await this.getDb().collection("golden_standards").doc(goldenEntry.id).set(goldenEntry);
+        console.log(`[SelfPlayGym] ⭐ Auto-saved into Golden Standards: "${drill.scenarioTitle}"`);
       } catch (err) {
-        console.warn("[SelfPlayGym] Could not auto-curate golden standard:", err);
+        console.warn("[SelfPlayGym] Could not auto-save golden standard:", err);
       }
 
       // Log positive RLHF reward
@@ -334,8 +340,30 @@ OUTPUT MUST BE VALID JSON ONLY:
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) return { ok: false, message: "API key missing" };
 
-    const drill = this.recentDrills.find((d) => d.id === drillId);
-    if (!drill) return { ok: false, message: "Drill not found" };
+    // 1. Try in-memory first
+    let drill = this.recentDrills.find((d) => d.id === drillId);
+
+    // 2. Firestore fallback (handles server restarts)
+    if (!drill) {
+      try {
+        const snap = await this.getDb()
+          .collection("memory")
+          .doc("self_play_gym")
+          .collection("drills")
+          .doc(drillId)
+          .get();
+        if (snap.exists) {
+          drill = { id: snap.id, ...(snap.data() as any) } as GymDrill;
+          this.recentDrills.unshift(drill);
+          if (this.recentDrills.length > 40) this.recentDrills.pop();
+          console.log(`[SelfPlayGym] 🔍 Drill fetched from Firestore for retry: ${drillId}`);
+        }
+      } catch (e: any) {
+        console.warn("[SelfPlayGym] Firestore fetch error in retryDrill:", e?.message || e);
+      }
+    }
+
+    if (!drill) return { ok: false, message: "Drill nahi mila! Reload karke dobara try karo." };
 
     const ai = new GoogleGenAI({ apiKey });
     const prompt = `You are Friday. You previously generated a trial response that Boss DK marked as BAD / INADEQUATE.
