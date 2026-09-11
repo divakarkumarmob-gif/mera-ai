@@ -836,6 +836,7 @@ function HangingRopeCapsule({
 
     return (
         <motion.div
+            data-hanging-capsule="true"
             className="relative flex flex-col items-center shrink-0 group/hanging select-none pt-7"
             animate={{
                 rotate: [-maxAngle, maxAngle, -maxAngle],
