@@ -821,12 +821,14 @@ function HangingRopeCapsule({
     swayIndex = 0,
     ropeColor = 'from-amber-400/90 via-amber-300 to-amber-500/90',
     glowColor = 'rgba(251,191,36,0.4)',
+    rowTier = 'upper',
     children,
 }: {
     ropeHeight?: number;
     swayIndex?: number;
     ropeColor?: string;
     glowColor?: string;
+    rowTier?: 'upper' | 'lower';
     children: React.ReactNode;
 }) {
     // Stagger natural sway frequency and angle so each capsule sways naturally in the air
@@ -898,6 +900,7 @@ function HangingRopeCapsule({
         <motion.div
             ref={capsuleRef}
             data-hanging-capsule="true"
+            data-capsule-row={rowTier}
             className="relative flex flex-col items-center shrink-0 group/hanging select-none pt-7"
             animate={
                 isCracked
@@ -3227,7 +3230,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                             >
                                 <div className="inline-flex items-start justify-center min-w-full w-max gap-3.5 px-6 pt-0 pb-1.5 mx-auto" style={{ overflow: 'visible' }}>
                                     {/* 11. 🧠 Learning & Cognition Capsule */}
-                                    <HangingRopeCapsule ropeHeight={35} swayIndex={11} ropeColor="from-emerald-400/90 via-teal-300 to-emerald-500/90" glowColor="rgba(16,185,129,0.45)">
+                                    <HangingRopeCapsule rowTier="lower" ropeHeight={35} swayIndex={11} ropeColor="from-emerald-400/90 via-teal-300 to-emerald-500/90" glowColor="rgba(16,185,129,0.45)">
                                         <button
                                             onClick={() => setShowLearningCapsule(true)}
                                             className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 text-xs font-semibold shadow-[0_0_15px_rgba(16,185,129,0.3)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
@@ -3239,7 +3242,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                                     </HangingRopeCapsule>
 
                                     {/* 12. Code Agent */}
-                                    <HangingRopeCapsule ropeHeight={33} swayIndex={12} ropeColor="from-purple-400/90 via-violet-300 to-purple-500/90" glowColor="rgba(168,85,247,0.4)">
+                                    <HangingRopeCapsule rowTier="lower" ropeHeight={33} swayIndex={12} ropeColor="from-purple-400/90 via-violet-300 to-purple-500/90" glowColor="rgba(168,85,247,0.4)">
                                         <button
                                             onClick={() => setShowCodeAgent(true)}
                                             className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/50 text-purple-300 text-xs font-semibold shadow-[0_0_15px_rgba(168,85,247,0.25)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
@@ -3251,7 +3254,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                                     </HangingRopeCapsule>
 
                                     {/* 13. Chat History */}
-                                    <HangingRopeCapsule ropeHeight={38} swayIndex={13} ropeColor="from-blue-400/90 via-sky-300 to-blue-500/90" glowColor="rgba(59,130,246,0.4)">
+                                    <HangingRopeCapsule rowTier="lower" ropeHeight={38} swayIndex={13} ropeColor="from-blue-400/90 via-sky-300 to-blue-500/90" glowColor="rgba(59,130,246,0.4)">
                                         <button
                                             onClick={() => setShowChatHistory(true)}
                                             className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/50 text-blue-300 text-xs font-semibold shadow-[0_0_15px_rgba(59,130,246,0.25)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
@@ -3263,7 +3266,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                                     </HangingRopeCapsule>
 
                                     {/* 14. Captions */}
-                                    <HangingRopeCapsule ropeHeight={32} swayIndex={14} ropeColor="from-slate-400/90 via-slate-300 to-emerald-400/90" glowColor="rgba(148,163,184,0.4)">
+                                    <HangingRopeCapsule rowTier="lower" ropeHeight={32} swayIndex={14} ropeColor="from-slate-400/90 via-slate-300 to-emerald-400/90" glowColor="rgba(148,163,184,0.4)">
                                         <button
                                             onClick={() => setShowCaptions(!showCaptions)}
                                             className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold shrink-0 whitespace-nowrap transition-all cursor-pointer active:scale-95 ${
@@ -3279,7 +3282,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                                     </HangingRopeCapsule>
 
                                     {/* 15. Settings */}
-                                    <HangingRopeCapsule ropeHeight={36} swayIndex={15} ropeColor="from-slate-400/90 via-zinc-300 to-slate-500/90" glowColor="rgba(148,163,184,0.35)">
+                                    <HangingRopeCapsule rowTier="lower" ropeHeight={36} swayIndex={15} ropeColor="from-slate-400/90 via-zinc-300 to-slate-500/90" glowColor="rgba(148,163,184,0.35)">
                                         <button
                                             onClick={() => setShowSettings(!showSettings)}
                                             className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-slate-800/80 hover:bg-slate-700 border border-slate-600 text-slate-200 text-xs font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
@@ -3291,7 +3294,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                                     </HangingRopeCapsule>
 
                                     {/* 16. Minimize / Close */}
-                                    <HangingRopeCapsule ropeHeight={34} swayIndex={16} ropeColor="from-rose-400/90 via-red-300 to-rose-500/90" glowColor="rgba(244,63,94,0.4)">
+                                    <HangingRopeCapsule rowTier="lower" ropeHeight={34} swayIndex={16} ropeColor="from-rose-400/90 via-red-300 to-rose-500/90" glowColor="rgba(244,63,94,0.4)">
                                         <button
                                             onClick={handleClose}
                                             className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/50 text-rose-300 text-xs font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"

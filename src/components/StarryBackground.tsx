@@ -287,7 +287,8 @@ interface ShootingStar {
   theme: MeteorTheme;
   headRadius: number;
   sparks: Spark[];
-  targetType?: 'floating_capsule' | 'hanging_capsule' | 'pair' | 'ambient';
+  depthLevel?: number; // 1 = Deep Cosmic Plane (flies behind lower row to hit upper row), 0 = Foreground Plane
+  targetType?: 'floating_capsule' | 'hanging_upper' | 'hanging_lower' | 'pair' | 'ambient';
 }
 
 export const StarryBackground: React.FC = () => {
@@ -354,7 +355,7 @@ export const StarryBackground: React.FC = () => {
 
     let themeCounter = 0;
 
-    // Trigger big fireworks burst when meteors collide
+    // Trigger big fireworks burst when meteors collide or hit capsules
     const triggerFirecrackerExplosion = (x: number, y: number, colors: string[]) => {
       playFirecrackerSound();
 
@@ -439,6 +440,7 @@ export const StarryBackground: React.FC = () => {
         theme,
         headRadius: Math.random() * 1.5 + 3.2,
         sparks: [],
+        depthLevel: 0,
         targetType: 'ambient',
       };
     };
@@ -489,6 +491,7 @@ export const StarryBackground: React.FC = () => {
         theme: theme1,
         headRadius: 3.8,
         sparks: [],
+        depthLevel: 0,
         targetType: 'pair',
       });
 
@@ -505,18 +508,18 @@ export const StarryBackground: React.FC = () => {
         theme: theme2,
         headRadius: 3.8,
         sparks: [],
+        depthLevel: 0,
         targetType: 'pair',
       });
     };
 
-    // 🌟 3. Dedicated Floating Cognition Capsule Target Spawner (Flies ALL the way without disappearing!)
+    // 🌟 3. Dedicated Floating Cognition / Training Capsule Target Spawner
     const spawnFloatingCapsuleTargetMeteor = () => {
       try {
         const floatCap = document.querySelector('[data-floating-capsule="true"]');
         if (!floatCap) return;
 
         const rect = floatCap.getBoundingClientRect();
-        // Target exact live center of the floating capsule
         const targetX = rect.left + rect.width / 2;
         const targetY = rect.top + rect.height / 2;
 
@@ -525,15 +528,12 @@ export const StarryBackground: React.FC = () => {
         let startY = 0;
 
         if (spawnSide === 0) {
-          // Bottom edge flying straight up across screen
           startX = Math.random() * (width * 0.6) + width * 0.2;
           startY = height + 35;
         } else if (spawnSide === 1) {
-          // Left edge flying across to upper-right capsule
           startX = -35;
           startY = Math.random() * (height * 0.5) + height * 0.35;
         } else {
-          // Right edge flying in
           startX = width + 35;
           startY = Math.random() * (height * 0.4) + height * 0.4;
         }
@@ -553,23 +553,80 @@ export const StarryBackground: React.FC = () => {
           vy: dy / dist,
           length: Math.random() * 20 + 80,
           speed: Math.random() * 0.6 + 3.4,
-          opacity: 1, // Will stay 1.0 full brightness until impact!
+          opacity: 1,
           active: true,
           theme,
           headRadius: 4.2,
           sparks: [],
+          depthLevel: 0,
           targetType: 'floating_capsule',
         });
       } catch {}
     };
 
-    // 🌟 4. Hanging Header Capsules Target Spawner
-    const spawnHangingCapsuleTargetMeteor = () => {
+    // 🌟 4. 🌌 DEPTH LIGHTING STARS & METEORS — Specifically Targets UPPER ROW Tier 1 Capsules!
+    // Flies through Deep Cosmic Plane (depthLevel: 1) completely bypassing/behind lower row capsules to strike upper row!
+    const spawnUpperRowDepthMeteor = () => {
       try {
-        const hangingCaps = Array.from(document.querySelectorAll('[data-hanging-capsule="true"]'));
-        if (hangingCaps.length === 0) return;
+        const upperCaps = Array.from(document.querySelectorAll('[data-capsule-row="upper"]'));
+        if (upperCaps.length === 0) return;
 
-        const targetEl = hangingCaps[Math.floor(Math.random() * hangingCaps.length)];
+        const targetEl = upperCaps[Math.floor(Math.random() * upperCaps.length)];
+        const rect = targetEl.getBoundingClientRect();
+        const targetX = rect.left + rect.width / 2;
+        const targetY = rect.top + rect.height / 2;
+
+        const spawnSide = Math.floor(Math.random() * 3);
+        let startX = 0;
+        let startY = 0;
+
+        if (spawnSide === 0) {
+          // Bottom border -> Flies straight up through deep cosmic plane
+          startX = Math.random() * (width * 0.8) + width * 0.1;
+          startY = height + 35;
+        } else if (spawnSide === 1) {
+          // Left border
+          startX = -35;
+          startY = Math.random() * (height * 0.5) + height * 0.3;
+        } else {
+          // Right border
+          startX = width + 35;
+          startY = Math.random() * (height * 0.5) + height * 0.3;
+        }
+
+        const dx = targetX - startX;
+        const dy = targetY - startY;
+        const dist = Math.hypot(dx, dy) || 1;
+
+        const theme = METEOR_THEMES[themeCounter % METEOR_THEMES.length];
+        themeCounter++;
+
+        shootingStars.push({
+          id: nextMeteorId++,
+          x: startX,
+          y: startY,
+          vx: dx / dist,
+          vy: dy / dist,
+          length: 90, // Longer, majestic cosmic tail
+          speed: Math.random() * 0.8 + 3.3,
+          opacity: 1,
+          active: true,
+          theme,
+          headRadius: 4.5,
+          sparks: [],
+          depthLevel: 1, // ✨ 3D Deep Space Cosmic Layer: Ignores Lower Row, Hits Upper Row!
+          targetType: 'hanging_upper',
+        });
+      } catch {}
+    };
+
+    // 🌟 5. Lower Row Hanging Capsules Target Spawner (Foreground Layer)
+    const spawnLowerRowMeteor = () => {
+      try {
+        const lowerCaps = Array.from(document.querySelectorAll('[data-capsule-row="lower"]'));
+        if (lowerCaps.length === 0) return;
+
+        const targetEl = lowerCaps[Math.floor(Math.random() * lowerCaps.length)];
         const rect = targetEl.getBoundingClientRect();
         const targetX = rect.left + rect.width / 2;
         const targetY = rect.top + rect.height / 2;
@@ -599,14 +656,15 @@ export const StarryBackground: React.FC = () => {
           y: startY,
           vx: dx / dist,
           vy: dy / dist,
-          length: 70,
+          length: 72,
           speed: Math.random() * 0.6 + 3.0,
           opacity: 1,
           active: true,
           theme,
-          headRadius: 3.4,
+          headRadius: 3.6,
           sparks: [],
-          targetType: 'hanging_capsule',
+          depthLevel: 0,
+          targetType: 'hanging_lower',
         });
       } catch {}
     };
@@ -614,7 +672,8 @@ export const StarryBackground: React.FC = () => {
     let lastMeteorTime = Date.now();
     let lastPairTime = Date.now();
     let lastFloatingTargetTime = Date.now();
-    let lastHangingTargetTime = Date.now();
+    let lastUpperDepthTargetTime = Date.now();
+    let lastLowerTargetTime = Date.now();
 
     const render = () => {
       ctx.clearRect(0, 0, width, height);
@@ -635,16 +694,22 @@ export const StarryBackground: React.FC = () => {
         lastPairTime = now;
       }
 
-      // 3. Dedicated floating cognition capsule targeted meteor: every ~5 seconds
+      // 3. Dedicated floating training capsule targeted meteor: every ~5 seconds
       if (now - lastFloatingTargetTime > 5000) {
         spawnFloatingCapsuleTargetMeteor();
         lastFloatingTargetTime = now;
       }
 
-      // 4. Hanging header capsules targeted meteor: every ~8 seconds
-      if (now - lastHangingTargetTime > 8000) {
-        spawnHangingCapsuleTargetMeteor();
-        lastHangingTargetTime = now;
+      // 4. 🌌 DEPTH LIGHTING METEOR -> Bypasses lower row & cracks UPPER ROW capsules: every ~4.5 seconds
+      if (now - lastUpperDepthTargetTime > 4500) {
+        spawnUpperRowDepthMeteor();
+        lastUpperDepthTargetTime = now;
+      }
+
+      // 5. Lower row hanging capsules targeted meteor: every ~5.5 seconds
+      if (now - lastLowerTargetTime > 5500) {
+        spawnLowerRowMeteor();
+        lastLowerTargetTime = now;
       }
 
       // 1. Draw static & twinkling stars
@@ -767,23 +832,26 @@ export const StarryBackground: React.FC = () => {
         }
       } catch {}
 
-      // ── CHECK 3: Meteor vs Hanging Rope Capsules Collisions ─────────
+      // ── CHECK 3A: Upper Row Hanging Capsules Hit Check (Tier 1) ─────────
+      // Can be hit by Depth Meteors (targetType: 'hanging_upper' / depthLevel: 1) or ambient meteors
       try {
-        const hangingCaps = Array.from(document.querySelectorAll('[data-hanging-capsule="true"]'));
-        for (const hangEl of hangingCaps) {
+        const upperCaps = Array.from(document.querySelectorAll('[data-capsule-row="upper"]'));
+        for (const hangEl of upperCaps) {
           const rect = hangEl.getBoundingClientRect();
           const capCenterX = rect.left + rect.width / 2;
           const capCenterY = rect.top + rect.height / 2;
-          const hitRadius = Math.max(rect.width, rect.height) / 2 + 16;
+          const hitRadius = Math.max(rect.width, rect.height) / 2 + 18;
 
-          const capLeft = rect.left - 20;
-          const capRight = rect.right + 20;
-          const capTop = rect.top - 20;
-          const capBottom = rect.bottom + 20;
+          const capLeft = rect.left - 22;
+          const capRight = rect.right + 22;
+          const capTop = rect.top - 22;
+          const capBottom = rect.bottom + 22;
 
           for (let i = 0; i < shootingStars.length; i++) {
             const meteor = shootingStars[i];
             if (!meteor.active) continue;
+            // Lower row targeted or floating targeted meteors don't hit upper row
+            if (meteor.targetType === 'hanging_lower' || meteor.targetType === 'floating_capsule') continue;
 
             const distToCenter = Math.hypot(meteor.x - capCenterX, meteor.y - capCenterY);
             const isInsideBox =
@@ -795,7 +863,60 @@ export const StarryBackground: React.FC = () => {
             if (distToCenter <= hitRadius || isInsideBox) {
               meteor.active = false;
 
-              // Fire crack event to this specific hanging capsule element!
+              // Fire crack event to this specific Upper Row capsule!
+              hangEl.dispatchEvent(
+                new CustomEvent('capsule_crack_hit', {
+                  bubbles: true,
+                  detail: { x: meteor.x, y: meteor.y, theme: meteor.theme.name },
+                })
+              );
+
+              triggerFirecrackerExplosion(meteor.x, meteor.y, meteor.theme.fireworkColors);
+            }
+          }
+        }
+      } catch {}
+
+      // ── CHECK 3B: Lower Row Hanging Capsules Hit Check (Tier 2) ─────────
+      // ONLY hit by Lower Row targeted meteors (targetType: 'hanging_lower') or foreground ambient meteors
+      // ✨ CRUCIAL: Depth meteors (depthLevel: 1 or targetType: 'hanging_upper') NEVER collide with Lower Row! They fly right behind!
+      try {
+        const lowerCaps = Array.from(document.querySelectorAll('[data-capsule-row="lower"]'));
+        for (const hangEl of lowerCaps) {
+          const rect = hangEl.getBoundingClientRect();
+          const capCenterX = rect.left + rect.width / 2;
+          const capCenterY = rect.top + rect.height / 2;
+          const hitRadius = Math.max(rect.width, rect.height) / 2 + 18;
+
+          const capLeft = rect.left - 22;
+          const capRight = rect.right + 22;
+          const capTop = rect.top - 22;
+          const capBottom = rect.bottom + 22;
+
+          for (let i = 0; i < shootingStars.length; i++) {
+            const meteor = shootingStars[i];
+            if (!meteor.active) continue;
+
+            // ✨ DEPTH PASS-THROUGH: Skip depth meteors targeting upper row! They fly in deep cosmic plane!
+            if (
+              meteor.depthLevel === 1 ||
+              meteor.targetType === 'hanging_upper' ||
+              meteor.targetType === 'floating_capsule'
+            ) {
+              continue;
+            }
+
+            const distToCenter = Math.hypot(meteor.x - capCenterX, meteor.y - capCenterY);
+            const isInsideBox =
+              meteor.x >= capLeft &&
+              meteor.x <= capRight &&
+              meteor.y >= capTop &&
+              meteor.y <= capBottom;
+
+            if (distToCenter <= hitRadius || isInsideBox) {
+              meteor.active = false;
+
+              // Fire crack event to this specific Lower Row capsule!
               hangEl.dispatchEvent(
                 new CustomEvent('capsule_crack_hit', {
                   bubbles: true,
@@ -823,7 +944,8 @@ export const StarryBackground: React.FC = () => {
         // Targeted & Pair meteors maintain 100% full opacity (NEVER vanish mid-flight!)
         if (
           meteor.targetType === 'floating_capsule' ||
-          meteor.targetType === 'hanging_capsule' ||
+          meteor.targetType === 'hanging_upper' ||
+          meteor.targetType === 'hanging_lower' ||
           meteor.targetType === 'pair'
         ) {
           meteor.opacity = 1.0;
@@ -891,7 +1013,7 @@ export const StarryBackground: React.FC = () => {
 
         ctx.save();
         ctx.strokeStyle = tailGrad;
-        ctx.lineWidth = 2.4;
+        ctx.lineWidth = meteor.depthLevel === 1 ? 3.0 : 2.4;
         ctx.lineCap = 'round';
         ctx.beginPath();
         ctx.moveTo(meteor.x, meteor.y);
@@ -900,12 +1022,12 @@ export const StarryBackground: React.FC = () => {
 
         // Inner white-hot laser core of the tail
         const innerTailGrad = ctx.createLinearGradient(meteor.x, meteor.y, tailX, tailY);
-        innerTailGrad.addColorStop(0, `rgba(255, 255, 255, ${meteor.opacity * 0.9})`);
-        innerTailGrad.addColorStop(0.3, `rgba(255, 255, 255, ${meteor.opacity * 0.4})`);
+        innerTailGrad.addColorStop(0, `rgba(255, 255, 255, ${meteor.opacity * 0.95})`);
+        innerTailGrad.addColorStop(0.3, `rgba(255, 255, 255, ${meteor.opacity * 0.45})`);
         innerTailGrad.addColorStop(0.7, 'transparent');
 
         ctx.strokeStyle = innerTailGrad;
-        ctx.lineWidth = 1.0;
+        ctx.lineWidth = 1.1;
         ctx.beginPath();
         ctx.moveTo(meteor.x, meteor.y);
         ctx.lineTo(tailX, tailY);
@@ -917,6 +1039,28 @@ export const StarryBackground: React.FC = () => {
         const headX = meteor.x;
         const headY = meteor.y;
         const baseR = meteor.headRadius;
+
+        // ✨ 3D DEPTH LIGHTING AURA (For deep space cosmic meteors targeting upper row)
+        if (meteor.depthLevel === 1) {
+          const depthAura = ctx.createRadialGradient(headX, headY, 0, headX, headY, baseR * 8.5);
+          depthAura.addColorStop(0, meteor.theme.flameMid);
+          depthAura.addColorStop(0.35, meteor.theme.flameOuter);
+          depthAura.addColorStop(0.75, 'rgba(168, 85, 247, 0.15)');
+          depthAura.addColorStop(1, 'transparent');
+
+          ctx.globalAlpha = Math.max(0, Math.min(1, meteor.opacity * 0.75));
+          ctx.fillStyle = depthAura;
+          ctx.beginPath();
+          ctx.arc(headX, headY, baseR * 8.5, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Depth lens flare ring
+          ctx.strokeStyle = `rgba(255, 255, 255, ${meteor.opacity * 0.5})`;
+          ctx.lineWidth = 0.8;
+          ctx.beginPath();
+          ctx.arc(headX, headY, baseR * 4.2, 0, Math.PI * 2);
+          ctx.stroke();
+        }
 
         const flameCorona = ctx.createRadialGradient(
           headX,
