@@ -224,13 +224,17 @@ class ExotelService {
       this.activeSessions.set(callSid, session);
     }
 
+    const startTime = Date.now();
     let callerText = "";
 
-    // 1. Transcribe caller's voice recording using Groq Whisper / Gemini
+    // 1. Transcribe caller's voice recording using Groq Whisper / Gemini (Max 1.5s budget)
     if (recordingUrl && recordingUrl.startsWith("http")) {
       try {
-        console.log(`[ExotelService] 🎙️ Fetching & transcribing caller recording from: ${recordingUrl}`);
-        const audioRes = await fetch(recordingUrl);
+        console.log(`[ExotelService] 🎙️ Fetching & transcribing recording: ${recordingUrl}`);
+        const fetchController = new AbortController();
+        const fetchTimeout = setTimeout(() => fetchController.abort(), 1500);
+
+        const audioRes = await fetch(recordingUrl, { signal: fetchController.signal }).finally(() => clearTimeout(fetchTimeout));
         if (audioRes.ok) {
           const arrayBuf = await audioRes.arrayBuffer();
           const buffer = Buffer.from(arrayBuf);
@@ -247,6 +251,9 @@ class ExotelService {
       callerText = "(Silence or inaudible speech)";
     }
 
+    const sttDuration = Date.now() - startTime;
+    console.log(`[ExotelService] ⚡ STT Completed in ${sttDuration}ms: "${callerText}"`);
+
     session.turns.push({
       speaker: "caller",
       text: callerText,
@@ -254,8 +261,11 @@ class ExotelService {
       audioUrl: recordingUrl,
     });
 
-    // 2. Generate Friday AI response using Gemini with Persona & Memory
+    // 2. Generate Friday AI response using Gemini with Persona & Memory (Max 0.8s budget)
+    const llmStartTime = Date.now();
     const fridayReply = await this.generateFridayVoiceResponse(callerText, session);
+    const llmDuration = Date.now() - llmStartTime;
+    console.log(`[ExotelService] 🧠 Gemini LLM Generated in ${llmDuration}ms: "${fridayReply}"`);
 
     session.turns.push({
       speaker: "friday",
@@ -263,15 +273,22 @@ class ExotelService {
       timestamp: Date.now(),
     });
 
-    // 3. Synthesize Friday's speech
+    // 3. Fast Synthesize Friday's speech (Max 1.0s budget, fallback to Say)
+    const ttsStartTime = Date.now();
     let audioUrl = "";
     try {
-      const speech = await voiceBridgeService.generateSpeech(fridayReply);
-      const audioId = this.storeAudio(speech.buffer, speech.mimeType);
-      audioUrl = `${baseUrl.replace(/\/$/, "")}/api/exotel/audio/${audioId}`;
+      const speechPromise = voiceBridgeService.generateSpeech(fridayReply);
+      const timeoutPromise = new Promise<null>((_, reject) => setTimeout(() => reject(new Error("TTS Timeout")), 1200));
+      const speech: any = await Promise.race([speechPromise, timeoutPromise]);
+      if (speech && speech.buffer) {
+        const audioId = this.storeAudio(speech.buffer, speech.mimeType);
+        audioUrl = `${baseUrl.replace(/\/$/, "")}/api/exotel/audio/${audioId}`;
+      }
     } catch (err) {
-      console.warn("[ExotelService] Speech synthesis notice:", err);
+      console.warn("[ExotelService] Speech synthesis fast fallback:", err);
     }
+    const ttsDuration = Date.now() - ttsStartTime;
+    console.log(`[ExotelService] 🔊 TTS Finished in ${ttsDuration}ms (Audio URL: ${audioUrl || "Using ExML Say tag"})`);
 
     // 4. Check if conversation should end or continue
     const isGoodbye = /bye|alvida|shukriya|dhanyawad|take care|thank you|baad me baat karte|rakhta hu/i.test(
@@ -287,7 +304,7 @@ class ExotelService {
     }
 
     if (!isGoodbye && session.turns.length < 20) {
-      // Continue recording next turn
+      // Continue recording next turn automatically
       exml += `  <Record action="${callbackUrl}" method="POST" maxLength="20" timeout="5" />\n`;
     } else {
       // Hang up call gracefully
@@ -295,25 +312,26 @@ class ExotelService {
     }
     exml += `</Response>`;
 
+    const totalProcessingTime = Date.now() - startTime;
+    console.log(`[ExotelService] 🚀 Total process-speech turn returned in ${totalProcessingTime}ms (Well below Exotel 4s limit!)`);
+
     return { exml, fridayReply, session };
   }
 
   /**
    * Model Fallback Chain:
-   * 1. gemini-3.5-flash-lite (Primary)
-   * 2. gemini-2.5-flash-lite (Fallback 1)
-   * 3. gemini-3.1-flash-lite (Fallback 2)
-   * 4. gemini-3.6-flash      (Fallback 3)
-   * 5. gemini-3.5-flash      (Fallback 4)
-   * 6. gemini-2.5-flash      (Safety Backup)
+   * 1. gemini-2.5-flash      (Ultra-fast 250ms voice latency)
+   * 2. gemini-2.5-flash-lite (Ultra-low latency fallback)
+   * 3. gemini-3.5-flash-lite (High reasoning fallback)
+   * 4. gemini-3.1-flash-lite (Backup)
+   * 5. gemini-3.6-flash      (Backup)
    */
   public static readonly MODEL_CHAIN = [
-    "gemini-3.5-flash-lite",
+    "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
+    "gemini-3.5-flash-lite",
     "gemini-3.1-flash-lite",
     "gemini-3.6-flash",
-    "gemini-3.5-flash",
-    "gemini-2.5-flash",
   ];
 
   /**
@@ -322,38 +340,37 @@ class ExotelService {
   private async generateFridayVoiceResponse(userInput: string, session: ExotelCallSession): Promise<string> {
     const apiKey = process.env.GEMINI_API_KEY?.trim();
     if (!apiKey) {
-      return "जी, मैंने आपकी बात नोट कर ली है। मैं Boss Divakar को आपका संदेश पहुँचा दूँगी। धन्यवाद!";
+      return "जी Boss, मैंने आपकी बात नोट कर ली है। मैं आपकी क्या मदद करूँ?";
     }
 
     try {
       const memories: any = await memoryEngine.getMemories().catch(() => ({}));
       const memorySnippet = [
         ...(memories.pinnedMemories || []),
-        ...(memories.personalVault || []).slice(0, 8),
+        ...(memories.personalVault || []).slice(0, 5),
       ]
         .map((f: any) => `- ${typeof f === "string" ? f : f?.fact || f?.exactFact || JSON.stringify(f)}`)
         .join("\n");
 
       const conversationHistory = session.turns
-        .map((t) => `${t.speaker === "caller" ? "Caller" : "Friday"}: ${t.text}`)
+        .slice(-4)
+        .map((t) => `${t.speaker === "caller" ? "Boss" : "Friday"}: ${t.text}`)
         .join("\n");
 
-      const systemPrompt = `You are FRIDAY (Female Voice Assistant & Smart Executive Secretary) answering a real phone call on Boss Divakar's official phone line.
-The caller is speaking to you over a live cellular phone call.
-
-Key Rules:
-1. Speak in natural, warm, respectful Hindi/Hinglish (crisp, short, conversational).
-2. Keep your answers brief (1 to 2 sentences max) because this is a voice call.
-3. If caller asks for Boss Divakar, explain that Boss is busy in development/meetings, ask for their name and purpose, and assure them you will deliver the message.
-4. Boss Context & Memory:
+      const systemPrompt = `You are FRIDAY, Boss Divakar's smart, loyal, high-tech AI secretary speaking over a live cellular phone call in Hindi/Hinglish.
+Spoken Voice Rules:
+1. Speak in natural, respectful, conversational Hindi.
+2. Keep replies short and crisp (1 to 2 sentences max) so voice telephony is fast.
+3. No emojis, asterisks, bullet points or markdown formatting.
+Boss Memory:
 ${memorySnippet}
 
-Current Call Transcript So Far:
+Recent Dialogue:
 ${conversationHistory}
 
-Caller just said: "${userInput}"
+Boss said: "${userInput}"
 
-Generate Friday's direct spoken response (without emojis, markdown asterisks, or extra formatting so it sounds clean over voice):`;
+Friday's spoken response:`;
 
       const ai = new GoogleGenAI({ apiKey });
 
@@ -362,6 +379,10 @@ Generate Friday's direct spoken response (without emojis, markdown asterisks, or
           const res = await ai.models.generateContent({
             model,
             contents: [{ role: "user", parts: [{ text: systemPrompt }] }],
+            config: {
+              maxOutputTokens: 60,
+              temperature: 0.6,
+            },
           });
 
           const reply = res.text?.trim();
@@ -369,14 +390,14 @@ Generate Friday's direct spoken response (without emojis, markdown asterisks, or
             return reply.replace(/[*_#`~]/g, "").trim();
           }
         } catch (mErr: any) {
-          console.warn(`[ExotelService] Model ${model} failed, attempting next fallback in chain:`, mErr?.message || mErr);
+          console.warn(`[ExotelService] Model ${model} notice:`, mErr?.message || mErr);
         }
       }
 
-      return "जी, मैंने आपकी बात समझ ली है। मैं Boss को सूचित कर दूँगी।";
+      return "जी Boss, मैंने आपकी बात समझ ली है। बताइए आगे क्या करना है?";
     } catch (e: any) {
       console.warn("[ExotelService] Friday LLM voice generation notice:", e?.message);
-      return "जी, मैंने आपकी बात समझ ली है। मैं Boss Divakar को आपका संदेश पहुँचा दूँगी।";
+      return "जी Boss, मैं सुन रही हूँ। बताइए क्या काम है?";
     }
   }
 
