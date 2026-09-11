@@ -388,39 +388,33 @@ export const StarryBackground: React.FC = () => {
       }
     };
 
-    // 🌟 1. OMNI-DIRECTIONAL 360° Shooting Star Spawner (Comes from Top, Bottom, Left, Right & All Diagonals!)
-    const createOmniShootingStar = (): ShootingStar => {
-      // Pick random spawn border: 0 = Top, 1 = Bottom, 2 = Left, 3 = Right
-      const spawnSide = Math.floor(Math.random() * 4);
+    // 🌟 1. Shooting Star Spawner — STRICTLY FROM SIDES (LEFT/RIGHT) & BOTTOM ONLY (No top edge spawns!)
+    const createSideOrBottomShootingStar = (): ShootingStar => {
+      // 0 = Bottom Edge, 1 = Left Edge, 2 = Right Edge
+      const spawnSide = Math.floor(Math.random() * 3);
       let startX = 0;
       let startY = 0;
       let targetX = 0;
       let targetY = 0;
 
       if (spawnSide === 0) {
-        // From TOP edge -> travelling downwards
-        startX = Math.random() * width;
-        startY = -30;
-        targetX = Math.random() * width;
-        targetY = height + 30;
-      } else if (spawnSide === 1) {
-        // From BOTTOM edge -> travelling upwards
+        // From BOTTOM edge -> travelling upwards across the night sky
         startX = Math.random() * width;
         startY = height + 30;
         targetX = Math.random() * width;
-        targetY = -30;
-      } else if (spawnSide === 2) {
-        // From LEFT edge -> travelling rightwards
+        targetY = Math.random() * (height * 0.5) + 50;
+      } else if (spawnSide === 1) {
+        // From LEFT edge -> travelling rightwards and slightly up/across
         startX = -30;
-        startY = Math.random() * height;
+        startY = Math.random() * (height * 0.7) + height * 0.25;
         targetX = width + 30;
-        targetY = Math.random() * height;
+        targetY = Math.random() * (height * 0.6);
       } else {
-        // From RIGHT edge -> travelling leftwards
+        // From RIGHT edge -> travelling leftwards and slightly up/across
         startX = width + 30;
-        startY = Math.random() * height;
+        startY = Math.random() * (height * 0.7) + height * 0.25;
         targetX = -30;
-        targetY = Math.random() * height;
+        targetY = Math.random() * (height * 0.6);
       }
 
       const dx = targetX - startX;
@@ -439,7 +433,7 @@ export const StarryBackground: React.FC = () => {
         vx,
         vy,
         length: Math.random() * 65 + 75,
-        speed: Math.random() * 1.4 + 2.6, // Smooth slower speed
+        speed: Math.random() * 1.4 + 2.6, // Slower visible speed
         opacity: 1,
         active: true,
         theme,
@@ -448,38 +442,32 @@ export const StarryBackground: React.FC = () => {
       };
     };
 
-    // 🌟 2. OMNI-DIRECTIONAL Mid-Air Collision Pair Generator (Horizontal, Vertical & Diagonal Intercepts!)
+    // 🌟 2. Mid-Air Collision Pair (Spawns from Left vs Right or Bottom-Upwards into the sky!)
     const spawnCollisionPair = () => {
       const meetX = Math.random() * (width * 0.6) + width * 0.2;
-      const meetY = Math.random() * (height * 0.5) + height * 0.15;
-      const travelDist = Math.random() * 200 + 260;
+      const meetY = Math.random() * (height * 0.4) + height * 0.3; // Safely below top header
+      const travelDist = Math.random() * 220 + 260;
       const baseSpeed = Math.random() * 0.8 + 3.0;
 
-      // Pattern: 0 = Horizontal head-on (Left vs Right), 1 = Vertical head-on (Top vs Bottom), 2 = Diagonal Cross
-      const pattern = Math.floor(Math.random() * 3);
+      // Pattern: 0 = Left vs Right, 1 = Bottom-Left vs Bottom-Right
+      const pattern = Math.random() > 0.5 ? 0 : 1;
       let s1X = 0;
       let s1Y = 0;
       let s2X = 0;
       let s2Y = 0;
 
       if (pattern === 0) {
-        // Left vs Right
+        // Left vs Right sweeping across
         s1X = meetX - travelDist;
-        s1Y = meetY + (Math.random() - 0.5) * 40;
+        s1Y = meetY + (Math.random() - 0.5) * 60;
         s2X = meetX + travelDist;
-        s2Y = meetY + (Math.random() - 0.5) * 40;
-      } else if (pattern === 1) {
-        // Top vs Bottom
-        s1X = meetX + (Math.random() - 0.5) * 40;
-        s1Y = meetY - travelDist;
-        s2X = meetX + (Math.random() - 0.5) * 40;
-        s2Y = meetY + travelDist;
+        s2Y = meetY + (Math.random() - 0.5) * 60;
       } else {
-        // Diagonal cross
-        s1X = meetX - travelDist * 0.7;
-        s1Y = meetY - travelDist * 0.7;
-        s2X = meetX + travelDist * 0.7;
-        s2Y = meetY - travelDist * 0.7;
+        // From lower screen flying upwards to meet
+        s1X = meetX - travelDist * 0.8;
+        s1Y = meetY + travelDist * 0.7;
+        s2X = meetX + travelDist * 0.8;
+        s2Y = meetY + travelDist * 0.7;
       }
 
       const d1 = Math.hypot(meetX - s1X, meetY - s1Y) || 1;
@@ -521,7 +509,7 @@ export const StarryBackground: React.FC = () => {
       });
     };
 
-    // 🌟 3. OMNI-DIRECTIONAL Capsule Target Spawner (Hits from Above, Below, Left, or Right!)
+    // 🌟 3. Capsule Target Spawner (Shoots UPWARDS or SIDEWAYS from distance across the sky towards capsules!)
     const spawnCapsuleTargetMeteor = () => {
       try {
         const capsules = Array.from(
@@ -534,27 +522,24 @@ export const StarryBackground: React.FC = () => {
         const targetX = rect.left + rect.width / 2;
         const targetY = rect.top + rect.height / 2;
 
-        const side = Math.floor(Math.random() * 4);
-        const travelDist = Math.random() * 180 + 240;
+        // Spawn only from Bottom, Left-Bottom, or Right-Bottom so it travels long and visibly!
+        const spawnType = Math.floor(Math.random() * 3);
+        const travelDist = Math.random() * 260 + 340;
         let startX = targetX;
         let startY = targetY;
 
-        if (side === 0) {
-          // Strike from TOP
-          startX = targetX + (Math.random() - 0.5) * 120;
-          startY = targetY - travelDist;
-        } else if (side === 1) {
-          // Strike from BOTTOM
-          startX = targetX + (Math.random() - 0.5) * 120;
+        if (spawnType === 0) {
+          // Shoot UPWARDS from bottom
+          startX = targetX + (Math.random() - 0.5) * 160;
           startY = targetY + travelDist;
-        } else if (side === 2) {
-          // Strike from LEFT
-          startX = targetX - travelDist;
-          startY = targetY + (Math.random() - 0.5) * 80;
+        } else if (spawnType === 1) {
+          // Shoot from bottom-LEFT sweeping upwards towards capsule
+          startX = targetX - travelDist * 0.85;
+          startY = targetY + travelDist * 0.65;
         } else {
-          // Strike from RIGHT
-          startX = targetX + travelDist;
-          startY = targetY + (Math.random() - 0.5) * 80;
+          // Shoot from bottom-RIGHT sweeping upwards towards capsule
+          startX = targetX + travelDist * 0.85;
+          startY = targetY + travelDist * 0.65;
         }
 
         const dx = targetX - startX;
@@ -570,7 +555,7 @@ export const StarryBackground: React.FC = () => {
           y: startY,
           vx: dx / dist,
           vy: dy / dist,
-          length: 80,
+          length: 85,
           speed: Math.random() * 0.8 + 2.8,
           opacity: 1,
           active: true,
@@ -582,7 +567,7 @@ export const StarryBackground: React.FC = () => {
     };
 
     let lastMeteorTime = Date.now();
-    let nextMeteorInterval = 800;
+    let nextMeteorInterval = 850;
     let lastPairTime = Date.now();
     let lastCapsuleTargetTime = Date.now();
 
@@ -591,25 +576,25 @@ export const StarryBackground: React.FC = () => {
 
       const now = Date.now();
 
-      // Routine 360-degree omni-directional meteors
+      // Routine side and bottom meteors
       if (now - lastMeteorTime > nextMeteorInterval) {
         if (shootingStars.length < 9) {
-          shootingStars.push(createOmniShootingStar());
+          shootingStars.push(createSideOrBottomShootingStar());
         }
         lastMeteorTime = now;
         nextMeteorInterval = Math.random() * 800 + 600;
       }
 
-      // Mid-air collision pairs every ~2.8 seconds
-      if (now - lastPairTime > 2800) {
+      // Mid-air collision pairs every ~3 seconds
+      if (now - lastPairTime > 3000) {
         if (shootingStars.length < 8) {
           spawnCollisionPair();
         }
         lastPairTime = now;
       }
 
-      // Targeted capsule strikes every ~3.5 seconds
-      if (now - lastCapsuleTargetTime > 3500) {
+      // Long-distance capsule targeted meteors every ~4 seconds
+      if (now - lastCapsuleTargetTime > 4000) {
         spawnCapsuleTargetMeteor();
         lastCapsuleTargetTime = now;
       }
