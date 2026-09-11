@@ -2872,15 +2872,15 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
             <StarryBackground />
 
             <div className="w-full h-full flex flex-col flex-1 overflow-hidden relative z-10">
-                {/* ── Top Dashboard Header & Horizontally Slideable Capsule Buttons ── */}
-                <div className="w-full flex flex-col gap-1.5 mb-2 pt-0.5 shrink-0 overflow-x-hidden" style={{ overflowY: 'visible' }}>
-                    <div className="flex items-center justify-between px-1">
-                        <h1 className="text-base sm:text-lg font-bold flex items-center gap-2">
-                            <span>🤖</span>
-                            <span>FRIDAY</span>
-                            <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 font-mono font-medium border border-blue-500/40">Live Agent</span>
+                {/* ── Top Dashboard Header (100% Fully Transparent so all hanging ropes behind it are visible) ── */}
+                <div className="w-full flex flex-col gap-1.5 mb-2 pt-0.5 shrink-0 bg-transparent" style={{ overflowY: 'visible' }}>
+                    <div className="flex items-center justify-between px-1 bg-transparent pointer-events-auto">
+                        <h1 className="text-base sm:text-lg font-bold flex items-center gap-2 drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]">
+                            <span className="filter drop-shadow-[0_0_8px_rgba(59,130,246,0.6)]">🤖</span>
+                            <span className="bg-gradient-to-r from-white via-slate-100 to-slate-300 bg-clip-text text-transparent">FRIDAY</span>
+                            <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-300 font-mono font-medium border border-blue-500/30 shadow-[0_0_12px_rgba(59,130,246,0.2)]">Live Agent</span>
                             {isCallMode && (
-                                <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-mono border border-cyan-500/40 flex items-center gap-1.5 shadow-[0_0_12px_rgba(6,182,212,0.3)] animate-pulse">
+                                <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 font-mono border border-cyan-500/40 flex items-center gap-1.5 shadow-[0_0_12px_rgba(6,182,212,0.3)] animate-pulse">
                                     <span>📞</span>
                                     <span>{callSession?.isOwner ? 'Boss Call' : 'Live Call'}</span>
                                     {callRemainingSecs !== null && (
@@ -2891,8 +2891,8 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                                 </span>
                             )}
                         </h1>
-                        <span className="text-[11px] text-slate-400 font-mono flex items-center gap-1.5 bg-slate-900/60 px-2.5 py-1 rounded-full border border-white/5">
-                            <span className={`w-2 h-2 rounded-full ${isRecording ? 'bg-red-500 animate-ping' : 'bg-emerald-400'}`} />
+                        <span className="text-[11px] text-slate-300 font-mono flex items-center gap-1.5 bg-slate-900/30 px-2.5 py-1 rounded-full border border-white/10 shadow-[0_0_15px_rgba(0,0,0,0.5)]">
+                            <span className={`w-2 h-2 rounded-full ${isRecording ? 'bg-red-500 animate-ping' : 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]'}`} />
                             <span>{isRecording ? 'Listening...' : 'Ready'}</span>
                         </span>
                     </div>
