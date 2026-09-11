@@ -190,8 +190,8 @@ class ExotelService {
     } else {
       exml += `  <Say voice="female">${greetingText}</Say>\n`;
     }
-    // Record up to 10 seconds of caller speech, finish on silence or timeout
-    exml += `  <Record action="${callbackUrl}" method="POST" maxLength="12" timeout="3" playBeep="false" finishOnKey="#" />\n`;
+    // Record up to 15 seconds of caller speech
+    exml += `  <Record action="${callbackUrl}" method="POST" maxLength="15" timeout="4" />\n`;
     exml += `</Response>`;
 
     return { exml, session };
@@ -287,7 +287,7 @@ class ExotelService {
 
     if (!isGoodbye && session.turns.length < 20) {
       // Continue recording next turn
-      exml += `  <Record action="${callbackUrl}" method="POST" maxLength="15" timeout="3" playBeep="false" finishOnKey="#" />\n`;
+      exml += `  <Record action="${callbackUrl}" method="POST" maxLength="15" timeout="4" />\n`;
     } else {
       // Hang up call gracefully
       exml += `  <Hangup />\n`;

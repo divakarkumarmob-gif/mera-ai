@@ -60,6 +60,7 @@ async function startServer() {
   const app = express();
   app.set("trust proxy", 1);
   app.use(express.json({ limit: "10mb" }));
+  app.use(express.urlencoded({ extended: true, limit: "10mb" }));
   app.use(cors());
 
   // ── Industrial-Grade Server Firewall & Attack Sentinel (DPI + Anti-Exploit) ──
@@ -91,6 +92,7 @@ async function startServer() {
       reqPath.startsWith("/api/instagram/webhook") ||
       reqPath.startsWith("/api/whatsapp/cloud/webhook") ||
       reqPath.startsWith("/api/telegram/webhook") ||
+      reqPath.startsWith("/api/exotel/") ||
       reqPath === "/health" ||
       !reqPath.startsWith("/api/")
     ) {

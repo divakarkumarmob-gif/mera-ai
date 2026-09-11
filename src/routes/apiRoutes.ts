@@ -3224,7 +3224,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     } catch (e: any) {
       console.error("[ExotelRoute] Incoming call webhook error:", e);
       res.set("Content-Type", "text/xml");
-      res.send(`<?xml version="1.0" encoding="UTF-8"?><Response><Say language="hi-IN">नमस्ते! मैं शुक्रवार हूँ, कुछ ही समय में आपसे संपर्क करूँगी।</Say><Hangup/></Response>`);
+      res.send(`<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="female">नमस्ते! मैं Friday हूँ, कुछ ही समय में आपसे संपर्क करूँगी।</Say><Hangup/></Response>`);
     }
   });
 
@@ -3244,7 +3244,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     } catch (e: any) {
       console.error("[ExotelRoute] Process speech webhook error:", e);
       res.set("Content-Type", "text/xml");
-      res.send(`<?xml version="1.0" encoding="UTF-8"?><Response><Say language="hi-IN">धन्यवाद, मैंने आपकी बात नोट कर ली है।</Say><Hangup/></Response>`);
+      res.send(`<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="female">धन्यवाद, मैंने आपकी बात नोट कर ली है।</Say><Hangup/></Response>`);
     }
   });
 
