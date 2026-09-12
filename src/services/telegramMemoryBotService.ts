@@ -52,7 +52,12 @@ class TelegramMemoryBotService {
 
       this.registerHandlers();
       this.isInitialized = true;
-      console.log("[TelegramMemoryBot] 🧠 Telegram Memory Vault Bot initialized & polling!");
+
+      this.bot.getMe().then((me: any) => {
+        console.log(`[TelegramMemoryBot] 🧠 Memory Vault Bot connected as @${me?.username || "fridaymemory_bot"} (ID: ${me?.id})`);
+      }).catch(() => {
+        console.log("[TelegramMemoryBot] 🧠 Telegram Memory Vault Bot initialized & polling!");
+      });
 
       // If bossChatId is known, auto-hydrate facts from Telegram Cloud
       if (this.bossChatId) {
