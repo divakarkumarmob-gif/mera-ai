@@ -447,12 +447,7 @@ Output ONLY the raw descriptive prompt text.`;
           "gemini-3.1-flash-lite",
           "gemini-3.5-flash-lite",
           "gemini-3.5-flash",
-          "gemini-3.1-flash-lite",
           "gemini-3.6-flash",
-          "gemini-3.5-flash",
-          "gemini-3.5-flash",
-          "gemini-3.5-flash-lite",
-          "gemini-3.1-flash-lite",
         ];
 
         for (const model of VISION_EDIT_MODELS) {
@@ -617,12 +612,7 @@ Output ONLY the raw descriptive prompt string without quotes.`;
           "gemini-3.1-flash-lite",
           "gemini-3.5-flash-lite",
           "gemini-3.5-flash",
-          "gemini-3.1-flash-lite",
           "gemini-3.6-flash",
-          "gemini-3.5-flash",
-          "gemini-3.5-flash",
-          "gemini-3.5-flash-lite",
-          "gemini-3.1-flash-lite",
         ];
 
         for (const model of FUSION_MODELS) {

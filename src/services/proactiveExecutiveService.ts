@@ -333,7 +333,12 @@ Format with crisp emoji bullet points, action items, and a powerful punchy daily
 
       // 2. Send via WhatsApp to Boss
       const { whatsappBotService } = await import("./whatsappBotService");
-      const bossWaPhone = process.env.BOSS_WHATSAPP_PHONE || process.env.WHATSAPP_OWNER_NUMBER || "me";
+      const bossWaPhone =
+        process.env.BOSS_WHATSAPP_PHONE ||
+        process.env.OWNER_WHATSAPP_NUMBER ||
+        process.env.WHATSAPP_OWNER_NUMBER ||
+        process.env.WHATSAPP_BOSS_PHONE ||
+        "me";
       if (bossWaPhone && bossWaPhone !== "me") {
         await whatsappBotService.sendMessage(bossWaPhone, text);
       }

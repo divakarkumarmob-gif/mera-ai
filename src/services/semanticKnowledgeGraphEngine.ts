@@ -1,4 +1,4 @@
-import { getFirestore } from "firebase-admin/firestore";
+import { db } from "./firebaseAdmin";
 
 export interface GraphNode {
   id: string;
@@ -27,7 +27,7 @@ class SemanticKnowledgeGraphEngine {
   private loadPromise: Promise<void> | null = null;
 
   private getDb() {
-    return getFirestore();
+    return db;
   }
 
   public async init(): Promise<void> {

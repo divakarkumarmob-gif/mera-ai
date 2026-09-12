@@ -56,7 +56,13 @@ class ExotelService {
     virtualNumber: process.env.EXOTEL_VIRTUAL_NUMBER || "",
     appId: process.env.EXOTEL_APP_ID || "",
     isLive: false,
-    bossNotificationNumber: process.env.BOSS_WHATSAPP_NUMBER || "",
+    bossNotificationNumber:
+      process.env.BOSS_WHATSAPP_NUMBER ||
+      process.env.OWNER_WHATSAPP_NUMBER ||
+      process.env.BOSS_WHATSAPP_PHONE ||
+      process.env.WHATSAPP_OWNER_NUMBER ||
+      process.env.WHATSAPP_BOSS_PHONE ||
+      "",
   };
 
   private activeSessions = new Map<string, ExotelCallSession>();
@@ -460,7 +466,13 @@ Friday's spoken response:`;
 
     // 1. Send via WhatsApp to Boss
     try {
-      const bossNum = this.config.bossNotificationNumber || process.env.BOSS_WHATSAPP_NUMBER || "919315570187";
+      const bossNum =
+        this.config.bossNotificationNumber ||
+        process.env.BOSS_WHATSAPP_NUMBER ||
+        process.env.OWNER_WHATSAPP_NUMBER ||
+        process.env.BOSS_WHATSAPP_PHONE ||
+        process.env.WHATSAPP_OWNER_NUMBER ||
+        process.env.WHATSAPP_BOSS_PHONE;
       if (bossNum) {
         await sendWhatsAppUnified(bossNum, alertMessage);
         console.log(`[ExotelService] 📲 Sent post-call summary alert to Boss on WhatsApp (${bossNum})`);
@@ -471,7 +483,12 @@ Friday's spoken response:`;
 
     // 2. Send via Telegram to Boss
     try {
-      const bossTelegramId = Number(process.env.BOSS_TELEGRAM_CHAT_ID) || 0;
+      const rawTgId =
+        process.env.BOSS_TELEGRAM_CHAT_ID ||
+        process.env.TELEGRAM_OWNER_CHAT_ID ||
+        process.env.TELEGRAM_BOSS_CHAT_ID ||
+        process.env.OWNER_TELEGRAM_CHAT_ID;
+      const bossTelegramId = Number(rawTgId) || 0;
       if (bossTelegramId) {
         await telegramBotService.sendMessage(bossTelegramId, alertMessage);
         console.log(`[ExotelService] ✈️ Sent post-call summary alert to Boss on Telegram`);

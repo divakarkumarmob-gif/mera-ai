@@ -14,7 +14,7 @@ import { githubService } from "./githubService";
 // Firestore layout: codeAgentRequests/{id}
 // ---------------------------------------------------------------------------
 
-const MODEL_CHAIN = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite"];
+const MODEL_CHAIN = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.6-flash", "gemini-3.5-flash"];
 
 // Helper: extract a readable error message from anything the SDK throws
 function extractError(e: any): string {
@@ -390,7 +390,11 @@ Rules:
   }
 
   private async notifyOwner(id: string, plan: CodeAgentPlan, instruction: string) {
-    const ownerPhone = process.env.OWNER_WHATSAPP_NUMBER;
+    const ownerPhone =
+      process.env.OWNER_WHATSAPP_NUMBER ||
+      process.env.BOSS_WHATSAPP_PHONE ||
+      process.env.WHATSAPP_OWNER_NUMBER ||
+      process.env.WHATSAPP_BOSS_PHONE;
     if (!ownerPhone) return;
     const fileLines = plan.files.map((f) => `• [${f.action}] ${f.path} — ${f.changeSummary}`).join("\n");
     const text =
@@ -775,7 +779,11 @@ Return ONLY the complete updated source code.`;
       { merge: true }
     );
 
-    const ownerPhone = process.env.OWNER_WHATSAPP_NUMBER;
+    const ownerPhone =
+      process.env.OWNER_WHATSAPP_NUMBER ||
+      process.env.BOSS_WHATSAPP_PHONE ||
+      process.env.WHATSAPP_OWNER_NUMBER ||
+      process.env.WHATSAPP_BOSS_PHONE;
     if (ownerPhone) {
       const { sendWhatsAppUnified } = await import("./whatsappService");
       await sendWhatsAppUnified(ownerPhone, `✅ Changes ready for review:\n${prUrl}\n\nClick "Push to main origin" in Dashboard to commit directly.`)
@@ -991,7 +999,11 @@ Provide a concise, direct answer in friendly conversational Hindi/Hinglish:
       { merge: true }
     ).catch(() => {});
 
-    const ownerPhone = process.env.OWNER_WHATSAPP_NUMBER;
+    const ownerPhone =
+      process.env.OWNER_WHATSAPP_NUMBER ||
+      process.env.BOSS_WHATSAPP_PHONE ||
+      process.env.WHATSAPP_OWNER_NUMBER ||
+      process.env.WHATSAPP_BOSS_PHONE;
     if (ownerPhone) {
       const { sendWhatsAppUnified } = await import("./whatsappService");
       await sendWhatsAppUnified(ownerPhone, `🚀 Successfully committed changes directly to origin/${baseBranch}:\n${commitUrl}`)

@@ -190,9 +190,17 @@ async function startServer() {
       if (client.readyState === client.OPEN) client.send(payload);
     }
 
-    const ownerPhone = (process.env.OWNER_WHATSAPP_NUMBER || "").replace(/\D/g, "");
+    const ownerPhones = [
+      process.env.OWNER_WHATSAPP_NUMBER,
+      process.env.BOSS_WHATSAPP_PHONE,
+      process.env.BOSS_WHATSAPP_NUMBER,
+      process.env.WHATSAPP_OWNER_NUMBER,
+      process.env.WHATSAPP_BOSS_PHONE,
+    ].filter(Boolean).map((p) => (p || "").replace(/\D/g, "")).filter(Boolean);
+
     const senderDigits = (msg.senderPhone || "").replace(/\D/g, "");
-    if (!msg.isGroup && ownerPhone && senderDigits === ownerPhone && !msg.consumedByDailyUpdate) {
+    const isOwner = ownerPhones.some((p) => p && (senderDigits === p || senderDigits.endsWith(p) || p.endsWith(senderDigits)));
+    if (!msg.isGroup && isOwner && !msg.consumedByDailyUpdate) {
       codeAgentService.handleWhatsAppApprovalReply(msg.text).catch((e) =>
         console.error("[Server] Failed to handle WhatsApp approval reply:", e)
       );
@@ -218,9 +226,17 @@ async function startServer() {
     for (const client of connectedClients) {
       if (client.readyState === client.OPEN) client.send(payload);
     }
-    const ownerPhone = (process.env.OWNER_WHATSAPP_NUMBER || "").replace(/\D/g, "");
+    const ownerPhones = [
+      process.env.OWNER_WHATSAPP_NUMBER,
+      process.env.BOSS_WHATSAPP_PHONE,
+      process.env.BOSS_WHATSAPP_NUMBER,
+      process.env.WHATSAPP_OWNER_NUMBER,
+      process.env.WHATSAPP_BOSS_PHONE,
+    ].filter(Boolean).map((p) => (p || "").replace(/\D/g, "")).filter(Boolean);
+
     const senderDigits = (msg.from || "").replace(/\D/g, "");
-    if (ownerPhone && senderDigits === ownerPhone) {
+    const isOwner = ownerPhones.some((p) => p && (senderDigits === p || senderDigits.endsWith(p) || p.endsWith(senderDigits)));
+    if (isOwner) {
       voiceBiometricsService.handleWhatsAppVoicePinMessage(msg.text, msg.name, "whatsapp_cloud")
         .then(async (pinRes) => {
           if (pinRes.handled && pinRes.replyText) {

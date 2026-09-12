@@ -45,12 +45,10 @@ class WhatsAppFeatureEngine {
   private activeCallSessions = new Map<string, LiveCallSession>();
 
   private static readonly MODEL_CHAIN = [
-    "gemini-3.6-flash",
-    "gemini-3.5-flash",
     "gemini-3.1-flash-lite",
     "gemini-3.5-flash-lite",
     "gemini-3.5-flash",
-    "gemini-3.1-flash-lite",
+    "gemini-3.6-flash",
   ];
 
   private async callGeminiWithFallback(prompt: string, timeoutMs = 9000): Promise<string | null> {

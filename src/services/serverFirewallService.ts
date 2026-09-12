@@ -411,7 +411,11 @@ class ServerFirewallService {
   private async dispatchTelegramAlert(message: string): Promise<void> {
     try {
       const token = process.env.TELEGRAM_SECURITY_BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN;
-      const chatId = process.env.BOSS_TELEGRAM_CHAT_ID || process.env.TELEGRAM_OWNER_CHAT_ID;
+      const chatId =
+        process.env.BOSS_TELEGRAM_CHAT_ID ||
+        process.env.TELEGRAM_OWNER_CHAT_ID ||
+        process.env.TELEGRAM_BOSS_CHAT_ID ||
+        process.env.OWNER_TELEGRAM_CHAT_ID;
       if (token && chatId) {
         await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
           method: "POST",

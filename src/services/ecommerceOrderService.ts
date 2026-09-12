@@ -72,13 +72,22 @@ class EcommerceOrderService {
   private getOwnerPhone(): string {
     return (
       process.env.OWNER_WHATSAPP_NUMBER ||
+      process.env.BOSS_WHATSAPP_PHONE ||
       process.env.BOSS_WHATSAPP_NUMBER ||
+      process.env.WHATSAPP_OWNER_NUMBER ||
+      process.env.WHATSAPP_BOSS_PHONE ||
       "919999999999"
     ).trim();
   }
 
   private getBossTelegramChatId(): number | null {
-    const raw = (process.env.BOSS_TELEGRAM_CHAT_ID || process.env.TELEGRAM_OWNER_CHAT_ID || "").trim();
+    const raw = (
+      process.env.BOSS_TELEGRAM_CHAT_ID ||
+      process.env.TELEGRAM_OWNER_CHAT_ID ||
+      process.env.TELEGRAM_BOSS_CHAT_ID ||
+      process.env.OWNER_TELEGRAM_CHAT_ID ||
+      ""
+    ).trim();
     if (raw) {
       const parsed = Number(raw);
       return isNaN(parsed) ? null : parsed;

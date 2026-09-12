@@ -45,7 +45,14 @@ class TelegramSecurityBotService {
   }
 
   private getBossChatId(): number | null {
-    const raw = (process.env.BOSS_TELEGRAM_CHAT_ID || process.env.TELEGRAM_OWNER_CHAT_ID || "").trim();
+    const raw = (
+      process.env.BOSS_TELEGRAM_CHAT_ID ||
+      process.env.TELEGRAM_OWNER_CHAT_ID ||
+      process.env.TELEGRAM_BOSS_CHAT_ID ||
+      process.env.OWNER_TELEGRAM_CHAT_ID ||
+      process.env.TELEGRAM_OWNER_ID ||
+      ""
+    ).trim();
     if (raw) {
       const parsed = Number(raw);
       return isNaN(parsed) ? null : parsed;

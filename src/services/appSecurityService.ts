@@ -504,7 +504,13 @@ ya
 
     // 1. Send to WhatsApp Owner
     try {
-      const ownerPhone = (process.env.OWNER_WHATSAPP_NUMBER || "").replace(/\D/g, "");
+      const ownerPhone = (
+        process.env.OWNER_WHATSAPP_NUMBER ||
+        process.env.BOSS_WHATSAPP_PHONE ||
+        process.env.WHATSAPP_OWNER_NUMBER ||
+        process.env.WHATSAPP_BOSS_PHONE ||
+        ""
+      ).replace(/\D/g, "");
       if (ownerPhone) {
         const { whatsappBotService } = await import("./whatsappBotService");
         if (whatsappBotService.getStatus().isConnected) {

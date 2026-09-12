@@ -1,4 +1,4 @@
-import { getFirestore } from "firebase-admin/firestore";
+import { db } from "./firebaseAdmin";
 import { GoogleGenAI } from "@google/genai";
 
 export interface RlhfFeedbackEntry {
@@ -42,7 +42,7 @@ class AiAdvancedLearningService {
   private loadPromise: Promise<void> | null = null;
 
   private getDb() {
-    return getFirestore();
+    return db;
   }
 
   public async init(): Promise<void> {

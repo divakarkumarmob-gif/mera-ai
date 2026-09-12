@@ -1,4 +1,4 @@
-import { getFirestore } from "firebase-admin/firestore";
+import { db } from "./firebaseAdmin";
 import { GoogleGenAI } from "@google/genai";
 import { sendWhatsAppUnified } from "./whatsappService";
 
@@ -55,7 +55,7 @@ class FrontierCognitionService {
   private loadPromise: Promise<void> | null = null;
 
   private getDb() {
-    return getFirestore();
+    return db;
   }
 
   public async init(): Promise<void> {
@@ -247,7 +247,13 @@ class FrontierCognitionService {
    */
   public async checkAndDispatchProactiveCheckins(ownerPhone?: string): Promise<{ success: boolean; dispatchedCount: number; message: string }> {
     await this.init();
-    const targetPhone = ownerPhone || (process.env.OWNER_WHATSAPP_NUMBER || "").replace(/\D/g, "");
+    const targetPhone = ownerPhone || (
+      process.env.OWNER_WHATSAPP_NUMBER ||
+      process.env.BOSS_WHATSAPP_PHONE ||
+      process.env.WHATSAPP_OWNER_NUMBER ||
+      process.env.WHATSAPP_BOSS_PHONE ||
+      ""
+    ).replace(/\D/g, "");
     if (!targetPhone) {
       return { success: false, dispatchedCount: 0, message: "Owner phone number not configured." };
     }

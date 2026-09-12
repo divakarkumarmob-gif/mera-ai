@@ -1,4 +1,4 @@
-import { getFirestore } from "firebase-admin/firestore";
+import { db } from "./firebaseAdmin";
 import { GoogleGenAI } from "@google/genai";
 
 export interface GroupMemberProfile {
@@ -36,7 +36,7 @@ class GroupCollectiveLearningService {
   private loadPromise: Promise<void> | null = null;
 
   private getDb() {
-    return getFirestore();
+    return db;
   }
 
   public async init(): Promise<void> {

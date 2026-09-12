@@ -292,6 +292,9 @@ class WhatsAppBotService {
     contact?: any
   ): boolean {
     const envNumbers = [
+      process.env.BOSS_WHATSAPP_PHONE,
+      process.env.WHATSAPP_OWNER_NUMBER,
+      process.env.WHATSAPP_BOSS_PHONE,
       process.env.OWNER_WHATSAPP_NUMBER,
       process.env.BOSS_WHATSAPP_NUMBER,
       process.env.OWNER_PHONE,

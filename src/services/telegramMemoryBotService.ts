@@ -65,12 +65,33 @@ class TelegramMemoryBotService {
     }
   }
 
+  private isAuthorized(chatId: number | string, fromId?: number | string): boolean {
+    const configuredBoss =
+      process.env.TELEGRAM_OWNER_CHAT_ID ||
+      process.env.TELEGRAM_BOSS_CHAT_ID ||
+      process.env.BOSS_TELEGRAM_CHAT_ID ||
+      process.env.TELEGRAM_OWNER_ID;
+    if (configuredBoss) {
+      return String(chatId) === String(configuredBoss) || (!!fromId && String(fromId) === String(configuredBoss));
+    }
+    if (!this.bossChatId) {
+      this.bossChatId = chatId;
+      return true;
+    }
+    return String(chatId) === String(this.bossChatId) || (!!fromId && String(fromId) === String(this.bossChatId));
+  }
+
   private registerHandlers(): void {
     if (!this.bot) return;
 
     // ── Command: /start or /help ───────────────────────────────────────────
     this.bot.onText(/^\/(?:start|help)/i, async (msg: any) => {
       const chatId = msg.chat.id;
+      const fromId = msg.from?.id;
+      if (!this.isAuthorized(chatId, fromId)) {
+        await this.safeSendMessage(chatId, "🔒 *Access Denied:* Ye Friday ka private Memory Vault hai. Only DK Boss is authorized.", { parse_mode: "Markdown" });
+        return;
+      }
       this.bossChatId = chatId;
       const firstName = msg.from?.first_name || "Boss";
       const helpMsg = `🧠 *Welcome to Friday Memory Vault Bot!* ⚡
@@ -98,6 +119,11 @@ Even agar Firebase configured nahi hai, ye bot Telegram ke Cloud Servers ko **da
     // ── Command: /sync (Force Telegram Cloud Storage Sync) ─────────────────
     this.bot.onText(/^\/(?:sync|backup)/i, async (msg: any) => {
       const chatId = msg.chat.id;
+      const fromId = msg.from?.id;
+      if (!this.isAuthorized(chatId, fromId)) {
+        await this.safeSendMessage(chatId, "🔒 *Access Denied:* Unauthorized.", { parse_mode: "Markdown" });
+        return;
+      }
       this.bossChatId = chatId;
       const facts = await unifiedMemoryService.listAllFacts();
       const synced = await this.saveManifestToTelegramCloud(chatId, facts);
@@ -115,6 +141,11 @@ Even agar Firebase configured nahi hai, ye bot Telegram ke Cloud Servers ko **da
     // ── Command: /memory or /memories ──────────────────────────────────────
     this.bot.onText(/^\/(?:memory|memories|list|vault)/i, async (msg: any) => {
       const chatId = msg.chat.id;
+      const fromId = msg.from?.id;
+      if (!this.isAuthorized(chatId, fromId)) {
+        await this.safeSendMessage(chatId, "🔒 *Access Denied:* Unauthorized.", { parse_mode: "Markdown" });
+        return;
+      }
       this.bossChatId = chatId;
       const facts = await unifiedMemoryService.listAllFacts();
       const formatted = unifiedMemoryService.formatFactsListMarkdown(facts);
@@ -124,6 +155,11 @@ Even agar Firebase configured nahi hai, ye bot Telegram ke Cloud Servers ko **da
     // ── Command: /remember <fact> ──────────────────────────────────────────
     this.bot.onText(/^\/remember\s*(.+)/i, async (msg: any, match: RegExpExecArray | null) => {
       const chatId = msg.chat.id;
+      const fromId = msg.from?.id;
+      if (!this.isAuthorized(chatId, fromId)) {
+        await this.safeSendMessage(chatId, "🔒 *Access Denied:* Unauthorized.", { parse_mode: "Markdown" });
+        return;
+      }
       this.bossChatId = chatId;
       const factText = match && match[1] ? match[1].trim() : "";
       if (!factText) {
@@ -137,6 +173,11 @@ Even agar Firebase configured nahi hai, ye bot Telegram ke Cloud Servers ko **da
     // ── Command: /forget <fact> ────────────────────────────────────────────
     this.bot.onText(/^\/forget\s*(.+)/i, async (msg: any, match: RegExpExecArray | null) => {
       const chatId = msg.chat.id;
+      const fromId = msg.from?.id;
+      if (!this.isAuthorized(chatId, fromId)) {
+        await this.safeSendMessage(chatId, "🔒 *Access Denied:* Unauthorized.", { parse_mode: "Markdown" });
+        return;
+      }
       this.bossChatId = chatId;
       const target = match && match[1] ? match[1].trim() : "";
       if (!target) {
@@ -153,6 +194,11 @@ Even agar Firebase configured nahi hai, ye bot Telegram ke Cloud Servers ko **da
     // ── Command: /search <query> ───────────────────────────────────────────
     this.bot.onText(/^\/search\s*(.+)/i, async (msg: any, match: RegExpExecArray | null) => {
       const chatId = msg.chat.id;
+      const fromId = msg.from?.id;
+      if (!this.isAuthorized(chatId, fromId)) {
+        await this.safeSendMessage(chatId, "🔒 *Access Denied:* Unauthorized.", { parse_mode: "Markdown" });
+        return;
+      }
       this.bossChatId = chatId;
       const query = match && match[1] ? match[1].trim() : "";
       if (!query) {
@@ -166,6 +212,11 @@ Even agar Firebase configured nahi hai, ye bot Telegram ke Cloud Servers ko **da
     // ── Command: /briefing ─────────────────────────────────────────────────
     this.bot.onText(/^\/(?:briefing|morning)/i, async (msg: any) => {
       const chatId = msg.chat.id;
+      const fromId = msg.from?.id;
+      if (!this.isAuthorized(chatId, fromId)) {
+        await this.safeSendMessage(chatId, "🔒 *Access Denied:* Unauthorized.", { parse_mode: "Markdown" });
+        return;
+      }
       this.bossChatId = chatId;
       const { proactiveExecutiveService } = await import("./proactiveExecutiveService");
       const text = await proactiveExecutiveService.generateChiefOfStaffMorningBriefing();
@@ -175,6 +226,11 @@ Even agar Firebase configured nahi hai, ye bot Telegram ke Cloud Servers ko **da
     // ── Command: /unanswered ───────────────────────────────────────────────
     this.bot.onText(/^\/(?:unanswered|pending)/i, async (msg: any) => {
       const chatId = msg.chat.id;
+      const fromId = msg.from?.id;
+      if (!this.isAuthorized(chatId, fromId)) {
+        await this.safeSendMessage(chatId, "🔒 *Access Denied:* Unauthorized.", { parse_mode: "Markdown" });
+        return;
+      }
       this.bossChatId = chatId;
       const { proactiveExecutiveService } = await import("./proactiveExecutiveService");
       const res = await proactiveExecutiveService.checkPendingUnansweredMessages(3);
@@ -184,6 +240,11 @@ Even agar Firebase configured nahi hai, ye bot Telegram ke Cloud Servers ko **da
     // ── Command: /stats ────────────────────────────────────────────────────
     this.bot.onText(/^\/(?:stats|status|health)/i, async (msg: any) => {
       const chatId = msg.chat.id;
+      const fromId = msg.from?.id;
+      if (!this.isAuthorized(chatId, fromId)) {
+        await this.safeSendMessage(chatId, "🔒 *Access Denied:* Unauthorized.", { parse_mode: "Markdown" });
+        return;
+      }
       this.bossChatId = chatId;
       const facts = await unifiedMemoryService.listAllFacts();
       const isCloudFirestore = unifiedMemoryService.isCloudFirestoreConfigured();
@@ -202,6 +263,10 @@ Even agar Firebase configured nahi hai, ye bot Telegram ke Cloud Servers ko **da
       if (!text || text.startsWith("/")) return;
 
       const chatId = msg.chat.id;
+      const fromId = msg.from?.id;
+      if (!this.isAuthorized(chatId, fromId)) {
+        return;
+      }
       this.bossChatId = chatId;
       const parsedCmd = unifiedMemoryService.parseMemoryCommand(text);
 
