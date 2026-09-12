@@ -9,6 +9,8 @@
  * 5. 🔍 Deep Cross-Platform Search
  */
 
+import * as _TelegramBot from "node-telegram-bot-api";
+const TelegramBot: any = (_TelegramBot as any).default || _TelegramBot;
 import { unifiedMemoryService, AtomicFactEntry } from "./unifiedMemoryService";
 
 class TelegramMemoryBotService {
@@ -40,9 +42,7 @@ class TelegramMemoryBotService {
     }
 
     try {
-      const TelegramBot = (await import("node-telegram-bot-api" as any)).default || (await import("node-telegram-bot-api" as any));
-
-      this.bot = new TelegramBot(this.memoryBotToken, {
+      this.bot = new (TelegramBot as any)(this.memoryBotToken, {
         polling: {
           interval: 1000,
           autoStart: true,
