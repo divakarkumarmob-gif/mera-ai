@@ -1242,7 +1242,8 @@ class WhatsAppBotService {
         quotedMessage,
         replyJid,
         messageKey,
-        (j, img, cap, k) => this.sendPhotoMessage(j, img, cap, k)
+        (j, img, cap, k) => this.sendPhotoMessage(j, img, cap, k),
+        (j, b, k, m) => this.sendVoiceMessage(j, b, k, m)
       );
       if (!reply || reply.trim().length === 0) {
         return;

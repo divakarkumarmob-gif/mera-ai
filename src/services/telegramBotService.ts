@@ -522,23 +522,30 @@ class TelegramBotService {
    */
   public async sendVoice(
     chatId: number | string,
-    audioBuffer: Buffer,
+    voice: Buffer | string,
     caption?: string
   ): Promise<{ success: boolean; messageId?: number; error?: string }> {
     if (!this.token) return { success: false, error: "TELEGRAM_BOT_TOKEN is not configured." };
     try {
+      if (typeof voice === "string") {
+        const res = await this.callApi("sendVoice", {
+          chat_id: chatId,
+          voice,
+          caption,
+        });
+        return { success: true, messageId: res.message_id };
+      }
+
       const url = `https://api.telegram.org/bot${this.token}/sendVoice`;
       const formData = new FormData();
       formData.append("chat_id", String(chatId));
-      const blob = new Blob([audioBuffer], { type: "audio/mpeg" });
+      const blob = new Blob([voice], { type: "audio/mpeg" });
       formData.append("voice", blob, "voice.mp3");
       if (caption) formData.append("caption", caption);
 
-      const res = await fetch(url, { method: "POST", body: formData });
+      const res = await fetch(url, { method: "POST", body: formData, signal: AbortSignal.timeout(35000) });
       const json = await res.json();
-      if (!json.ok) {
-        throw new Error(json.description || "sendVoice API failed");
-      }
+      if (!json.ok) throw new Error(json.description || "sendVoice API failed");
       return { success: true, messageId: json.result.message_id };
     } catch (e: any) {
       console.error(`[TelegramBot] sendVoice failed to ${chatId}:`, e?.message);
@@ -547,30 +554,40 @@ class TelegramBotService {
   }
 
   /**
-   * Sends an Audio file (.mp3) to a Telegram chat.
+   * Sends an Audio file (.mp3) or preview to a Telegram chat.
    */
   public async sendAudio(
     chatId: number | string,
-    audioBuffer: Buffer,
-    title: string = "Voice Note",
-    caption?: string
+    audio: Buffer | string,
+    titleOrCaption?: string,
+    caption?: string,
+    performer: string = "Friday AI"
   ): Promise<{ success: boolean; messageId?: number; error?: string }> {
     if (!this.token) return { success: false, error: "TELEGRAM_BOT_TOKEN is not configured." };
     try {
+      if (typeof audio === "string") {
+        const res = await this.callApi("sendAudio", {
+          chat_id: chatId,
+          audio,
+          title: titleOrCaption,
+          caption: caption || titleOrCaption,
+          performer,
+        });
+        return { success: true, messageId: res.message_id };
+      }
+
       const url = `https://api.telegram.org/bot${this.token}/sendAudio`;
       const formData = new FormData();
       formData.append("chat_id", String(chatId));
-      const blob = new Blob([audioBuffer], { type: "audio/mpeg" });
-      formData.append("audio", blob, `${title}.mp3`);
-      formData.append("title", title);
-      formData.append("performer", "Friday AI");
+      const blob = new Blob([audio], { type: "audio/mpeg" });
+      formData.append("audio", blob, `${titleOrCaption || "audio"}.mp3`);
+      if (titleOrCaption) formData.append("title", titleOrCaption);
       if (caption) formData.append("caption", caption);
+      if (performer) formData.append("performer", performer);
 
-      const res = await fetch(url, { method: "POST", body: formData });
+      const res = await fetch(url, { method: "POST", body: formData, signal: AbortSignal.timeout(35000) });
       const json = await res.json();
-      if (!json.ok) {
-        throw new Error(json.description || "sendAudio API failed");
-      }
+      if (!json.ok) throw new Error(json.description || "sendAudio API failed");
       return { success: true, messageId: json.result.message_id };
     } catch (e: any) {
       console.error(`[TelegramBot] sendAudio failed to ${chatId}:`, e?.message);
@@ -2759,6 +2776,34 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
         `🎙️ *Voice Recording Tone Updated!* ⚡\n\n• New Voice: **${res.voiceName}** (\`${res.voice}\`)\n\nAb WhatsApp aur Telegram par aane wale sabhi voice note replies is nayi aawaz me deliver honge! ✨`
       );
       return;
+    }
+
+    // 2.3B Handle /song, /music, /preview, and 30s Song Audio Preview on Telegram
+    const isSongOrPreviewReq =
+      /^(?:\/song|\/music|\/preview|\/gaana|@song|@music|@gaana)\b/i.test(text.trim()) ||
+      /\b(?:preview|audio\s*preview|30s|30\s*sec|30\s*second|preview\s*sunao|preview\s*bhejo|preview\s*play)\b/i.test(text.trim()) ||
+      text.trim().toLowerCase() === "preview" ||
+      /(?:song|gaana|music)\s+(?:bhejo|sunao|chalao|play|preview)/i.test(text.trim());
+
+    if (isSongOrPreviewReq) {
+      try {
+        await this.sendChatAction(chatId, "upload_voice");
+        const { whatsappFeatureEngine } = await import("./whatsappFeatureEngine");
+        const songRes = await whatsappFeatureEngine.searchMusicWithLyrics(text, senderName, String(chatId));
+
+        if (songRes.audioBuffer) {
+          await this.sendAudio(chatId, songRes.audioBuffer, songRes.replyText, songRes.trackTitle, songRes.artistName);
+          return;
+        } else if (songRes.previewAudioUrl) {
+          await this.sendAudio(chatId, songRes.previewAudioUrl, songRes.replyText, songRes.trackTitle, songRes.artistName);
+          return;
+        } else {
+          await this.sendMessage(chatId, songRes.replyText);
+          return;
+        }
+      } catch (songErr: any) {
+        console.warn("[TelegramBot] Song search/preview error:", songErr);
+      }
     }
 
     // 2.4 Handle /tts command (Instant Text-to-Speech Voice Note)

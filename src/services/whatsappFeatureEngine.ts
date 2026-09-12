@@ -970,8 +970,19 @@ Respond ONLY with valid JSON in this exact structure:
     }
 
     const lowerQuery = (query || "").toLowerCase();
-    const isPreviewReq = /\b(?:preview|audio\s*preview|audio|sample|clip|30s|audio\s*sunao)\b/i.test(lowerQuery);
-    const searchClean = rawClean.replace(/\b(?:preview|audio\s*preview|audio|sample|clip|30s)\b/gi, "").trim() || rawClean;
+    const isPreviewReq = /\b(?:preview|audio\s*preview|audio|sample|clip|30s|30\s*sec|30\s*second|audio\s*sunao|preview\s*bhejo|preview\s*play|preview\s*karo)\b/i.test(lowerQuery) || lowerQuery.trim() === "preview";
+    let searchClean = rawClean.replace(/\b(?:preview|audio\s*preview|audio|sample|clip|30s|30\s*sec|30\s*second|audio\s*sunao|preview\s*bhejo|preview\s*play|preview\s*karo)\b/gi, "").trim();
+
+    if (!searchClean && isPreviewReq && chatId) {
+      const last = this.getLastSong(chatId);
+      if (last && last.title) {
+        searchClean = `${last.title} ${last.artist || ""}`.trim();
+      }
+    }
+
+    if (!searchClean) {
+      searchClean = rawClean || "trending hit song";
+    }
 
     // ── Check if this is a Category / Mood / Era Song Request (Top 5 Recommendations) ──
     const isCategory = this.isCategorySongQuery(searchClean);
@@ -1120,6 +1131,22 @@ ${playlistLines}
       }
     } catch (itunesErr) {
       console.warn("[WhatsAppFeatureEngine] iTunes search warning:", itunesErr);
+    }
+
+    // Step 1B: Fallback to JioSaavn if previewAudioUrl is not found from iTunes
+    if (!previewAudioUrl && isPreviewReq) {
+      try {
+        const { jioSaavnService } = await import("./jioSaavnService");
+        const saavnRes = await jioSaavnService.searchSongs(searchClean, 1);
+        if (saavnRes.songs && saavnRes.songs.length > 0) {
+          const s = saavnRes.songs[0];
+          previewAudioUrl = s.mediaUrl || s.url || "";
+          if (s.title && (!trackTitle || trackTitle === searchClean)) trackTitle = s.title;
+          if (s.singers && (!artistName || artistName === "Various Artists")) artistName = s.singers;
+        }
+      } catch (saavnErr) {
+        console.warn("[WhatsAppFeatureEngine] JioSaavn preview search warning:", saavnErr);
+      }
     }
 
     // Step 2: Query Gemini AI for accurate Hindi/Bollywood/Regional song context, lyrics snippet & movie details

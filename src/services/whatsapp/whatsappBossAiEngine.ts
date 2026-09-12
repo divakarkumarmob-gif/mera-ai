@@ -20,7 +20,8 @@ export class WhatsAppBossAiEngine {
     quotedMessage?: QuotedMessageContext | null,
     replyJid = "",
     messageKey?: any,
-    sendPhotoFn?: (target: string, imageSource: string | Buffer, caption?: string, key?: any) => Promise<any>
+    sendPhotoFn?: (target: string, imageSource: string | Buffer, caption?: string, key?: any) => Promise<any>,
+    sendVoiceFn?: (target: string, audio: Buffer, key?: any, mimetype?: string) => Promise<any>
   ): Promise<string> {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
@@ -46,13 +47,31 @@ export class WhatsAppBossAiEngine {
     if (whatsappFeatureEngine.isNextSongRequest(messageText)) {
       const nextRes = await whatsappFeatureEngine.handleNextSongInPlaylist(replyJid, senderName);
       if (nextRes.handled && nextRes.replyText) {
+        if (nextRes.audioBuffer && sendVoiceFn) {
+          try {
+            await sendVoiceFn(replyJid, nextRes.audioBuffer, messageKey, "audio/mp4");
+          } catch {}
+        }
         return nextRes.replyText;
       }
     }
 
-    // Fast direct intercept for @song / @music / @gaana queries
-    if (/^(?:@song|@music|@gaana|\/song|\/music|\/gaana)\b/i.test(messageText.trim())) {
+    // Fast direct intercept for @song / @music / @gaana / preview queries
+    const isSongOrPreviewReq =
+      /^(?:@song|@music|@gaana|\/song|\/music|\/gaana|\/preview)\b/i.test(messageText.trim()) ||
+      /\b(?:preview|audio\s*preview|30s|30\s*sec|audio\s*sunao|preview\s*bhejo|preview\s*play)\b/i.test(messageText.trim()) ||
+      messageText.trim().toLowerCase() === "preview" ||
+      /(?:song|gaana|music)\s+(?:bhejo|sunao|chalao|play|preview)/i.test(messageText.trim());
+
+    if (isSongOrPreviewReq) {
       const songRes = await whatsappFeatureEngine.searchMusicWithLyrics(messageText, senderName, replyJid);
+      if (songRes.audioBuffer && sendVoiceFn) {
+        try {
+          await sendVoiceFn(replyJid, songRes.audioBuffer, messageKey, "audio/mp4");
+        } catch (vErr) {
+          console.warn("[WhatsAppBossAI] Failed to send preview voice/audio:", vErr);
+        }
+      }
       return songRes.replyText;
     }
 
