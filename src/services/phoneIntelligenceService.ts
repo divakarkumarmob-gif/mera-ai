@@ -982,10 +982,7 @@ export class PhoneIntelligenceService {
       if (match) {
         savedContact = {
           name: match.name,
-          nickname: match.nickname,
-          relationship: match.relationship,
-          email: match.email,
-          notes: match.notes,
+          relationship: match.relation || "Contact",
         };
       }
     } catch {}

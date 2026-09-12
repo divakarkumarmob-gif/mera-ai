@@ -300,6 +300,14 @@ export class VoiceBridgeService {
   }
 
   /**
+   * Synthesizes speech returning raw audio buffer directly
+   */
+  public async synthesizeSpeech(text: string, voice?: string): Promise<Buffer> {
+    const res = await this.generateSpeech(text, voice);
+    return res.buffer;
+  }
+
+  /**
    * 2. Speech-to-Text (STT) using Groq Whisper Large V3 (~200ms ultra fast)
    * Fallback to Gemini Multimodal Audio if Groq API key is not configured.
    */

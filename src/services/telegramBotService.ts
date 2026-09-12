@@ -2060,6 +2060,9 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
     const senderName = from.first_name ? `${from.first_name} ${from.last_name || ""}`.trim() : "Boss";
     const text = (msg.text || msg.caption || "").trim();
     const isGroup = msg.chat?.type === "group" || msg.chat?.type === "supergroup";
+    const ownerChatId = process.env.TELEGRAM_OWNER_CHAT_ID;
+    const isOwner = !!ownerChatId && String(chatId) === String(ownerChatId);
+    const repliedMsg = msg.reply_to_message;
 
     // Drop reaction messages or standalone emoji-reaction acknowledgements
     const isSingleReactionEmoji = /^(👍|👎|❤️|🔥|👏|🙏|😂|😍|🎉|👌|💯|⚡|😎|✨|💪|🙌|🤝|💖|😊|🥺|😢|😭|🕊️|💀|🗿|👀)$/u.test(text);
@@ -2876,8 +2879,6 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
           `🎙️ *Aapki Aawaz (Transcription):*\n_"${transcribedText}"_`
         );
 
-        const ownerChatId = process.env.TELEGRAM_OWNER_CHAT_ID;
-        const isOwner = !!ownerChatId && String(chatId) === String(ownerChatId);
         const replyText = await this.generateSmartAiReply(
           senderName,
           transcribedText,
@@ -2909,7 +2910,6 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
     }
 
     // 2.55 Handle Reply-To / Swipe-Up on Voice Note / Audio Message on Telegram
-    const repliedMsg = (msg as any).reply_to_message;
     const repliedVoice = repliedMsg?.voice || repliedMsg?.audio;
     if (repliedVoice && text) {
       const cleanReplyText = text.toLowerCase().trim();
@@ -3225,8 +3225,6 @@ INSTRUCTIONS:
     }
 
     // 9. General Smart AI Conversational Reply via Multi-Tier Fallback Chain (with Typing presence)
-    const ownerChatId = process.env.TELEGRAM_OWNER_CHAT_ID;
-    const isOwner = !!ownerChatId && String(chatId) === String(ownerChatId);
     const replyText = await this.generateSmartAiReply(
       senderName,
       text,

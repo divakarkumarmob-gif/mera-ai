@@ -243,7 +243,9 @@ class WhatsAppBotService {
     );
   }
 
-  // ── Media & Swipe Delegation ──────────────────────────────────────────────
+  public getSocket() {
+    return this.sock;
+  }
 
   public extractQuotedContext(msg: any): QuotedMessageContext | null {
     return whatsappMediaRouter.extractQuotedContext(msg);
@@ -374,6 +376,10 @@ class WhatsAppBotService {
           const text = this.extractMessageText(msg);
           if (!text) continue;
 
+          const isGroup = remoteJid.endsWith("@g.us");
+          const isFromMe = !!msg.key?.fromMe;
+          const isBotSelfEcho = isFromMe && !!msg.key?.id && this.botSentMessageIds.has(msg.key.id);
+
           // ── GLOBAL REACTION INTERCEPTOR & SILENCE GUARD ──
           // Reactions (👍, ❤️, 😂, etc.) are non-verbal metadata, NEVER chat messages.
           const isReactionMsg = !!msg.message?.reactionMessage || text.startsWith("[Reaction:") || text.startsWith("[reaction:") || /^\[Reaction/i.test(text);
@@ -393,10 +399,6 @@ class WhatsAppBotService {
             // CRITICAL: Drop immediately so reactions never enter history or trigger AI replies!
             continue;
           }
-
-          const isGroup = remoteJid.endsWith("@g.us");
-          const isFromMe = !!msg.key?.fromMe;
-          const isBotSelfEcho = isFromMe && !!msg.key?.id && this.botSentMessageIds.has(msg.key.id);
 
           if (isFromMe) {
             const ts = msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : Date.now();

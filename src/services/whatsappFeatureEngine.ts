@@ -437,7 +437,7 @@ OUTPUT FORMAT:
     }
   ) {
     if (!chatId) return;
-    this.chatLastSongMap.set(chatId, { ...song, timestamp: Date.now() });
+    this.chatLastSongMap.set(chatId, { ...song, spotifyUrl: song.spotifyUrl || "", timestamp: Date.now() });
   }
 
   public getLastSong(chatId: string) {
@@ -1164,12 +1164,12 @@ ${playlistLines}
     if (!previewAudioUrl && isPreviewReq) {
       try {
         const { jioSaavnService } = await import("./jioSaavnService");
-        const saavnRes = await jioSaavnService.searchSongs(searchClean, 1);
+        const saavnRes = await jioSaavnService.searchSong(searchClean, 1);
         if (saavnRes.songs && saavnRes.songs.length > 0) {
           const s = saavnRes.songs[0];
-          previewAudioUrl = s.mediaUrl || s.url || "";
-          if (s.title && (!trackTitle || trackTitle === searchClean)) trackTitle = s.title;
-          if (s.singers && (!artistName || artistName === "Various Artists")) artistName = s.singers;
+          previewAudioUrl = s.audio320kbps || s.audio160kbps || s.audio96kbps || "";
+          if (s.songName && (!trackTitle || trackTitle === searchClean)) trackTitle = s.songName;
+          if (s.artistName && (!artistName || artistName === "Various Artists")) artistName = s.artistName;
         }
       } catch (saavnErr) {
         console.warn("[WhatsAppFeatureEngine] JioSaavn preview search warning:", saavnErr);

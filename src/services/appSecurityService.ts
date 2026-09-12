@@ -954,6 +954,13 @@ ya
   ): Promise<{ handled: boolean; replyText?: string }> {
     return this.handleOwnerSecurityMessage(text, isOwner, senderName, source);
   }
+
+  /**
+   * Checks whether app lock key verification is required
+   */
+  public isAppKeyRequired(): boolean {
+    return !!this.cachedKey;
+  }
 }
 
 export const appSecurityService = new AppSecurityService();

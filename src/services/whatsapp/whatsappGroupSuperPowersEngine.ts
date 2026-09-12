@@ -769,7 +769,7 @@ Format a clean, crystal-clear WhatsApp Expense Card in natural Hinglish:
     } else {
       try {
         const history = await whatsappHistoryEngine.getGroupMessagesWithSummary(groupName, 25);
-        recentMessagesText = history;
+        recentMessagesText = typeof history === "string" ? history : (history.summary || (history as any).messages?.map((m: any) => m.text).join("\n") || "");
       } catch {}
     }
 

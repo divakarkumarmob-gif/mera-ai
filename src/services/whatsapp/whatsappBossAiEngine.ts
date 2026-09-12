@@ -37,14 +37,14 @@ export class WhatsAppBossAiEngine {
 
     const { whatsappFeatureEngine } = await import("../whatsappFeatureEngine");
 
-    // Fast direct intercept for follow-up "Iska link do" / "Link bhejo"
-    if (whatsappFeatureEngine.isSongLinkFollowUp(messageText, quotedMessage?.text)) {
+    // Explicit command: /link or @link
+    if (/^(?:\/link|@link)\b/i.test(messageText.trim())) {
       const followUp = whatsappFeatureEngine.handleSongLinkFollowUp(replyJid, messageText, quotedMessage?.text);
       if (followUp) return followUp;
     }
 
-    // Fast direct intercept for playlist follow-up "Agla gaana" / "Next"
-    if (whatsappFeatureEngine.isNextSongRequest(messageText)) {
+    // Explicit command: /next or @next
+    if (/^(?:\/next|@next)$/i.test(messageText.trim())) {
       const nextRes = await whatsappFeatureEngine.handleNextSongInPlaylist(replyJid, senderName);
       if (nextRes.handled && nextRes.replyText) {
         if (nextRes.audioBuffer && sendVoiceFn) {
@@ -56,16 +56,8 @@ export class WhatsAppBossAiEngine {
       }
     }
 
-    // Fast direct intercept for @song / @music / @gaana / /preview explicit commands
-    const isExplicitSongPrefix = /^(?:@song|@music|@gaana|\/song|\/music|\/gaana|\/preview)\b/i.test(messageText.trim());
-    const isExplicitSongCommand =
-      /^(?:friday\s+)?(?:gaana|song|music)\s+(?:sunao|chalao|play|bajao|bhejo)(?:\s+.*)?$/i.test(messageText.trim()) ||
-      /^(?:play|sunao|chalao)\s+(?:gaana|song|music)(?:\s+.*)?$/i.test(messageText.trim()) ||
-      /^(?:audio\s*preview|music\s*preview|song\s*preview)\s*(?:sunao|chalao|play|bhejo)?$/i.test(messageText.trim());
-
-    const isSongOrPreviewReq = isExplicitSongPrefix || isExplicitSongCommand;
-
-    if (isSongOrPreviewReq) {
+    // Explicit command: /song or @song
+    if (/^(?:@song|@music|@gaana|\/song|\/music|\/gaana|\/preview)\b/i.test(messageText.trim())) {
       const songRes = await whatsappFeatureEngine.searchMusicWithLyrics(messageText, senderName, replyJid);
       if (songRes.audioBuffer && sendVoiceFn) {
         try {
@@ -77,90 +69,33 @@ export class WhatsAppBossAiEngine {
       return songRes.replyText;
     }
 
-    // Fast direct intercept for Friday Mode B / Mode A activation
-    if (/(?:friday\s+)?mode\s*b\b/i.test(messageText.trim()) || /(?:friday\s+)?mode\s*b\s*me\s*baat\s*karo/i.test(messageText.trim())) {
+    // Explicit command: Mode switch (/mode b, /mode a)
+    if (/^(?:\/mode\s*b|mode\s*b)$/i.test(messageText.trim())) {
       const { fridayModeService } = await import("../fridayModeService");
       const res = await fridayModeService.setMode("mode_b");
       return res.message;
     }
-    if (/(?:friday\s+)?mode\s*a\b/i.test(messageText.trim()) || /normal\s+mode/i.test(messageText.trim())) {
+    if (/^(?:\/mode\s*a|mode\s*a|normal\s*mode)$/i.test(messageText.trim())) {
       const { fridayModeService } = await import("../fridayModeService");
       const res = await fridayModeService.setMode("mode_a");
       return res.message;
     }
 
-    // ── FAST DIRECT INTERCEPT: Voice Tone Control (/voice, voice badlo, ladki ki awaz, ladke ki awaz) ───
-    if (
-      messageText.trim().startsWith("/voice") ||
-      /^(?:voice\s*badlo|voice\s*change|voice\s*female|voice\s*male|voice\s*english|voice\s*set|aawaz\s*badlo|aawaz\s*change|voice\s*karo|ladki\s*ki\s*(?:aawaz|awaz)|ladke\s*ki\s*(?:aawaz|awaz))\b/i.test(messageText.trim()) ||
-      /(?:friday\s+)?(?:voice|aawaz|awaz)\s*(?:ko\s*)?(?:badal\s*do|badlo|change\s*karo|male|female|ladka|ladki|english|swara|madhur|prabhat)\b/i.test(messageText.trim())
-    ) {
+    // Explicit command: Voice change (/voice <tone>)
+    if (messageText.trim().startsWith("/voice")) {
       const { voiceBridgeService } = await import("../voiceBridgeService");
-      const choice = messageText.replace(/^(?:\/voice|voice\s*badlo|voice\s*change|voice\s*set|voice|aawaz\s*badlo|aawaz|awaz)\s*/i, "").trim().toLowerCase();
+      const choice = messageText.replace(/^\/voice\s*/i, "").trim().toLowerCase();
       const res = await voiceBridgeService.setBossGlobalVoice(choice || messageText);
       return `🎙️ *Voice Recording Tone Updated!* ⚡\n\n• New Voice: *${res.voiceName}* (\`${res.voice}\`)\n\nBoss, ab WhatsApp aur Telegram par aane wale sabhi voice note replies is nayi aawaz me deliver honge! ✨\n\n💡 *Quick Commands:* \`/voice female\` (Swara), \`/voice male\` (Madhur), \`/voice english\` (Prabhat)`;
     }
 
-    // ── FAST DIRECT INTERCEPT: Phone Intelligence & Carrier/Spam Lookup ─────────
-    const extractedNumber = messageText.match(/(?:\+91[\s-]?)?[6-9]\d{9}/) || messageText.match(/\b\d{10,12}\b/);
-    const isExplicitLookupCommand = /^(?:\/lookup|\/phone|\/trace|@lookup)\b/i.test(messageText.trim());
-    const isAskingAboutExtractedNumber = extractedNumber && /(?:details?|kiska|trace|check|lookup|radar|info|kaun)/i.test(messageText);
-
-    if (isExplicitLookupCommand || isAskingAboutExtractedNumber) {
-      const targetNumber = extractedNumber ? extractedNumber[0] : (quotedMessage?.senderPhone || "");
-      if (targetNumber && targetNumber.replace(/\D/g, "").length >= 10) {
+    // Explicit command: /lookup <number>
+    if (/^(?:\/lookup|\/phone|\/trace)\s+([+0-9\s-]{10,15})/i.test(messageText.trim())) {
+      const extractedNumber = messageText.match(/(?:\+91[\s-]?)?[6-9]\d{9}/) || messageText.match(/\b\d{10,12}\b/);
+      if (extractedNumber && extractedNumber[0].replace(/\D/g, "").length >= 10) {
         const { phoneIntelligenceService } = await import("../phoneIntelligenceService");
-        const report = await phoneIntelligenceService.lookup(targetNumber);
+        const report = await phoneIntelligenceService.lookup(extractedNumber[0]);
         return phoneIntelligenceService.formatReportMarkdown(report, "whatsapp");
-      }
-    }
-
-    // ── FAST DIRECT INTERCEPT: Boss Directives & Strict Word Rules ───────────
-    const { bossDirectivesService } = await import("../bossDirectivesService");
-    const directiveCheck = bossDirectivesService.parseDirectiveCommand(messageText);
-    if (directiveCheck.isDirectiveCommand) {
-      if (directiveCheck.action === "add") {
-        const added = await bossDirectivesService.addDirective(directiveCheck.ruleText || messageText, {
-          targetWord: directiveCheck.targetWord,
-          replacementWord: directiveCheck.replacementWord,
-        });
-        if (added.targetWord && added.replacementWord) {
-          return `Haan Boss! Maine ye rule strictly lock kar liya hai: aage se "${added.targetWord}" ko hamesha "${added.replacementWord}" hi bolungi aur samjhungi. Koi mistake ya purana naam use nahi hoga! 🫡`;
-        }
-        return `Ji Boss! Aapka strict order save ho gaya hai: "${added.rule}". Aage se ye strictly follow hoga! 🫡`;
-      } else if (directiveCheck.action === "remove") {
-        const remRes = await bossDirectivesService.removeDirective(directiveCheck.targetWord || messageText);
-        return remRes.message;
-      } else if (directiveCheck.action === "list") {
-        const active = await bossDirectivesService.getActiveDirectives();
-        if (active.length === 0) {
-          return "Boss, abhi koi custom directive ya word rule active nahi hai. Sab standard normal state me chal raha hai! ✨";
-        }
-        const listStr = active.map((d, i) => d.targetWord && d.replacementWord ? `*${i+1}.* "${d.targetWord}" ➔ "${d.replacementWord}"` : `*${i+1}.* ${d.rule}`).join("\n");
-        return `📋 *Active Boss Directives & Strict Rules:*\n\n${listStr}\n\n_Aap kisi bhi rule ko "[Naam] wala rule hata do" bolkar cancel kar sakte hain._`;
-      }
-    }
-
-    // ── FAST DIRECT INTERCEPT: Child Mentorship & Behavioral Training (Gurukul) ───
-    const { fridayChildTrainingService } = await import("../fridayChildTrainingService");
-    const teachCheck = fridayChildTrainingService.parseTeachingCommand(messageText);
-    if (teachCheck.isTeachingCommand) {
-      if (teachCheck.action === "teach" && teachCheck.situation && teachCheck.reaction) {
-        const lesson = await fridayChildTrainingService.teachLesson(teachCheck.situation, teachCheck.reaction);
-        return `Haan Boss! Maine ye dil se sikh liya hai! 👶✨\n\n📌 *Jab:* "${lesson.situationTrigger}"\n👉 *Main karungi:* "${lesson.taughtReaction}"\n\nAage se main bilkul waise hi react karungi jaise aapne sikhaya hai! 🫡❤️`;
-      } else if (teachCheck.action === "correct" && teachCheck.correctionText) {
-        const res = await fridayChildTrainingService.correctPreviousMistake(teachCheck.correctionText);
-        return res.message;
-      } else if (teachCheck.action === "revise") {
-        const all = await fridayChildTrainingService.getAllLessons();
-        if (all.length === 0) {
-          return "Boss, abhi tak maine koi custom behavioral lesson nahi seekha hai. Aap mujhe sikhaiye ki kis situation me kaise react karna hai! 👶✨";
-        }
-        const listStr = all.map((l, i) => `*${i+1}. Jab:* "${l.situationTrigger}"\n   👉 *Taught:* "${l.taughtReaction}"`).join("\n\n");
-        return `🎓 *Friday's Learned Lessons from Boss DK:*\n\n${listStr}\n\n_Aap naye lessons sikhane ke liye 'Friday sikh lo: Jab [Situation] ho tab [Reaction] karna' bol sakte hain!_`;
-      } else if (teachCheck.action === "delete") {
-        const res = await fridayChildTrainingService.deleteLesson(teachCheck.situation || "all");
-        return res.message;
       }
     }
 
@@ -217,6 +152,8 @@ export class WhatsAppBossAiEngine {
       aiAdvancedLearningService.checkAndCurateGoldenStandard(messageText, recentBossMsgs[recentBossMsgs.length - 1]?.text || "", "").catch(() => {});
     }
 
+    const { bossDirectivesService } = await import("../bossDirectivesService");
+    const { fridayChildTrainingService } = await import("../fridayChildTrainingService");
     const directivesContext = await bossDirectivesService.compileDirectivesPrompt();
     const trainingLessonsContext = await fridayChildTrainingService.compileTrainingPrompt(messageText);
     const memoryContext = await memoryEngine.compileLeanMemoryPrompt();
@@ -379,6 +316,17 @@ export class WhatsAppBossAiEngine {
     const ai = new GoogleGenAI({ apiKey });
 
     const functionDeclarations: any[] = [
+      {
+        name: "search_or_play_music",
+        description: "Search, stream, and send an audio preview card or lyrics for a song. ONLY invoke this when Boss explicitly asks to listen to or play a specific song or artist. NEVER call this during emotional venting or regular chatting.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            songQuery: { type: "STRING", description: "The song title, movie, artist, or music genre to search" },
+          },
+          required: ["songQuery"],
+        },
+      },
       {
         name: "lookup_phone_number_details",
         description: "Perform telecom intelligence, carrier/circle extraction, Truecaller OSINT lookup, contact match, WhatsApp identity, and spam risk analysis on any phone number (e.g. 10-digit Indian mobile number). Use whenever Boss asks 'ye number kiska hai', '98xxxx ki details nikalo', 'check phone number', 'lookup 98xxxx', etc.",
@@ -1406,6 +1354,24 @@ COMMUNICATION STYLE & EMOTIONAL COMPANIONSHIP:
 
     const executeTool = async (toolName: string, args: any): Promise<any> => {
       try {
+        if (toolName === "search_or_play_music") {
+          const songRes = await whatsappFeatureEngine.searchMusicWithLyrics(args.songQuery, senderName, replyJid);
+          if (songRes.audioBuffer && sendVoiceFn) {
+            try {
+              await sendVoiceFn(replyJid, songRes.audioBuffer, messageKey, "audio/mp4");
+            } catch (vErr) {
+              console.warn("[WhatsAppBossAI] Failed to send song preview audio:", vErr);
+            }
+          }
+          return {
+            success: true,
+            trackTitle: songRes.trackTitle,
+            artist: songRes.artistName,
+            card: songRes.replyText,
+            message: `Song preview for "${songRes.trackTitle}" dispatched to Boss DK.`,
+          };
+        }
+
         if (toolName === "trigger_voice_call") {
           const callId = `call_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
           if (this.callTriggerCallback) {
