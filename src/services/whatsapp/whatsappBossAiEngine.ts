@@ -99,12 +99,38 @@ export class WhatsAppBossAiEngine {
       }
     }
 
-    const recentBossMsgs = whatsappHistoryEngine
-      .getCachedMessages()
-      .filter((m) => !m.isGroup && (m.senderName.includes("Boss") || m.senderName.includes("DK") || m.senderName.includes("Friday") || (replyJid && m.replyJid === replyJid)))
-      .filter((m) => !m.text.startsWith("[Reaction:"))
-      .slice(0, 8)
-      .reverse();
+    // ── Fast Direct Intercept: Enterprise Memory Suite (/memory, /remember, /forget) ──
+    const { unifiedMemoryService } = await import("../unifiedMemoryService");
+    const memoryCmdCheck = unifiedMemoryService.parseMemoryCommand(messageText);
+    if (memoryCmdCheck.isMemoryCommand) {
+      if (memoryCmdCheck.action === "list") {
+        const facts = await unifiedMemoryService.listAllFacts();
+        return unifiedMemoryService.formatFactsListMarkdown(facts);
+      } else if (memoryCmdCheck.action === "remember" && memoryCmdCheck.targetText) {
+        const saveRes = await unifiedMemoryService.addAtomicFact(memoryCmdCheck.targetText, "personal_detail", "whatsapp");
+        return saveRes.confirmationMessage;
+      } else if (memoryCmdCheck.action === "forget" && memoryCmdCheck.targetText) {
+        const res = await unifiedMemoryService.removeAtomicFact(memoryCmdCheck.targetText);
+        return res.message;
+      }
+    }
+
+    // ── Fast Direct Intercept: Proactive Morning Briefing & Sentinel ───────
+    if (/^(?:\/briefing|morning\s*briefing|briefing|chief\s*of\s*staff|aaj\s*ka\s*briefing)$/i.test(messageText.trim())) {
+      const { proactiveExecutiveService } = await import("../proactiveExecutiveService");
+      return await proactiveExecutiveService.generateChiefOfStaffMorningBriefing();
+    }
+    if (/^(?:\/unanswered|unanswered|pending\s*messages|kiska\s*message\s*pending\s*hai)$/i.test(messageText.trim())) {
+      const { proactiveExecutiveService } = await import("../proactiveExecutiveService");
+      const res = await proactiveExecutiveService.checkPendingUnansweredMessages(3);
+      return res.formattedSummary;
+    }
+
+    // Background Auto-Fact Observation (Mem0 / ChatGPT style)
+    unifiedMemoryService.observeAndExtractFacts("Boss DK", messageText, "whatsapp", true);
+
+    const recentBossMsgs = await whatsappHistoryEngine.getRecentBossContext(replyJid, 15);
+    const crossPlatformMemoryContext = await unifiedMemoryService.getCrossPlatformWorkingMemoryPrompt();
 
     const { memoryEngine } = await import("../memoryEngine");
     const { humanComprehensionEngine } = await import("../humanComprehensionEngine");
@@ -885,6 +911,76 @@ export class WhatsAppBossAiEngine {
         },
       },
       {
+        name: "search_all_memories_and_chats",
+        description: "Deep Hybrid Semantic & Keyword RAG search across all historical WhatsApp messages, Telegram chats, and permanent Knowledge Vault facts across months of history.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            query: { type: "STRING", description: "Search query or topic to find across WhatsApp, Telegram, and Memory Vault" },
+            daysBack: { type: "NUMBER", description: "How many days back to search (default: 90)" },
+            limit: { type: "NUMBER", description: "Max results to return (default: 15)" },
+          },
+          required: ["query"],
+        },
+      },
+      {
+        name: "manage_memory_vault",
+        description: "Manage Friday's permanent ChatGPT/Mem0-style Knowledge Vault: remember a personal fact/preference, list saved facts, or forget/remove a fact.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            action: { type: "STRING", enum: ["remember", "forget", "list"], description: "Action: 'remember', 'forget', or 'list'" },
+            factOrKeyword: { type: "STRING", description: "The fact text to remember, or keyword to delete" },
+            category: { type: "STRING", enum: ["preference", "schedule_or_goal", "relationship", "habit", "personal_detail", "rule"], description: "Optional category" },
+          },
+          required: ["action"],
+        },
+      },
+      {
+        name: "search_visual_and_document_vault",
+        description: "Search across historical photos, bills, receipts, tickets, screenshots, and PDF documents in the Multimodal RAG vault.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            query: { type: "STRING", description: "Search query (e.g. 'electricity bill', 'train ticket', 'receipt', 'medical report')" },
+            daysBack: { type: "NUMBER", description: "How many days back to search (default 90)" },
+          },
+          required: ["query"],
+        },
+      },
+      {
+        name: "delegate_to_specialist_agent",
+        description: "Delegate a complex task to a specialized Swarm Sub-Agent: 'research' (Deep Web Synthesizer), 'security' (Phishing/Cyber Auditor), 'code' (Software Engineer/Auditor), or 'finance' (Expense Comptroller).",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            agentType: { type: "STRING", enum: ["research", "security", "code", "finance"], description: "The specialist sub-agent to invoke" },
+            taskPrompt: { type: "STRING", description: "The specific prompt or data for the sub-agent" },
+          },
+          required: ["agentType", "taskPrompt"],
+        },
+      },
+      {
+        name: "generate_morning_briefing",
+        description: "Generate a complete Chief-of-Staff Morning Briefing dossier with daily agenda, weather, pending inquiries, and priorities.",
+        parameters: {
+          type: "OBJECT",
+          properties: {},
+          required: [],
+        },
+      },
+      {
+        name: "check_unanswered_messages_dossier",
+        description: "Scan all recent WhatsApp and Telegram messages to detect any unanswered inquiries from contacts and draft suggested replies.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            thresholdHours: { type: "NUMBER", description: "Threshold in hours (default 3)" },
+          },
+          required: [],
+        },
+      },
+      {
         name: "forward_to_telegram",
         description: "Forward a message, photo, video, or document to Telegram (DK's personal Telegram or group).",
         parameters: {
@@ -1173,6 +1269,8 @@ ${directivesContext}
 ${trainingLessonsContext}
 
 ${memoryContext}
+
+${crossPlatformMemoryContext}
 
 ${humanComprehensionContext}
 
@@ -1973,6 +2071,53 @@ COMMUNICATION STYLE & EMOTIONAL COMPANIONSHIP:
             args.daysBack || 7
           );
           return res;
+        }
+        if (toolName === "search_all_memories_and_chats") {
+          const { unifiedMemoryService } = await import("../unifiedMemoryService");
+          const res = await unifiedMemoryService.searchCrossPlatformMemory(args.query, {
+            daysBack: args.daysBack || 90,
+            limit: args.limit || 15,
+          });
+          return res;
+        }
+        if (toolName === "manage_memory_vault") {
+          const { unifiedMemoryService } = await import("../unifiedMemoryService");
+          if (args.action === "remember") {
+            const saveRes = await unifiedMemoryService.addAtomicFact(args.factOrKeyword, args.category || "personal_detail", "whatsapp");
+            return { success: saveRes.success, isPersistent: saveRes.isPersistent, message: saveRes.confirmationMessage, fact: saveRes.entry.fact };
+          } else if (args.action === "forget") {
+            return await unifiedMemoryService.removeAtomicFact(args.factOrKeyword);
+          } else {
+            const facts = await unifiedMemoryService.listAllFacts();
+            return { success: true, count: facts.length, facts: facts.map((f) => f.fact) };
+          }
+        }
+        if (toolName === "search_visual_and_document_vault") {
+          const { multimodalRagService } = await import("../multimodalRagService");
+          return await multimodalRagService.searchVisualAndDocumentVault(args.query, {
+            daysBack: args.daysBack || 90,
+            limit: args.limit || 15,
+          });
+        }
+        if (toolName === "delegate_to_specialist_agent") {
+          const { multiAgentSpecialistSwarm } = await import("../multiAgentSpecialistSwarm");
+          return await multiAgentSpecialistSwarm.delegate(args.agentType, args.taskPrompt);
+        }
+        if (toolName === "generate_morning_briefing") {
+          const { proactiveExecutiveService } = await import("../proactiveExecutiveService");
+          const briefing = await proactiveExecutiveService.generateChiefOfStaffMorningBriefing();
+          return { success: true, briefing, message: "Chief-of-Staff Morning Briefing generated successfully." };
+        }
+        if (toolName === "check_unanswered_messages_dossier") {
+          const { proactiveExecutiveService } = await import("../proactiveExecutiveService");
+          return await proactiveExecutiveService.checkPendingUnansweredMessages(args.thresholdHours || 3);
+        }
+        if (toolName === "search_whatsapp_history") {
+          return await whatsappHistoryEngine.searchWhatsAppHistory(args.query, {
+            contact: args.contact,
+            daysBack: args.daysBack || 30,
+            limit: args.limit || 15,
+          });
         }
         if (toolName === "get_unknown_senders_digest") {
           const res = await whatsappHistoryEngine.getConversationSummaryAndHistory(

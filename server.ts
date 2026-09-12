@@ -34,6 +34,8 @@ import { telegramSecurityBotService } from "./src/services/telegramSecurityBotSe
 import { serverFirewallService } from "./src/services/serverFirewallService";
 import { scheduledAutomationService } from "./src/services/scheduledAutomationService";
 import { freeFireGamingService } from "./src/services/freeFireGamingService";
+import { telegramMemoryBotService } from "./src/services/telegramMemoryBotService";
+import { proactiveExecutiveService } from "./src/services/proactiveExecutiveService";
 
 // Clean modular live AI & route subsystems
 import { fridayFunctionDeclarations } from "./src/live/liveToolDeclarations";
@@ -670,6 +672,14 @@ async function startServer() {
 
   httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`[Server] Friday Clean Architecture Server running on http://0.0.0.0:${PORT}`);
+
+    // ── Boot 24/7 Automated Executive Cron Daemon (Render Active) ───────────
+    proactiveExecutiveService.startBackgroundExecutiveCronDaemon();
+
+    // ── Initialize Dedicated Telegram Memory Vault Bot (#3) ─────────────────
+    telegramMemoryBotService.init().catch((err) => {
+      console.warn("[Server] Telegram Memory Bot init warning:", err?.message || err);
+    });
   });
 }
 

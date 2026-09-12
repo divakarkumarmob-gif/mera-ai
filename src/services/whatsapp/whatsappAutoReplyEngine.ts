@@ -478,6 +478,9 @@ export class WhatsAppAutoReplyEngine {
     const isFamily =
       /family|mummy|papa|mother|father|sister|brother|bhai|behan/i.test(relation || "");
 
+    const recentContactMsgs = await whatsappHistoryEngine.getRecentContactContext(senderPhone, 8);
+    const recentChatHistory = whatsappHistoryEngine.formatConversationTranscript(recentContactMsgs);
+
     const prompt = `You are replying on DK's (Divakar Kumar) personal WhatsApp account.
 CRITICAL MANDATE ON IDENTITY:
 - NEVER EVER state or introduce yourself as an AI ("Main Friday hoon", "Main AI hoon", "As an AI language model").
@@ -486,7 +489,7 @@ CRITICAL MANDATE ON IDENTITY:
 ${directivesContext}
 
 ${comprehensionContext}
-
+${recentChatHistory ? `\n[RECENT CONVERSATION HISTORY WITH THIS SENDER]:\n${recentChatHistory}\n` : ""}
 Incoming WhatsApp message details:
 - Sender Name: "${senderName}"
 - Contact Status: ${isUnknownContact ? "Unknown Contact / Stranger" : `Saved Contact in Phonebook`}

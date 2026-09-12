@@ -1540,6 +1540,7 @@ class WhatsAppBotService {
         isRead: true,
       };
       whatsappHistoryEngine.unshiftMessage(botOutgoing);
+      whatsappHistoryEngine.saveToFirestore(botOutgoing).catch(() => {});
     }
     return result;
   }

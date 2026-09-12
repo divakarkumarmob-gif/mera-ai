@@ -5,6 +5,46 @@ const inboxCol = () => db.collection("whatsapp_inbox");
 
 export class WhatsAppHistoryEngine {
   private messageCache: IncomingMessage[] = []; // RAM — max 500, newest first
+  private isWarmedUp = false;
+  private warmUpPromise: Promise<void> | null = null;
+
+  constructor() {
+    this.warmUpCacheFromFirestore().catch(() => {});
+  }
+
+  /**
+   * Preloads latest messages from Firestore so that server restarts retain active memory.
+   */
+  public async warmUpCacheFromFirestore(limit = 150): Promise<void> {
+    if (this.isWarmedUp) return;
+    if (this.warmUpPromise) return this.warmUpPromise;
+
+    this.warmUpPromise = (async () => {
+      try {
+        const snap = await inboxCol().orderBy("timestamp", "desc").limit(limit).get();
+        if (!snap.empty) {
+          const fetched = snap.docs.map((d) => d.data() as IncomingMessage);
+          for (const msg of fetched) {
+            if (!this.messageCache.some((m) => m.id === msg.id)) {
+              this.messageCache.push(msg);
+            }
+          }
+          this.messageCache.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+          if (this.messageCache.length > 500) {
+            this.messageCache = this.messageCache.slice(0, 500);
+          }
+          console.log(`[WhatsAppHistory] 🔥 Cache warmed up with ${fetched.length} persistent messages from Firestore.`);
+        }
+        this.isWarmedUp = true;
+      } catch (err) {
+        console.warn("[WhatsAppHistory] Failed to warm up cache from Firestore:", err);
+      } finally {
+        this.warmUpPromise = null;
+      }
+    })();
+
+    return this.warmUpPromise;
+  }
 
   public recordIncomingMessage(msg: IncomingMessage) {
     if (!this.messageCache.some((m) => m.id === msg.id)) {
@@ -24,9 +64,11 @@ export class WhatsAppHistoryEngine {
   }
 
   public unshiftMessage(msg: IncomingMessage) {
-    this.messageCache.unshift(msg);
-    if (this.messageCache.length > 500) {
-      this.messageCache.pop();
+    if (!this.messageCache.some((m) => m.id === msg.id)) {
+      this.messageCache.unshift(msg);
+      if (this.messageCache.length > 500) {
+        this.messageCache = this.messageCache.slice(0, 500);
+      }
     }
   }
 
@@ -39,6 +81,106 @@ export class WhatsAppHistoryEngine {
       .filter((m) => m.isGroup && (m.groupId === cleanJid || m.replyJid === cleanJid))
       .slice(0, limit)
       .reverse();
+  }
+
+  /**
+   * Retrieves persistent conversation context between Boss (DK) and Friday.
+   * If cache is cold or insufficient, queries Firestore for historical turns.
+   */
+  public async getRecentBossContext(replyJid = "", limit = 15): Promise<IncomingMessage[]> {
+    await this.warmUpCacheFromFirestore();
+
+    const isBossMatch = (m: IncomingMessage) => {
+      if (m.isGroup) return false;
+      if (m.text.startsWith("[Reaction:") || /^(👍|👎|❤️|🔥|👏|🙏|😂|😍|🎉|👌|💯|⚡|😎|✨|💪|🙌|🤝|💖|😊|🥺|😢|😭|🕊️|💀|🗿|👀)$/u.test(m.text.trim())) return false;
+      const sName = (m.senderName || "").toLowerCase();
+      const sPhone = (m.senderPhone || "").toLowerCase();
+      const isBossSender = sName.includes("boss") || sName.includes("dk") || sPhone === "me";
+      const isBotSender = sName.includes("friday") || sPhone === "bot";
+      const isTargetJid = !!(replyJid && (m.replyJid === replyJid || m.senderPhone === replyJid.split("@")[0]));
+      return isBossSender || isBotSender || isTargetJid;
+    };
+
+    let matched = this.messageCache.filter(isBossMatch);
+
+    if (matched.length < limit) {
+      try {
+        const snap = await inboxCol()
+          .where("isGroup", "==", false)
+          .orderBy("timestamp", "desc")
+          .limit(limit * 2)
+          .get();
+        if (!snap.empty) {
+          const docs = snap.docs.map((d) => d.data() as IncomingMessage);
+          for (const d of docs) {
+            if (isBossMatch(d) && !matched.some((m) => m.id === d.id)) {
+              matched.push(d);
+            }
+          }
+        }
+      } catch (err) {
+        // Fallback: continue with memory cache
+      }
+    }
+
+    return matched
+      .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
+      .slice(-limit);
+  }
+
+  /**
+   * Retrieves persistent conversation context for a specific contact phone or JID.
+   */
+  public async getRecentContactContext(senderPhone: string, limit = 8): Promise<IncomingMessage[]> {
+    await this.warmUpCacheFromFirestore();
+    const clean = (senderPhone || "").replace(/\D/g, "");
+
+    const isContactMatch = (m: IncomingMessage) => {
+      if (m.isGroup) return false;
+      if (m.text.startsWith("[Reaction:")) return false;
+      const mPhone = (m.senderPhone || "").replace(/\D/g, "");
+      const mJid = (m.replyJid || "").replace(/\D/g, "");
+      return (clean && (mPhone === clean || mJid.includes(clean))) || (m.senderPhone === "bot" && mJid.includes(clean));
+    };
+
+    let matched = this.messageCache.filter(isContactMatch);
+
+    if (matched.length < limit && clean) {
+      try {
+        const snap = await inboxCol()
+          .where("isGroup", "==", false)
+          .orderBy("timestamp", "desc")
+          .limit(limit * 2)
+          .get();
+        if (!snap.empty) {
+          const docs = snap.docs.map((d) => d.data() as IncomingMessage);
+          for (const d of docs) {
+            if (isContactMatch(d) && !matched.some((m) => m.id === d.id)) {
+              matched.push(d);
+            }
+          }
+        }
+      } catch {}
+    }
+
+    return matched
+      .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
+      .slice(-limit);
+  }
+
+  /**
+   * Formats a list of messages into a clean chronological context string.
+   */
+  public formatConversationTranscript(messages: IncomingMessage[]): string {
+    if (!messages || messages.length === 0) return "";
+    return messages
+      .map((m) => {
+        const sender = m.senderPhone === "bot" || m.senderName.toLowerCase().includes("friday")
+          ? "Friday (You)"
+          : (m.senderName.includes("Boss") || m.senderName.includes("DK") || m.senderPhone === "me" ? "Boss (DK)" : m.senderName);
+        return `• [${m.dateStr || "Recent"}] ${sender}: "${m.text}"`;
+      })
+      .join("\n");
   }
 
   /**

@@ -168,19 +168,77 @@ class TelegramBotService {
     this.messageCallback = cb;
   }
 
-  // Rolling cache of recent Telegram dialogue turns to preserve context and avoid repeating resolved topics
-  private static chatHistoryCache: { senderName: string; text: string; timeStr: string }[] = [];
+  // Multi-day persistent dialogue turns per Telegram Chat ID
+  private static chatHistoryByChatId: Map<string, Array<{ senderName: string; text: string; timeStr: string; timestamp: number }>> = new Map();
 
-  public static recordChatTurn(senderName: string, text: string) {
+  public static recordChatTurn(chatId: string | number, senderName: string, text: string) {
     if (!text || text.startsWith("[Reaction:") || !text.trim()) return;
-    this.chatHistoryCache.push({
+    const key = String(chatId || "global");
+    if (!this.chatHistoryByChatId.has(key)) {
+      this.chatHistoryByChatId.set(key, []);
+    }
+    const turns = this.chatHistoryByChatId.get(key)!;
+    turns.push({
       senderName,
       text: text.trim(),
       timeStr: new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" }),
+      timestamp: Date.now(),
     });
-    if (this.chatHistoryCache.length > 25) {
-      this.chatHistoryCache = this.chatHistoryCache.slice(-25);
+    if (turns.length > 30) {
+      this.chatHistoryByChatId.set(key, turns.slice(-30));
     }
+  }
+
+  public static async getRecentDialogueTranscript(chatId: string | number, senderName: string, limit = 15): Promise<string> {
+    const key = String(chatId || "global");
+    if (!this.chatHistoryByChatId.has(key)) {
+      this.chatHistoryByChatId.set(key, []);
+    }
+    const cachedTurns = this.chatHistoryByChatId.get(key)!;
+
+    if (cachedTurns.length < 4 && chatId) {
+      try {
+        const snap = await db
+          .collection("telegramMessageLogs")
+          .where("chatId", "==", Number(chatId))
+          .orderBy("timestamp", "desc")
+          .limit(limit)
+          .get();
+
+        if (!snap.empty) {
+          const docs = snap.docs.map((d) => d.data() as TelegramMessageLog).reverse();
+          for (const doc of docs) {
+            const userMsgExists = cachedTurns.some((t) => t.text === doc.text);
+            if (!userMsgExists && doc.text) {
+              cachedTurns.push({
+                senderName: doc.senderName || senderName,
+                text: doc.text,
+                timeStr: doc.timeStr || "Recent",
+                timestamp: doc.timestamp || 0,
+              });
+            }
+            if (doc.botReply) {
+              const botReplyExists = cachedTurns.some((t) => t.text === doc.botReply);
+              if (!botReplyExists) {
+                cachedTurns.push({
+                  senderName: "Friday (You)",
+                  text: doc.botReply,
+                  timeStr: doc.timeStr || "Recent",
+                  timestamp: (doc.timestamp || 0) + 1000,
+                });
+              }
+            }
+          }
+          cachedTurns.sort((a, b) => a.timestamp - b.timestamp);
+        }
+      } catch (err) {
+        // Fallback to in-memory turns
+      }
+    }
+
+    const recent = cachedTurns.slice(-limit);
+    if (recent.length === 0) return "";
+    return recent.map((m) => `• [${m.timeStr}] ${m.senderName}: "${m.text}"`).join("\n");
   }
 
   private async callApi(method: string, body?: any, timeoutMs = 35000): Promise<any> {
@@ -1497,6 +1555,7 @@ Provide a 2-4 sentence executive digest of main topics, project updates, member 
    * Matches WhatsApp auto-reply behavior: identifies as DK's AI, explains DK is busy, takes notes.
    */
   private async generateSmartAiReply(
+    chatId: number | string,
     senderName: string,
     messageText: string,
     isOwner: boolean = false,
@@ -1511,8 +1570,8 @@ Provide a 2-4 sentence executive digest of main topics, project updates, member 
       return "";
     }
 
-    // Record incoming user turn in chat cache
-    TelegramBotService.recordChatTurn(senderName, messageText);
+    // Record incoming user turn in chat cache for this chat
+    TelegramBotService.recordChatTurn(chatId, senderName, messageText);
 
     // ── Fast Direct Intercept: Boss Directives & Word Rules (for Owner) ─────
     if (isOwner) {
@@ -1563,7 +1622,38 @@ Provide a 2-4 sentence executive digest of main topics, project updates, member 
           return res.message;
         }
       }
+
+      // ── Fast Direct Intercept: Enterprise Memory Suite (/memory, /remember, /forget) ──
+      const { unifiedMemoryService } = await import("./unifiedMemoryService");
+      const memoryCmdCheck = unifiedMemoryService.parseMemoryCommand(messageText);
+      if (memoryCmdCheck.isMemoryCommand) {
+        if (memoryCmdCheck.action === "list") {
+          const facts = await unifiedMemoryService.listAllFacts();
+          return unifiedMemoryService.formatFactsListMarkdown(facts);
+        } else if (memoryCmdCheck.action === "remember" && memoryCmdCheck.targetText) {
+          const saveRes = await unifiedMemoryService.addAtomicFact(memoryCmdCheck.targetText, "personal_detail", "telegram");
+          return saveRes.confirmationMessage;
+        } else if (memoryCmdCheck.action === "forget" && memoryCmdCheck.targetText) {
+          const res = await unifiedMemoryService.removeAtomicFact(memoryCmdCheck.targetText);
+          return res.message;
+        }
+      }
+
+      // ── Fast Direct Intercept: Proactive Morning Briefing & Sentinel ───────
+      if (/^(?:\/briefing|morning\s*briefing|briefing|chief\s*of\s*staff|aaj\s*ka\s*briefing)$/i.test(messageText.trim())) {
+        const { proactiveExecutiveService } = await import("./proactiveExecutiveService");
+        return await proactiveExecutiveService.generateChiefOfStaffMorningBriefing();
+      }
+      if (/^(?:\/unanswered|unanswered|pending\s*messages|kiska\s*message\s*pending\s*hai)$/i.test(messageText.trim())) {
+        const { proactiveExecutiveService } = await import("./proactiveExecutiveService");
+        const res = await proactiveExecutiveService.checkPendingUnansweredMessages(3);
+        return res.formattedSummary;
+      }
     }
+
+    // Background Auto-Fact Observation (Mem0 / ChatGPT style)
+    const { unifiedMemoryService } = await import("./unifiedMemoryService");
+    unifiedMemoryService.observeAndExtractFacts(senderName, messageText, "telegram", isOwner);
 
     const { bossDirectivesService } = await import("./bossDirectivesService");
     const { fridayChildTrainingService } = await import("./fridayChildTrainingService");
@@ -1751,11 +1841,16 @@ Provide a 2-4 sentence executive digest of main topics, project updates, member 
     }
 
     const ai = new GoogleGenAI({ apiKey });
+    const recentDialogue = await TelegramBotService.getRecentDialogueTranscript(chatId, senderName, 15);
+    const crossPlatformMemory = await unifiedMemoryService.getCrossPlatformWorkingMemoryPrompt();
+
     const prompt = `YOU ARE FRIDAY: DK's (Divakar Kumar) ultra-intelligent, loyal, warm, human-like AI companion.
 
 ${directivesContext}
 
 ${trainingContext}
+
+${crossPlatformMemory}
 
 ${rlhfContext}
 
@@ -1894,7 +1989,7 @@ Message Received: "${messageText}"
 ${customBusy ? `Boss Custom Status / Busy Note: "${customBusy}"` : ""}
 
 [RECENT TELEGRAM CHAT CONTEXT]:
-${TelegramBotService.chatHistoryCache.slice(-6).map((m) => `• [${m.timeStr}] ${m.senderName}: "${m.text}"`).join("\n")}
+${recentDialogue || "No recent prior messages."}
 
 🎯 TOPIC HYPER-FOCUS & ZERO TOPIC BLEEDING (CRITICAL):
 - Strictly answer ONLY what the sender is asking in the CURRENT message!
@@ -1948,7 +2043,7 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
           const { cleanText } = machineUnlearningSentinel.scrubRoboticArtifacts(finalReply);
           cognitiveScaffoldingEngine.addMasteryPoints(2).catch(() => {});
           neurotransmitterEngine.updateEmotionalMomentum(messageText, cleanText);
-          TelegramBotService.recordChatTurn("Friday", cleanText);
+          TelegramBotService.recordChatTurn(chatId, "Friday (You)", cleanText);
           return cleanText;
         }
       } catch (err: any) {
@@ -1967,6 +2062,7 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
         const { cleanText } = machineUnlearningSentinel.scrubRoboticArtifacts(finalReply);
         cognitiveScaffoldingEngine.addMasteryPoints(2).catch(() => {});
         neurotransmitterEngine.updateEmotionalMomentum(messageText, cleanText);
+        TelegramBotService.recordChatTurn(chatId, "Friday (You)", cleanText);
         return cleanText;
       }
     }
@@ -2880,6 +2976,7 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
         );
 
         const replyText = await this.generateSmartAiReply(
+          chatId,
           senderName,
           transcribedText,
           isOwner,
@@ -3226,6 +3323,7 @@ INSTRUCTIONS:
 
     // 9. General Smart AI Conversational Reply via Multi-Tier Fallback Chain (with Typing presence)
     const replyText = await this.generateSmartAiReply(
+      chatId,
       senderName,
       text,
       isOwner,
