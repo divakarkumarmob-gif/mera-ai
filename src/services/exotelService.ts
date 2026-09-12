@@ -320,18 +320,14 @@ class ExotelService {
 
   /**
    * Model Fallback Chain:
-   * 1. gemini-2.5-flash      (Ultra-fast 250ms voice latency)
-   * 2. gemini-2.5-flash-lite (Ultra-low latency fallback)
-   * 3. gemini-3.5-flash-lite (High reasoning fallback)
-   * 4. gemini-3.1-flash-lite (Backup)
-   * 5. gemini-3.6-flash      (Backup)
+   * 1. gemini-3.5-flash-lite (Ultra-fast 200ms latency)
+   * 2. gemini-3.6-flash      (High reasoning & quality)
+   * 3. gemini-3.1-flash-lite (Ultra-low latency backup)
    */
   public static readonly MODEL_CHAIN = [
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
     "gemini-3.5-flash-lite",
-    "gemini-3.1-flash-lite",
     "gemini-3.6-flash",
+    "gemini-3.1-flash-lite",
   ];
 
   /**
