@@ -551,7 +551,7 @@ Friday's spoken response:`;
         formData.append("CallerId", formattedCallerId);
       }
 
-      const activeAppId = (appId || this.config.appId || process.env.EXOTEL_APP_ID || "1339632").trim();
+      const activeAppId = (appId || this.config.appId || process.env.EXOTEL_APP_ID || "").trim();
 
       if (activeAppId) {
         // Official Exotel Applet Flow URL: http://my.exotel.com/{account_sid}/exoml/start_voice/{app_id}
@@ -560,6 +560,7 @@ Friday's spoken response:`;
         console.log(`[ExotelService] 🔗 Using Exotel App Bazaar Voice Flow: ${exotelFlowUrl}`);
       } else {
         formData.append("Url", flowUrl);
+        console.log(`[ExotelService] 🔗 Using direct ExML endpoint: ${flowUrl}`);
       }
 
       if (effectiveBaseUrl && effectiveBaseUrl.startsWith("http") && !effectiveBaseUrl.includes("localhost")) {
