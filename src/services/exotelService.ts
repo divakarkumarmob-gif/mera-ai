@@ -289,11 +289,7 @@ class ExotelService {
    * 4. gemini-3.1-flash-lite (Ultra-low latency backup)
    */
   public static readonly MODEL_CHAIN = [
-    "gemini-3.5-flash",
-    "gemini-3.5-flash-lite",
-    "gemini-3.6-flash",
-    "gemini-3.1-flash-lite",
-  ];
+    "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite"];
 
   /**
    * 3. Friday Brain Voice Dialogue Generator with Model Fallback Chain

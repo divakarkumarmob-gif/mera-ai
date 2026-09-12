@@ -22,274 +22,58 @@ export interface ModelCategory {
 
 export const AI_STUDIO_MODELS: ModelCategory[] = [
   {
-    category: "⚡ Primary Text & Multimodal Models",
-    badge: "Most Popular",
-    models: [
+    category: "⚡ Primary Text & Multimodal Models", badge: "Most Popular", models: [
       {
-        id: "gemini-3.5-flash",
-        name: "Gemini 3.5 Flash",
-        type: "Text-out models",
-        rateLimit: "RPM: 5 | TPM: 250K | RPD: 20",
-        description: "Next-gen flagship high-speed reasoning & multimodal model with ultra-fast latency.",
-        icon: "⚡",
-      },
-      {
-        id: "gemini-3.5-flash-lite",
-        name: "Gemini 3.5 Flash Lite",
-        type: "Text-out models",
-        rateLimit: "RPM: 15 | TPM: 250K | RPD: 500",
-        description: "Ultra-low latency lightweight model optimized for high-throughput live apps.",
-        icon: "🚀",
-      },
-      {
-        id: "gemini-3.6-flash",
-        name: "Gemini 3.6 Flash",
-        type: "Text-out models",
-        rateLimit: "RPM: 5 | TPM: 250K | RPD: 20",
-        description: "Advanced intelligence, deep reasoning, vision and complex instruction following.",
-        icon: "🧠",
-      },
-      {
-        id: "gemini-3.1-flash-lite",
-        name: "Gemini 3.1 Flash Lite",
-        type: "Text-out models",
-        rateLimit: "RPM: 15 | TPM: 250K | RPD: 500",
-        description: "Fast, cost-efficient model for sub-second conversations and agent workflows.",
-        icon: "💨",
-      },
-      {
-        id: "gemini-3.7-flash",
-        name: "Gemini 3.7 Flash",
-        type: "Text-out models",
-        rateLimit: "RPM: 5 | TPM: 250K | RPD: 20",
-        description: "Experimental preview with enhanced mathematical logic and coding abilities.",
-        icon: "🔬",
-      },
-      {
-        id: "gemini-3.8-flash",
-        name: "Gemini 3.8 Flash",
-        type: "Text-out models",
-        rateLimit: "RPM: 5 | TPM: 250K | RPD: 20",
-        description: "Cutting-edge frontier flash model with ultra-large context handling.",
-        icon: "✨",
-      },
-      {
-        id: "gemini-3-flash",
-        name: "Gemini 3 Flash",
-        type: "Text-out models",
-        rateLimit: "RPM: 5 | TPM: 250K | RPD: 20",
-        description: "Stable generation 3 multimodal model for production apps.",
-        icon: "🎯",
-      },
-      {
-        id: "gemini-2-flash",
-        name: "Gemini 2 Flash",
-        type: "Text-out models",
-        rateLimit: "RPM: 15 | TPM: 1M | RPD: 1500",
-        description: "Legacy reliable flash model with broad language and media support.",
-        icon: "📦",
-      },
-      {
-        id: "gemini-2-flash-lite",
-        name: "Gemini 2 Flash Lite",
-        type: "Text-out models",
-        rateLimit: "RPM: 30 | TPM: 1M | RPD: 1500",
-        description: "High rate-limit model for high-frequency utility tasks.",
-        icon: "⚡",
-      },
-      {
-        id: "gemma-4-26b",
-        name: "Gemma 4 26B",
-        type: "Open Weights",
-        rateLimit: "RPM: 30 | TPM: 16K | RPD: 14.4K",
-        description: "Google's open-weights 26B dense transformer model.",
-        icon: "💎",
-      },
-      {
-        id: "gemma-4-31b",
-        name: "Gemma 4 31B",
-        type: "Open Weights",
-        rateLimit: "RPM: 30 | TPM: 16K | RPD: 14.4K",
-        description: "High-parameter open weights model for specialized research tasks.",
-        icon: "💠",
-      },
-    ],
+        id: "gemini-3.5-flash", name: "Gemini 3.5 Flash", type: "Text-out models", rateLimit: "RPM: 5 | TPM: 250K | RPD: 20", description: "Next-gen flagship high-speed reasoning & multimodal model with ultra-fast latency.", icon: "⚡", }, {
+        id: "gemini-3.5-flash-lite", name: "Gemini 3.5 Flash Lite", rateLimit: "RPM: 15 | TPM: 250K | RPD: 500", description: "Ultra-low latency lightweight model optimized for high-throughput live apps.", icon: "🚀", {
+        id: "gemini-3.6-flash", name: "Gemini 3.6 Flash", description: "Advanced intelligence, deep reasoning, vision and complex instruction following.", icon: "🧠", {
+        id: "gemini-3.1-flash-lite", name: "Gemini 3.1 Flash Lite", description: "Fast, cost-efficient model for sub-second conversations and agent workflows.", icon: "💨", {
+        id: "gemini-3.7-flash", name: "Gemini 3.7 Flash", description: "Experimental preview with enhanced mathematical logic and coding abilities.", icon: "🔬", {
+        id: "gemini-3.8-flash", name: "Gemini 3.8 Flash", description: "Cutting-edge frontier flash model with ultra-large context handling.", icon: "✨", {
+        id: "gemini-3-flash", name: "Gemini 3 Flash", description: "Stable generation 3 multimodal model for production apps.", icon: "🎯", {
+        id: "gemini-2-flash", name: "Gemini 2 Flash", rateLimit: "RPM: 15 | TPM: 1M | RPD: 1500", description: "Legacy reliable flash model with broad language and media support.", icon: "📦", {
+        id: "gemini-2-flash-lite", name: "Gemini 2 Flash Lite", rateLimit: "RPM: 30 | TPM: 1M | RPD: 1500", description: "High rate-limit model for high-frequency utility tasks.", {
+        id: "gemma-4-26b", name: "Gemma 4 26B", type: "Open Weights", rateLimit: "RPM: 30 | TPM: 16K | RPD: 14.4K", description: "Google's open-weights 26B dense transformer model.", icon: "💎", {
+        id: "gemma-4-31b", name: "Gemma 4 31B", description: "High-parameter open weights model for specialized research tasks.", icon: "💠"],
   },
   {
     category: "🎨 Image & Video Generation (Nano Banana & Veo)",
     badge: "Media Gen",
-    models: [
-      {
-        id: "nano-banana-2",
-        name: "Nano Banana 2 (Gemini 3.1 Flash Image)",
-        type: "Multi-modal generative",
-        rateLimit: "Live Sandbox",
-        description: "State-of-the-art fast image generation with photorealistic prompt comprehension.",
-        icon: "🍌",
-      },
-      {
-        id: "nano-banana-2-lite",
-        name: "Nano Banana 2 Lite (Gemini 3.1 Flash Lite Image)",
-        type: "Multi-modal generative",
-        rateLimit: "Live Sandbox",
-        description: "Ultra-fast thumbnail and sketch image generation.",
-        icon: "⚡",
-      },
-      {
-        id: "nano-banana-pro",
-        name: "Nano Banana Pro (Gemini 3 Pro Image)",
-        type: "Multi-modal generative",
-        rateLimit: "Studio High-Res",
-        description: "Professional high-detail 4K image and graphic design generation.",
-        icon: "🎨",
-      },
-      {
-        id: "veo-3-generate",
-        name: "Veo 3 Generate",
-        type: "Multi-modal generative",
-        rateLimit: "Cinematic Video",
-        description: "Google's cinematic 1080p generative video model.",
-        icon: "🎬",
-      },
-      {
-        id: "veo-3-fast-generate",
-        name: "Veo 3 Fast Generate",
-        type: "Multi-modal generative",
-        rateLimit: "Fast Video",
-        description: "Real-time rapid preview video generation.",
-        icon: "📹",
-      },
-      {
-        id: "lyria-3-pro",
-        name: "Lyria 3 Pro",
-        type: "Multi-modal generative",
-        rateLimit: "Audio Studio",
-        description: "Full-fidelity music synthesis, instrumental backing, and vocal tracks.",
-        icon: "🎵",
-      },
-      {
-        id: "gemini-omni-flash",
-        name: "Gemini Omni Flash",
-        type: "Multi-modal generative",
-        rateLimit: "Full Omnimodal",
-        description: "Unified text, vision, speech and video generation in single pass.",
-        icon: "🔮",
-      },
-    ],
+    models: [{
+        id: "nano-banana-2", name: "Nano Banana 2 (Gemini 3.1 Flash Image)", type: "Multi-modal generative", rateLimit: "Live Sandbox", description: "State-of-the-art fast image generation with photorealistic prompt comprehension.", icon: "🍌", }, {
+        id: "nano-banana-2-lite", name: "Nano Banana 2 Lite (Gemini 3.1 Flash Lite Image)", description: "Ultra-fast thumbnail and sketch image generation.", icon: "⚡", {
+        id: "nano-banana-pro", name: "Nano Banana Pro (Gemini 3 Pro Image)", rateLimit: "Studio High-Res", description: "Professional high-detail 4K image and graphic design generation.", icon: "🎨", {
+        id: "veo-3-generate", name: "Veo 3 Generate", rateLimit: "Cinematic Video", description: "Google's cinematic 1080p generative video model.", icon: "🎬", {
+        id: "veo-3-fast-generate", name: "Veo 3 Fast Generate", rateLimit: "Fast Video", description: "Real-time rapid preview video generation.", icon: "📹", {
+        id: "lyria-3-pro", name: "Lyria 3 Pro", rateLimit: "Audio Studio", description: "Full-fidelity music synthesis, instrumental backing, and vocal tracks.", icon: "🎵", {
+        id: "gemini-omni-flash", name: "Gemini Omni Flash", rateLimit: "Full Omnimodal", description: "Unified text, vision, speech and video generation in single pass.", icon: "🔮"],
   },
   {
     category: "🎙️ Audio, Speech & Live Dialog",
     badge: "Voice/Audio",
-    models: [
-      {
-        id: "gemini-3.1-flash-tts",
-        name: "Gemini 3.1 Flash TTS",
-        type: "Multi-modal generative",
-        rateLimit: "RPM: 3 | TPM: 10K | RPD: 10",
-        description: "Ultra-natural native speech synthesis with emotional inflections.",
-        icon: "🔊",
-      },
-      {
-        id: "gemini-3.5-transcribe",
-        name: "Gemini 3.5 Transcribe Live",
-        type: "Live API",
-        rateLimit: "RPM: 3 | TPM: 10K | RPD: 25",
-        description: "Real-time streaming speech-to-text with multi-speaker diarization.",
-        icon: "🎙️",
-      },
-      {
-        id: "gemini-3.5-live-translate",
-        name: "Gemini 3.5 Live Translate",
-        type: "Live API",
-        rateLimit: "RPM: 0 / Unlimited | 20K TPM",
-        description: "Instantaneous bidirectional real-time audio translation.",
-        icon: "🌐",
-      },
-      {
-        id: "gemini-3-flash-live",
-        name: "Gemini 3 Flash Live",
-        type: "Live API",
-        rateLimit: "RPM: 2 / Unlimited | 65K TPM",
-        description: "Full duplex low-latency audio/video bidirectional live dialogue.",
-        icon: "📡",
-      },
-      {
-        id: "gemini-2.5-flash-native-audio",
-        name: "Gemini 2.5 Flash Native Audio Dialog",
-        type: "Live API",
-        rateLimit: "Live API Stream",
-        description: "Direct end-to-end speech-in speech-out audio stream.",
-        icon: "🎧",
-      },
-    ],
+    models: [{
+        id: "gemini-3.1-flash-tts", name: "Gemini 3.1 Flash TTS", type: "Multi-modal generative", rateLimit: "RPM: 3 | TPM: 10K | RPD: 10", description: "Ultra-natural native speech synthesis with emotional inflections.", icon: "🔊", }, {
+        id: "gemini-3.5-transcribe", name: "Gemini 3.5 Transcribe Live", type: "Live API", rateLimit: "RPM: 3 | TPM: 10K | RPD: 25", description: "Real-time streaming speech-to-text with multi-speaker diarization.", icon: "🎙️", {
+        id: "gemini-3.5-live-translate", name: "Gemini 3.5 Live Translate", rateLimit: "RPM: 0 / Unlimited | 20K TPM", description: "Instantaneous bidirectional real-time audio translation.", icon: "🌐", {
+        id: "gemini-3-flash-live", name: "Gemini 3 Flash Live", rateLimit: "RPM: 2 / Unlimited | 65K TPM", description: "Full duplex low-latency audio/video bidirectional live dialogue.", icon: "📡", {
+        id: "gemini-2.5-flash-native-audio", name: "Gemini 2.5 Flash Native Audio Dialog", rateLimit: "Live API Stream", description: "Direct end-to-end speech-in speech-out audio stream.", icon: "🎧"],
   },
   {
     category: "🤖 Autonomous Agents & Tools",
     badge: "Agents",
-    models: [
-      {
-        id: "antigravity",
-        name: "Antigravity",
-        type: "Agents",
-        rateLimit: "RPM: 60 | TPM: 100K | RPD: 100",
-        description: "Google DeepMind's Advanced Autonomous Agent Architecture.",
-        icon: "🚀",
-      },
-      {
-        id: "deep-research-pro-preview",
-        name: "Deep Research Pro Preview",
-        type: "Agents",
-        rateLimit: "500 Map Groundings",
-        description: "Multi-step web crawling, citation synthesis, and research report agent.",
-        icon: "🔍",
-      },
-      {
-        id: "computer-use-preview",
-        name: "Computer Use Preview",
-        type: "Other models",
-        rateLimit: "500 UI Automations",
-        description: "Browser & desktop UI automation via visual screenshots and click actions.",
-        icon: "💻",
-      },
-      {
-        id: "gemini-robotics-er-2-preview",
-        name: "Gemini Robotics ER 2 Preview",
-        type: "Other models",
-        rateLimit: "RPM: 5 | TPM: 250K | RPD: 20",
-        description: "Spatial reasoning, 3D object manipulation, and embodied AI robotics.",
-        icon: "🤖",
-      },
-    ],
+    models: [{
+        id: "antigravity", name: "Antigravity", type: "Agents", rateLimit: "RPM: 60 | TPM: 100K | RPD: 100", description: "Google DeepMind's Advanced Autonomous Agent Architecture.", icon: "🚀", }, {
+        id: "deep-research-pro-preview", name: "Deep Research Pro Preview", rateLimit: "500 Map Groundings", description: "Multi-step web crawling, citation synthesis, and research report agent.", icon: "🔍", {
+        id: "computer-use-preview", name: "Computer Use Preview", type: "Other models", rateLimit: "500 UI Automations", description: "Browser & desktop UI automation via visual screenshots and click actions.", icon: "💻", {
+        id: "gemini-robotics-er-2-preview", name: "Gemini Robotics ER 2 Preview", rateLimit: "RPM: 5 | TPM: 250K | RPD: 20", description: "Spatial reasoning, 3D object manipulation, and embodied AI robotics.", icon: "🤖"],
   },
   {
     category: "📊 Embedding & Semantic Vector Models",
     badge: "Embeddings",
-    models: [
-      {
-        id: "gemini-embedding-1",
-        name: "Gemini Embedding 1",
-        type: "Other models",
-        rateLimit: "RPM: 100 | TPM: 30K | RPD: 1K",
-        description: "High-density 768/1536-dimensional semantic vector embeddings.",
-        icon: "📐",
-      },
-      {
-        id: "gemini-embedding-2",
-        name: "Gemini Embedding 2",
-        type: "Other models",
-        rateLimit: "RPM: 100 | TPM: 30K | RPD: 1K",
-        description: "Next-generation multimodal cross-lingual vector space.",
-        icon: "🧬",
-      },
-      {
-        id: "text-embedding-004",
-        name: "Text Embedding 004",
-        type: "Production Vector",
-        rateLimit: "RPM: 1500 | Unlimited",
-        description: "Standard production vector embedding for RAG and search.",
-        icon: "📑",
-      },
-    ],
+    models: [{
+        id: "gemini-embedding-1", name: "Gemini Embedding 1", type: "Other models", rateLimit: "RPM: 100 | TPM: 30K | RPD: 1K", description: "High-density 768/1536-dimensional semantic vector embeddings.", icon: "📐", }, {
+        id: "gemini-embedding-2", name: "Gemini Embedding 2", description: "Next-generation multimodal cross-lingual vector space.", icon: "🧬", {
+        id: "text-embedding-004", name: "Text Embedding 004", type: "Production Vector", rateLimit: "RPM: 1500 | Unlimited", description: "Standard production vector embedding for RAG and search.", icon: "📑"],
   },
 ];
 
@@ -330,13 +114,7 @@ export const ModelTesterCapsule: React.FC<ModelTesterCapsuleProps> = ({ isOpen, 
   const [inputPrompt, setInputPrompt] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
-      id: "welcome_msg",
-      sender: "model",
-      text: "नमस्ते Boss! मैं **FRIDAY Model Testing Sandbox** हूँ। आप ऊपर दाईं ओर दिए गए Dropdown से **Google AI Studio** का कोई भी Model सेलेक्ट कर सकते हैं और यहाँ Live Prompt, PDF, Audio, Video, या Code टेस्ट कर सकते हैं।",
-      timestamp: Date.now(),
-      modelUsed: "gemini-3.5-flash",
-    }
-  ]);
+      id: "welcome_msg", sender: "model", text: "नमस्ते Boss! मैं **FRIDAY Model Testing Sandbox** हूँ। आप ऊपर दाईं ओर दिए गए Dropdown से **Google AI Studio** का कोई भी Model सेलेक्ट कर सकते हैं और यहाँ Live Prompt, PDF, Audio, Video, या Code टेस्ट कर सकते हैं।", timestamp: Date.now(), modelUsed: "gemini-3.5-flash", }]);
   const [isLoading, setIsLoading] = useState(false);
   const [attachedMedia, setAttachedMedia] = useState<AttachedMedia | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);

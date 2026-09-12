@@ -143,7 +143,7 @@ ${caption ? `User caption: "${caption}"` : ""}`;
               ? (lowerMime.includes("ogg") ? "audio/ogg" : "audio/mp3")
               : (lowerMime.includes("png") ? "image/png" : lowerMime.includes("webp") ? "image/webp" : "image/jpeg");
 
-        const VISION_FALLBACK_MODELS = ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+        const VISION_FALLBACK_MODELS = ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3-flash"];
 
         for (const model of VISION_FALLBACK_MODELS) {
           try {
@@ -276,7 +276,7 @@ STRUCTURE YOUR RESPONSE IN CLEAN WHATSAPP FORMAT:
 Use WhatsApp markdown (*bold*, _italic_, bullet points). Keep it clean, accurate, and easy to read.`;
 
     const VISION_FALLBACK_MODELS = [
-          "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+          "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash"];
 
     for (const model of VISION_FALLBACK_MODELS) {
       try {
@@ -351,7 +351,7 @@ Use WhatsApp markdown (*bold*, _italic_, bullet points). Keep it clean, accurate
           : (lowerMime.includes("png") ? "image/png" : lowerMime.includes("webp") ? "image/webp" : "image/jpeg");
 
     const VISION_FALLBACK_MODELS = [
-          "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+          "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash"];
 
     // Case 1: We have media buffer -> multimodal vision query
     if (buffer && buffer.length > 0) {
@@ -409,7 +409,7 @@ INSTRUCTIONS:
 4. If not found in the summary, state clearly what the summary contains.`;
 
       const TEXT_MODELS = [
-        "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+        "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash"];
 
       for (const model of TEXT_MODELS) {
         try {
@@ -452,7 +452,7 @@ Extract:
 2. Distinctive physical traits that remain identifiable over months/years.
 3. Summary of this person's visual fingerprint.`;
 
-        for (const model of ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash", "gemini-2.0-flash", "gemini-1.5-flash"]) {
+        for (const model of ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash"]) {
           try {
             const response = await ai.models.generateContent({
               model,
@@ -553,7 +553,7 @@ TASK:
 }`;
 
       let response: any = null;
-      for (const model of ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash", "gemini-2.0-flash", "gemini-1.5-flash"]) {
+      for (const model of ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash"]) {
         try {
           response = await ai.models.generateContent({
             model,

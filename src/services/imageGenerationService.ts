@@ -368,7 +368,7 @@ Analyze the image with extreme precision and write a detailed prompt:
 Output ONLY the raw descriptive prompt text.`;
 
         const VISION_EDIT_MODELS = [
-          "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+          "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash"];
 
         for (const model of VISION_EDIT_MODELS) {
           try {
@@ -497,7 +497,7 @@ Generate a single, comprehensive, hyper-realistic diffusion prompt for Flux.1/SD
 Output ONLY the raw descriptive prompt string without quotes.`;
 
         const FUSION_MODELS = [
-          "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+          "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash"];
 
         for (const model of FUSION_MODELS) {
           try {

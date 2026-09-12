@@ -81,9 +81,7 @@ Return ONLY valid JSON. No markdown code fences.`;
                   documentType: type,
                   executiveSummary: parsed.executiveSummary,
                   keyClausesOrHighlights: parsed.keyClausesOrHighlights,
-                  riskOrActionItems: parsed.riskOrActionItems || [],
-                  message: `Boss, "${docTitle}" (${type.toUpperCase()}) ka deep AI analysis complete ho gaya hai! Executive summary: ${parsed.executiveSummary}`,
-                };
+                  riskOrActionItems: parsed.riskOrActionItems || [], message: `Boss, "${docTitle}" (${type.toUpperCase()}) ka deep AI analysis complete ho gaya hai! Executive summary: ${parsed.executiveSummary}`, };
               }
             }
           } catch {}
@@ -112,22 +110,14 @@ Return ONLY valid JSON. No markdown code fences.`;
     const message = `Boss, "${docTitle}" (${type.toUpperCase()}) ka analysis complete ho gaya hai! Executive summary: ${executiveSummary}`;
 
     return {
-      success: true,
-      documentTitle: docTitle,
-      documentType: type,
-      executiveSummary,
-      keyClausesOrHighlights: highlights,
-      riskOrActionItems,
-      message,
-    };
+      success: true, documentTitle: docTitle, documentType: type, executiveSummary, keyClausesOrHighlights: highlights, riskOrActionItems, message, };
   }
 
   /**
    * Answers questions based strictly on the provided document text using semantic AI search.
    */
   public async queryDocument(
-    documentText: string,
-    question: string
+    documentText: string, question: string
   ): Promise<DocumentQueryResult> {
     const text = (documentText || "").trim();
     const q = (question || "").trim();

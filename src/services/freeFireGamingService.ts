@@ -540,7 +540,7 @@ Analyze this in-game Free Fire frame and output ONLY valid JSON matching this sc
 }`;
 
       const models = [
-        "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+        "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash"];
       let rawText = "";
       for (const model of models) {
         try {
@@ -643,7 +643,7 @@ Provide a deep technical breakdown in strictly valid JSON:
       }
 
       const models = [
-        "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+        "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash"];
       let text = "";
       for (const model of models) {
         try {

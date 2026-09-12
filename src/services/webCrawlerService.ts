@@ -13,16 +13,13 @@ import { db } from "./firebaseAdmin";
 // 6. RAG Semantic Chunking for large sites.
 // ---------------------------------------------------------------------------
 
-const MODEL_CHAIN = ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+const MODEL_CHAIN = ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3-flash"];
 
 // Map Grounding Chain: 3.1 flash lite -> 2.5 flash -> 2.5 flash lite -> 2.0 flash
-const MAP_GROUNDING_CHAIN = ["gemini-3.1-flash-lite", "gemini-3.6-flash", "gemini-2.0-flash"];
+const MAP_GROUNDING_CHAIN = ["gemini-3.1-flash-lite", "gemini-3.6-flash", "gemini-3.5-flash"];
 
 // Search Grounding Chain: 2.5 flash -> 2.0 flash
-const SEARCH_GROUNDING_CHAIN = [
-  "gemini-3.6-flash",
-  "gemini-2.0-flash",
-];
+const SEARCH_GROUNDING_CHAIN = ["gemini-3.6-flash", "gemini-3.5-flash"];
 
 // Vector Embedding Model Chain: Gemini Embedding 1 -> Gemini Embedding 2 -> Legacy 001
 const EMBEDDING_MODEL_CHAIN = ["text-embedding-004", // Gemini Embedding 1 (768/1536 dim SOTA)
@@ -631,9 +628,7 @@ RETURN ONLY VALID JSON (no backticks, no explanatory text, just raw JSON):`;
             for (const chunk of groundingMetadata.groundingChunks) {
               if (chunk.web?.uri) {
                 sources.push({
-                  title: chunk.web.title || "Web Source",
-                  url: chunk.web.uri,
-                });
+                  title: chunk.web.title || "Web Source", url: chunk.web.uri, });
               }
             }
           }
@@ -671,9 +666,7 @@ Provide a detailed, precise location guide including:
     for (const model of MAP_GROUNDING_CHAIN) {
       try {
         const resp = await ai.models.generateContent({
-          model,
-          contents: prompt,
-        });
+          model, contents: prompt, });
         const text = resp.text;
         if (text && text.trim()) {
           return { answer: text, modelUsed: model };

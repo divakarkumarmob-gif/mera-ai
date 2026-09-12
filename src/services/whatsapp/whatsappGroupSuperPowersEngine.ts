@@ -472,11 +472,9 @@ Structure your response EXACTLY like this:
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       return {
-        handled: true,
-        replyText: isPraise
+        handled: true, replyText: isPraise
           ? `🌟 *Hype Card:* ${targetPerson} is simply legendary! 🚀🔥`
-          : `🔥 *Roast:* ${targetPerson} bhai ka swag hi alag hai! 😂`,
-      };
+          : `🔥 *Roast:* ${targetPerson} bhai ka swag hi alag hai! 😂`, };
     }
 
     try {
@@ -577,15 +575,11 @@ Use playful punchlines and keep it within 4-5 lines.`;
           const finalScoreboard = this.getLeaderboardText(active);
           this.activeQuizzes.delete(groupJid);
           return {
-            handled: true,
-            replyText: `${ansCard}\n\n🏆 *QUIZ COMPLETED! GRAND FINALE* 🎊\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n${finalScoreboard}`,
-          };
+            handled: true, replyText: `${ansCard}\n\n🏆 *QUIZ COMPLETED! GRAND FINALE* 🎊\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n${finalScoreboard}`, };
         }
       } else {
         return {
-          handled: true,
-          replyText: `❌ *Galat Jawab!* @${senderPhone || senderName} (Option ${userAns} galat hai). Koi aur try karein!`,
-        };
+          handled: true, replyText: `❌ *Galat Jawab!* @${senderPhone || senderName} (Option ${userAns} galat hai). Koi aur try karein!`, };
       }
     }
 
@@ -594,15 +588,7 @@ Use playful punchlines and keep it within 4-5 lines.`;
 
     const question = await this.generateQuizQuestion(topic);
     const newQuiz: ActiveGroupQuiz = {
-      groupId: groupJid,
-      topic,
-      round: 1,
-      maxRounds: 5,
-      currentQuestion: question,
-      scores: new Map(),
-      startTime: Date.now(),
-      answeredUsers: new Set(),
-    };
+      groupId: groupJid, topic, round: 1, maxRounds: 5, currentQuestion: question, scores: new Map(), startTime: Date.now(), answeredUsers: new Set(), };
     this.activeQuizzes.set(groupJid, newQuiz);
 
     const card = `🎮 *FRIDAY LIVE GROUP QUIZ SHOWDOWN* ⚡
@@ -632,30 +618,17 @@ ${question.question}
 Topic: "${topic}".
 Output MUST be strict JSON only in this schema:
 {
-  "question": "Question in natural Hinglish or English",
-  "options": {
-    "A": "Option A text",
-    "B": "Option B text",
-    "C": "Option C text",
-    "D": "Option D text"
-  },
-  "correctAnswer": "A",
-  "explanation": "1-line interesting fun fact why this is correct"
+  "question": "Question in natural Hinglish or English", "options": {
+    "A": "Option A text", "B": "Option B text", "C": "Option C text", "D": "Option D text"
+  }, "correctAnswer": "A", "explanation": "1-line interesting fun fact why this is correct"
 }`;
         const resp = await ai.models.generateContent({
-          model: "gemini-3.6-flash",
-          contents: prompt,
-          config: { responseMimeType: "application/json" },
-        });
+          model: "gemini-3.6-flash", contents: prompt, config: { responseMimeType: "application/json" }, });
 
         const json = JSON.parse(resp.text?.trim() || "{}");
         if (json.question && json.options && json.correctAnswer) {
           return {
-            question: json.question,
-            options: json.options,
-            correctAnswer: (json.correctAnswer || "A").toUpperCase(),
-            explanation: json.explanation || "Correct answer!",
-          };
+            question: json.question, options: json.options, correctAnswer: (json.correctAnswer || "A").toUpperCase(), explanation: json.explanation || "Correct answer!", };
         }
       } catch (e) {
         console.warn("[GroupSuperPowers] Quiz AI generation error:", e);
@@ -796,12 +769,7 @@ Format your output EXACTLY as a pinned executive checklist:
   // ── 7. @birthday Auto-Celebrator ──────────────────────────────────────────
 
   private async handleBirthdayManager(
-    groupJid: string,
-    groupName: string,
-    rawText: string,
-    senderName: string,
-    senderPhone: string,
-    quotedMessage?: QuotedMessageContext | null
+    groupJid: string, groupName: string, rawText: string, senderName: string, senderPhone: string, quotedMessage?: QuotedMessageContext | null
   ): Promise<{ handled: boolean; replyText?: string }> {
     const clean = rawText.toLowerCase().trim();
 
@@ -831,12 +799,10 @@ Format your output EXACTLY as a pinned executive checklist:
       const targetName = quotedMessage?.sender || senderName;
 
       // Extract day and month
-      const dateMatch = rawText.match(/\b(\d{1,2})[\/\-\s]([0-1]?\d|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b/i);
+      const dateMatch = rawText.match(/\b(\d{1, 2})[\/\-\s]([0-1]?\d|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b/i);
       if (!dateMatch) {
         return {
-          handled: true,
-          replyText: `⚠️ Kripya sahi date format me likhein. Example: \`@birthday add @Rohan 25-10\` ya \`@birthday add 15 Aug\``,
-        };
+          handled: true, replyText: `⚠️ Kripya sahi date format me likhein. Example: \`@birthday add @Rohan 25-10\` ya \`@birthday add 15 Aug\``, };
       }
 
       const day = parseInt(dateMatch[1], 10);
@@ -844,9 +810,7 @@ Format your output EXACTLY as a pinned executive checklist:
       const monthRaw = dateMatch[2].toLowerCase();
 
       const monthMap: { [k: string]: number } = {
-        jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
-        jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
-      };
+        jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12, };
 
       if (monthMap[monthRaw]) {
         month = monthMap[monthRaw];
@@ -859,14 +823,7 @@ Format your output EXACTLY as a pinned executive checklist:
       }
 
       const newBday: GroupBirthday = {
-        groupId: groupJid,
-        memberPhone: targetPhone,
-        memberName: targetName,
-        day,
-        month,
-        addedBy: senderName,
-        addedAt: Date.now(),
-      };
+        groupId: groupJid, memberPhone: targetPhone, memberName: targetName, day, month, addedBy: senderName, addedAt: Date.now(), };
 
       const existing = this.birthdayCache.get(groupJid) || [];
       const updated = existing.filter((b) => b.memberPhone !== targetPhone);
@@ -877,9 +834,7 @@ Format your output EXACTLY as a pinned executive checklist:
       await bdayCol().doc(docId).set(newBday, { merge: true });
 
       return {
-        handled: true,
-        replyText: `🎂 *BIRTHDAY SAVED SUCCESSFULLY!* 🎉\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n👤 *Member:* ${targetName} (@${targetPhone})\n📅 *Date:* ${String(day).padStart(2, "0")}/${String(month).padStart(2, "0")}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\nFriday theek 12:00 AM par group me custom celebration poster aur sweet wish post karegi! 🥳✨`,
-      };
+        handled: true, replyText: `🎂 *BIRTHDAY SAVED SUCCESSFULLY!* 🎉\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n👤 *Member:* ${targetName} (@${targetPhone})\n📅 *Date:* ${String(day).padStart(2, "0")}/${String(month).padStart(2, "0")}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\nFriday theek 12:00 AM par group me custom celebration poster aur sweet wish post karegi! 🥳✨`, };
     }
 
     // Instant Wish Generator (@birthday wish @Member)
@@ -897,23 +852,17 @@ Format your output EXACTLY as a pinned executive checklist:
     }
 
     return {
-      handled: true,
-      replyText: `🎂🎉 *HAPPY BIRTHDAY ${targetPerson.toUpperCase()}!* 🥳🎈
+      handled: true, replyText: `🎂🎉 *HAPPY BIRTHDAY ${targetPerson.toUpperCase()}!* 🥳🎈
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 ${customPoem}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
-👑 _Treat kab mil rahi hai sabko? Party toh banti hai!_ 🍕🍻`,
-    };
+👑 _Treat kab mil rahi hai sabko? Party toh banti hai!_ 🍕🍻`, };
   }
 
   // ── 8. @meme AI Meme & Sticker Generator ──────────────────────────────────
 
   public async handleMemeGenerator(
-    sock: any,
-    groupJid: string,
-    rawText: string,
-    senderName: string,
-    quotedMessage?: QuotedMessageContext | null
+    sock: any, groupJid: string, rawText: string, senderName: string, quotedMessage?: QuotedMessageContext | null
   ): Promise<{ handled: boolean; replyText?: string }> {
     const topic = rawText
       .replace(/^(?:@meme|\/meme|meme\s*banao|meme)\s*[:=-]?\s*/i, "")
@@ -933,8 +882,7 @@ ${customPoem}
           contents: `Create a super funny, relatable Indian Hinglish meme punchline about: "${target}".
 Format:
 Caption: [1-2 line funny punchline]
-ImagePrompt: [Visual description for 3D animated or photorealistic funny meme scene]`,
-        });
+ImagePrompt: [Visual description for 3D animated or photorealistic funny meme scene]`, });
         const full = res.text?.trim() || "";
         const capMatch = full.match(/Caption:\s*([\s\S]*?)(?:ImagePrompt:|$)/i);
         const promptMatch = full.match(/ImagePrompt:\s*([\s\S]*)/i);
@@ -948,9 +896,7 @@ ImagePrompt: [Visual description for 3D animated or photorealistic funny meme sc
       const genRes = await imageGenerationService.generateImage(memePrompt, { aspectRatio: "1:1" });
       if (genRes.success && genRes.buffer && sock) {
         await sock.sendMessage(groupJid, {
-          image: genRes.buffer,
-          caption: memeCaption,
-        });
+          image: genRes.buffer, caption: memeCaption, });
         return { handled: true };
       }
     } catch (imgErr) {
@@ -958,18 +904,13 @@ ImagePrompt: [Visual description for 3D animated or photorealistic funny meme sc
     }
 
     return {
-      handled: true,
-      replyText: `${memeCaption}\n\n🖼️ _(Meme Scene: ${memePrompt})_`,
-    };
+      handled: true, replyText: `${memeCaption}\n\n🖼️ _(Meme Scene: ${memePrompt})_`, };
   }
 
   // ── 9. @poll WhatsApp Native Interactive Poll Creator ─────────────────────
 
   public async handlePollCreator(
-    sock: any,
-    groupJid: string,
-    rawText: string,
-    senderName: string
+    sock: any, groupJid: string, rawText: string, senderName: string
   ): Promise<{ handled: boolean; replyText?: string }> {
     const clean = rawText.replace(/^(?:@poll|\/poll|poll\s*banao|poll)\s*[:=-]?\s*/i, "").trim();
 
@@ -985,14 +926,10 @@ Input: "${clean || "Sunday Cricket match"}"
 
 Output STRICT JSON ONLY:
 {
-  "question": "Clear poll title / question",
-  "options": ["Option 1", "Option 2", "Option 3"]
+  "question": "Clear poll title / question", "options": ["Option 1", "Option 2", "Option 3"]
 }`;
         const resp = await ai.models.generateContent({
-          model: "gemini-3.6-flash",
-          contents: prompt,
-          config: { responseMimeType: "application/json" },
-        });
+          model: "gemini-3.6-flash", contents: prompt, config: { responseMimeType: "application/json" }, });
         const json = JSON.parse(resp.text?.trim() || "{}");
         if (json.question && Array.isArray(json.options) && json.options.length >= 2) {
           question = json.question.slice(0, 250);
@@ -1165,9 +1102,7 @@ Structure output EXACTLY like this:
   // ── 13. @rap Desi Hip-Hop Rap Generator ───────────────────────────────────
 
   public async handleDesiRapGenerator(
-    rawText: string,
-    quotedMessage?: QuotedMessageContext | null,
-    senderName = "Member"
+    rawText: string, quotedMessage?: QuotedMessageContext | null, senderName = "Member"
   ): Promise<{ handled: boolean; replyText?: string }> {
     const target = rawText
       .replace(/^(?:@rap|\/rap|rap\s*banao|rap)\s*[:=-]?\s*/i, "")
@@ -1221,9 +1156,7 @@ CRITICAL: No vulgar/abusive words. Keep it high vibe and purely for friendly lau
 
     if (!apiKey) {
       return {
-        handled: true,
-        replyText: `⏳ *Year 2031 Prediction:* ${targetPerson} will be a billionaire drinking coconut water on a private yacht! 🚀`,
-      };
+        handled: true, replyText: `⏳ *Year 2031 Prediction:* ${targetPerson} will be a billionaire drinking coconut water on a private yacht! 🚀`, };
     }
 
     try {
@@ -1237,9 +1170,7 @@ Keep it positive, clever, and laugh-out-loud funny.`;
       const text = resp.text?.trim();
       if (text) {
         return {
-          handled: true,
-          replyText: `⏳ *FRIDAY TIME-MACHINE: YEAR 2031 DESTINY* 🔮✨\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n👤 *Subject:* ${targetPerson}\n\n${text}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n🌌 _Kismat locked in the blockchain of destiny!_ 🚀`,
-        };
+          handled: true, replyText: `⏳ *FRIDAY TIME-MACHINE: YEAR 2031 DESTINY* 🔮✨\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n👤 *Subject:* ${targetPerson}\n\n${text}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n🌌 _Kismat locked in the blockchain of destiny!_ 🚀`, };
       }
     } catch (e: any) {
       return { handled: true, replyText: `⚠️ Future oracle error: ${e?.message || e}` };
@@ -1251,9 +1182,7 @@ Keep it positive, clever, and laugh-out-loud funny.`;
   // ── 15. @srk / @tonystark / @amitabh / @speakas Celebrity Clone ────────────
 
   public async handleCelebrityClone(
-    rawText: string,
-    quotedMessage?: QuotedMessageContext | null,
-    senderName = "Member"
+    rawText: string, quotedMessage?: QuotedMessageContext | null, senderName = "Member"
   ): Promise<{ handled: boolean; replyText?: string }> {
     let celeb = "Shah Rukh Khan";
     const clean = rawText.toLowerCase();
@@ -1319,9 +1248,7 @@ Keep it entertaining, 4-5 lines.`;
 
     if (!apiKey) {
       return {
-        handled: true,
-        replyText: `🤖 *Simulating @${targetPerson}:* "Haan bhai 2 min me aata hoon..." 😅`,
-      };
+        handled: true, replyText: `🤖 *Simulating @${targetPerson}:* "Haan bhai 2 min me aata hoon..." 😅`, };
     }
 
     try {
@@ -1340,9 +1267,7 @@ Keep it 2-3 lines and wildly relatable.`;
       const text = resp.text?.trim();
       if (text) {
         return {
-          handled: true,
-          replyText: `🤖 *SIMULATING @${targetPerson.toUpperCase()}'S EXACT BRAIN* 👥⚡\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n${text}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n🤣 _(Pakka yehi bolte na? Sach batao!)_`,
-        };
+          handled: true, replyText: `🤖 *SIMULATING @${targetPerson.toUpperCase()}'S EXACT BRAIN* 👥⚡\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n${text}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n🤣 _(Pakka yehi bolte na? Sach batao!)_`, };
       }
     } catch (e: any) {
       return { handled: true, replyText: `⚠️ Mimic error: ${e?.message || e}` };
@@ -1354,10 +1279,7 @@ Keep it 2-3 lines and wildly relatable.`;
   // ── 17. @movie / @poster Movie Cast & Poster Generator ────────────────────
 
   public async handleMovieCastPoster(
-    sock: any,
-    groupJid: string,
-    rawText: string,
-    senderName: string
+    sock: any, groupJid: string, rawText: string, senderName: string
   ): Promise<{ handled: boolean; replyText?: string }> {
     const clean = rawText
       .replace(/^(?:@movie|@poster|\/movie|\/poster|movie\s*cast)\s*[:=-]?\s*/i, "")
@@ -1377,8 +1299,7 @@ Keep it 2-3 lines and wildly relatable.`;
 Assign funny dramatic character roles (e.g. Mastermind Hero, Sarcastic Tech Guy, Emotional Friend, Main Villain).
 Format:
 Synopsis: [3-4 lines dramatic trailer script]
-PosterPrompt: [Visual description for Hollywood-grade cinematic movie poster]`,
-        });
+PosterPrompt: [Visual description for Hollywood-grade cinematic movie poster]`, });
         const full = res.text?.trim() || "";
         const synMatch = full.match(/Synopsis:\s*([\s\S]*?)(?:PosterPrompt:|$)/i);
         const pMatch = full.match(/PosterPrompt:\s*([\s\S]*)/i);
@@ -1392,9 +1313,7 @@ PosterPrompt: [Visual description for Hollywood-grade cinematic movie poster]`,
       const genRes = await imageGenerationService.generateImage(imagePrompt, { aspectRatio: "16:9" });
       if (genRes.success && genRes.buffer && sock) {
         await sock.sendMessage(groupJid, {
-          image: genRes.buffer,
-          caption: synopsisText,
-        });
+          image: genRes.buffer, caption: synopsisText, });
         return { handled: true };
       }
     } catch (imgErr) {
@@ -1402,16 +1321,13 @@ PosterPrompt: [Visual description for Hollywood-grade cinematic movie poster]`,
     }
 
     return {
-      handled: true,
-      replyText: `${synopsisText}\n\n🎟️ _In Cinemas Worldwide This Friday!_ 🌟`,
-    };
+      handled: true, replyText: `${synopsisText}\n\n🎟️ _In Cinemas Worldwide This Friday!_ 🌟`, };
   }
 
   // ── 18. @commentary Bhojpuri & Sidhu Sports Commentary ────────────────────
 
   public async handleSportsCommentary(
-    rawText: string,
-    senderName: string
+    rawText: string, senderName: string
   ): Promise<{ handled: boolean; replyText?: string }> {
     const clean = rawText
       .replace(/^(?:@commentary|\/commentary|commentary)\s*[:=-]?\s*/i, "")
@@ -1422,9 +1338,7 @@ PosterPrompt: [Visual description for Hollywood-grade cinematic movie poster]`,
 
     if (!apiKey) {
       return {
-        handled: true,
-        replyText: `🎙️ *Bhojpuri Commentary:* Ee dekhi bhaiya, ball gail boundary ke paar! Chauka! 💥🏏`,
-      };
+        handled: true, replyText: `🎙️ *Bhojpuri Commentary:* Ee dekhi bhaiya, ball gail boundary ke paar! Chauka! 💥🏏`, };
     }
 
     try {
@@ -1437,9 +1351,7 @@ Use authentic high-energy Bhojpuri & Sidhuisms punchlines ("Eee dekhi babua", "T
       const text = resp.text?.trim();
       if (text) {
         return {
-          handled: true,
-          replyText: `🎙️ *FRIDAY LIVE DHAMAKA COMMENTARY* 🏏🔥\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n${text}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n⚡ _Thoko taali! Boundary paar!_ 💥`,
-        };
+          handled: true, replyText: `🎙️ *FRIDAY LIVE DHAMAKA COMMENTARY* 🏏🔥\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n${text}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n⚡ _Thoko taali! Boundary paar!_ 💥`, };
       }
     } catch (e: any) {
       return { handled: true, replyText: `⚠️ Commentary error: ${e?.message || e}` };
@@ -1451,11 +1363,7 @@ Use authentic high-energy Bhojpuri & Sidhuisms punchlines ("Eee dekhi babua", "T
   // ── 19. @song / @gaana / @music Instant Song Radar & Streaming Links ──────
 
   public async handleSongFinder(
-    sock: any,
-    groupJid: string,
-    rawText: string,
-    senderName = "Member",
-    messageKey?: any
+    sock: any, groupJid: string, rawText: string, senderName = "Member", messageKey?: any
   ): Promise<{ handled: boolean; replyText?: string }> {
     const { whatsappFeatureEngine } = await import("../whatsappFeatureEngine");
     const res = await whatsappFeatureEngine.searchMusicWithLyrics(rawText, senderName, groupJid);
@@ -1464,10 +1372,7 @@ Use authentic high-energy Bhojpuri & Sidhuisms punchlines ("Eee dekhi babua", "T
     if (res.audioBuffer && sock && groupJid) {
       try {
         await sock.sendMessage(groupJid, {
-          audio: res.audioBuffer,
-          mimetype: "audio/mp4",
-          ptt: false,
-        });
+          audio: res.audioBuffer, mimetype: "audio/mp4", ptt: false, });
       } catch (audioErr) {
         console.warn("[GroupSuperPowers] Failed to send preview audio:", audioErr);
       }
