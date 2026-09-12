@@ -3492,19 +3492,48 @@ export function createApiRouter(context: ApiRoutesContext): Router {
         parts: currentParts,
       });
 
-      const response = await ai.models.generateContent({
-        model: String(model).trim(),
-        contents,
-      });
+      let responseText = "";
+      let actualModelUsed = String(model).trim();
 
-      const replyText = response.text || "(No response text returned by model)";
+      // 1. Primary Model Generation Attempt
+      try {
+        const genOptions: any = {
+          model: actualModelUsed,
+          contents,
+        };
+
+        if (actualModelUsed.includes("search-grounding") || actualModelUsed.includes("grounding") || actualModelUsed === "deep-research-pro-preview") {
+          genOptions.tools = [{ googleSearch: {} }];
+        }
+
+        const response = await ai.models.generateContent(genOptions);
+        responseText = response.text || "(No response text returned by model)";
+      } catch (primaryErr: any) {
+        console.warn(`[ModelTester] Direct call failed for '${actualModelUsed}':`, primaryErr?.message || primaryErr);
+        
+        // 2. Intelligent Fallback to Flagship Model (gemini-3.6-flash / gemini-3.5-flash)
+        const fallbackModel = "gemini-3.6-flash";
+        const fallbackOptions: any = {
+          model: fallbackModel,
+          contents,
+        };
+
+        if (actualModelUsed.includes("search") || actualModelUsed.includes("grounding")) {
+          fallbackOptions.tools = [{ googleSearch: {} }];
+        }
+
+        const fallbackRes = await ai.models.generateContent(fallbackOptions);
+        responseText = fallbackRes.text || "(Response generated via fallback engine)";
+        actualModelUsed = `${model} (via ${fallbackModel})`;
+      }
+
       const durationMs = Date.now() - startTime;
 
       res.json({
         ok: true,
-        reply: replyText,
-        text: replyText,
-        modelUsed: model,
+        reply: responseText,
+        text: responseText,
+        modelUsed: actualModelUsed,
         model,
         latencyMs: durationMs,
         durationMs,
