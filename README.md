@@ -88,7 +88,7 @@ Hamare system me kisi bhi model ke failure, rate-limit ya quota error hone par a
 
 | Task / Purpose | Primary Model | Fallback Chain |
 | :--- | :--- | :--- |
-| **Full Session Summaries** | `gemini-3.6-flash` | `gemini-3.5-flash` ➔ `gemini-3.5-flash-lite` ➔ `gemini-3.1-pro` ➔ `gemini-3.6-flash` |
+| **Full Session Summaries** | `gemini-3.6-flash` | `gemini-3.5-flash` ➔ `gemini-3.5-flash-lite` ➔ `gemini-3.1-flash-lite` ➔ `gemini-3.6-flash` |
 | **"Aaj Ka Update" Overwrites** | `gemini-3.6-flash` | `gemini-3.5-flash` ➔ `gemini-3.5-flash-lite` ➔ `gemini-3.6-flash` ➔ Local Text Slice |
 | **24h Scratch Summaries** | `gemini-3.6-flash` | `gemini-3.5-flash` ➔ `gemini-3.5-flash-lite` ➔ `gemini-3.6-flash` ➔ Key-Topic Digest |
 | **Permanent Vector Embeddings** | `text-embedding-004` | `text-embedding-002` ➔ `embedding-001` ➔ Deterministic 768-dim Normalized Offline Vector |
