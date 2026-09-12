@@ -3163,19 +3163,6 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                                 }}
                             >
                                 <div className="inline-flex items-start justify-center min-w-full w-max gap-3.5 px-6 pt-0 pb-1.5 mx-auto" style={{ overflow: 'visible' }}>
-                                    {/* 0. 🧪 Model Test Capsule */}
-                                    <HangingRopeCapsule ropeHeight={40} swayIndex={0} ropeColor="from-cyan-400/90 via-sky-300 to-indigo-500/90" glowColor="rgba(6,182,212,0.6)">
-                                        <button
-                                            onClick={() => setShowModelTester(true)}
-                                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-gradient-to-r from-cyan-500/30 via-sky-500/30 to-indigo-500/30 hover:from-cyan-500/45 hover:to-indigo-500/45 border border-cyan-400/70 text-cyan-200 text-xs font-bold shadow-[0_0_25px_rgba(6,182,212,0.45)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95 animate-pulse"
-                                            title="🧪 Model Test (Test all 30+ Models with + PDF/Media)"
-                                        >
-                                            <span className="text-sm">🧪</span>
-                                            <span>Model Test</span>
-                                            <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-cyan-400/30 text-cyan-200 font-extrabold uppercase">30+ Models</span>
-                                        </button>
-                                    </HangingRopeCapsule>
-
                                     {/* 1. Wi-Fi Radar */}
                                     <HangingRopeCapsule ropeHeight={34} swayIndex={1} ropeColor="from-cyan-400/90 via-cyan-300 to-cyan-500/90" glowColor="rgba(6,182,212,0.4)">
                                         <button
@@ -3341,6 +3328,18 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                                 }}
                             >
                                 <div className="inline-flex items-start justify-center min-w-full w-max gap-3.5 px-6 pt-0 pb-1.5 mx-auto" style={{ overflow: 'visible' }}>
+                                    {/* 🧪 Model Test Capsule */}
+                                    <HangingRopeCapsule rowTier="lower" ropeHeight={37} swayIndex={0} ropeColor="from-cyan-400/90 via-sky-300 to-indigo-500/90" glowColor="rgba(6,182,212,0.6)">
+                                        <button
+                                            onClick={() => setShowModelTester(true)}
+                                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-gradient-to-r from-cyan-500/30 via-sky-500/30 to-indigo-500/30 hover:from-cyan-500/45 hover:to-indigo-500/45 border border-cyan-400/70 text-cyan-200 text-xs font-bold shadow-[0_0_20px_rgba(6,182,212,0.45)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
+                                            title="Model Test"
+                                        >
+                                            <span className="text-sm">🧪</span>
+                                            <span>Model Test</span>
+                                        </button>
+                                    </HangingRopeCapsule>
+
                                     {/* 11. 🧠 Learning & Cognition Capsule */}
                                     <HangingRopeCapsule rowTier="lower" ropeHeight={35} swayIndex={11} ropeColor="from-emerald-400/90 via-teal-300 to-emerald-500/90" glowColor="rgba(16,185,129,0.45)">
                                         <button
