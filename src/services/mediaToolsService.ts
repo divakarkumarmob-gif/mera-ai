@@ -37,11 +37,28 @@ export class MediaToolsService {
    */
   private getAntiBotHeaders(platform: "Instagram" | "YouTube" | "General" = "General", customCookies?: string): Record<string, string> {
     const userAgents = [
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1", "Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.135 Mobile Safari/537.36", ];
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0",
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
+      "Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.135 Mobile Safari/537.36",
+    ];
     const randomUa = userAgents[Math.floor(Math.random() * userAgents.length)];
 
     const headers: Record<string, string> = {
-      "User-Agent": randomUa, Accept: "text/html, application/xhtml+xml, application/xml;q=0.9, image/avif, image/webp, image/apng, */*;q=0.8, application/signed-exchange;v=b3;q=0.7", "Accept-Language": "en-US, en;q=0.9, hi;q=0.8", "Accept-Encoding": "gzip, deflate, br", "Sec-Ch-Ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"', "Sec-Ch-Ua-Mobile": randomUa.includes("Mobile") ? "?1" : "?0", "Sec-Ch-Ua-Platform": randomUa.includes("Windows") ? '"Windows"' : randomUa.includes("Mac") ? '"macOS"' : '"Android"', "Sec-Fetch-Dest": "document", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Site": "none", "Sec-Fetch-User": "?1", "Upgrade-Insecure-Requests": "1", };
+      "User-Agent": randomUa,
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+      "Accept-Language": "en-US,en;q=0.9,hi;q=0.8",
+      "Accept-Encoding": "gzip, deflate, br",
+      "Sec-Ch-Ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+      "Sec-Ch-Ua-Mobile": randomUa.includes("Mobile") ? "?1" : "?0",
+      "Sec-Ch-Ua-Platform": randomUa.includes("Windows") ? '"Windows"' : randomUa.includes("Mac") ? '"macOS"' : '"Android"',
+      "Sec-Fetch-Dest": "document",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Site": "none",
+      "Sec-Fetch-User": "?1",
+      "Upgrade-Insecure-Requests": "1",
+    };
 
     if (platform === "Instagram") {
       const igCookies = customCookies || process.env.INSTAGRAM_COOKIES || (process.env.INSTAGRAM_SESSION_ID ? `sessionid=${process.env.INSTAGRAM_SESSION_ID};` : "");
@@ -87,8 +104,14 @@ export class MediaToolsService {
       if (hfToken) {
         try {
           const res = await fetch("https://api-inference.huggingface.co/models/briaai/RMBG-1.4", {
-            method: "POST", headers: {
-              Authorization: `Bearer ${hfToken}`, "Content-Type": mimeType, }, body: imageBuffer, signal: AbortSignal.timeout(20000), });
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${hfToken}`,
+              "Content-Type": mimeType,
+            },
+            body: imageBuffer,
+            signal: AbortSignal.timeout(20000),
+          });
 
           if (res.ok) {
             const arrBuf = await res.arrayBuffer();
@@ -106,9 +129,17 @@ export class MediaToolsService {
       try {
         const base64Data = imageBuffer.toString("base64");
         const res = await fetch("https://api.deepai.org/api/image-editor", {
-          method: "POST", headers: {
-            "api-key": process.env.DEEPAI_API_KEY || "quickstart-free-user-token", "Content-Type": "application/x-www-form-urlencoded", body: new URLSearchParams({
-            image: `data:${mimeType};base64, ${base64Data}`, text: "transparent background, isolated subject without background", }), signal: AbortSignal.timeout(15000), });
+          method: "POST",
+          headers: {
+            "api-key": process.env.DEEPAI_API_KEY || "quickstart-free-user-token",
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: new URLSearchParams({
+            image: `data:${mimeType};base64,${base64Data}`,
+            text: "transparent background, isolated subject without background",
+          }),
+          signal: AbortSignal.timeout(15000),
+        });
 
         if (res.ok) {
           const data: any = await res.json();
@@ -149,16 +180,16 @@ export class MediaToolsService {
       return { isSocialUrl: true, url, platform: "Instagram" };
     }
     if (/youtube\.com\/shorts\//i.test(url) || /youtu\.be\//i.test(url)) {
-      return { isSocialUrl: true, platform: "YouTube Shorts" };
+      return { isSocialUrl: true, url, platform: "YouTube Shorts" };
     }
     if (/tiktok\.com\//i.test(url)) {
-      return { isSocialUrl: true, platform: "TikTok" };
+      return { isSocialUrl: true, url, platform: "TikTok" };
     }
     if (/twitter\.com\/.*\/status\//i.test(url) || /x\.com\/.*\/status\//i.test(url)) {
-      return { isSocialUrl: true, platform: "Twitter/X" };
+      return { isSocialUrl: true, url, platform: "Twitter/X" };
     }
     if (/facebook\.com\/(?:reel|watch|share)/i.test(url) || /fb\.watch\//i.test(url)) {
-      return { isSocialUrl: true, platform: "Facebook" };
+      return { isSocialUrl: true, url, platform: "Facebook" };
     }
 
     return null;
@@ -171,7 +202,8 @@ export class MediaToolsService {
    * Downloads clean MP4 video buffer from social media link across Instagram, YouTube, TikTok, Twitter/X, and 40+ platforms
    */
     /**
-   * Downloads clean MP4 video buffer from social media link across YouTube (Videos & Shorts), * Instagram (Reels & Posts), Facebook, etc.
+   * Downloads clean MP4 video buffer from social media link across YouTube (Videos & Shorts),
+   * Instagram (Reels & Posts), TikTok, Twitter/X, Facebook, etc.
    * Uses multi-tier resilient proxy engines (Piped Proxy, High-speed Scrapers, Invidious, and Twitter CDNs).
    */
   public async downloadSocialVideo(videoUrl: string): Promise<{ success: boolean; buffer?: Buffer; filename?: string; title?: string; error?: string }> {
@@ -187,13 +219,19 @@ export class MediaToolsService {
     // ── Engine 1: Piped Proxy Streaming (Immune to YouTube Datacenter IP Bans!) ──
     if (isYT && videoId) {
       const pipedInstances = [
-        "https://api.piped.private.coffee", "https://pipedapi.ducks.party", "https://pipedapi.leptons.xyz", "https://piped-api.garudalinux.org", "https://pa.il.ax", "https://pipedapi.kavin.rocks"
+        "https://api.piped.private.coffee",
+        "https://pipedapi.ducks.party",
+        "https://pipedapi.leptons.xyz",
+        "https://piped-api.garudalinux.org",
+        "https://pa.il.ax",
+        "https://pipedapi.kavin.rocks"
       ];
 
       for (const inst of pipedInstances) {
         try {
           const res = await fetch(`${inst}/streams/${videoId}`, {
-            headers: this.getAntiBotHeaders("YouTube"), signal: AbortSignal.timeout(7000)
+            headers: this.getAntiBotHeaders("YouTube"),
+            signal: AbortSignal.timeout(7000)
           });
 
           if (res.ok) {
@@ -208,7 +246,8 @@ export class MediaToolsService {
 
             if (mp4Stream?.url) {
               const vidRes = await fetch(mp4Stream.url, {
-                headers: this.getAntiBotHeaders("YouTube"), signal: AbortSignal.timeout(45000)
+                headers: this.getAntiBotHeaders("YouTube"),
+                signal: AbortSignal.timeout(45000)
               });
 
               if (vidRes.ok) {
@@ -216,7 +255,10 @@ export class MediaToolsService {
                 const buffer = Buffer.from(arrayBuf);
                 if (buffer.length > 5000) {
                   return {
-                    success: true, buffer, filename: `YouTube_${videoId}.mp4`, title: data.title || "YouTube Video"
+                    success: true,
+                    buffer,
+                    filename: `YouTube_${videoId}.mp4`,
+                    title: data.title || "YouTube Video"
                   };
                 }
               }
@@ -237,25 +279,42 @@ export class MediaToolsService {
 
     if (isInsta) {
       platformGateways.push(
-        `https://bk9.fun/download/instagram?url=${encodeURIComponent(cleanUrl)}`, `https://api.tiklydown.eu.org/api/download/v2?url=${encodeURIComponent(cleanUrl)}`, `https://api.ryzendesu.vip/api/downloader/igdl?url=${encodeURIComponent(cleanUrl)}`, `https://api.siputzx.my.id/api/d/igdl?url=${encodeURIComponent(cleanUrl)}`, `https://vihangayt.me/download/instagram?url=${encodeURIComponent(cleanUrl)}`, `https://api.vkrdown.com/api/index.php?url=${encodeURIComponent(cleanUrl)}`, `https://tools.imput.net/api/video?url=${encodeURIComponent(cleanUrl)}`
+        `https://bk9.fun/download/instagram?url=${encodeURIComponent(cleanUrl)}`,
+        `https://api.tiklydown.eu.org/api/download/v2?url=${encodeURIComponent(cleanUrl)}`,
+        `https://api.ryzendesu.vip/api/downloader/igdl?url=${encodeURIComponent(cleanUrl)}`,
+        `https://api.siputzx.my.id/api/d/igdl?url=${encodeURIComponent(cleanUrl)}`,
+        `https://vihangayt.me/download/instagram?url=${encodeURIComponent(cleanUrl)}`,
+        `https://api.vkrdown.com/api/index.php?url=${encodeURIComponent(cleanUrl)}`,
+        `https://tools.imput.net/api/video?url=${encodeURIComponent(cleanUrl)}`
       );
     }
 
     if (isYT) {
       platformGateways.push(
-        `https://bk9.fun/download/youtube?url=${encodeURIComponent(cleanUrl)}`, `https://api.guruapi.tech/ytdl/ytmp4?url=${encodeURIComponent(cleanUrl)}`, `https://api.ryzendesu.vip/api/downloader/ytmp4?url=${encodeURIComponent(cleanUrl)}`, `https://api.siputzx.my.id/api/d/ytmp4?url=${encodeURIComponent(cleanUrl)}`, `https://vihangayt.me/download/ytmp4?url=${encodeURIComponent(cleanUrl)}`, `https://tools.imput.net/api/video?url=${encodeURIComponent(cleanUrl)}`
+        `https://bk9.fun/download/youtube?url=${encodeURIComponent(cleanUrl)}`,
+        `https://api.tiklydown.eu.org/api/download/v2?url=${encodeURIComponent(cleanUrl)}`,
+        `https://api.guruapi.tech/ytdl/ytmp4?url=${encodeURIComponent(cleanUrl)}`,
+        `https://api.ryzendesu.vip/api/downloader/ytmp4?url=${encodeURIComponent(cleanUrl)}`,
+        `https://api.siputzx.my.id/api/d/ytmp4?url=${encodeURIComponent(cleanUrl)}`,
+        `https://vihangayt.me/download/ytmp4?url=${encodeURIComponent(cleanUrl)}`,
+        `https://api.vkrdown.com/api/index.php?url=${encodeURIComponent(cleanUrl)}`,
+        `https://tools.imput.net/api/video?url=${encodeURIComponent(cleanUrl)}`
       );
     }
 
     // Universal multi-engine fallbacks for any social media link
     platformGateways.push(
-      `https://api.tiklydown.eu.org/api/download/v2?url=${encodeURIComponent(cleanUrl)}`, `https://tools.imput.net/api/video?url=${encodeURIComponent(cleanUrl)}`
+      `https://api.tiklydown.eu.org/api/download/v2?url=${encodeURIComponent(cleanUrl)}`,
+      `https://api.vkrdown.com/api/index.php?url=${encodeURIComponent(cleanUrl)}`,
+      `https://tools.imput.net/api/video?url=${encodeURIComponent(cleanUrl)}`
     );
 
     for (const gw of platformGateways) {
       try {
         const res = await fetch(gw, {
-          headers: this.getAntiBotHeaders("General"), signal: AbortSignal.timeout(10000), });
+          headers: this.getAntiBotHeaders("General"),
+          signal: AbortSignal.timeout(10000),
+        });
 
         if (res.ok) {
           const data: any = await res.json();
@@ -278,12 +337,18 @@ export class MediaToolsService {
 
           if (videoStreamUrl && typeof videoStreamUrl === "string" && videoStreamUrl.startsWith("http")) {
             const vidRes = await fetch(videoStreamUrl, {
-              headers: this.getAntiBotHeaders("General"), signal: AbortSignal.timeout(35000), });
+              headers: this.getAntiBotHeaders("General"),
+              signal: AbortSignal.timeout(35000),
+            });
             if (vidRes.ok) {
               const buffer = Buffer.from(await vidRes.arrayBuffer());
               if (buffer.length > 5000) {
                 return {
-                  success: true, filename: `Video_${Date.now()}.mp4`, title: data?.title || data?.data?.title || data?.result?.title || "Social Video", };
+                  success: true,
+                  buffer,
+                  filename: `Video_${Date.now()}.mp4`,
+                  title: data?.title || data?.data?.title || data?.result?.title || "Social Video",
+                };
               }
             }
           }
@@ -299,11 +364,16 @@ export class MediaToolsService {
       if (twitterMatch && twitterMatch[1]) {
         const tweetId = twitterMatch[1];
         const twitGateways = [
-          `https://api.fxtwitter.com/status/${tweetId}`, `https://api.vxtwitter.com/Twitter/status/${tweetId}`, ];
+          `https://api.fxtwitter.com/status/${tweetId}`,
+          `https://api.vxtwitter.com/Twitter/status/${tweetId}`,
+        ];
 
         for (const gw of twitGateways) {
           try {
-            const res = await fetch(gw, signal: AbortSignal.timeout(8000), });
+            const res = await fetch(gw, {
+              headers: this.getAntiBotHeaders("General"),
+              signal: AbortSignal.timeout(8000),
+            });
             if (res.ok) {
               const data: any = await res.json();
               const mediaUrl =
@@ -313,12 +383,18 @@ export class MediaToolsService {
 
               if (mediaUrl) {
                 const vidRes = await fetch(mediaUrl, {
-                  headers: this.getAntiBotHeaders("General"), });
+                  headers: this.getAntiBotHeaders("General"),
+                  signal: AbortSignal.timeout(35000),
+                });
                 if (vidRes.ok) {
                   const buffer = Buffer.from(await vidRes.arrayBuffer());
                   if (buffer.length > 5000) {
                     return {
-                      success: true, filename: `Twitter_${tweetId}.mp4`, title: data?.tweet?.text?.slice(0, 50) || "Twitter Video", };
+                      success: true,
+                      buffer,
+                      filename: `Twitter_${tweetId}.mp4`,
+                      title: data?.tweet?.text?.slice(0, 50) || "Twitter Video",
+                    };
                   }
                 }
               }
@@ -331,11 +407,19 @@ export class MediaToolsService {
     // ── Engine 4: Invidious Instances Cluster ──
     if (isYT && videoId) {
       const invidiousInstances = [
-        "https://invidious.private.coffee", "https://inv.nadeko.net", "https://invidious.jing.rocks", "https://invidious.nerdvpn.de", "https://yt.artemislena.eu", ];
+        "https://invidious.private.coffee",
+        "https://inv.nadeko.net",
+        "https://invidious.jing.rocks",
+        "https://invidious.nerdvpn.de",
+        "https://yt.artemislena.eu",
+      ];
 
       for (const instance of invidiousInstances) {
         try {
-          const apiRes = await fetch(`${instance}/api/v1/videos/${videoId}`, });
+          const apiRes = await fetch(`${instance}/api/v1/videos/${videoId}`, {
+            headers: this.getAntiBotHeaders("YouTube"),
+            signal: AbortSignal.timeout(8000),
+          });
 
           if (apiRes.ok) {
             const data: any = await apiRes.json();
@@ -347,13 +431,20 @@ export class MediaToolsService {
               formatStreams[0];
 
             if (stream?.url) {
-              const streamRes = await fetch(stream.url, });
+              const streamRes = await fetch(stream.url, {
+                headers: this.getAntiBotHeaders("YouTube"),
+                signal: AbortSignal.timeout(35000),
+              });
               if (streamRes.ok) {
                 const arrayBuf = await streamRes.arrayBuffer();
                 const buffer = Buffer.from(arrayBuf);
                 if (buffer.length > 5000) {
                   return {
-                    success: true, title: data.title || "YouTube Video", };
+                    success: true,
+                    buffer,
+                    filename: `YouTube_${videoId}.mp4`,
+                    title: data.title || "YouTube Video",
+                  };
                 }
               }
             }
@@ -363,7 +454,9 @@ export class MediaToolsService {
     }
 
     return {
-      success: false, error: "Video download server busy hai ya post private/restricted hai. Kripya doosra link try karein.", };
+      success: false,
+      error: "Video download server busy hai ya post private/restricted hai. Kripya doosra link try karein.",
+    };
   }
 
   // =========================================================================
@@ -374,7 +467,9 @@ export class MediaToolsService {
    * Analyzes an image of a bill/receipt/table and creates an Excel spreadsheet buffer
    */
   public async convertImageToExcel(
-    imageBuffer: Buffer, mimeType: string = "image/jpeg", userInstruction?: string
+    imageBuffer: Buffer,
+    mimeType: string = "image/jpeg",
+    userInstruction?: string
   ): Promise<{ success: boolean; buffer?: Buffer; filename?: string; summary?: string; error?: string }> {
     const ai = this.getGeminiClient();
     if (!ai) {
@@ -387,22 +482,34 @@ export class MediaToolsService {
 Analyze the provided document, image, receipt, bill, or table with 100% precision.
 Extract all tabular data, line items, prices, dates, totals, and descriptions into a clean JSON structure.
 
-User specific instruction: "${userInstruction || "Extract all tables, amounts, and metadata into a clean spreadsheet."}"
+User specific instruction: "${userInstruction || "Extract all tables, line items, amounts, and metadata into a clean spreadsheet."}"
 
 Respond ONLY with valid JSON matching this exact schema:
 {
-  "sheetName": "Receipt_Summary", "title": "Expense / Invoice Title", "summary": "Short 2-line summary of items and grand total", "headers": ["Item Description", "Quantity", "Rate / Price", "Tax", "Total Amount"], "rows": [
-    ["Item 1", "1", "100.00", "5.00", "105.00"], ["Total", "", "105.00"]
+  "sheetName": "Receipt_Summary",
+  "title": "Expense / Invoice Title",
+  "summary": "Short 2-line summary of items and grand total",
+  "headers": ["Item Description", "Quantity", "Rate / Price", "Tax", "Total Amount"],
+  "rows": [
+    ["Item 1", "1", "100.00", "5.00", "105.00"],
+    ["Total", "", "", "", "105.00"]
   ]
 }`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.6-flash", contents: [
+        model: "gemini-3.5-flash",
+        contents: [
           {
-            role: "user", parts: [
+            role: "user",
+            parts: [
               {
                 inlineData: {
-                  data: base64Data, mimeType, { text: prompt }],
+                  data: base64Data,
+                  mimeType,
+                },
+              },
+              { text: prompt },
+            ],
           },
         ],
         config: {

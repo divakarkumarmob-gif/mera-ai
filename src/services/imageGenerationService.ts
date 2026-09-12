@@ -43,7 +43,7 @@ function extractValidImageBuffer(rawBuf: Buffer): { buffer: Buffer; mimeType: st
         parsed?.[0]?.image;
 
       if (b64 && typeof b64 === "string") {
-        const cleanB64 = b64.replace(/^data:image\/\w+;base64, /, "").trim();
+        const cleanB64 = b64.replace(/^data:image\/\w+;base64,/, "").trim();
         const decoded = Buffer.from(cleanB64, "base64");
         return extractValidImageBuffer(decoded);
       }
@@ -79,7 +79,7 @@ function extractValidImageBuffer(rawBuf: Buffer): { buffer: Buffer; mimeType: st
   }
 
   // GIF: GIF87a or GIF89a
-  if (rawBuf.length >= 6 && rawBuf.toString("ascii", 3) === "GIF") {
+  if (rawBuf.length >= 6 && rawBuf.toString("ascii", 0, 3) === "GIF") {
     return { buffer: rawBuf, mimeType: "image/gif" };
   }
 
@@ -116,7 +116,8 @@ class ImageGenerationService {
    * Returns a clean binary Buffer with verified magic bytes ready for WhatsApp media upload.
    */
   public async generateImage(
-    prompt: string, options: {
+    prompt: string,
+    options: {
       aspectRatio?: "1:1" | "16:9" | "9:16" | "4:3" | "3:4";
       enhancePrompt?: boolean;
     } = {}
@@ -124,7 +125,11 @@ class ImageGenerationService {
     let rawPrompt = (prompt || "").trim();
     if (!rawPrompt) {
       return {
-        success: false, model: "none", prompt: "", error: "Prompt cannot be empty", };
+        success: false,
+        model: "none",
+        prompt: "",
+        error: "Prompt cannot be empty",
+      };
     }
 
     const isPortrait = options.aspectRatio === "9:16" || options.aspectRatio === "3:4" || /portrait|ladki|girl|woman|face|person/i.test(rawPrompt);
@@ -150,7 +155,10 @@ class ImageGenerationService {
 
     if (cfToken && cfAccountId) {
       const cfModels = [
-        "@cf/black-forest-labs/flux-1-schnell", "@cf/bytedance/stable-diffusion-xl-lightning", "@cf/stabilityai/stable-diffusion-xl-base-1.0", ];
+        "@cf/black-forest-labs/flux-1-schnell",
+        "@cf/bytedance/stable-diffusion-xl-lightning",
+        "@cf/stabilityai/stable-diffusion-xl-base-1.0",
+      ];
 
       for (const cfModel of cfModels) {
         try {
@@ -158,10 +166,17 @@ class ImageGenerationService {
           const cfUrl = `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/ai/run/${cfModel}`;
           const resp = await Promise.race([
             fetch(cfUrl, {
-              method: "POST", headers: {
-                Authorization: `Bearer ${cfToken}`, "Content-Type": "application/json", }, body: JSON.stringify({ prompt: rawPrompt }), }), new Promise<Response>((_, reject) =>
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${cfToken}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ prompt: rawPrompt }),
+            }),
+            new Promise<Response>((_, reject) =>
               setTimeout(() => reject(new Error("Cloudflare Workers AI timeout")), 25000)
-            ), ]);
+            ),
+          ]);
 
           if (resp.ok) {
             const arrayBuf = await resp.arrayBuffer();
@@ -172,7 +187,12 @@ class ImageGenerationService {
                 `[ImageGen] Successfully generated image via Cloudflare (${cfModel}) [${validated.buffer.length} bytes, ${validated.mimeType}]`
               );
               return {
-                success: true, buffer: validated.buffer, mimeType: validated.mimeType, model: `Cloudflare (${cfModel.split("/").pop()})`, prompt: rawPrompt, };
+                success: true,
+                buffer: validated.buffer,
+                mimeType: validated.mimeType,
+                model: `Cloudflare (${cfModel.split("/").pop()})`,
+                prompt: rawPrompt,
+              };
             } else {
               console.warn(
                 `[ImageGen] Cloudflare (${cfModel}) response was not a valid image binary (${rawBuf.length} bytes)`
@@ -202,19 +222,31 @@ class ImageGenerationService {
 
     if (hfToken) {
       const hfModels = [
-        "black-forest-labs/FLUX.1-schnell", "stabilityai/stable-diffusion-xl-base-1.0", ];
+        "black-forest-labs/FLUX.1-schnell",
+        "stabilityai/stable-diffusion-xl-base-1.0",
+      ];
 
       for (const modelName of hfModels) {
         for (const baseUrl of [
-          `https://router.huggingface.co/hf-inference/models/${modelName}`, `https://api-inference.huggingface.co/models/${modelName}`, ]) {
+          `https://router.huggingface.co/hf-inference/models/${modelName}`,
+          `https://api-inference.huggingface.co/models/${modelName}`,
+        ]) {
           try {
             console.log(`[ImageGen] Trying Hugging Face (${modelName}) via ${baseUrl.split('/')[2]}...`);
             const resp = await Promise.race([
               fetch(baseUrl, {
-                method: "POST", headers: {
-                  Authorization: `Bearer ${hfToken}`, "User-Agent": "MeraAI-Friday-Agent/1.0", body: JSON.stringify({ inputs: rawPrompt }), reject) =>
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${hfToken}`,
+                  "Content-Type": "application/json",
+                  "User-Agent": "MeraAI-Friday-Agent/1.0",
+                },
+                body: JSON.stringify({ inputs: rawPrompt }),
+              }),
+              new Promise<Response>((_, reject) =>
                 setTimeout(() => reject(new Error("Hugging Face API timeout")), 25000)
-              ), ]);
+              ),
+            ]);
 
             if (resp.ok) {
               const arrayBuf = await resp.arrayBuffer();
@@ -225,7 +257,12 @@ class ImageGenerationService {
                   `[ImageGen] Successfully generated image via Hugging Face (${modelName}) [${validated.buffer.length} bytes, ${validated.mimeType}]`
                 );
                 return {
-                  success: true, model: `Hugging Face (${modelName.split("/").pop()})`, };
+                  success: true,
+                  buffer: validated.buffer,
+                  mimeType: validated.mimeType,
+                  model: `Hugging Face (${modelName.split("/").pop()})`,
+                  prompt: rawPrompt,
+                };
               }
             } else {
               const errBody = await resp.text().catch(() => "");
@@ -250,8 +287,16 @@ class ImageGenerationService {
 
           const response: any = await Promise.race([
             ai.models.generateImages({
-              model: modelName, config: {
-                numberOfImages: 1, outputMimeType: "image/jpeg", aspectRatio: options.aspectRatio || "1:1", new Promise((_, reject) => setTimeout(() => reject(new Error("Imagen 3 timeout")), 15000)), ]);
+              model: modelName,
+              prompt: rawPrompt,
+              config: {
+                numberOfImages: 1,
+                outputMimeType: "image/jpeg",
+                aspectRatio: options.aspectRatio || "1:1",
+              },
+            }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("Imagen 3 timeout")), 15000)),
+          ]);
 
           const imageBase64 = response?.generatedImages?.[0]?.image?.imageBytes;
           if (imageBase64) {
@@ -259,7 +304,12 @@ class ImageGenerationService {
             const validated = extractValidImageBuffer(rawBuffer) || { buffer: rawBuffer, mimeType: "image/jpeg" };
             console.log(`[ImageGen] Successfully generated image using Google ${modelName} (${validated.buffer.length} bytes)`);
             return {
-              success: true, model: `Google ${modelName}`, };
+              success: true,
+              buffer: validated.buffer,
+              mimeType: validated.mimeType,
+              model: `Google ${modelName}`,
+              prompt: rawPrompt,
+            };
           }
         } catch (err: any) {
           console.warn(`[ImageGen] Google ${modelName} failed (${err?.message || err}), trying fallback...`);
@@ -279,7 +329,11 @@ class ImageGenerationService {
       const resp = await Promise.race([
         fetch(pollinationsUrl, {
           headers: {
-            "User-Agent": "MeraAI-Friday-Agent/1.0", reject) => setTimeout(() => reject(new Error("Pollinations timeout")), 20000)), ]);
+            "User-Agent": "MeraAI-Friday-Agent/1.0",
+          },
+        }),
+        new Promise<Response>((_, reject) => setTimeout(() => reject(new Error("Pollinations timeout")), 20000)),
+      ]);
 
       if (resp.ok) {
         const arrayBuf = await resp.arrayBuffer();
@@ -290,7 +344,13 @@ class ImageGenerationService {
             `[ImageGen] Successfully generated image using Pollinations Flux AI (${validated.buffer.length} bytes)`
           );
           return {
-            success: true, imageUrl: pollinationsUrl, model: "Pollinations Flux AI", };
+            success: true,
+            buffer: validated.buffer,
+            mimeType: validated.mimeType,
+            imageUrl: pollinationsUrl,
+            model: "Pollinations Flux AI",
+            prompt: rawPrompt,
+          };
         }
       }
     } catch (pollErr: any) {
@@ -313,7 +373,13 @@ class ImageGenerationService {
             `[ImageGen] Generated image using Pollinations Turbo (${validated.buffer.length} bytes)`
           );
           return {
-            success: true, imageUrl: turboUrl, model: "Pollinations Turbo AI", };
+            success: true,
+            buffer: validated.buffer,
+            mimeType: validated.mimeType,
+            imageUrl: turboUrl,
+            model: "Pollinations Turbo AI",
+            prompt: rawPrompt,
+          };
         }
       }
     } catch (turboErr: any) {
@@ -321,7 +387,11 @@ class ImageGenerationService {
     }
 
     return {
-      success: false, error: "All image generation models failed. Please try again with a different description.", };
+      success: false,
+      model: "none",
+      prompt: rawPrompt,
+      error: "All image generation models failed. Please try again with a different description.",
+    };
   }
 
   /**
@@ -330,12 +400,18 @@ class ImageGenerationService {
    * transformation prompt, then executes via the Multi-Tier Flux engine.
    */
   public async editImageWithAI(
-    imageBuffer: Buffer, editInstructions: string, mimeType = "image/jpeg"
+    imageBuffer: Buffer,
+    editInstructions: string,
+    mimeType = "image/jpeg"
   ): Promise<GeneratedImageResult> {
     const rawInstruction = (editInstructions || "").trim();
     if (!rawInstruction) {
       return {
-        success: false, error: "Edit instructions cannot be empty", };
+        success: false,
+        model: "none",
+        prompt: "",
+        error: "Edit instructions cannot be empty",
+      };
     }
 
     const apiKey =
@@ -368,17 +444,36 @@ Analyze the image with extreme precision and write a detailed prompt:
 Output ONLY the raw descriptive prompt text.`;
 
         const VISION_EDIT_MODELS = [
-          "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash"];
+          "gemini-3.1-flash-lite",
+          "gemini-3.5-flash-lite",
+          "gemini-3.5-flash",
+          "gemini-3.1-flash-lite",
+          "gemini-3.6-flash",
+          "gemini-3.5-flash",
+          "gemini-3.5-flash",
+          "gemini-3.5-flash-lite",
+          "gemini-3.1-flash-lite",
+        ];
 
         for (const model of VISION_EDIT_MODELS) {
           try {
             const resp = await ai.models.generateContent({
               model,
-              contents: [{
-                  role: "user", parts: [
+              contents: [
+                {
+                  role: "user",
+                  parts: [
                     {
                       inlineData: {
-                        mimeType: cleanMime, data: base64Data, }, { text: visionPrompt }, ], });
+                        mimeType: cleanMime,
+                        data: base64Data,
+                      },
+                    },
+                    { text: visionPrompt },
+                  ],
+                },
+              ],
+            });
             const text = resp.text?.trim();
             if (text && text.length > 10) {
               enhancedPrompt = text;
@@ -412,7 +507,9 @@ Output ONLY the raw descriptive prompt text.`;
 
     if (cfToken && cfAccountId && hasValidImage) {
       const img2imgModels = [
-        { model: "@cf/stabilityai/stable-diffusion-xl-base-1.0", strength: 0.48 }, { model: "@cf/runwayml/stable-diffusion-v1-5-inpainting", strength: 0.55 }, ];
+        { model: "@cf/stabilityai/stable-diffusion-xl-base-1.0", strength: 0.48 },
+        { model: "@cf/runwayml/stable-diffusion-v1-5-inpainting", strength: 0.55 },
+      ];
 
       for (const { model: cfModel, strength } of img2imgModels) {
         try {
@@ -422,11 +519,21 @@ Output ONLY the raw descriptive prompt text.`;
           const imageArray = Array.from(imageBuffer);
           const resp = await Promise.race([
             fetch(cfUrl, {
-              method: "POST", headers: {
-                Authorization: `Bearer ${cfToken}`, "Content-Type": "application/json", body: JSON.stringify({
-                prompt: enhancedPrompt, image: imageArray, strength, }), new Promise<Response>((_, reject) =>
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${cfToken}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                prompt: enhancedPrompt,
+                image: imageArray,
+                strength,
+              }),
+            }),
+            new Promise<Response>((_, reject) =>
               setTimeout(() => reject(new Error("Cloudflare Image-to-Image timeout")), 30000)
-            ), ]);
+            ),
+          ]);
 
           if (resp.ok) {
             const arrayBuf = await resp.arrayBuffer();
@@ -437,7 +544,12 @@ Output ONLY the raw descriptive prompt text.`;
                 `[ImageGen] Successfully edited image via Cloudflare Img2Img (${cfModel}) [${validated.buffer.length} bytes, ${validated.mimeType}]`
               );
               return {
-                success: true, buffer: validated.buffer, mimeType: validated.mimeType, model: `Cloudflare Img2Img (${cfModel.split("/").pop()})`, prompt: enhancedPrompt, };
+                success: true,
+                buffer: validated.buffer,
+                mimeType: validated.mimeType,
+                model: `Cloudflare Img2Img (${cfModel.split("/").pop()})`,
+                prompt: enhancedPrompt,
+              };
             }
           }
         } catch (cfErr: any) {
@@ -452,10 +564,15 @@ Output ONLY the raw descriptive prompt text.`;
 
   /**
    * Dual-Image AI Fusion Engine (Face Swap, Style & Color Grading Transfer, Outfit Transfer).
-   * Takes Image 1 (Source Face / Subject) and Image 2 (Target Body / Style / Color Reference), * analyzes both with Gemini Multimodal Vision, and synthesizes the fused masterpiece.
+   * Takes Image 1 (Source Face / Subject) and Image 2 (Target Body / Style / Color Reference),
+   * analyzes both with Gemini Multimodal Vision, and synthesizes the fused masterpiece.
    */
   public async fuseTwoImagesWithAI(
-    image1Buffer: Buffer, image2Buffer: Buffer, userInstruction: string, mimeType1 = "image/jpeg", mimeType2 = "image/jpeg"
+    image1Buffer: Buffer,
+    image2Buffer: Buffer,
+    userInstruction: string,
+    mimeType1 = "image/jpeg",
+    mimeType2 = "image/jpeg"
   ): Promise<GeneratedImageResult> {
     const rawInstruction = (userInstruction || "Seamlessly blend the two photos").trim();
     const apiKey =
@@ -497,7 +614,16 @@ Generate a single, comprehensive, hyper-realistic diffusion prompt for Flux.1/SD
 Output ONLY the raw descriptive prompt string without quotes.`;
 
         const FUSION_MODELS = [
-          "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash"];
+          "gemini-3.1-flash-lite",
+          "gemini-3.5-flash-lite",
+          "gemini-3.5-flash",
+          "gemini-3.1-flash-lite",
+          "gemini-3.6-flash",
+          "gemini-3.5-flash",
+          "gemini-3.5-flash",
+          "gemini-3.5-flash-lite",
+          "gemini-3.1-flash-lite",
+        ];
 
         for (const model of FUSION_MODELS) {
           try {

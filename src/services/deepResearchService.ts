@@ -22,10 +22,12 @@ export interface DeepResearchReport {
 class DeepResearchService {
   /**
    * Autonomous Multi-Stage Deep Research Agent:
-   * Gathers intelligence from Wikipedia, live news feeds, and community forums, * then synthesizes factual, comprehensive research reports via Gemini AI.
+   * Gathers intelligence from Wikipedia, live news feeds, and community forums,
+   * then synthesizes factual, comprehensive research reports via Gemini AI.
    */
   public async executeResearch(
-    topic: string, onProgress?: (stepName: string, progressPercent: number) => void
+    topic: string,
+    onProgress?: (stepName: string, progressPercent: number) => void
   ): Promise<DeepResearchReport> {
     const q = topic.trim();
     if (!q) {
@@ -43,7 +45,10 @@ class DeepResearchService {
       const wiki = await publicApisService.getWikipediaSummary(q);
       if (wiki.success && wiki.summary) {
         searchResults.push({
-          source: "Wikipedia", query: q, content: wiki.summary, });
+          source: "Wikipedia",
+          query: q,
+          content: wiki.summary,
+        });
         if (wiki.url) {
           sources.push({ title: `${wiki.title || q} (Wikipedia)`, url: wiki.url });
         }
@@ -61,7 +66,10 @@ class DeepResearchService {
           .map((a) => `• ${a.title}: ${a.description || a.content || ""}`)
           .join("\n");
         searchResults.push({
-          source: "Live News & Journalism", content: headlines, });
+          source: "Live News & Journalism",
+          query: q,
+          content: headlines,
+        });
         news.articles.forEach((a) => {
           if (a.link) {
             sources.push({ title: a.title, url: a.link });
@@ -82,7 +90,10 @@ class DeepResearchService {
           .map((p: any) => `• ${p.title} (Score: ${p.score || 0})`)
           .join("\n");
         searchResults.push({
-          source: "Community & Forums (Reddit)", content: discussions, });
+          source: "Community & Forums (Reddit)",
+          query: q,
+          content: discussions,
+        });
       }
     } catch (e) {
       console.warn("[DeepResearch] Community discussions note:", e);
@@ -91,7 +102,8 @@ class DeepResearchService {
     // Fallback default source if none found
     if (sources.length === 0) {
       sources.push(
-        { title: `${q} Technical Reference Index`, url: `https://www.google.com/search?q=${encodeURIComponent(q)}` }, { title: `${q} Wikipedia Knowledge Base`, url: `https://en.wikipedia.org/wiki/${encodeURIComponent(q.replace(/ /g, "_"))}` }
+        { title: `${q} Technical Reference Index`, url: `https://www.google.com/search?q=${encodeURIComponent(q)}` },
+        { title: `${q} Wikipedia Knowledge Base`, url: `https://en.wikipedia.org/wiki/${encodeURIComponent(q.replace(/ /g, "_"))}` }
       );
     }
 
@@ -120,27 +132,46 @@ ${gatheredContext || "No external search snippets found. Synthesize based on ver
 
 Return a valid JSON object matching this structure EXACTLY:
 {
-  "executiveSummary": "A comprehensive 2-3 paragraph executive summary detailing current state, significance, and primary breakthroughs.", "sections": [
+  "executiveSummary": "A comprehensive 2-3 paragraph executive summary detailing current state, significance, and primary breakthroughs.",
+  "sections": [
     {
-      "title": "1. Core Architecture & Fundamental Principles", "content": "In-depth technical breakdown of how it works, mechanisms, and key components.", "bulletPoints": [
-        "Concrete technical insight 1", "Concrete technical insight 2", "Concrete technical insight 3"
+      "title": "1. Core Architecture & Fundamental Principles",
+      "content": "In-depth technical breakdown of how it works, mechanisms, and key components.",
+      "bulletPoints": [
+        "Concrete technical insight 1",
+        "Concrete technical insight 2",
+        "Concrete technical insight 3"
       ]
-    }, {
-      "title": "2. Current Trends, Real-World Applications & Industry Impact", "content": "Detailed real-world applications, recent developments, and competitive ecosystem.", "bulletPoints": [
-        "Key deployment pattern 1", "Key deployment pattern 2", "Key deployment pattern 3"
+    },
+    {
+      "title": "2. Current Trends, Real-World Applications & Industry Impact",
+      "content": "Detailed real-world applications, recent developments, and competitive ecosystem.",
+      "bulletPoints": [
+        "Key deployment pattern 1",
+        "Key deployment pattern 2",
+        "Key deployment pattern 3"
       ]
-    }, {
-      "title": "3. Strategic Opportunities, Challenges & Outlook", "content": "Critical evaluation of challenges, trade-offs, and future trajectory.", "bulletPoints": [
-        "Strategic factor 1", "Strategic factor 2", "Strategic factor 3"
+    },
+    {
+      "title": "3. Strategic Opportunities, Challenges & Outlook",
+      "content": "Critical evaluation of challenges, trade-offs, and future trajectory.",
+      "bulletPoints": [
+        "Strategic factor 1",
+        "Strategic factor 2",
+        "Strategic factor 3"
       ]
     }
-  ], "keyTakeaways": [
-    "High-value takeaway 1", "High-value takeaway 2", "High-value takeaway 3", "High-value takeaway 4"
+  ],
+  "keyTakeaways": [
+    "High-value takeaway 1",
+    "High-value takeaway 2",
+    "High-value takeaway 3",
+    "High-value takeaway 4"
   ]
 }
 Return ONLY valid JSON. Do not include markdown code fences or conversational greetings.`;
 
-        const models = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.6-flash"];
+        const models = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash"];
         for (const model of models) {
           try {
             const resp = await ai.models.generateContent({

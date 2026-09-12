@@ -199,7 +199,16 @@ async function startServer() {
 
   whatsappCloudService.setMessageCallback((msg) => {
     const payload = JSON.stringify({
-      type: "whatsapp_incoming", sender: msg.name, time: new Date(msg.timestamp).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" }), isGroup: false, "");
+      type: "whatsapp_incoming",
+      sender: msg.name,
+      text: msg.text,
+      time: new Date(msg.timestamp).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" }),
+      isGroup: false,
+    });
+    for (const client of connectedClients) {
+      if (client.readyState === client.OPEN) client.send(payload);
+    }
+    const ownerPhone = (process.env.OWNER_WHATSAPP_NUMBER || "").replace(/\D/g, "");
     const senderDigits = (msg.from || "").replace(/\D/g, "");
     if (ownerPhone && senderDigits === ownerPhone) {
       voiceBiometricsService.handleWhatsAppVoicePinMessage(msg.text, msg.name, "whatsapp_cloud")
@@ -296,7 +305,7 @@ async function startServer() {
       let thisSessionRef: any;
 
       const liveModelsToTry = [
-        "gemini-3.1-flash-live-preview", "gemini-3.6-flash-native-audio-dialog", "gemini-2.0-flash-exp"];
+        "gemini-3.1-flash-live-preview", "gemini-3.6-flash-native-audio-dialog", "gemini-3.5-flash-lite-exp"];
 
       let newSession: any = null;
       let lastLiveError: any = null;

@@ -47,9 +47,17 @@ export interface ExotelCallSession {
 
 class ExotelService {
   private configPath = path.resolve(process.cwd(), "data", "exotel_config.json");
-  private logsPath = path.resolve(process.cwd(), "exotel_call_logs.json");
+  private logsPath = path.resolve(process.cwd(), "data", "exotel_call_logs.json");
   private config: ExotelConfig = {
-    accountSid: process.env.EXOTEL_ACCOUNT_SID || "", apiKey: process.env.EXOTEL_API_KEY || "", apiToken: process.env.EXOTEL_API_TOKEN || "", subdomain: process.env.EXOTEL_SUBDOMAIN || "api.exotel.com", virtualNumber: process.env.EXOTEL_VIRTUAL_NUMBER || "", appId: process.env.EXOTEL_APP_ID || "", isLive: false, bossNotificationNumber: process.env.BOSS_WHATSAPP_NUMBER || "", };
+    accountSid: process.env.EXOTEL_ACCOUNT_SID || "",
+    apiKey: process.env.EXOTEL_API_KEY || "",
+    apiToken: process.env.EXOTEL_API_TOKEN || "",
+    subdomain: process.env.EXOTEL_SUBDOMAIN || "api.exotel.com",
+    virtualNumber: process.env.EXOTEL_VIRTUAL_NUMBER || "",
+    appId: process.env.EXOTEL_APP_ID || "",
+    isLive: false,
+    bossNotificationNumber: process.env.BOSS_WHATSAPP_NUMBER || "",
+  };
 
   private activeSessions = new Map<string, ExotelCallSession>();
   private audioBufferStore = new Map<string, { buffer: Buffer; mimeType: string; createdAt: number }>();
@@ -75,7 +83,10 @@ class ExotelService {
 
   public saveConfig(newConfig: Partial<ExotelConfig>): { success: boolean; config: ExotelConfig } {
     this.config = {
-      ...this.config, ...newConfig, isLive: Boolean(newConfig.accountSid && newConfig.apiKey && newConfig.apiToken), };
+      ...this.config,
+      ...newConfig,
+      isLive: Boolean(newConfig.accountSid && newConfig.apiKey && newConfig.apiToken),
+    };
     try {
       this.ensureDataDir();
       fs.writeFileSync(this.configPath, JSON.stringify(this.config, null, 2), "utf-8");
@@ -142,13 +153,24 @@ class ExotelService {
 
     const cleanFrom = from.replace(/\D/g, "");
     const session: ExotelCallSession = {
-      callSid, from: cleanFrom, startTime: Date.now(), durationSecs: 0, status: "in-progress", direction: "inbound", turns: [], };
+      callSid,
+      from: cleanFrom,
+      to,
+      startTime: Date.now(),
+      durationSecs: 0,
+      status: "in-progress",
+      direction: "inbound",
+      turns: [],
+    };
     this.activeSessions.set(callSid, session);
 
     // Initial greeting in Hindi
     const greetingText = "नमस्ते Boss! मैं आपकी AI असिस्टेंट Friday बोल रही हूँ। बताइए मैं आपकी क्या मदद कर सकती हूँ?";
     session.turns.push({
-      speaker: "friday", text: greetingText, timestamp: Date.now(), });
+      speaker: "friday",
+      text: greetingText,
+      timestamp: Date.now(),
+    });
 
     // Synthesize audio
     let audioUrl = "";
@@ -190,7 +212,15 @@ class ExotelService {
 
     if (!session) {
       session = {
-        callSid, from: "Unknown", to: this.config.virtualNumber || "Friday", };
+        callSid,
+        from: "Unknown",
+        to: this.config.virtualNumber || "Friday",
+        startTime: Date.now(),
+        durationSecs: 0,
+        status: "in-progress",
+        direction: "inbound",
+        turns: [],
+      };
       this.activeSessions.set(callSid, session);
     }
 
@@ -225,7 +255,11 @@ class ExotelService {
     console.log(`[ExotelService] ⚡ STT Completed in ${sttDuration}ms: "${callerText}"`);
 
     session.turns.push({
-      speaker: "caller", text: callerText, audioUrl: recordingUrl, });
+      speaker: "caller",
+      text: callerText,
+      timestamp: Date.now(),
+      audioUrl: recordingUrl,
+    });
 
     // 2. Generate Friday AI response using Gemini with Persona & Memory (Max 0.8s budget)
     const llmStartTime = Date.now();
@@ -234,7 +268,10 @@ class ExotelService {
     console.log(`[ExotelService] 🧠 Gemini LLM Generated in ${llmDuration}ms: "${fridayReply}"`);
 
     session.turns.push({
-      speaker: "friday", text: fridayReply, });
+      speaker: "friday",
+      text: fridayReply,
+      timestamp: Date.now(),
+    });
 
     // 3. Fast Synthesize Friday's speech (Max 1.0s budget, fallback to Say)
     const ttsStartTime = Date.now();
@@ -283,13 +320,15 @@ class ExotelService {
 
   /**
    * Model Fallback Chain:
-   * 1. gemini-3.5-flash      (Ultra-fast 200ms latency & rich intelligence)
-   * 2. gemini-3.5-flash-lite (Ultra-low latency fallback)
-   * 3. gemini-3.6-flash      (High reasoning & quality)
-   * 4. gemini-3.1-flash-lite (Ultra-low latency backup)
+   * 1. gemini-3.5-flash-lite (Ultra-fast 200ms latency)
+   * 2. gemini-3.6-flash      (High reasoning & quality)
+   * 3. gemini-3.1-flash-lite (Ultra-low latency backup)
    */
   public static readonly MODEL_CHAIN = [
-    "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite"];
+    "gemini-3.5-flash-lite",
+    "gemini-3.6-flash",
+    "gemini-3.1-flash-lite",
+  ];
 
   /**
    * 3. Friday Brain Voice Dialogue Generator with Model Fallback Chain

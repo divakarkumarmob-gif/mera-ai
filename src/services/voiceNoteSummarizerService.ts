@@ -15,12 +15,19 @@ class VoiceNoteSummarizerService {
    * Summarizes long audio voice notes into a fast 2-line executive digest with action items.
    */
   public async summarizeVoiceNote(
-    transcriptOrAudioSnippet: string, senderName = "Contact"
+    transcriptOrAudioSnippet: string,
+    senderName = "Contact"
   ): Promise<VoiceNoteSummaryResult> {
     const rawText = (transcriptOrAudioSnippet || "").trim();
     if (!rawText) {
       return {
-        success: false, senderName, intentCategory: "general", twoLineSummary: "Voice note me audio clear nahi tha.", actionItems: [], spokenBriefing: `Boss, ${senderName} ke voice note me koi audible baat samajh nahi aayi.`, };
+        success: false,
+        senderName,
+        intentCategory: "general",
+        twoLineSummary: "Voice note me audio clear nahi tha.",
+        actionItems: [],
+        spokenBriefing: `Boss, ${senderName} ke voice note me koi audible baat samajh nahi aayi.`,
+      };
     }
 
     // 1. Semantic Gemini AI Analysis
@@ -35,10 +42,13 @@ Voice Note Transcript:
 
 Return ONLY valid JSON matching this schema:
 {
-  "intentCategory": "urgent" | "work_meeting" | "payment" | "personal" | "general", "twoLineSummary": "Fast, crisp 2-line conversational summary in Hinglish for Boss DK", "actionItems": ["Actionable task 1", "Actionable task 2"], "spokenBriefing": "Natural spoken sentence Friday will say out loud to DK summarizing what sender wants"
+  "intentCategory": "urgent" | "work_meeting" | "payment" | "personal" | "general",
+  "twoLineSummary": "Fast, crisp 2-line conversational summary in Hinglish for Boss DK",
+  "actionItems": ["Actionable task 1", "Actionable task 2"],
+  "spokenBriefing": "Natural spoken sentence Friday will say out loud to DK summarizing what sender wants"
 }`;
 
-        const models = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.6-flash"];
+        const models = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash"];
         for (const model of models) {
           try {
             const res = await ai.models.generateContent({

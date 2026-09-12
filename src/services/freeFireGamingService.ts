@@ -93,7 +93,14 @@ class FreeFireGamingService {
   private wsBroadcaster: ((payload: string) => void) | null = null;
   private registeredAndroidHelpers: Set<{ ws: any; deviceName?: string; model?: string; connectedAt: number }> = new Set();
   private coPilotConfig: CoPilotConfig = {
-    coPlayEnabled: true, autoHealOnDamage: true, autoShootOnTarget: false, autoGlooOnDamage: true, afkTakeover: true, currentPilot: "boss", preferredGunType: "smg", };
+    coPlayEnabled: true,
+    autoHealOnDamage: true,
+    autoShootOnTarget: false,
+    autoGlooOnDamage: true,
+    afkTakeover: true,
+    currentPilot: "boss",
+    preferredGunType: "smg",
+  };
 
   /**
    * Register a connected Android Helper App (Accessibility Service - Zero ADB)
@@ -102,12 +109,19 @@ class FreeFireGamingService {
     // Remove if already exists with same ws instance
     this.unregisterAndroidHelper(ws);
     this.registeredAndroidHelpers.add({
-      ws, deviceName: meta?.deviceName || "Android Device (Accessibility Bridge)", model: meta?.model || "Android 11+ Handset", connectedAt: Date.now(), });
+      ws,
+      deviceName: meta?.deviceName || "Android Device (Accessibility Bridge)",
+      model: meta?.model || "Android 11+ Handset",
+      connectedAt: Date.now(),
+    });
     console.log(`[FreeFireGamingService] ⚡ Android Native Helper Connected (Total: ${this.registeredAndroidHelpers.size})`);
     
     // Broadcast status to UI
     this.broadcastWsAction({
-      type: "android_helper_status_change", connected: true, helperCount: this.registeredAndroidHelpers.size, });
+      type: "android_helper_status_change",
+      connected: true,
+      helperCount: this.registeredAndroidHelpers.size,
+    });
   }
 
   /**
@@ -126,9 +140,15 @@ class FreeFireGamingService {
    */
   public getAndroidHelperStatus(): { connected: boolean; count: number; devices: any[] } {
     const devices = Array.from(this.registeredAndroidHelpers).map((h) => ({
-      deviceName: h.deviceName, model: h.model, connectedAt: h.connectedAt, }));
+      deviceName: h.deviceName,
+      model: h.model,
+      connectedAt: h.connectedAt,
+    }));
     return {
-      connected: this.registeredAndroidHelpers.size > 0, count: this.registeredAndroidHelpers.size, devices, };
+      connected: this.registeredAndroidHelpers.size > 0,
+      count: this.registeredAndroidHelpers.size,
+      devices,
+    };
   }
 
   /**
@@ -166,7 +186,10 @@ class FreeFireGamingService {
       try {
         this.wsBroadcaster(
           JSON.stringify({
-            type: "gaming_copilot_event", timestamp: Date.now(), ...actionPayload, })
+            type: "gaming_copilot_event",
+            timestamp: Date.now(),
+            ...actionPayload,
+          })
         );
       } catch (e) {
         console.warn("[FreeFireGamingService] WS broadcast error:", e);
@@ -186,7 +209,7 @@ class FreeFireGamingService {
   public getAdbBinary(): string {
     const isWindows = process.platform === "win32";
     const localWindowsAdb = path.resolve(process.cwd(), "bin", "platform-tools", "adb.exe");
-    const localLinuxAdb = path.resolve(process.cwd(), "adb");
+    const localLinuxAdb = path.resolve(process.cwd(), "bin", "platform-tools", "adb");
 
     if (isWindows && fs.existsSync(localWindowsAdb)) {
       return `"${localWindowsAdb}"`;
@@ -225,7 +248,12 @@ class FreeFireGamingService {
     if (!isAvail) {
       return [
         {
-          id: "virtual-device-demo", type: "emulator", status: "device", model: "FRIDAY Virtual Gaming Rig (Simulation Mode)", }, ];
+          id: "virtual-device-demo",
+          type: "emulator",
+          status: "device",
+          model: "FRIDAY Virtual Gaming Rig (Simulation Mode)",
+        },
+      ];
     }
 
     try {
@@ -246,7 +274,11 @@ class FreeFireGamingService {
           const model = modelMatch ? modelMatch[1].replace(/_/g, " ") : undefined;
 
           devices.push({
-            id, type: isEmulator ? "emulator" : isWifi ? "wifi" : "usb", status, model: model || (isEmulator ? "Android Emulator" : isWifi ? "WiFi Wireless Device" : "USB Device"), });
+            id,
+            type: isEmulator ? "emulator" : isWifi ? "wifi" : "usb",
+            status,
+            model: model || (isEmulator ? "Android Emulator" : isWifi ? "WiFi Wireless Device" : "USB Device"),
+          });
         }
       }
 
@@ -265,7 +297,10 @@ class FreeFireGamingService {
    * Connect to Android phone via Wireless ADB (IP:Port)
    */
   public async connectWirelessAdb(
-    ip: string, port = 5555, pairingCode?: string, pairingPort?: number
+    ip: string,
+    port = 5555,
+    pairingCode?: string,
+    pairingPort?: number
   ): Promise<{ success: boolean; message: string; deviceId?: string }> {
     const cleanIp = ip.trim();
     const adb = this.getAdbBinary();
@@ -296,16 +331,23 @@ class FreeFireGamingService {
           ? `Boss, Tailscale Private Mesh [${target}] se phone 100% CONNECTED ho gaya hai! Direct physical touch controls active hain.`
           : `Boss, phone [${target}] wirelessly CONNECTED ho gaya hai! Direct game controls ready hain.`;
         return {
-          success: true, message: msg, deviceId: target, };
+          success: true,
+          message: msg,
+          deviceId: target,
+        };
       } else {
         this.activeDeviceId = null;
         return {
-          success: false, message: `Connection fail hua: "${output.trim()}". Phone par 'Wireless Debugging' aur 'Allow touch simulation' check karein.`, };
+          success: false,
+          message: `Connection fail hua: "${output.trim()}". Phone par 'Wireless Debugging' aur 'Allow touch simulation' check karein.`,
+        };
       }
     } catch (err: any) {
       this.activeDeviceId = null;
       return {
-        success: false, message: `ADB Connection Error: ${err?.message || "Could not reach device IP"}. Check karein ki phone aur server same network par hain.`, };
+        success: false,
+        message: `ADB Connection Error: ${err?.message || "Could not reach device IP"}. Check karein ki phone aur server same network par hain.`,
+      };
     }
   }
 
@@ -313,7 +355,10 @@ class FreeFireGamingService {
    * Pair Android 11+ device using Pairing Code & Port
    */
   public async pairWirelessAdb(
-    ip: string, pairingPort: number, pairingCode: string, connectPort: number
+    ip: string,
+    pairingPort: number,
+    pairingCode: string,
+    connectPort: number
   ): Promise<{ success: boolean; message: string; deviceId?: string }> {
     return this.connectWirelessAdb(ip, connectPort, pairingCode, pairingPort);
   }
@@ -344,7 +389,12 @@ class FreeFireGamingService {
     // 1. If Android Native Helper (Accessibility Service) is connected, dispatch direct native gesture
     if (this.registeredAndroidHelpers.size > 0) {
       this.dispatchToAndroidHelper({
-        type: "ANDROID_GESTURE", gesture: "TAP", x: rx, y: ry, durationMs: 50, });
+        type: "ANDROID_GESTURE",
+        gesture: "TAP",
+        x: rx,
+        y: ry,
+        durationMs: 50,
+      });
       return;
     }
 
@@ -357,7 +407,11 @@ class FreeFireGamingService {
    * Dispatches via Android Native Accessibility Helper (Tarika B) if connected, else ADB Shell
    */
   public async bezierDrag(
-    startX: number, startY: number, endX: number, endY: number, durationMs = 120
+    startX: number,
+    startY: number,
+    endX: number,
+    endY: number,
+    durationMs = 120
   ): Promise<void> {
     // Calculate intermediate control point for smooth non-linear curve
     const midX = Math.round((startX + endX) / 2 + (Math.random() * 20 - 10));
@@ -366,7 +420,16 @@ class FreeFireGamingService {
     // 1. If Android Native Helper (Accessibility Service) is connected, dispatch native Bezier gesture
     if (this.registeredAndroidHelpers.size > 0) {
       this.dispatchToAndroidHelper({
-        type: "ANDROID_GESTURE", gesture: "DRAG", startX, startY, midX, midY, endX, endY, durationMs: Math.max(40, Math.round(durationMs)), });
+        type: "ANDROID_GESTURE",
+        gesture: "DRAG",
+        startX,
+        startY,
+        midX,
+        midY,
+        endX,
+        endY,
+        durationMs: Math.max(40, Math.round(durationMs)),
+      });
       return;
     }
 
@@ -408,7 +471,10 @@ class FreeFireGamingService {
 
         await this.bezierDrag(fireBtnX, fireBtnY, fireBtnX, fireBtnY - dragDistance, dragSpeedMs);
         return {
-          success: true, action: "drag_headshot", details: `Executed ${gunType.toUpperCase()} auto-drag headshot with ${dragDistance}px lift in ${dragSpeedMs}ms!`, };
+          success: true,
+          action: "drag_headshot",
+          details: `Executed ${gunType.toUpperCase()} auto-drag headshot with ${dragDistance}px lift in ${dragSpeedMs}ms!`,
+        };
       }
 
       case "quick_gloo": {
@@ -426,10 +492,13 @@ class FreeFireGamingService {
         await new Promise((r) => setTimeout(r, 25));
         await this.humanTap(crouchBtnX, crouchBtnY);
         await new Promise((r) => setTimeout(r, 20));
-        await this.bezierDrag(fireBtnX, fireBtnY + 180, 50);
+        await this.bezierDrag(fireBtnX, fireBtnY, fireBtnX, fireBtnY + 180, 50);
 
         return {
-          success: true, action: "quick_gloo", details: "Instant 360 Situp Gloo Wall deployed in 95ms!", };
+          success: true,
+          action: "quick_gloo",
+          details: "Instant 360 Situp Gloo Wall deployed in 95ms!",
+        };
       }
 
       case "jump_shot": {
@@ -440,10 +509,13 @@ class FreeFireGamingService {
 
         await this.humanTap(jumpBtnX, jumpBtnY);
         await new Promise((r) => setTimeout(r, 80));
-        await this.bezierDrag(fireBtnX, fireBtnY - 350, 90);
+        await this.bezierDrag(fireBtnX, fireBtnY, fireBtnX, fireBtnY - 350, 90);
 
         return {
-          success: true, action: "jump_shot", details: "Jump Drag Shot executed seamlessly!", };
+          success: true,
+          action: "jump_shot",
+          details: "Jump Drag Shot executed seamlessly!",
+        };
       }
 
       case "heal": {
@@ -451,12 +523,18 @@ class FreeFireGamingService {
         const medkitY = 920;
         await this.humanTap(medkitX, medkitY);
         return {
-          success: true, action: "heal", details: "Medkit applied!", };
+          success: true,
+          action: "heal",
+          details: "Medkit applied!",
+        };
       }
 
       default:
         return {
-          success: true, action, details: `Action ${action} executed on device.`, };
+          success: true,
+          action,
+          details: `Action ${action} executed on device.`,
+        };
     }
   }
 
@@ -494,10 +572,14 @@ class FreeFireGamingService {
 
       const roleStr = params.role === "spectate" ? "SPECTATOR slot" : "PLAYER slot";
       return {
-        success: true, message: `Boss, Room [${params.roomId}] me ${roleStr} successfully join kar liya hai. Match start hote hi visual monitoring aur telemetry active ho jayegi!`, };
+        success: true,
+        message: `Boss, Room [${params.roomId}] me ${roleStr} successfully join kar liya hai. Match start hote hi visual monitoring aur telemetry active ho jayegi!`,
+      };
     } catch (err: any) {
       return {
-        success: true, Custom Room [${params.roomId}] join command staged for ${params.role}. (Simulation active: ${err?.message || "Running"})`, };
+        success: true,
+        message: `Boss, Custom Room [${params.roomId}] join command staged for ${params.role}. (Simulation active: ${err?.message || "Running"})`,
+      };
     }
   }
 
@@ -509,7 +591,9 @@ class FreeFireGamingService {
       const adb = this.getAdbBinary();
       const deviceFlag = this.activeDeviceId ? `-s ${this.activeDeviceId}` : "";
       const { stdout } = await execAsync(`${adb} ${deviceFlag} exec-out screencap -p`, {
-        encoding: "base64", maxBuffer: 10 * 1024 * 1024, });
+        encoding: "base64",
+        maxBuffer: 10 * 1024 * 1024,
+      });
       return stdout;
     } catch (err: any) {
       return null;
@@ -525,32 +609,69 @@ class FreeFireGamingService {
 
     if (!imageBase64 || !ai) {
       return {
-        timestamp: nowStr, state: "combat", healthPercentage: 85, alivePlayers: 18, dangerAlerts: ["Cover lo! Left side se gunfire sound aa raha hai."], tacticalAdvice: "Zone center hold karein aur Gloo Wall ready rakhein.", };
+        timestamp: nowStr,
+        state: "combat",
+        healthPercentage: 85,
+        alivePlayers: 18,
+        dangerAlerts: ["Cover lo! Left side se gunfire sound aa raha hai."],
+        tacticalAdvice: "Zone center hold karein aur Gloo Wall ready rakhein.",
+      };
     }
 
     try {
       const prompt = `You are FRIDAY AI's High-Precision Free Fire Esports Neural Brain & Combat Perception Engine.
 Analyze this in-game Free Fire frame and output ONLY valid JSON matching this schema:
 {
-  "state": "in_lobby" | "in_plane" | "looting" | "combat" | "spectating" | "match_summary", "healthPercentage": number (0-100), "alivePlayers": number, "enemies": [
+  "state": "in_lobby" | "in_plane" | "looting" | "combat" | "spectating" | "match_summary",
+  "healthPercentage": number (0-100),
+  "alivePlayers": number,
+  "enemies": [
     {
-      "direction": "front" | "left" | "right" | "behind", "distance": "close" | "mid" | "far", "distanceMetersEstimated": number, "behindCover": boolean, "aimingAtPlayer": boolean, "positionOnScreen": { "xPercent": number, "yPercent": number }
+      "direction": "front" | "left" | "right" | "behind",
+      "distance": "close" | "mid" | "far",
+      "distanceMetersEstimated": number,
+      "behindCover": boolean,
+      "aimingAtPlayer": boolean,
+      "positionOnScreen": { "xPercent": number, "yPercent": number }
     }
-  ], "targetHitbox": "head" | "neck" | "upper_chest", "recommendedAction": "RUSH_SHOTGUN" | "MID_RANGE_SMG_DRAG" | "DEPLOY_GLOO_WALL" | "SPRINT_FLANK" | "HEAL_BEHIND_COVER" | "SNIPE_HEAD" | "FAST_SPRINT_SEARCH", "dangerAlerts": ["urgent danger alert 1", "urgent danger alert 2"], "tacticalAdvice": "Immediate 1-sentence tactical action in Hinglish addressing user as Boss (e.g., 'Boss front me 15m par enemy open me hai, SMG straight head drag lo!')"
+  ],
+  "targetHitbox": "head" | "neck" | "upper_chest",
+  "recommendedAction": "RUSH_SHOTGUN" | "MID_RANGE_SMG_DRAG" | "DEPLOY_GLOO_WALL" | "SPRINT_FLANK" | "HEAL_BEHIND_COVER" | "SNIPE_HEAD" | "FAST_SPRINT_SEARCH",
+  "dangerAlerts": ["urgent danger alert 1", "urgent danger alert 2"],
+  "tacticalAdvice": "Immediate 1-sentence tactical action in Hinglish addressing user as Boss (e.g., 'Boss front me 15m par enemy open me hai, SMG straight head drag lo!')"
 }`;
 
       const models = [
-        "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash"];
+        "gemini-3.1-flash-lite",
+        "gemini-3.5-flash-lite",
+        "gemini-3.5-flash",
+        "gemini-3.1-flash-lite",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3.5-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite",
+      ];
       let rawText = "";
       for (const model of models) {
         try {
           const response = await ai.models.generateContent({
             model,
-            contents: [{
-                role: "user", parts: [
-                  { text: prompt }, {
+            contents: [
+              {
+                role: "user",
+                parts: [
+                  { text: prompt },
+                  {
                     inlineData: {
-                      mimeType: "image/jpeg", data: imageBase64, }, ], });
+                      mimeType: "image/jpeg",
+                      data: imageBase64,
+                    },
+                  },
+                ],
+              },
+            ],
+          });
           if (response.text?.trim()) {
             rawText = response.text.trim();
             break;
@@ -566,7 +687,13 @@ Analyze this in-game Free Fire frame and output ONLY valid JSON matching this sc
         targetHitbox?: string;
         recommendedAction?: string;
       } = {
-        timestamp: nowStr, state: parsed.state || "combat", healthPercentage: parsed.healthPercentage ?? 100, alivePlayers: parsed.alivePlayers ?? 24, dangerAlerts: Array.isArray(parsed.dangerAlerts) ? parsed.dangerAlerts : [], tacticalAdvice: parsed.tacticalAdvice || "Boss, crosshair head level par lock karein aur cover maintain karein.", };
+        timestamp: nowStr,
+        state: parsed.state || "combat",
+        healthPercentage: parsed.healthPercentage ?? 100,
+        alivePlayers: parsed.alivePlayers ?? 24,
+        dangerAlerts: Array.isArray(parsed.dangerAlerts) ? parsed.dangerAlerts : [],
+        tacticalAdvice: parsed.tacticalAdvice || "Boss, crosshair head level par lock karein aur cover maintain karein.",
+      };
 
       (result as any).enemies = parsed.enemies || [];
       (result as any).targetHitbox = parsed.targetHitbox || "head";
@@ -575,13 +702,24 @@ Analyze this in-game Free Fire frame and output ONLY valid JSON matching this sc
       // If Android Helper is connected, dispatch tactical decision directly to device
       if (this.registeredAndroidHelpers.size > 0 && parsed.recommendedAction) {
         this.dispatchToAndroidHelper({
-          type: "AI_TACTICAL_ACTION", action: parsed.recommendedAction, hitbox: parsed.targetHitbox || "head", enemies: parsed.enemies || [], advice: result.tacticalAdvice, });
+          type: "AI_TACTICAL_ACTION",
+          action: parsed.recommendedAction,
+          hitbox: parsed.targetHitbox || "head",
+          enemies: parsed.enemies || [],
+          advice: result.tacticalAdvice,
+        });
       }
 
       return result;
     } catch (err) {
       return {
-        timestamp: nowStr, state: "combat", healthPercentage: 90, alivePlayers: 14, dangerAlerts: ["Watch out: Enemy nearby!"], tacticalAdvice: "Boss, crosshair placement head level par rakhein aur Gloo wall ready rakhein.", };
+        timestamp: nowStr,
+        state: "combat",
+        healthPercentage: 90,
+        alivePlayers: 14,
+        dangerAlerts: ["Watch out: Enemy nearby!"],
+        tacticalAdvice: "Boss, crosshair placement head level par rakhein aur Gloo wall ready rakhein.",
+      };
     }
   }
 
@@ -600,15 +738,51 @@ Analyze this in-game Free Fire frame and output ONLY valid JSON matching this sc
     const ai = this.getGenAI();
 
     const fallbackReport: PostMatchAnalysisReport = {
-      timestamp: nowStr, matchDurationMinutes: 12, totalKillsEstimated: 7, grade: "A", weaknesses: [
+      timestamp: nowStr,
+      matchDurationMinutes: 12,
+      totalKillsEstimated: 7,
+      grade: "A",
+      weaknesses: [
         {
-          category: "Aim / Drag", severity: "Medium", description: "Close range combat me shotgun drag thoda late trigger ho raha tha, jisse first bullet chest par lock hui.", actionableFix: "General Sensitivity ko 96 se badha kar 99 karein aur fire button size 48% par set karein.", {
-          category: "Gloo Wall & Defense", severity: "High", description: "Damage padne ke baad Gloo Wall place hone me ~0.4s ka delay tha.", actionableFix: "Sit-up Gloo Wall technique practice karein aur Gloo Wall slot ko left thumb ke exact reach me rakhein.", {
-          category: "Reload & Weapon Swap", description: "Open ground me sprint karte waqt gun reload karne ki habit dekhi gayi.", actionableFix: "Always cover ke peeche reload karein ya quick weapon switch use karein.", sensitivityRecommendations: {
-        general: 98, redDot: 95, scope2x: 90, scope4x: 86, sniperScope: 65, freeLook: 80, reasoning: "High general sensitivity se 360 rotation aur close range drag headshots me smooth acceleration milega.", hudAdvice: {
-        fireButtonSize: "46% - 50%", glooWallPlacement: "Left upper area (Size: 95%, Transparency: 80%)", quickWeaponSwitch: true, tips: [
-          "Quick Weapon Switch button enable karein taaki shotgun reload animation cancel ho sake.", "Fire button ko screen ke thoda neeche place karein taaki upward drag space zyada mile.", coachAudioSummaryHinglish:
-        "Boss, match analysis complete hai! Overall performance solid thi, lekin 2 critical weaknesses hain: Pehla, close range me drag thoda late ho raha hai jisse headshot miss hua — iske liye General sensitivity 98 aur Fire Button 48% kijiye. Doosra, damage lene par Gloo Wall 0.3s late lag raha hai, Sit-up Gloo macro drill practice kijiye. Next match me hum pakka Booyah nikalenge!", };
+          category: "Aim / Drag",
+          severity: "Medium",
+          description: "Close range combat me shotgun drag thoda late trigger ho raha tha, jisse first bullet chest par lock hui.",
+          actionableFix: "General Sensitivity ko 96 se badha kar 99 karein aur fire button size 48% par set karein.",
+        },
+        {
+          category: "Gloo Wall & Defense",
+          severity: "High",
+          description: "Damage padne ke baad Gloo Wall place hone me ~0.4s ka delay tha.",
+          actionableFix: "Sit-up Gloo Wall technique practice karein aur Gloo Wall slot ko left thumb ke exact reach me rakhein.",
+        },
+        {
+          category: "Reload & Weapon Swap",
+          severity: "Medium",
+          description: "Open ground me sprint karte waqt gun reload karne ki habit dekhi gayi.",
+          actionableFix: "Always cover ke peeche reload karein ya quick weapon switch use karein.",
+        },
+      ],
+      sensitivityRecommendations: {
+        general: 98,
+        redDot: 95,
+        scope2x: 90,
+        scope4x: 86,
+        sniperScope: 65,
+        freeLook: 80,
+        reasoning: "High general sensitivity se 360 rotation aur close range drag headshots me smooth acceleration milega.",
+      },
+      hudAdvice: {
+        fireButtonSize: "46% - 50%",
+        glooWallPlacement: "Left upper area (Size: 95%, Transparency: 80%)",
+        quickWeaponSwitch: true,
+        tips: [
+          "Quick Weapon Switch button enable karein taaki shotgun reload animation cancel ho sake.",
+          "Fire button ko screen ke thoda neeche place karein taaki upward drag space zyada mile.",
+        ],
+      },
+      coachAudioSummaryHinglish:
+        "Boss, match analysis complete hai! Overall performance solid thi, lekin 2 critical weaknesses hain: Pehla, close range me drag thoda late ho raha hai jisse headshot miss hua — iske liye General sensitivity 98 aur Fire Button 48% kijiye. Doosra, damage lene par Gloo Wall 0.3s late lag raha hai, Sit-up Gloo macro drill practice kijiye. Next match me hum pakka Booyah nikalenge!",
+    };
 
     if (!ai) return fallbackReport;
 
@@ -621,15 +795,33 @@ Analyze the provided match details and gameplay context:
 
 Provide a deep technical breakdown in strictly valid JSON:
 {
-  "matchDurationMinutes": number, "totalKillsEstimated": number, "grade": "S+" | "A" | "B" | "C" | "D", "weaknesses": [
+  "matchDurationMinutes": number,
+  "totalKillsEstimated": number,
+  "grade": "S+" | "A" | "B" | "C" | "D",
+  "weaknesses": [
     {
-      "category": "Aim / Drag" | "Gloo Wall & Defense" | "Positioning & Movement" | "Decision Making" | "Reload & Weapon Swap", "severity": "High" | "Medium" | "Low", "description": "Detailed observation in Hinglish", "actionableFix": "Specific fix in Hinglish"
+      "category": "Aim / Drag" | "Gloo Wall & Defense" | "Positioning & Movement" | "Decision Making" | "Reload & Weapon Swap",
+      "severity": "High" | "Medium" | "Low",
+      "description": "Detailed observation in Hinglish",
+      "actionableFix": "Specific fix in Hinglish"
     }
-  ], "sensitivityRecommendations": {
-    "general": number (0-100), "redDot": number (0-100), "scope2x": number (0-100), "scope4x": number (0-100), "sniperScope": number (0-100), "freeLook": number (0-100), "reasoning": "Why these settings will fix Boss's drag issues in Hinglish"
-  }, "hudAdvice": {
-    "fireButtonSize": "string recommendation", "glooWallPlacement": "string recommendation", "quickWeaponSwitch": boolean, "tips": ["tip 1", "tip 2"]
-  }, "coachAudioSummaryHinglish": "A warm, energetic, and encouraging speech in natural Hinglish as Friday addressing Boss directly about what went wrong and how to fix it."
+  ],
+  "sensitivityRecommendations": {
+    "general": number (0-100),
+    "redDot": number (0-100),
+    "scope2x": number (0-100),
+    "scope4x": number (0-100),
+    "sniperScope": number (0-100),
+    "freeLook": number (0-100),
+    "reasoning": "Why these settings will fix Boss's drag issues in Hinglish"
+  },
+  "hudAdvice": {
+    "fireButtonSize": "string recommendation",
+    "glooWallPlacement": "string recommendation",
+    "quickWeaponSwitch": boolean,
+    "tips": ["tip 1", "tip 2"]
+  },
+  "coachAudioSummaryHinglish": "A warm, energetic, and encouraging speech in natural Hinglish as Friday addressing Boss directly about what went wrong and how to fix it."
 }`;
 
       const contents: any[] = [{ text: prompt }];
@@ -638,12 +830,24 @@ Provide a deep technical breakdown in strictly valid JSON:
         for (const frame of matchData.matchFramesBase64.slice(0, 3)) {
           contents.push({
             inlineData: {
-              mimeType: "image/jpeg", data: frame, });
+              mimeType: "image/jpeg",
+              data: frame,
+            },
+          });
         }
       }
 
       const models = [
-        "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash"];
+        "gemini-3.1-flash-lite",
+        "gemini-3.5-flash-lite",
+        "gemini-3.5-flash",
+        "gemini-3.1-flash-lite",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3.5-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite",
+      ];
       let text = "";
       for (const model of models) {
         try {

@@ -44,7 +44,14 @@ export interface LiveCallSession {
 class WhatsAppFeatureEngine {
   private activeCallSessions = new Map<string, LiveCallSession>();
 
-  private static readonly MODEL_CHAIN = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash-lite"];
+  private static readonly MODEL_CHAIN = [
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-3.5-flash-lite",
+    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite",
+  ];
 
   private async callGeminiWithFallback(prompt: string, timeoutMs = 9000): Promise<string | null> {
     const apiKey = process.env.GEMINI_API_KEY;
@@ -52,12 +59,16 @@ class WhatsAppFeatureEngine {
     const ai = new GoogleGenAI({ apiKey });
 
     const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T> =>
-      Promise.race([p, new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`timeout after ${ms}ms`)), ms)), ]);
+      Promise.race([
+        p,
+        new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`timeout after ${ms}ms`)), ms)),
+      ]);
 
     for (const model of WhatsAppFeatureEngine.MODEL_CHAIN) {
       try {
         const response = await withTimeout(
-          ai.models.generateContent({ model, contents: prompt }), timeoutMs
+          ai.models.generateContent({ model, contents: prompt }),
+          timeoutMs
         );
         const text = response.text?.trim();
         if (text) return text;
@@ -71,7 +82,8 @@ class WhatsAppFeatureEngine {
   // ── 1. 📊 Group & 1v1 Catch-Up Digest / Summary (@summary, @digest) ──────
 
   public async generateGroupSummary(
-    groupName: string, messages: Array<{ senderName: string; text: string; dateStr: string }>
+    groupName: string,
+    messages: Array<{ senderName: string; text: string; dateStr: string }>
   ): Promise<string> {
     if (!messages || messages.length === 0) {
       return `Group "${groupName}" me pichle kuch der me koi naya message nahi mila.`;
@@ -153,7 +165,9 @@ Return ONLY the translated text, followed by 1 line mentioning [🌐 Translated 
     try {
       const cleanUrl = url.startsWith("http") ? url : `https://${url}`;
       const response = await fetch(cleanUrl, {
-        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0" }, signal: AbortSignal.timeout(8000), });
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0" },
+        signal: AbortSignal.timeout(8000),
+      });
 
       if (!response.ok) {
         return `⚠️ URL open nahi ho paya (Status: ${response.status}). Kripya link verify karein.`;
@@ -194,7 +208,9 @@ OUTPUT RULES:
   // ── 4. ⏰ Scheduled WhatsApp Message Sender (@schedule, @send_later) ─────
 
   public async scheduleMessage(
-    contactNameOrPhone: string, messageText: string, timeInstruction: string
+    contactNameOrPhone: string,
+    messageText: string,
+    timeInstruction: string
   ): Promise<{ success: boolean; message: string }> {
     let phone = contactNameOrPhone.replace(/\D/g, "");
     let contactName = contactNameOrPhone;
@@ -231,16 +247,31 @@ OUTPUT RULES:
     }
 
     const scheduledDateStr = new Date(scheduledTs).toLocaleString("en-IN", {
-      timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", day: "numeric", month: "short", });
+      timeZone: "Asia/Kolkata",
+      hour: "2-digit",
+      minute: "2-digit",
+      day: "numeric",
+      month: "short",
+    });
 
     const docId = `sched_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const schedDoc: ScheduledMessageDoc = {
-      id: docId, recipientPhone: phone, recipientName: contactName, messageText, scheduledForTs: scheduledTs, scheduledForStr: scheduledDateStr, status: "pending", createdAt: now, };
+      id: docId,
+      recipientPhone: phone,
+      recipientName: contactName,
+      messageText,
+      scheduledForTs: scheduledTs,
+      scheduledForStr: scheduledDateStr,
+      status: "pending",
+      createdAt: now,
+    };
 
     await scheduledCol().doc(docId).set(schedDoc);
 
     return {
-      success: true, message: `⏰ *WhatsApp Message Scheduled!* ✅\n\n👤 *Recipient:* ${contactName} (+${phone})\n📅 *Delivery Time:* ${scheduledDateStr} (IST)\n💬 *Message:* _"${messageText}"_\n\n_Main theek time par delivery execute kar dungi Boss!_`, };
+      success: true,
+      message: `⏰ *WhatsApp Message Scheduled!* ✅\n\n👤 *Recipient:* ${contactName} (+${phone})\n📅 *Delivery Time:* ${scheduledDateStr} (IST)\n💬 *Message:* _"${messageText}"_\n\n_Main theek time par delivery execute kar dungi Boss!_`,
+    };
   }
 
   public async processPendingScheduledMessages(
@@ -324,7 +355,7 @@ D) [Option D]
     const res = await this.callGeminiWithFallback(prompt);
     return (
       res ||
-      `🎯 *FRIDAY TRIVIA:* Tech Quiz!\n❓ *Question:* What is the default port for HTTP?\nA) 443\nB) 80\nC) 8080\nD) 22\n\n👉 Reply A, or D!`
+      `🎯 *FRIDAY TRIVIA:* Tech Quiz!\n❓ *Question:* What is the default port for HTTP?\nA) 443\nB) 80\nC) 8080\nD) 22\n\n👉 Reply A, B, C, or D!`
     );
   }
 
@@ -361,13 +392,17 @@ OUTPUT FORMAT:
     // Phishing keywords & suspicious URL patterns
     const suspiciousPatterns = [
       /t\.me\/(joinchat|\+[A-Za-z0-9_-]+)/i, // spam telegram invites
-      /(free\s*recharge|free\s*iphone|earn\s*5000\s*daily|crypto\s*double|binance-bonus)/i, /(bit\.ly|tinyurl\.com|cutt\.ly|is\.gd)\/[A-Za-z0-9_-]+/i, // generic shorteners with spam context
-      /(18\+|porn|betting|winzo\s*hack|rummy\s*bonus)/i, ];
+      /(free\s*recharge|free\s*iphone|earn\s*5000\s*daily|crypto\s*double|binance-bonus)/i,
+      /(bit\.ly|tinyurl\.com|cutt\.ly|is\.gd)\/[A-Za-z0-9_-]+/i, // generic shorteners with spam context
+      /(18\+|porn|betting|winzo\s*hack|rummy\s*bonus)/i,
+    ];
 
     for (const pattern of suspiciousPatterns) {
       if (pattern.test(lower)) {
         return {
-          isSuspicious: true, reason: "Suspicious promotional spam or unverified shortened link detected.", };
+          isSuspicious: true,
+          reason: "Suspicious promotional spam or unverified shortened link detected.",
+        };
       }
     }
 
@@ -379,7 +414,8 @@ OUTPUT FORMAT:
   private chatLastSongMap: Map<string, { title: string; artist: string; ytUrl: string; spotifyUrl: string; timestamp: number; album?: string; year?: string; genre?: string; lyrics?: string }> = new Map();
   private chatPlaylistMap: Map<string, { playlist: Array<{ title: string; artist: string; year: string; ytUrl: string; previewAudioUrl?: string }>; currentIndex: number; categoryName: string; timestamp: number }> = new Map();
   private chatSongSearchSessionMap: Map<
-    string, {
+    string,
+    {
       originalQuery: string;
       seenSongs: Array<{ title: string; artist: string; ytUrl: string }>;
       attemptCount: number;
@@ -388,7 +424,8 @@ OUTPUT FORMAT:
   > = new Map();
 
   public recordLastSong(
-    chatId: string, song: {
+    chatId: string,
+    song: {
       title: string;
       artist: string;
       ytUrl: string;
@@ -430,9 +467,14 @@ OUTPUT FORMAT:
   }> {
     try {
       const searchRes = await fetch(
-        `https://www.jiosaavn.com/api.php?__call=search.getResults&_format=json&n=5&p=1&q=${encodeURIComponent(searchTarget)}&_marker=0&ctx=android&api_version=4`, {
+        `https://www.jiosaavn.com/api.php?__call=search.getResults&_format=json&n=5&p=1&q=${encodeURIComponent(searchTarget)}&_marker=0&ctx=android&api_version=4`,
+        {
           headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", "Accept": "application/json", }, signal: AbortSignal.timeout(6000), }
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json",
+          },
+          signal: AbortSignal.timeout(6000),
+        }
       );
 
       if (searchRes.ok) {
@@ -451,12 +493,18 @@ OUTPUT FORMAT:
               const directUrl = this.decryptJioSaavnMediaUrl(encUrl);
               if (directUrl) {
                 const audioRes = await fetch(directUrl, {
-                  headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(15000), });
+                  headers: { "User-Agent": "Mozilla/5.0" },
+                  signal: AbortSignal.timeout(15000),
+                });
                 if (audioRes.ok) {
                   const ab = await audioRes.arrayBuffer();
                   if (ab.byteLength > 100000) { // at least 100KB full song
                     return {
-                      audioBuffer: Buffer.from(ab), mediaUrl: directUrl, songTitle: first.title || first.song, artist: first.more_info?.primary_artists || first.primary_artists, };
+                      audioBuffer: Buffer.from(ab),
+                      mediaUrl: directUrl,
+                      songTitle: first.title || first.song,
+                      artist: first.more_info?.primary_artists || first.primary_artists,
+                    };
                   }
                 }
               }
@@ -496,7 +544,9 @@ OUTPUT FORMAT:
   }
 
   public async handleFullSongRequest(
-    chatId: string, rawText: string, requesterName = "Boss"
+    chatId: string,
+    rawText: string,
+    requesterName = "Boss"
   ): Promise<{
     handled: boolean;
     replyText: string;
@@ -519,7 +569,9 @@ OUTPUT FORMAT:
 
     if (!targetTitle) {
       return {
-        handled: true, replyText: `⚠️ Boss, pehle koi gaana search ya preview kijiye, phir "full song" likhiye! 👍`, };
+        handled: true,
+        replyText: `⚠️ Boss, pehle koi gaana search ya preview kijiye, phir "full song" likhiye! 👍`,
+      };
     }
 
     const searchTarget = `${targetTitle} ${targetArtist}`.trim();
@@ -538,7 +590,11 @@ OUTPUT FORMAT:
 🎧 _Pura gaana JioSaavn se download karke bhej diya gaya hai! Enjoy ${requesterName}!_ 🔊🔥`;
 
       return {
-        handled: true, replyText: successCard, audioBuffer: jioResult.audioBuffer, trackTitle: targetTitle, };
+        handled: true,
+        replyText: successCard,
+        audioBuffer: jioResult.audioBuffer,
+        trackTitle: targetTitle,
+      };
     }
 
     // If JioSaavn full audio is not available or download failed:
@@ -552,7 +608,11 @@ ${ytUrl}
 ⚠️ _Sorry ${requesterName}, full audio track download nahi mil paya. Aap direct YouTube par suniye!_ 👍`;
 
     return {
-      handled: true, replyText: fallbackCard, audioBuffer: null, };
+      handled: true,
+      replyText: fallbackCard,
+      audioBuffer: null,
+      trackTitle: targetTitle,
+    };
   }
 
   public isWrongSongFeedback(text: string, quotedText?: string): boolean {
@@ -566,7 +626,8 @@ ${ytUrl}
   }
 
   public async handleWrongSongAlternative(
-    chatId: string, requesterName = "Boss"
+    chatId: string,
+    requesterName = "Boss"
   ): Promise<{
     handled: boolean;
     replyText?: string;
@@ -607,11 +668,19 @@ For example:
 
 Respond ONLY with valid JSON in this exact structure:
 {
-  "trackTitle": "Different Exact Song Name", "artists": "Singer(s), Music Composer", "albumOrMovie": "Movie / Album Name", "year": "YYYY", "genre": "Genre", "lyricsSnippet": "Famous 2-line hook lyrics..."
+  "trackTitle": "Different Exact Song Name",
+  "artists": "Singer(s), Music Composer",
+  "albumOrMovie": "Movie / Album Name",
+  "year": "YYYY",
+  "genre": "Genre",
+  "lyricsSnippet": "Famous 2-line hook lyrics..."
 }`;
 
         const aiRes = await ai.models.generateContent({
-          model: "gemini-3.6-flash", contents: prompt, config: { responseMimeType: "application/json" }, });
+          model: "gemini-3.5-flash",
+          contents: prompt,
+          config: { responseMimeType: "application/json" },
+        });
 
         const json = JSON.parse(aiRes.text?.trim() || "{}");
         if (json.trackTitle) trackTitle = json.trackTitle;
@@ -680,7 +749,11 @@ Respond ONLY with valid JSON in this exact structure:
 🎧 _Volume UP ${requesterName}! Enjoy the preview!_ 🔊🔥`;
 
     return {
-      handled: true, replyText: card, audioBuffer, trackTitle, };
+      handled: true,
+      replyText: card,
+      audioBuffer,
+      trackTitle,
+    };
   }
 
   public isSongLinkFollowUp(text: string, quotedText?: string): boolean {
@@ -731,7 +804,12 @@ Respond ONLY with valid JSON in this exact structure:
     if (!cached || Date.now() - cached.timestamp > 3600000) return null;
 
     const detailsLines: string[] = [
-      `🎶 *Music:* ${cached.title}`, cached.artist ? `🎙️ *Singer(s):* ${cached.artist}` : "", cached.album ? `🎬 *Movie / Album:* ${cached.album}` : "", cached.year ? `📅 *Year:* ${cached.year}` : "", cached.genre ? `🏷️ *Genre:* ${cached.genre}` : "", ].filter(Boolean);
+      `🎶 *Music:* ${cached.title}`,
+      cached.artist ? `🎙️ *Singer(s):* ${cached.artist}` : "",
+      cached.album ? `🎬 *Movie / Album:* ${cached.album}` : "",
+      cached.year ? `📅 *Year:* ${cached.year}` : "",
+      cached.genre ? `🏷️ *Genre:* ${cached.genre}` : "",
+    ].filter(Boolean);
 
     const lyricsBlock = cached.lyrics ? `\n\n📝 *Hook Lyrics:*\n_"${cached.lyrics}"_` : "";
 
@@ -764,7 +842,8 @@ Respond ONLY with valid JSON in this exact structure:
     let audioBuffer: Buffer | null = null;
     try {
       const itunesRes = await fetch(
-        `https://itunes.apple.com/search?term=${encodeURIComponent(current.title + " " + current.artist)}&media=music&entity=song&limit=1`, { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(3500) }
+        `https://itunes.apple.com/search?term=${encodeURIComponent(current.title + " " + current.artist)}&media=music&entity=song&limit=1`,
+        { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(3500) }
       );
       if (itunesRes.ok) {
         const itunesData: any = await itunesRes.json();
@@ -781,7 +860,12 @@ Respond ONLY with valid JSON in this exact structure:
     }
 
     this.recordLastSong(chatId, {
-      title: current.title, artist: current.artist, ytUrl: current.ytUrl, spotifyUrl: `https://open.spotify.com/search/${encodeURIComponent(current.title + " " + current.artist)}`, year: current.year || "", });
+      title: current.title,
+      artist: current.artist,
+      ytUrl: current.ytUrl,
+      spotifyUrl: `https://open.spotify.com/search/${encodeURIComponent(current.title + " " + current.artist)}`,
+      year: current.year || "",
+    });
 
     const replyText = `🎧 *FRIDAY AUDIO PREVIEW (#${songNum}/${total})* 🔊✨
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -793,10 +877,14 @@ Respond ONLY with valid JSON in this exact structure:
 🎧 _Volume UP ${requesterName}!_ 🔊🔥`;
 
     return {
-      handled: true, replyText, currentSong: current, };
+      handled: true,
+      replyText,
+      audioBuffer,
+      currentSong: current,
+    };
   }
 
-  public handleSongLinkFollowUp(chatId: string, quotedText?: string): string | null {
+  public handleSongLinkFollowUp(chatId: string, text: string, quotedText?: string): string | null {
     let targetTitle = "";
     let targetArtist = "";
     let ytUrl = "";
@@ -872,7 +960,13 @@ Respond ONLY with valid JSON in this exact structure:
 
     if (!rawClean) {
       return {
-        replyText: `🎵 *FRIDAY SONG RADAR:* Kripya song ka naam ya mood likhein!\n\n👉 *Examples:* \`@song Kesariya\`, \`@song sad song\`, \`@song bhojpuri song\`, \`@song 1960 ke gane\``, trackTitle: "", artistName: "", ytUrl: "", spotifyUrl: "", isPreviewRequested: false, };
+        replyText: `🎵 *FRIDAY SONG RADAR:* Kripya song ka naam ya mood likhein!\n\n👉 *Examples:* \`@song Kesariya\`, \`@song sad song\`, \`@song bhojpuri song\`, \`@song 1960 ke gane\``,
+        trackTitle: "",
+        artistName: "",
+        ytUrl: "",
+        spotifyUrl: "",
+        isPreviewRequested: false,
+      };
     }
 
     const lowerQuery = (query || "").toLowerCase();
@@ -896,13 +990,21 @@ Sort them with the #1 highest-viewed / most iconic song first.
 
 Respond ONLY with valid JSON in this exact structure:
 {
-  "categoryName": "Descriptive Category (e.g. Sad Bollywood Hits, 1960s Evergreen Classics, High-Energy Bhojpuri Hits)", "songs": [
-    { "title": "Song 1 Title", "artist": "Singer 1", "year": "YYYY" }, { "title": "Song 2 Title", "artist": "Singer 2", { "title": "Song 3 Title", "artist": "Singer 3", { "title": "Song 4 Title", "artist": "Singer 4", { "title": "Song 5 Title", "artist": "Singer 5", "year": "YYYY" }
+  "categoryName": "Descriptive Category (e.g. Sad Bollywood Hits, 1960s Evergreen Classics, High-Energy Bhojpuri Hits)",
+  "songs": [
+    { "title": "Song 1 Title", "artist": "Singer 1", "year": "YYYY" },
+    { "title": "Song 2 Title", "artist": "Singer 2", "year": "YYYY" },
+    { "title": "Song 3 Title", "artist": "Singer 3", "year": "YYYY" },
+    { "title": "Song 4 Title", "artist": "Singer 4", "year": "YYYY" },
+    { "title": "Song 5 Title", "artist": "Singer 5", "year": "YYYY" }
   ]
 }`;
 
           const aiRes = await ai.models.generateContent({
-            model: "gemini-3.6-flash", contents: prompt, config: { responseMimeType: "application/json" }, });
+            model: "gemini-3.5-flash",
+            contents: prompt,
+            config: { responseMimeType: "application/json" },
+          });
 
           const json = JSON.parse(aiRes.text?.trim() || "{}");
           const songsList = Array.isArray(json.songs) && json.songs.length > 0 ? json.songs.slice(0, 5) : [];
@@ -925,7 +1027,11 @@ Respond ONLY with valid JSON in this exact structure:
                 timestamp: Date.now(),
               });
               this.recordLastSong(chatId, {
-                title: compiledPlaylist[0].title, artist: compiledPlaylist[0].artist, ytUrl: compiledPlaylist[0].ytUrl, spotifyUrl: `https://open.spotify.com/search/${encodeURIComponent(compiledPlaylist[0].title + " " + compiledPlaylist[0].artist)}`, });
+                title: compiledPlaylist[0].title,
+                artist: compiledPlaylist[0].artist,
+                ytUrl: compiledPlaylist[0].ytUrl,
+                spotifyUrl: `https://open.spotify.com/search/${encodeURIComponent(compiledPlaylist[0].title + " " + compiledPlaylist[0].artist)}`,
+              });
             }
 
             // Fetch 30-sec audio preview of 1st Song
@@ -933,7 +1039,8 @@ Respond ONLY with valid JSON in this exact structure:
             let previewAudioUrl = "";
             try {
               const itunesRes = await fetch(
-                `https://itunes.apple.com/search?term=${encodeURIComponent(compiledPlaylist[0].title + " " + compiledPlaylist[0].artist)}&media=music&entity=song&limit=1`, { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(3500) }
+                `https://itunes.apple.com/search?term=${encodeURIComponent(compiledPlaylist[0].title + " " + compiledPlaylist[0].artist)}&media=music&entity=song&limit=1`,
+                { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(3500) }
               );
               if (itunesRes.ok) {
                 const itunesData: any = await itunesRes.json();
@@ -965,7 +1072,16 @@ ${playlistLines}
 🎧 _Gaana suniye aur vibe kijiye ${requesterName}! Volume UP!_ 🔊🔥`;
 
             return {
-              replyText: card, trackTitle: compiledPlaylist[0].title, artistName: compiledPlaylist[0].artist, previewAudioUrl, audioBuffer, isPreviewRequested: isPreviewReq || !!audioBuffer, isPlaylist: true, };
+              replyText: card,
+              trackTitle: compiledPlaylist[0].title,
+              artistName: compiledPlaylist[0].artist,
+              ytUrl: compiledPlaylist[0].ytUrl,
+              spotifyUrl: `https://open.spotify.com/search/${encodeURIComponent(compiledPlaylist[0].title + " " + compiledPlaylist[0].artist)}`,
+              previewAudioUrl,
+              audioBuffer,
+              isPreviewRequested: isPreviewReq || !!audioBuffer,
+              isPlaylist: true,
+            };
           }
         } catch (catErr) {
           console.warn("[WhatsAppFeatureEngine] Category song generation error:", catErr);
@@ -986,7 +1102,8 @@ ${playlistLines}
     // Step 1: Query free iTunes API for instantaneous official metadata & Apple Music link & 30s Audio Preview
     try {
       const itunesRes = await fetch(
-        `https://itunes.apple.com/search?term=${encodeURIComponent(searchClean)}&media=music&entity=song&limit=1`, signal: AbortSignal.timeout(3500) }
+        `https://itunes.apple.com/search?term=${encodeURIComponent(searchClean)}&media=music&entity=song&limit=1`,
+        { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(3500) }
       );
       if (itunesRes.ok) {
         const itunesData: any = await itunesRes.json();
@@ -1017,11 +1134,20 @@ If it's in Hindi/Bollywood/Punjabi/English/Regional, identify the exact canonica
 
 Respond ONLY with valid JSON in this exact structure:
 {
-  "trackTitle": "Exact Song Name", "artists": "Singer 1, Singer 2, Composer", "albumOrMovie": "Movie or Album Name", "year": "YYYY", "genre": "Romantic / Pop / Lo-Fi / Sufi / Rock", "lyricsSnippet": "2-3 most famous hook lyrics lines...", "searchKeyword": "Canonical Song Name Artist"
+  "trackTitle": "Exact Song Name",
+  "artists": "Singer 1, Singer 2, Composer",
+  "albumOrMovie": "Movie or Album Name",
+  "year": "YYYY",
+  "genre": "Romantic / Pop / Lo-Fi / Sufi / Rock",
+  "lyricsSnippet": "2-3 most famous hook lyrics lines...",
+  "searchKeyword": "Canonical Song Name Artist"
 }`;
 
         const aiRes = await ai.models.generateContent({
-          model: "gemini-3.6-flash", contents: prompt, config: { responseMimeType: "application/json" }, });
+          model: "gemini-3.5-flash",
+          contents: prompt,
+          config: { responseMimeType: "application/json" },
+        });
 
         const json = JSON.parse(aiRes.text?.trim() || "{}");
         if (json.trackTitle) trackTitle = json.trackTitle;
@@ -1060,7 +1186,11 @@ Respond ONLY with valid JSON in this exact structure:
         seen.push({ title: trackTitle, artist: artistName, ytUrl: ytSearchUrl });
       }
       this.chatSongSearchSessionMap.set(chatId, {
-        originalQuery: searchClean, seenSongs: seen, attemptCount: isSameQuery ? existingSession.attemptCount + 1 : 1, timestamp: Date.now(), });
+        originalQuery: searchClean,
+        seenSongs: seen,
+        attemptCount: isSameQuery ? existingSession.attemptCount + 1 : 1,
+        timestamp: Date.now(),
+      });
     }
 
     // Fetch Audio Preview Buffer if preview requested
@@ -1087,7 +1217,16 @@ Respond ONLY with valid JSON in this exact structure:
 🎧 _Gaana suniye aur vibe kijiye ${requesterName}! Volume UP!_ 🔊🔥`;
 
       return {
-        replyText: previewCard, trackTitle, artistName, ytUrl: ytSearchUrl, spotifyUrl, previewAudioUrl, audioBuffer, isPreviewRequested: true, isPlaylist: false, };
+        replyText: previewCard,
+        trackTitle,
+        artistName,
+        ytUrl: ytSearchUrl,
+        spotifyUrl,
+        previewAudioUrl,
+        audioBuffer,
+        isPreviewRequested: true,
+        isPlaylist: false,
+      };
     }
 
     // Default Direct Search (YouTube Link only)
@@ -1102,13 +1241,25 @@ ${ytSearchUrl}
 🎧 _Gaana suniye aur vibe kijiye ${requesterName}! Volume UP!_ 🔊🔥`;
 
     return {
-      replyText: card, isPreviewRequested: false, };
+      replyText: card,
+      trackTitle,
+      artistName,
+      ytUrl: ytSearchUrl,
+      spotifyUrl,
+      previewAudioUrl,
+      audioBuffer,
+      isPreviewRequested: false,
+      isPlaylist: false,
+    };
   }
 
   // ── 9.1 🎶 AI Shazam & Voice Humming Song Identifier (@hum / @shazam) ───
 
   public async identifySongFromHumming(
-    audioBuffer: Buffer, mimeType = "audio/ogg", requesterName = "Boss", chatId?: string
+    audioBuffer: Buffer,
+    mimeType = "audio/ogg",
+    requesterName = "Boss",
+    chatId?: string
   ): Promise<{
     replyText: string;
     trackTitle: string;
@@ -1137,12 +1288,19 @@ Identify the EXACT canonical song title, artist(s), movie/album, and iconic hook
 
 Respond ONLY with valid JSON in this exact structure:
 {
-  "trackTitle": "Exact Song Name", "artists": "Singer Name, Music Composer", "albumOrMovie": "Movie or Album Name", "lyricsSnippet": "Famous 2-line lyrics snippet...", "confidence": "96%"
+  "trackTitle": "Exact Song Name",
+  "artists": "Singer Name, Music Composer",
+  "albumOrMovie": "Movie or Album Name",
+  "lyricsSnippet": "Famous 2-line lyrics snippet...",
+  "confidence": "96%"
 }`;
 
         const aiRes = await ai.models.generateContent({
-          model: "gemini-3.6-flash", contents: [
-            { inlineData: { mimeType: mimeType || "audio/ogg", data: base64Audio } }, { text: prompt }],
+          model: "gemini-3.5-flash",
+          contents: [
+            { inlineData: { mimeType: mimeType || "audio/ogg", data: base64Audio } },
+            { text: prompt },
+          ],
           config: { responseMimeType: "application/json" },
         });
 
@@ -1164,7 +1322,15 @@ Respond ONLY with valid JSON in this exact structure:
     // Record last song into chat memory
     if (chatId) {
       this.recordLastSong(chatId, {
-        title: trackTitle, artist: artistName, ytUrl: ytSearchUrl, spotifyUrl, album: albumName, year: releaseYear, genre, lyrics: identifiedSnippet, });
+        title: trackTitle,
+        artist: artistName,
+        ytUrl: ytSearchUrl,
+        spotifyUrl,
+        album: albumName,
+        year: releaseYear,
+        genre,
+        lyrics: identifiedSnippet,
+      });
       this.recordGroupSongPlay(chatId, trackTitle, artistName, requesterName);
     }
 
@@ -1172,7 +1338,8 @@ Respond ONLY with valid JSON in this exact structure:
     let previewBuffer: Buffer | null = null;
     try {
       const itunesRes = await fetch(
-        `https://itunes.apple.com/search?term=${encodeURIComponent(searchTarget)}&media=music&entity=song&limit=1`, { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(3500) }
+        `https://itunes.apple.com/search?term=${encodeURIComponent(searchTarget)}&media=music&entity=song&limit=1`,
+        { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(3500) }
       );
       if (itunesRes.ok) {
         const itunesData: any = await itunesRes.json();
@@ -1197,13 +1364,20 @@ Respond ONLY with valid JSON in this exact structure:
 🎧 _Volume UP ${requesterName}! Enjoy the preview!_ 🔊🔥`;
 
     return {
-      replyText: card, audioBuffer: previewBuffer, };
+      replyText: card,
+      trackTitle,
+      artistName,
+      ytUrl: ytSearchUrl,
+      audioBuffer: previewBuffer,
+    };
   }
 
   // ── 9.2 🎬 Reel / Shorts Background Song Extractor (@reel / @bgm) ─────────
 
   public async extractReelBackgroundSong(
-    urlOrText: string, requesterName = "Boss", chatId?: string
+    urlOrText: string,
+    requesterName = "Boss",
+    chatId?: string
   ): Promise<{
     replyText: string;
     trackTitle: string;
@@ -1234,11 +1408,18 @@ Identify the famous background soundtrack / viral trending audio / BGM used in t
 
 Respond ONLY with valid JSON in this exact structure:
 {
-  "trackTitle": "Exact Song Name", "artists": "Singer / Music Producer", "albumOrMovie": "Movie or Album Name", "vibe": "Trending Instagram Reel Audio / Slowed+Reverb / Bass Boosted", "iconicDrop": "Key hook line or beat drop description"
+  "trackTitle": "Exact Song Name",
+  "artists": "Singer / Music Producer",
+  "albumOrMovie": "Movie or Album Name",
+  "vibe": "Trending Instagram Reel Audio / Slowed+Reverb / Bass Boosted",
+  "iconicDrop": "Key hook line or beat drop description"
 }`;
 
         const aiRes = await ai.models.generateContent({
-          model: "gemini-3.6-flash", contents: prompt, config: { responseMimeType: "application/json" }, });
+          model: "gemini-3.5-flash",
+          contents: prompt,
+          config: { responseMimeType: "application/json" },
+        });
 
         const json = JSON.parse(aiRes.text?.trim() || "{}");
         if (json.trackTitle) trackTitle = json.trackTitle;

@@ -47,7 +47,12 @@ const midTermSummariesCol = () => db.collection("mid_term_summaries");
 const pendingCol = () => db.collection("pending_questions");
 
 const MAX_DAYS_RETAINED = 30;
-const AFFIRMATIVE_WORDS = new Set(["haan", "haa", "ha", "han", "h", "hn", "hmm", "hmmm", "hmmmm", "hm", "yes", "yess", "yep", "yup", "ok", "okk", "okok", "okay", "o", "oo", "sahi", "sahi hai", "theek", "theek hai", "thik hai", "acha", "achha", "bilkul", "kar do", "kar dena", "pucho", "pooch lo", "poocho", ]);
+const AFFIRMATIVE_WORDS = new Set([
+  "haan", "haa", "ha", "han", "h", "hn", "hmm", "hmmm", "hmmmm", "hm",
+  "yes", "yess", "yep", "yup", "ok", "okk", "okok", "okay", "o", "oo",
+  "sahi", "sahi hai", "theek", "theek hai", "thik hai", "acha", "achha",
+  "bilkul", "kar do", "kar dena", "pucho", "pooch lo", "poocho",
+]);
 
 /** Today's date string in IST (e.g. "2026-08-23"), used as the daily doc id. */
 export function todayIST(): string {
@@ -79,7 +84,16 @@ class DailyUpdateService {
   private inMemoryPending: Map<string, PendingQuestion> = new Map();
 
   private static readonly FAST_SUMMARY_MODELS = [
-    "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash"];
+    "gemini-3.1-flash-lite",
+    "gemini-3.5-flash-lite",
+    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+  ];
 
   /**
    * Fast-Summary Prompt helper:
@@ -110,7 +124,9 @@ class DailyUpdateService {
 
   /**
    * Appends or Overwrites DK's spoken update to today's entry.
-   * Tip 2: If isOverwrite is true and previous content exists, * it queries status: "active", sends the old text to Fast-Summary, * stores the summary in mid_term_summaries, and replaces the live doc!
+   * Tip 2: If isOverwrite is true and previous content exists,
+   * it queries status: "active", sends the old text to Fast-Summary,
+   * stores the summary in mid_term_summaries, and replaces the live doc!
    */
   public async appendUpdate(text: string, isOverwrite: boolean = false): Promise<DailyUpdateEntry> {
     const date = todayIST();
@@ -120,7 +136,7 @@ class DailyUpdateService {
     // Query active document
     let existingText = "";
     try {
-      const activeSnap = await updatesCol().where("dateStr", "==", date).where("status", "active").limit(1).get();
+      const activeSnap = await updatesCol().where("dateStr", "==", date).where("status", "==", "active").limit(1).get();
       if (!activeSnap.empty) {
         const rawT = (activeSnap.docs[0].data() as DailyUpdateEntry).text || "";
         existingText = decryptData(rawT);
@@ -136,7 +152,11 @@ class DailyUpdateService {
     }
 
     const timeFormatted = new Date(now).toLocaleTimeString("en-IN", {
-      timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true, });
+      timeZone: "Asia/Kolkata",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    });
     const updateSnippet = `[${timeFormatted}] ${cleanText}`;
 
     let finalUpdatedText = updateSnippet;
@@ -148,12 +168,23 @@ class DailyUpdateService {
 
       // Encrypt at rest in Firestore
       const midSummaryDoc = {
-        id: summaryId, dateStr: date, summary: encryptData(fastSummary), rawText: encryptData(existingText), archivedAt: now, status: "archived" as const, };
+        id: summaryId,
+        dateStr: date,
+        summary: encryptData(fastSummary),
+        rawText: encryptData(existingText),
+        archivedAt: now,
+        status: "archived" as const,
+      };
 
       midTermSummariesCol().doc(summaryId).set(midSummaryDoc).then(() => {
         // Dispatch verified notification to Telegram and WhatsApp
         memoryNotificationService.notifySummaryVerifiedAndStaged({
-          dateRangeStr: date, summaryType: "mid_term_summary", summaryId, summaryText: fastSummary, targetCollection: "mid_term_summaries", }).catch(() => {});
+          dateRangeStr: date,
+          summaryType: "mid_term_summary",
+          summaryId,
+          summaryText: fastSummary,
+          targetCollection: "mid_term_summaries",
+        }).catch(() => {});
       }).catch((err) => {
         console.warn("[DailyUpdate] Failed to write mid_term_summary:", err);
       });
@@ -165,14 +196,20 @@ class DailyUpdateService {
     }
 
     const entry: DailyUpdateEntry = {
-      dateStr: date, text: finalUpdatedText, updatedAt: now, status: "active", };
+      dateStr: date,
+      text: finalUpdatedText,
+      updatedAt: now,
+      status: "active",
+    };
 
     this.inMemoryUpdates.set(date, entry);
 
     try {
       // Encrypt text at rest before writing to Firestore
       const docToStore = {
-        ...entry, text: encryptData(entry.text), };
+        ...entry,
+        text: encryptData(entry.text),
+      };
       await updatesCol().doc(date).set(docToStore);
     } catch (e: any) {
       console.warn("[DailyUpdate] Firestore write warning (cached in memory):", e?.message || e);
@@ -190,7 +227,9 @@ class DailyUpdateService {
         const data = snap.data() as DailyUpdateEntry;
         // Decrypt text from Firestore
         const decryptedData: DailyUpdateEntry = {
-          ...data, text: decryptData(data.text), };
+          ...data,
+          text: decryptData(data.text),
+        };
         this.inMemoryUpdates.set(dateStr, decryptedData);
         return decryptedData;
       }
@@ -210,7 +249,8 @@ class DailyUpdateService {
   /**
    * Keeps only the most recent MAX_DAYS_RETAINED (30 days) day-documents.
    * Zero Data-Loss 24-Hour Safety Buffer:
-   * Phase 1: Converts 30d+ updates to Vector DB, marks status 'archived_pending_delete', * sets safeDeleteAfter = now + 24h, and sends verified notification to Telegram & WhatsApp.
+   * Phase 1: Converts 30d+ updates to Vector DB, marks status 'archived_pending_delete',
+   * sets safeDeleteAfter = now + 24h, and sends verified notification to Telegram & WhatsApp.
    * Phase 2: Prunes raw document ONLY after 24 hours have elapsed.
    */
   private async trimOldUpdates() {
@@ -240,19 +280,38 @@ class DailyUpdateService {
         if (data.text) {
           const summaryText = `Daily Update Log for ${data.dateStr}: ${data.text.slice(0, 300)}`;
           const archiveRes = await vectorMemoryService.archiveToVectorStore({
-            originalText: data.text, summary: summaryText, sourceType: "daily_update", dateRangeStr: data.dateStr, startTimestamp: data.updatedAt || now, endTimestamp: data.updatedAt || now, metadata: {
-              session_id: "daily_update_" + data.dateStr, exact_date: data.dateStr, }, });
+            originalText: data.text,
+            summary: summaryText,
+            sourceType: "daily_update",
+            dateRangeStr: data.dateStr,
+            startTimestamp: data.updatedAt || now,
+            endTimestamp: data.updatedAt || now,
+            metadata: {
+              session_id: "daily_update_" + data.dateStr,
+              exact_date: data.dateStr,
+            },
+          });
 
           if (archiveRes.success && archiveRes.entryId) {
             const safeDeleteAfter = now + 24 * 60 * 60 * 1000;
             batch.set(
-              doc.ref, {
-                status: "archived_pending_delete", safeDeleteAfter, summaryId: archiveRes.entryId, { merge: true }
+              doc.ref,
+              {
+                status: "archived_pending_delete",
+                safeDeleteAfter,
+                summaryId: archiveRes.entryId,
+              },
+              { merge: true }
             );
 
             // Verified real notification to Telegram & WhatsApp
             memoryNotificationService.notifySummaryVerifiedAndStaged({
-              dateRangeStr: data.dateStr, summaryType: "daily_update", summaryText: summaryText, targetCollection: "vectorStore", }).catch(() => {});
+              dateRangeStr: data.dateStr,
+              summaryType: "daily_update",
+              summaryId: archiveRes.entryId,
+              summaryText: summaryText,
+              targetCollection: "vectorStore",
+            }).catch(() => {});
 
             console.log(`[DailyUpdate] 🛡️ Staged 30d+ daily update for ${data.dateStr} under 24h buffer.`);
           }
@@ -280,7 +339,16 @@ class DailyUpdateService {
     }
 
     const models = [
-      "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash"];
+      "gemini-3.1-flash-lite",
+      "gemini-3.5-flash-lite",
+      "gemini-3.5-flash",
+      "gemini-3.1-flash-lite",
+      "gemini-3.6-flash",
+      "gemini-3.5-flash",
+      "gemini-3.5-flash",
+      "gemini-3.5-flash-lite",
+      "gemini-3.1-flash-lite",
+    ];
     const prompt = `You are Friday, DK's WhatsApp assistant. Below is DK's own update log for TODAY only — short notes DK dictated about what he did/is doing today.
 
 TODAY'S UPDATE LOG:

@@ -218,13 +218,13 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/ecommerce/track", res) => {
+  app.post("/api/ecommerce/track", async (req, res) => {
     try {
       const { productName, currentPrice, targetPrice, productUrl, store } = req.body;
       if (!productName || !currentPrice) {
         return res.status(400).json({ ok: false, error: "productName and currentPrice are required" });
       }
-      const result = await priceDropTrackerService.trackProduct(productName, store);
+      const result = await priceDropTrackerService.trackProduct(productName, currentPrice, targetPrice, productUrl, store);
       res.json(result);
     } catch (e: any) {
       res.status(500).json({ ok: false, error: e?.message || "Failed to track product" });
@@ -240,7 +240,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.delete("/api/ecommerce/tracked/:id", res) => {
+  app.delete("/api/ecommerce/tracked/:id", async (req, res) => {
     try {
       const { id } = req.params;
       const success = await priceDropTrackerService.deleteTrackedProduct(id);
@@ -250,7 +250,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/ecommerce/check-now", res) => {
+  app.post("/api/ecommerce/check-now", async (_req, res) => {
     try {
       const result = await priceDropTrackerService.checkAllPricesLive();
       res.json({ ok: true, ...result });
@@ -260,19 +260,28 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   });
 
   // ── Autonomous E-Commerce Orders & Payment Endpoints ──────────────────────
-  app.post("/api/ecommerce/order", price, paymentMethod, store, imageUrl, customAddress } = req.body;
+  app.post("/api/ecommerce/order", async (req, res) => {
+    try {
+      const { productName, price, paymentMethod, store, productUrl, imageUrl, customAddress } = req.body;
       if (!productName || !price) {
         return res.status(400).json({ ok: false, error: "productName and price are required" });
       }
       const result = await ecommerceOrderService.createOrder({
-        productName, paymentMethod: paymentMethod === "COD" ? "COD" : "ONLINE_UPI", customAddress, });
+        productName,
+        price,
+        paymentMethod: paymentMethod === "COD" ? "COD" : "ONLINE_UPI",
+        store,
+        productUrl,
+        imageUrl,
+        customAddress,
+      });
       res.json(result);
     } catch (e: any) {
       res.status(500).json({ ok: false, error: e?.message || "Failed to create order" });
     }
   });
 
-  app.get("/api/ecommerce/orders", res) => {
+  app.get("/api/ecommerce/orders", async (_req, res) => {
     try {
       const orders = await ecommerceOrderService.getAllOrders();
       res.json({ ok: true, orders });
@@ -281,7 +290,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/ecommerce/orders/:id/paid", res) => {
+  app.post("/api/ecommerce/orders/:id/paid", async (req, res) => {
     try {
       const { id } = req.params;
       const { utr } = req.body;
@@ -293,7 +302,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   });
 
   // ── Autonomous Auto-Buyer & Login Session Endpoints ────────────────────────
-  app.post("/api/ecommerce/browser-login", res) => {
+  app.post("/api/ecommerce/browser-login", async (req, res) => {
     try {
       const { store } = req.body;
       const targetStore = store === "amazon" ? "amazon" : store === "meesho" ? "meesho" : "flipkart";
@@ -304,7 +313,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/ecommerce/browser-logout", res) => {
+  app.post("/api/ecommerce/browser-logout", async (req, res) => {
     try {
       const { store } = req.body;
       const targetStore = store === "amazon" ? "amazon" : store === "meesho" ? "meesho" : "flipkart";
@@ -315,39 +324,62 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.get("/api/ecommerce/session-status", res) => {
+  app.get("/api/ecommerce/session-status", async (_req, res) => {
     try {
       const [fk, amz, meesho] = await Promise.all([
-        autonomousBuyerService.checkLoginStatus("flipkart"), autonomousBuyerService.checkLoginStatus("amazon"), autonomousBuyerService.checkLoginStatus("meesho"), ]);
+        autonomousBuyerService.checkLoginStatus("flipkart"),
+        autonomousBuyerService.checkLoginStatus("amazon"),
+        autonomousBuyerService.checkLoginStatus("meesho"),
+      ]);
       res.json({ ok: true, sessions: { flipkart: fk, amazon: amz, meesho } });
     } catch (e: any) {
       res.status(500).json({ ok: false, error: e?.message || "Failed to check session status" });
     }
   });
 
-  app.post("/api/ecommerce/auto-order-cod", res) => {
+  app.post("/api/ecommerce/auto-order-cod", async (req, res) => {
     try {
-      const { productUrl, productName, addressKeyword } = req.body;
+      const { productUrl, productName, price, store, addressKeyword } = req.body;
       if (!productUrl || !productName) {
         return res.status(400).json({ ok: false, error: "productUrl and productName are required" });
       }
       const targetStore = store === "amazon" ? "amazon" : store === "meesho" ? "meesho" : "flipkart";
       const result = await autonomousBuyerService.autoOrderCod({
-        productUrl, price: Number(price) || 0, store: targetStore, addressKeyword, error: e?.message || "Autonomous COD order failed" });
+        productUrl,
+        productName,
+        price: Number(price) || 0,
+        store: targetStore,
+        addressKeyword,
+      });
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "Autonomous COD order failed" });
     }
   });
 
-  app.post("/api/ecommerce/send-buy-link", originalPrice, discountPercentage, rating } = req.body;
+  app.post("/api/ecommerce/send-buy-link", async (req, res) => {
+    try {
+      const { productName, price, store, productUrl, originalPrice, discountPercentage, rating } = req.body;
       if (!productUrl || !productName) {
         return res.status(400).json({ ok: false, error: "productUrl and productName are required" });
       }
       const result = await ecommerceOrderService.sendDirectBuyLink({
-        productName: String(productName), store: String(store || "Online Store"), productUrl: String(productUrl), originalPrice: originalPrice ? Number(originalPrice) : undefined, discountPercentage: discountPercentage ? Number(discountPercentage) : undefined, rating: rating ? Number(rating) : undefined, error: e?.message || "Failed to send buy link" });
+        productName: String(productName),
+        price: Number(price) || 0,
+        store: String(store || "Online Store"),
+        productUrl: String(productUrl),
+        originalPrice: originalPrice ? Number(originalPrice) : undefined,
+        discountPercentage: discountPercentage ? Number(discountPercentage) : undefined,
+        rating: rating ? Number(rating) : undefined,
+      });
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "Failed to send buy link" });
     }
   });
 
   // ── Public Web UPI 1-Click Pay & QR Portal ─────────────────────────────────
-  app.get("/pay/:orderId", res) => {
+  app.get("/pay/:orderId", async (req, res) => {
     try {
       const { orderId } = req.params;
       const order = await ecommerceOrderService.getOrderById(orderId);
@@ -381,8 +413,8 @@ export function createApiRouter(context: ApiRoutesContext): Router {
           <style>
             * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
             body { background: #060918; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 16px; }
-            .card { background: #0f172a; border: 1px solid rgba(6, 182, 212, 0.3); box-shadow: 0 10px 40px rgba(0, 0, 0.8), 0 0 30px rgba(6, 0.15); border-radius: 24px; width: 100%; max-width: 440px; padding: 24px; text-align: center; }
-            .badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 999px; background: rgba(6, 0.15); border: 1px solid rgba(6, 0.4); color: #22d3ee; font-size: 11px; font-weight: 700; text-transform: uppercase; margin-bottom: 16px; }
+            .card { background: #0f172a; border: 1px solid rgba(6, 182, 212, 0.3); box-shadow: 0 10px 40px rgba(0,0,0,0.8), 0 0 30px rgba(6, 182, 212, 0.15); border-radius: 24px; width: 100%; max-width: 440px; padding: 24px; text-align: center; }
+            .badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 999px; background: rgba(6, 182, 212, 0.15); border: 1px solid rgba(6, 182, 212, 0.4); color: #22d3ee; font-size: 11px; font-weight: 700; text-transform: uppercase; margin-bottom: 16px; }
             .price { font-size: 36px; font-weight: 900; color: #38bdf8; margin: 8px 0; }
             .title { font-size: 15px; font-weight: 600; color: #e2e8f0; margin-bottom: 16px; line-height: 1.4; }
             .details { background: #1e293b; border-radius: 16px; padding: 12px 16px; font-size: 12px; color: #94a3b8; text-align: left; margin-bottom: 20px; }
@@ -393,8 +425,8 @@ export function createApiRouter(context: ApiRoutesContext): Router {
             .btn-phonepe { background: linear-gradient(135deg, #5f259f, #7c3aed); color: #fff; }
             .btn-gpay { background: linear-gradient(135deg, #1a73e8, #2563eb); color: #fff; }
             .btn-paytm { background: linear-gradient(135deg, #00b9f5, #0284c7); color: #fff; }
-            .btn-any { background: #334155; color: #f8fafc; border: 1px solid rgba(255, 255, 0.1); }
-            .qr-box { margin-top: 20px; padding-top: 16px; border-top: 1px solid rgba(255, 0.1); }
+            .btn-any { background: #334155; color: #f8fafc; border: 1px solid rgba(255,255,255,0.1); }
+            .qr-box { margin-top: 20px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.1); }
             .qr-img { width: 180px; height: 180px; border-radius: 12px; border: 4px solid #fff; margin: 8px auto; display: block; }
             .footer { font-size: 11px; color: #64748b; margin-top: 16px; }
           </style>
@@ -434,7 +466,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.get("/api/routine", res) => {
+  app.get("/api/routine", async (_req, res) => {
     try {
       const current = bossRoutineService.getCurrentHabit();
       const slots = await bossRoutineService.getAllRoutineSlots();
@@ -444,18 +476,18 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/routine/update", res) => {
+  app.post("/api/routine/update", async (req, res) => {
     try {
       const { slotQuery, startTimeStr, endTimeStr, activity, title } = req.body;
       if (!slotQuery) return res.status(400).json({ ok: false, error: "slotQuery is required" });
-      const result = await bossRoutineService.updateRoutineSlot(slotQuery, { startTimeStr, title });
+      const result = await bossRoutineService.updateRoutineSlot(slotQuery, { startTimeStr, endTimeStr, activity, title });
       res.json(result);
     } catch (e) {
       res.status(500).json({ error: "failed_to_update_routine" });
     }
   });
 
-  app.get("/api/learning/lessons", res) => {
+  app.get("/api/learning/lessons", async (_req, res) => {
     try {
       res.json({ ok: true, lessons: await fridayLearningService.getAllLessons() });
     } catch (e) {
@@ -463,14 +495,18 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/learning/record", res) => {
+  app.post("/api/learning/record", async (req, res) => {
     try {
       const { whatFridayDidWrong, whatBossTaught, goldenRule, triggerContext } = req.body;
       if (!whatFridayDidWrong || !whatBossTaught || !goldenRule) {
         return res.status(400).json({ ok: false, error: "Missing required fields" });
       }
       const result = await fridayLearningService.recordLesson({
-        whatFridayDidWrong, triggerContext, });
+        whatFridayDidWrong,
+        whatBossTaught,
+        goldenRule,
+        triggerContext,
+      });
       res.json(result);
     } catch (e) {
       res.status(500).json({ error: "failed_to_record_lesson" });
@@ -478,7 +514,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   });
 
   // ── Friday Autonomous Learning & Cognition Capsule APIs ────────────────────
-  app.get("/api/learning/dashboard-stats", res) => {
+  app.get("/api/learning/dashboard-stats", async (_req, res) => {
     try {
       const { syntheticSelfGymEngine } = await import("../services/syntheticSelfGymEngine");
       const { aiAdvancedLearningService } = await import("../services/aiAdvancedLearningService");
@@ -488,26 +524,70 @@ export function createApiRouter(context: ApiRoutesContext): Router {
       const { bossDirectivesService } = await import("../services/bossDirectivesService");
 
       const [
-        drills, goldenStandards, rlhfHistory, bossStyle, realizations, streamEvents, dreamLogs, lessons, groupProfiles, directives, ] = await Promise.all([
-        syntheticSelfGymEngine.getDrills().catch(() => []), aiAdvancedLearningService.getGoldenStandards().catch(() => []), aiAdvancedLearningService.getRlhfHistory().catch(() => []), aiAdvancedLearningService.getBossStyleProfile().catch(() => null), frontierCognitionService.getRealizations().catch(() => []), frontierCognitionService.getStreamEvents().catch(() => []), frontierCognitionService.getRecentDreamLogs().catch(() => []), fridayChildTrainingService.getAllLessons().catch(() => []), groupCollectiveLearningService.getAllProfiles().catch(() => []), bossDirectivesService.getActiveDirectives().catch(() => []), ]);
+        drills,
+        goldenStandards,
+        rlhfHistory,
+        bossStyle,
+        realizations,
+        streamEvents,
+        dreamLogs,
+        lessons,
+        groupProfiles,
+        directives,
+      ] = await Promise.all([
+        syntheticSelfGymEngine.getDrills().catch(() => []),
+        aiAdvancedLearningService.getGoldenStandards().catch(() => []),
+        aiAdvancedLearningService.getRlhfHistory().catch(() => []),
+        aiAdvancedLearningService.getBossStyleProfile().catch(() => null),
+        frontierCognitionService.getRealizations().catch(() => []),
+        frontierCognitionService.getStreamEvents().catch(() => []),
+        frontierCognitionService.getRecentDreamLogs().catch(() => []),
+        fridayChildTrainingService.getAllLessons().catch(() => []),
+        groupCollectiveLearningService.getAllProfiles().catch(() => []),
+        bossDirectivesService.getActiveDirectives().catch(() => []),
+      ]);
 
       const positiveCount = rlhfHistory.filter((r) => r.sentiment === "positive" || r.sentiment === "humor").length;
       const approvalRate = rlhfHistory.length > 0 ? Math.round((positiveCount / rlhfHistory.length) * 100) : 100;
 
       res.json({
-        ok: true, stats: {
-          totalLessons: lessons.length, totalDrills: drills.length, totalGolden: goldenStandards.length, totalRlhf: rlhfHistory.length, approvalRate, observedSamples: bossStyle?.observedSampleCount || 0, currentMood: frontierCognitionService.getCurrentMood(), activeGroups: groupProfiles.length, activeDirectives: directives.length, cognitionTier: "Tier 5 (Autonomous Adaptive)", lastUpdated: Date.now(), }, drills, });
+        ok: true,
+        stats: {
+          totalLessons: lessons.length,
+          totalDrills: drills.length,
+          totalGolden: goldenStandards.length,
+          totalRlhf: rlhfHistory.length,
+          approvalRate,
+          observedSamples: bossStyle?.observedSampleCount || 0,
+          currentMood: frontierCognitionService.getCurrentMood(),
+          activeGroups: groupProfiles.length,
+          activeDirectives: directives.length,
+          cognitionTier: "Tier 5 (Autonomous Adaptive)",
+          lastUpdated: Date.now(),
+        },
+        drills,
+        goldenStandards,
+        rlhfHistory,
+        bossStyle,
+        realizations,
+        streamEvents,
+        dreamLogs,
+        lessons,
+        groupProfiles,
+        directives,
+      });
     } catch (e: any) {
-      console.error("[ApiRoutes] Failed to fetch learning dashboard stats:", error: e?.message || "Failed to fetch stats" });
+      console.error("[ApiRoutes] Failed to fetch learning dashboard stats:", e);
+      res.status(500).json({ ok: false, error: e?.message || "Failed to fetch stats" });
     }
   });
 
-  app.post("/api/learning/practice-drill", res) => {
+  app.post("/api/learning/practice-drill", async (req, res) => {
     try {
       const { syntheticSelfGymEngine } = await import("../services/syntheticSelfGymEngine");
       const { lessonId, trigger, rule, whatBossTaught } = req.body || {};
       const drill = await syntheticSelfGymEngine.runAutonomousDrill(
-        lessonId || trigger || rule ? { lessonId, whatBossTaught } : undefined
+        lessonId || trigger || rule ? { lessonId, trigger, rule, whatBossTaught } : undefined
       );
       if (!drill) {
         return res.status(500).json({ ok: false, message: "Drill generation failed or API key missing" });
@@ -518,7 +598,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/learning/drills/:id/verdict", res) => {
+  app.post("/api/learning/drills/:id/verdict", async (req, res) => {
     try {
       const { syntheticSelfGymEngine } = await import("../services/syntheticSelfGymEngine");
       const { verdict, feedback } = req.body || {};
@@ -532,7 +612,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/learning/drills/:id/retry", res) => {
+  app.post("/api/learning/drills/:id/retry", async (req, res) => {
     try {
       const { syntheticSelfGymEngine } = await import("../services/syntheticSelfGymEngine");
       const { customInstruction } = req.body || {};
@@ -543,22 +623,27 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/learning/teach-lesson", res) => {
+  app.post("/api/learning/teach-lesson", async (req, res) => {
     try {
       const { situationTrigger, taughtReaction, idealSampleResponse, forbiddenBehaviors, category, isAnchor, anchorPriority } = req.body;
       if (!situationTrigger || !taughtReaction) {
         return res.status(400).json({ ok: false, error: "situationTrigger and taughtReaction are required" });
       }
       const { fridayChildTrainingService } = await import("../services/fridayChildTrainingService");
-      const lesson = await fridayChildTrainingService.teachLesson(situationTrigger, {
-        idealSampleResponse, forbiddenBehaviors: Array.isArray(forbiddenBehaviors) ? forbiddenBehaviors : forbiddenBehaviors ? [forbiddenBehaviors] : undefined, isAnchor: isAnchor !== false, anchorPriority: Number(anchorPriority) || 100, });
+      const lesson = await fridayChildTrainingService.teachLesson(situationTrigger, taughtReaction, {
+        idealSampleResponse,
+        forbiddenBehaviors: Array.isArray(forbiddenBehaviors) ? forbiddenBehaviors : forbiddenBehaviors ? [forbiddenBehaviors] : undefined,
+        category,
+        isAnchor: isAnchor !== false,
+        anchorPriority: Number(anchorPriority) || 100,
+      });
       res.json({ ok: true, lesson });
     } catch (e: any) {
       res.status(500).json({ ok: false, error: e?.message || "Teach error" });
     }
   });
 
-  app.post("/api/learning/dream-consolidate", res) => {
+  app.post("/api/learning/dream-consolidate", async (_req, res) => {
     try {
       const { frontierCognitionService } = await import("../services/frontierCognitionService");
       const ledger = await frontierCognitionService.runNightDreamConsolidation();
@@ -569,14 +654,15 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   });
 
   // ── Audio Proxy for JioSaavn / CDN streams (HTTP 206 Range Stream Support) ──
-  app.get("/api/music/proxy-stream", res) => {
+  app.get("/api/music/proxy-stream", async (req, res) => {
     const rawUrl = String(req.query.url || "");
     if (!rawUrl || !rawUrl.startsWith("http")) {
       return res.status(400).send("Invalid stream URL");
     }
     try {
       const headers: Record<string, string> = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36", };
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+      };
       if (req.headers.range) {
         headers["Range"] = req.headers.range as string;
       }
@@ -585,7 +671,13 @@ export function createApiRouter(context: ApiRoutesContext): Router {
 
       res.status(audioRes.status);
       res.set({
-        "Content-Type": audioRes.headers.get("content-type") || "audio/mp4", "Accept-Ranges": "bytes", "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS", "Access-Control-Allow-Headers": "Range, Content-Type", "Cache-Control": "public, max-age=86400", });
+        "Content-Type": audioRes.headers.get("content-type") || "audio/mp4",
+        "Accept-Ranges": "bytes",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+        "Access-Control-Allow-Headers": "Range, Content-Type",
+        "Cache-Control": "public, max-age=86400",
+      });
 
       if (audioRes.headers.get("content-range")) {
         res.set("Content-Range", audioRes.headers.get("content-range")!);
@@ -603,7 +695,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   });
 
   // ── Music Lyrics Endpoint ──
-  app.get("/api/music/lyrics", res) => {
+  app.get("/api/music/lyrics", async (req, res) => {
     const query = String(req.query.query || "");
     if (!query) return res.status(400).json({ success: false, message: "Query required" });
     try {
@@ -621,7 +713,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   });
 
   // ── Music Search Endpoint (JioSaavn HD) ──
-  app.get("/api/music/search", res) => {
+  app.get("/api/music/search", async (req, res) => {
     const query = String(req.query.query || "").trim();
     if (!query) return res.status(400).json({ success: false, message: "Query required" });
     try {
@@ -633,7 +725,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   });
 
   // ── Music Smart Queue Endpoint (JioSaavn Radio) ──
-  app.get("/api/music/queue", res) => {
+  app.get("/api/music/queue", async (req, res) => {
     try {
       const songName = String(req.query.songName || req.query.song || "");
       const artistName = String(req.query.artistName || req.query.artist || "");
@@ -645,7 +737,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.get("/api/network/connected-devices", res) => {
+  app.get("/api/network/connected-devices", async (req, res) => {
     try {
       const force = req.query.refresh !== "false";
       const result = await networkDeviceScannerService.scanConnectedDevices(force);
@@ -655,11 +747,17 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.get("/api/network/wifi-radar", error: e?.message || "Radar scan failed" });
+  app.get("/api/network/wifi-radar", async (req, res) => {
+    try {
+      const force = req.query.refresh !== "false";
+      const result = await networkDeviceScannerService.scanConnectedDevices(force);
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || "Radar scan failed" });
     }
   });
 
-  app.get("/api/network/wifi-recon", res) => {
+  app.get("/api/network/wifi-recon", async (req, res) => {
     try {
       const force = req.query.refresh !== "false";
       const result = await networkDeviceScannerService.scanNearbyWifiRecon(force);
@@ -670,7 +768,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   });
 
   // ── Voice Biometrics REST Endpoints ─────────────────────────────────────────
-  app.get("/api/voice-biometrics/profiles", res) => {
+  app.get("/api/voice-biometrics/profiles", async (_req, res) => {
     try {
       const profiles = await voiceBiometricsService.getProfiles();
       res.json({ success: true, count: profiles.length, profiles });
@@ -679,11 +777,14 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/voice-biometrics/start-enroll", res) => {
+  app.post("/api/voice-biometrics/start-enroll", async (req, res) => {
     try {
       const { pin, name, relationWithDivakar, role } = req.body || {};
       const result = await voiceBiometricsService.startVoiceEnrollment(
-        String(pin || ""), String(name || "Guest"), String(relationWithDivakar || "Friend"), role || "friend"
+        String(pin || ""),
+        String(name || "Guest"),
+        String(relationWithDivakar || "Friend"),
+        role || "friend"
       );
       res.json(result);
     } catch (e: any) {
@@ -691,11 +792,13 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/voice-biometrics/record-sample", res) => {
+  app.post("/api/voice-biometrics/record-sample", async (req, res) => {
     try {
       const { sessionId, audioBase64, spokenPhrase } = req.body || {};
       const result = await voiceBiometricsService.recordCalibrationSample(
-        String(sessionId || ""), String(audioBase64 || ""), spokenPhrase ? String(spokenPhrase) : undefined
+        String(sessionId || ""),
+        String(audioBase64 || ""),
+        spokenPhrase ? String(spokenPhrase) : undefined
       );
       res.json(result);
     } catch (e: any) {
@@ -703,7 +806,9 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/voice-biometrics/delete-profile", profileId } = req.body || {};
+  app.post("/api/voice-biometrics/delete-profile", async (req, res) => {
+    try {
+      const { pin, profileId } = req.body || {};
       const result = await voiceBiometricsService.deleteVoiceProfile(String(pin || ""), profileId ? String(profileId) : undefined);
       res.json(result);
     } catch (e: any) {
@@ -711,7 +816,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/voice-biometrics/update-pin", res) => {
+  app.post("/api/voice-biometrics/update-pin", async (req, res) => {
     try {
       const { newPin, senderName } = req.body || {};
       const result = await voiceBiometricsService.updateVoicePin(String(newPin || ""), senderName || "Boss (DK)");
@@ -722,7 +827,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   });
 
   // ── Music Audio Proxy Stream (Bypasses CDN CORS Blocks) ──────────────────────
-  app.get("/api/music/proxy-stream", res) => {
+  app.get("/api/music/proxy-stream", async (req, res) => {
     try {
       const audioUrl = String(req.query.url || "");
       if (!audioUrl || (!audioUrl.startsWith("http://") && !audioUrl.startsWith("https://"))) {
@@ -731,7 +836,11 @@ export function createApiRouter(context: ApiRoutesContext): Router {
 
       const response = await fetch(audioUrl, {
         headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, "Referer": "https://www.jiosaavn.com/", "Accept": "*/*", });
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+          "Referer": "https://www.jiosaavn.com/",
+          "Accept": "*/*",
+        },
+      });
 
       if (!response.ok) {
         return res.status(response.status).send(`Upstream audio fetch failed: ${response.statusText}`);
@@ -755,14 +864,17 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.get("/api/memory/vector/search", res) => {
+  app.get("/api/memory/vector/search", async (req, res) => {
     try {
       const q = String(req.query.q || "").trim();
       const limit = req.query.limit ? Number(req.query.limit) : 5;
       const filterDate = req.query.date ? String(req.query.date).trim() : undefined;
       if (!q) return res.status(400).json({ ok: false, error: "query 'q' is required" });
       const searchRes = await vectorMemoryService.searchSemanticMemory(
-        q, limit, 0.15, filterDate ? { exactDate: filterDate } : undefined
+        q,
+        limit,
+        0.15,
+        filterDate ? { exactDate: filterDate } : undefined
       );
       res.json({ ok: true, ...searchRes });
     } catch (e) {
@@ -770,20 +882,30 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.get("/api/memory/lifecycle/stats", res) => {
+  app.get("/api/memory/lifecycle/stats", async (_req, res) => {
     try {
       const vectorStats = await vectorMemoryService.getVectorStoreStats();
       const memories = await memoryEngine.getMemories();
       res.json({
-        ok: true, stats: {
-          pastSessionsCount: memories.pastSessionsCount, vectorStats, policy: {
-            exactDialoguesDays: 4, comprehensiveSummariesDays: 60, permanentVectorArchivalDays: "60+", dailyUpdatesVerbatimDays: 30, liveScratchStreamHours: 24, });
+        ok: true,
+        stats: {
+          pastSessionsCount: memories.pastSessionsCount,
+          vectorStats,
+          policy: {
+            exactDialoguesDays: 4,
+            comprehensiveSummariesDays: 60,
+            permanentVectorArchivalDays: "60+",
+            dailyUpdatesVerbatimDays: 30,
+            liveScratchStreamHours: 24,
+          },
+        },
+      });
     } catch (e) {
       res.status(500).json({ error: "failed_to_get_lifecycle_stats" });
     }
   });
 
-  app.get("/api/memory/smart-retrieve", res) => {
+  app.get("/api/memory/smart-retrieve", async (req, res) => {
     try {
       const q = String(req.query.q || "").trim();
       if (!q) return res.status(400).json({ ok: false, error: "query 'q' is required" });
@@ -794,9 +916,9 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.get("/api/memory/export/decrypted-backup", res) => {
+  app.get("/api/memory/export/decrypted-backup", async (req, res) => {
     try {
-      const clientIp = (req.headers["x-forwarded-for"] as string)?.split(", ")[0].trim() || req.socket.remoteAddress || "127.0.0.1";
+      const clientIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0].trim() || req.socket.remoteAddress || "127.0.0.1";
       const userAgent = (req.headers["user-agent"] as string) || "Unknown Device";
 
       // High-Security Double Lock: Requires Boss's Master App Key even with a valid session token!
@@ -804,10 +926,15 @@ export function createApiRouter(context: ApiRoutesContext): Router {
       const activeKey = await appSecurityService.getAppKey();
       if (activeKey && (!passkey || passkey.trim() !== activeKey.trim())) {
         await appSecurityService.blockClient(
-          clientIp, userAgent, `Unauthorized backup export attempt with invalid Master Key on ${req.path}`
+          clientIp,
+          userAgent,
+          `Unauthorized backup export attempt with invalid Master Key on ${req.path}`
         );
         return res.status(403).json({
-          ok: false, error: "ACCESS_BLOCKED_IMMEDIATE", message: "🚨 Critical Intrusion: Wrong/missing Master App Key for decrypted backup. IP & Device blocked.", });
+          ok: false,
+          error: "ACCESS_BLOCKED_IMMEDIATE",
+          message: "🚨 Critical Intrusion: Wrong/missing Master App Key for decrypted backup. IP & Device blocked.",
+        });
       }
 
       const backup = await memoryBackupService.exportDecryptedBackup();
@@ -820,7 +947,9 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/memory/import/restore-backup", ")[0].trim() || req.socket.remoteAddress || "127.0.0.1";
+  app.post("/api/memory/import/restore-backup", async (req, res) => {
+    try {
+      const clientIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0].trim() || req.socket.remoteAddress || "127.0.0.1";
       const userAgent = (req.headers["user-agent"] as string) || "Unknown Device";
 
       // High-Security Double Lock: Requires Boss's Master App Key
@@ -828,10 +957,15 @@ export function createApiRouter(context: ApiRoutesContext): Router {
       const activeKey = await appSecurityService.getAppKey();
       if (activeKey && (!passkey || passkey.trim() !== activeKey.trim())) {
         await appSecurityService.blockClient(
-          clientIp, `Unauthorized backup restore attempt with invalid Master Key on ${req.path}`
+          clientIp,
+          userAgent,
+          `Unauthorized backup restore attempt with invalid Master Key on ${req.path}`
         );
         return res.status(403).json({
-          ok: false, message: "🚨 Critical Intrusion: Wrong/missing Master App Key for memory restore. IP & Device blocked.", });
+          ok: false,
+          error: "ACCESS_BLOCKED_IMMEDIATE",
+          message: "🚨 Critical Intrusion: Wrong/missing Master App Key for memory restore. IP & Device blocked.",
+        });
       }
 
       const backupData = req.body;
@@ -839,12 +973,14 @@ export function createApiRouter(context: ApiRoutesContext): Router {
         return res.status(400).json({ ok: false, error: "Invalid backup JSON payload" });
       }
       const result = await memoryBackupService.restoreAndReEncryptBackup(backupData);
-      res.json({ ok: true, error: e?.message || "Failed to restore backup" });
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "Failed to restore backup" });
     }
   });
 
   // ── Dashboard Unblock & Blocked Clients Management ─────────────────────────
-  app.get("/api/security/blocked-clients", res) => {
+  app.get("/api/security/blocked-clients", async (_req, res) => {
     try {
       const list = await appSecurityService.listBlockedIps();
       res.json({ ok: true, blockedList: list });
@@ -853,7 +989,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/security/unblock", res) => {
+  app.post("/api/security/unblock", async (req, res) => {
     try {
       const { ip, masterKey } = req.body || {};
       const activeKey = await appSecurityService.getAppKey();
@@ -875,7 +1011,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.get("/api/reminders", res) => {
+  app.get("/api/reminders", async (_req, res) => {
     try {
       res.json({ reminders: await toolsEngine.getReminders() });
     } catch (e) {
@@ -883,7 +1019,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.get("/api/notes", res) => {
+  app.get("/api/notes", async (_req, res) => {
     try {
       res.json({ notes: await toolsEngine.getNotes() });
     } catch (e) {
@@ -891,7 +1027,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.get("/api/contacts", res) => {
+  app.get("/api/contacts", async (_req, res) => {
     try {
       res.json({ contacts: await contactsService.getAllContacts() });
     } catch (e) {
@@ -899,11 +1035,11 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/contacts", res) => {
+  app.post("/api/contacts", async (req, res) => {
     const { name, phone, relation } = req.body;
     if (name && phone) {
       try {
-        const entry = await contactsService.saveContact(name, relation);
+        const entry = await contactsService.saveContact(name, phone, relation);
         res.json({ ok: true, contact: entry });
       } catch (e) {
         res.status(500).json({ error: "failed_to_save_contact" });
@@ -913,7 +1049,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/whatsapp/pair", res) => {
+  app.post("/api/whatsapp/pair", async (req, res) => {
     try {
       const { phone } = req.body;
       if (!phone) return res.status(400).json({ error: "phone_required" });
@@ -924,7 +1060,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/whatsapp/reset", res) => {
+  app.post("/api/whatsapp/reset", async (_req, res) => {
     try {
       await whatsappBotService.resetSession();
       res.json({ ok: true });
@@ -937,7 +1073,17 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     const baileysStatus = whatsappBotService.getStatus();
     const cloudStatus = whatsappCloudService.getStatus();
     res.json({
-      isConnected: baileysStatus.isConnected, isBaileysConnected: baileysStatus.isConnected, isCloudConfigured: cloudStatus.configured, dedicatedPhone: baileysStatus.dedicatedPhone, cloudPhone: cloudStatus.configured ? cloudStatus.fromNumber : null, qrCodeDataUrl: baileysStatus.qrCodeDataUrl, pairingCode: baileysStatus.pairingCode, baileys: baileysStatus, cloud: cloudStatus, baileysEnabled, });
+      isConnected: baileysStatus.isConnected,
+      isBaileysConnected: baileysStatus.isConnected,
+      isCloudConfigured: cloudStatus.configured,
+      dedicatedPhone: baileysStatus.dedicatedPhone,
+      cloudPhone: cloudStatus.configured ? cloudStatus.fromNumber : null,
+      qrCodeDataUrl: baileysStatus.qrCodeDataUrl,
+      pairingCode: baileysStatus.pairingCode,
+      baileys: baileysStatus,
+      cloud: cloudStatus,
+      baileysEnabled,
+    });
   });
 
   // ── Baileys toggle endpoint (for UI toggle + internal use) ────────────────
@@ -954,13 +1100,13 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     res.json({ ok: true, baileysEnabled });
   });
 
-  app.get("/api/whatsapp/baileys/status", res) => {
+  app.get("/api/whatsapp/baileys/status", (_req, res) => {
     const currentEnabled = typeof getBaileysEnabled === "function" ? getBaileysEnabled() : baileysEnabled;
     res.json({ baileysEnabled: currentEnabled });
   });
 
   // ── Primary WhatsApp Channel endpoints ───────────────────────────────────
-  app.get("/api/whatsapp/primary-channel", res) => {
+  app.get("/api/whatsapp/primary-channel", async (_req, res) => {
     try {
       const channel = await getPrimaryWhatsAppChannel();
       res.json({ ok: true, channel });
@@ -969,7 +1115,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/whatsapp/primary-channel", res) => {
+  app.post("/api/whatsapp/primary-channel", async (req, res) => {
     try {
       const { channel } = req.body;
       const result = await setPrimaryWhatsAppChannel(channel);
@@ -981,7 +1127,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
 
   // ── WhatsApp Cloud API Webhook (Meta official) ────────────────────────────
   // GET: Meta verifies the webhook URL by sending hub.challenge
-  app.get("/api/whatsapp/cloud/webhook", res) => {
+  app.get("/api/whatsapp/cloud/webhook", (req, res) => {
     const mode = req.query["hub.mode"] as string;
     const challenge = req.query["hub.challenge"] as string;
     const verifyToken = req.query["hub.verify_token"] as string;
@@ -995,18 +1141,18 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   });
 
   // POST: Meta sends incoming messages here
-  app.post("/api/whatsapp/cloud/webhook", express.json(), res) => {
+  app.post("/api/whatsapp/cloud/webhook", express.json(), (req, res) => {
     res.sendStatus(200); // Always ACK immediately
     whatsappCloudService.handleWebhook(req.body);
   });
 
   // Cloud API status
-  app.get("/api/whatsapp/cloud/status", res) => {
+  app.get("/api/whatsapp/cloud/status", (_req, res) => {
     res.json(whatsappCloudService.getStatus());
   });
 
   // Send test message via Cloud API
-  app.post("/api/whatsapp/cloud/send", res) => {
+  app.post("/api/whatsapp/cloud/send", async (req, res) => {
     const { phone, message } = req.body;
     if (!phone || !message) return res.status(400).json({ error: "phone and message required" });
     const result = await whatsappCloudService.sendMessage(phone, message);
@@ -1014,7 +1160,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   });
 
   // ── YouTube Intelligence & "Ask Gemini" Endpoints ────────────────────────
-  app.post("/api/youtube/analyze", res) => {
+  app.post("/api/youtube/analyze", async (req, res) => {
     const { url } = req.body || {};
     if (!url) return res.status(400).json({ success: false, error: "YouTube URL is required." });
     try {
@@ -1026,7 +1172,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/youtube/ask", res) => {
+  app.post("/api/youtube/ask", async (req, res) => {
     const { url, question } = req.body || {};
     if (!url || !question) return res.status(400).json({ success: false, error: "URL and question required." });
     try {
@@ -1039,7 +1185,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   });
 
   // ── YouTube Safe Background Music & Stream Endpoints ──────────────────────
-  app.get("/api/youtube/search-music", res) => {
+  app.get("/api/youtube/search-music", async (req, res) => {
     const q = String(req.query.q || req.query.query || "").trim();
     if (!q) return res.status(400).json({ success: false, error: "Query is required" });
     try {
@@ -1050,7 +1196,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.get("/api/youtube/stream-audio", res) => {
+  app.get("/api/youtube/stream-audio", async (req, res) => {
     const videoId = String(req.query.v || req.query.videoId || "").trim();
     if (!videoId) return res.status(400).json({ success: false, error: "Video ID is required" });
     try {
@@ -1060,35 +1206,44 @@ export function createApiRouter(context: ApiRoutesContext): Router {
       }
       // If direct stream url is not available, return embed / fallback info
       res.json({
-        success: false, videoId, fallbackEmbed: `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&enablejsapi=1`, message: "Direct audio stream format not found, using embed fallback.", });
+        success: false,
+        videoId,
+        fallbackEmbed: `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&enablejsapi=1`,
+        message: "Direct audio stream format not found, using embed fallback.",
+      });
     } catch (e: any) {
       res.status(500).json({ success: false, error: e?.message || e });
     }
   });
 
   // ── Boss Voice Biometrics & Recognition Endpoints ─────────────────────────
-  app.get("/api/voice-biometrics/status", res) => {
+  app.get("/api/voice-biometrics/status", async (_req, res) => {
     try {
       const profiles = await voiceBiometricsService.getProfiles();
       res.json({
-        ok: true, profiles, maxProfiles: 2, });
+        ok: true,
+        profiles,
+        count: profiles.length,
+        maxProfiles: 2,
+      });
     } catch (e: any) {
       res.status(500).json({ error: e?.message || "failed_to_fetch_profiles" });
     }
   });
 
-  app.post("/api/voice-biometrics/enroll", res) => {
-    const { pin, spokenPhrase } = req.body || {};
+  app.post("/api/voice-biometrics/enroll", async (req, res) => {
+    const { pin, name, audioBase64, spokenPhrase } = req.body || {};
     if (!pin) return res.status(400).json({ error: "pin_required", message: "Password / PIN zaroori hai." });
     try {
-      const result = await voiceBiometricsService.enrollVoice(pin, spokenPhrase);
+      const result = await voiceBiometricsService.enrollVoice(pin, name, audioBase64, spokenPhrase);
       res.json(result);
     } catch (e: any) {
       res.status(500).json({ error: e?.message || "enrollment_failed" });
     }
   });
 
-  app.post("/api/voice-biometrics/delete", profileId } = req.body || {};
+  app.post("/api/voice-biometrics/delete", async (req, res) => {
+    const { pin, profileId } = req.body || {};
     if (!pin) return res.status(400).json({ error: "pin_required", message: "Password / PIN zaroori hai." });
     try {
       const result = await voiceBiometricsService.deleteProfile(pin, profileId);
@@ -1099,11 +1254,11 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   });
 
   // ── Telegram Bot Endpoints ────────────────────────────────────────────────
-  app.get("/api/telegram/status", res) => {
+  app.get("/api/telegram/status", (_req, res) => {
     res.json({ ok: true, ...telegramBotService.getStatus() });
   });
 
-  app.get("/api/telegram/users", res) => {
+  app.get("/api/telegram/users", async (_req, res) => {
     try {
       const users = await telegramBotService.getAllTelegramUsers();
       res.json({ ok: true, users, count: users.length });
@@ -1112,7 +1267,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.get("/api/telegram/groups", res) => {
+  app.get("/api/telegram/groups", async (_req, res) => {
     try {
       const groups = await telegramBotService.getAllTelegramGroups();
       res.json({ ok: true, groups, count: groups.length });
@@ -1121,7 +1276,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.get("/api/telegram/messages", res) => {
+  app.get("/api/telegram/messages", async (req, res) => {
     try {
       const target = (req.query.target as string) || "all";
       const limit = Number(req.query.limit) || 25;
@@ -1132,19 +1287,19 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/telegram/users/modify", res) => {
+  app.post("/api/telegram/users/modify", async (req, res) => {
     const { target, customAlias, customNotes } = req.body || {};
     if (!target) return res.status(400).json({ ok: false, error: "target_required" });
     const result = await telegramBotService.modifyTelegramUser(target, { customAlias, customNotes });
     res.json(result);
   });
 
-  app.get("/api/telegram/busy-message", res) => {
+  app.get("/api/telegram/busy-message", async (_req, res) => {
     const customBusy = await telegramBotService.getCustomBusyReply();
     res.json({ ok: true, customBusyReply: customBusy });
   });
 
-  app.post("/api/telegram/busy-message", res) => {
+  app.post("/api/telegram/busy-message", async (req, res) => {
     const { message } = req.body || {};
     if (!message) return res.status(400).json({ ok: false, error: "message_required" });
     const result = await telegramBotService.setCustomBusyReply(message);
@@ -1152,7 +1307,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   });
 
   // ── YouTube Audio Stream Proxy Endpoint ──────────────────────────────────
-  app.get("/api/youtube/stream-audio", res) => {
+  app.get("/api/youtube/stream-audio", async (req, res) => {
     const videoId = String(req.query.v || "");
     if (!videoId) return res.status(400).json({ error: "videoId_required" });
 
@@ -1168,7 +1323,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   });
 
   // ── Music Smart Queue Endpoint ──────────────────────────────────────────
-  app.get("/api/music/queue", res) => {
+  app.get("/api/music/queue", async (req, res) => {
     const { songName, artistName } = req.query || {};
     try {
       const query = String(songName || artistName || "Bollywood Hits");
@@ -1179,7 +1334,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/telegram/send", res) => {
+  app.post("/api/telegram/send", async (req, res) => {
     const { chatId, text } = req.body || {};
     if (!chatId || !text) return res.status(400).json({ error: "chatId_and_text_required" });
     const result = await telegramBotService.sendMessage(chatId, text);
@@ -1187,7 +1342,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   });
 
   // ── App Key Security Endpoints ────────────────────────────────────────────
-  app.get("/api/app-key/status", res) => {
+  app.get("/api/app-key/status", async (_req, res) => {
     try {
       const activeKey = await appSecurityService.getAppKey();
       res.json({ ok: true, isConfigured: !!activeKey });
@@ -1196,10 +1351,10 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/app-key/verify", res) => {
+  app.post("/api/app-key/verify", async (req, res) => {
     try {
       const { key } = req.body || {};
-      const clientIp = (req.headers["x-forwarded-for"] as string)?.split(", ")[0].trim() || req.socket.remoteAddress || "127.0.0.1";
+      const clientIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0].trim() || req.socket.remoteAddress || "127.0.0.1";
       const userAgent = (req.headers["user-agent"] as string) || "Unknown Device";
 
       const verifyRes = await appSecurityService.verifyAppKey(String(key || ""), clientIp, userAgent);
@@ -1218,26 +1373,27 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   });
 
   // ── Instagram Direct Bot Endpoints (Direct ID & Password Automation) ─────────
-  app.get("/api/instagram/status", ...instagramBotService.getStatus() });
+  app.get("/api/instagram/status", (_req, res) => {
+    res.json({ ok: true, ...instagramBotService.getStatus() });
   });
 
-  app.post("/api/instagram/login", res) => {
+  app.post("/api/instagram/login", async (req, res) => {
     const { username, password, verificationCode, sessionId } = req.body || {};
     if (sessionId) {
       const result = await instagramBotService.loginWithSessionId(sessionId, username);
       return res.json({ ok: result.success, ...result });
     }
     if (!username) return res.status(400).json({ ok: false, message: "Username, Email, or Session ID required." });
-    const result = await instagramBotService.login(username, verificationCode);
+    const result = await instagramBotService.login(username, password, verificationCode);
     res.json({ ok: result.success, ...result });
   });
 
-  app.post("/api/instagram/logout", res) => {
+  app.post("/api/instagram/logout", async (_req, res) => {
     const result = await instagramBotService.logout();
     res.json({ ok: result.success, ...result });
   });
 
-  app.post("/api/instagram/toggle-auto-reply", res) => {
+  app.post("/api/instagram/toggle-auto-reply", (req, res) => {
     const { enabled } = req.body || {};
     if (typeof enabled === "boolean") {
       instagramBotService.setAutoReply(enabled);
@@ -1245,42 +1401,49 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     res.json({ ok: true, ...instagramBotService.getStatus() });
   });
 
-  app.post("/api/instagram/send", res) => {
+  app.post("/api/instagram/send", async (req, res) => {
     const { recipient, message } = req.body || {};
     if (!recipient || !message) return res.status(400).json({ error: "recipient_and_message_required" });
     const result = await instagramBotService.sendMessageToTarget(recipient, message);
     res.json(result);
   });
 
-  app.get("/api/instagram/search", res) => {
+  app.get("/api/instagram/search", async (req, res) => {
     const query = String(req.query.q || req.query.query || "");
     const result = await instagramBotService.searchUserLive(query);
     res.json(result);
   });
 
-  app.get("/api/instagram/user-info", res) => {
+  app.get("/api/instagram/user-info", async (req, res) => {
     const username = String(req.query.username || req.query.u || "");
     const result = await instagramBotService.getUserInfoLive(username);
     res.json(result);
   });
 
   // ── Social Anti-Bot & Human Simulation Firewall Status ───────────────────
-  app.get("/api/firewall/social-status", ...humanBotFirewallService.getStats() });
+  app.get("/api/firewall/social-status", (_req, res) => {
+    res.json({ ok: true, ...humanBotFirewallService.getStats() });
   });
 
   // ── Voice Biometrics & Calibration REST Endpoints ─────────────────────────
-  app.get("/api/voice-biometrics/status", res) => {
+  app.get("/api/voice-biometrics/status", async (_req, res) => {
     try {
       const profiles = await voiceBiometricsService.getProfiles();
-      res.json({ ok: true, maxProfiles: 5 });
+      res.json({ ok: true, profiles, maxProfiles: 5 });
     } catch (e: any) {
       res.status(500).json({ ok: false, error: e?.message || e });
     }
   });
 
-  app.post("/api/voice-biometrics/enroll", spokenPhrase, audioBase64 } = req.body || {};
+  app.post("/api/voice-biometrics/enroll", async (req, res) => {
+    try {
+      const { pin, name, relationWithDivakar, spokenPhrase, audioBase64 } = req.body || {};
       const result = await voiceBiometricsService.enrollVoice(
-        String(pin || ""), String(name || "Boss (Divakar)"), String(relationWithDivakar || "Boss (DK)"), spokenPhrase
+        String(pin || ""),
+        String(name || "Boss (Divakar)"),
+        String(relationWithDivakar || "Boss (DK)"),
+        audioBase64,
+        spokenPhrase
       );
       res.json(result);
     } catch (e: any) {
@@ -1288,7 +1451,10 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/voice-biometrics/delete", profileId);
+  app.post("/api/voice-biometrics/delete", async (req, res) => {
+    try {
+      const { pin, profileId } = req.body || {};
+      const result = await voiceBiometricsService.deleteVoiceProfile(String(pin || ""), profileId);
       res.json(result);
     } catch (e: any) {
       res.status(500).json({ success: false, message: e?.message || "Deletion failed" });
@@ -1296,11 +1462,16 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   });
 
   // ── Spoonacular Recipe & Food Intelligence Endpoints ──────────────────────
-  app.get("/api/recipes/search", res) => {
+  app.get("/api/recipes/search", async (req, res) => {
     try {
       const { query, cuisine, diet, type, maxCalories, minProtein, number } = req.query;
       const result = await publicApisService.searchRecipe(
-        query ? String(query) : undefined, cuisine ? String(cuisine) : undefined, diet ? String(diet) : undefined, type ? String(type) : undefined, maxCalories ? Number(maxCalories) : undefined, minProtein ? Number(minProtein) : undefined
+        query ? String(query) : undefined,
+        cuisine ? String(cuisine) : undefined,
+        diet ? String(diet) : undefined,
+        type ? String(type) : undefined,
+        maxCalories ? Number(maxCalories) : undefined,
+        minProtein ? Number(minProtein) : undefined
       );
       res.json(result);
     } catch (e: any) {
@@ -1308,12 +1479,13 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.get("/api/recipes/by-ingredients", res) => {
+  app.get("/api/recipes/by-ingredients", async (req, res) => {
     try {
       const { ingredients, count } = req.query;
       if (!ingredients) return res.status(400).json({ success: false, message: "ingredients query param required" });
       const result = await publicApisService.searchRecipesByIngredients(
-        String(ingredients), count ? Number(count) : 5
+        String(ingredients),
+        count ? Number(count) : 5
       );
       res.json(result);
     } catch (e: any) {
@@ -1321,7 +1493,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.get("/api/recipes/details", res) => {
+  app.get("/api/recipes/details", async (req, res) => {
     try {
       const { id, title } = req.query;
       const target = id ? (isNaN(Number(id)) ? String(id) : Number(id)) : String(title || "");
@@ -1333,11 +1505,12 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.get("/api/recipes/random", res) => {
+  app.get("/api/recipes/random", async (req, res) => {
     try {
       const { tags, count } = req.query;
       const result = await publicApisService.getRandomRecipes(
-        tags ? String(tags) : undefined, count ? Number(count) : 3
+        tags ? String(tags) : undefined,
+        count ? Number(count) : 3
       );
       res.json(result);
     } catch (e: any) {
@@ -1345,7 +1518,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.get("/api/recipes/substitutes", res) => {
+  app.get("/api/recipes/substitutes", async (req, res) => {
     try {
       const { ingredient } = req.query;
       if (!ingredient) return res.status(400).json({ success: false, message: "ingredient query param required" });
@@ -1356,11 +1529,13 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.get("/api/recipes/meal-plan", res) => {
+  app.get("/api/recipes/meal-plan", async (req, res) => {
     try {
       const { calories, timeFrame, diet } = req.query;
       const result = await publicApisService.generateMealPlan(
-        calories ? Number(calories) : 2000, timeFrame ? (String(timeFrame) as any) : "day", diet ? String(diet) : undefined
+        calories ? Number(calories) : 2000,
+        timeFrame ? (String(timeFrame) as any) : "day",
+        diet ? String(diet) : undefined
       );
       res.json(result);
     } catch (e: any) {
@@ -1369,7 +1544,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   });
 
   // ── Friday Cyber Security & OSINT Recon Endpoints ─────────────────────────
-  app.post("/api/cyber/scan-url", res) => {
+  app.post("/api/cyber/scan-url", async (req, res) => {
     const { url } = req.body || {};
     if (!url) return res.status(400).json({ error: "url_required" });
     try {
@@ -1380,7 +1555,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/cyber/breach-check", res) => {
+  app.post("/api/cyber/breach-check", async (req, res) => {
     const { query } = req.body || {};
     if (!query) return res.status(400).json({ error: "query_required" });
     try {
@@ -1391,7 +1566,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/cyber/audit-domain", res) => {
+  app.post("/api/cyber/audit-domain", async (req, res) => {
     const { domain } = req.body || {};
     if (!domain) return res.status(400).json({ error: "domain_required" });
     try {
@@ -1402,7 +1577,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/cyber/ip-lookup", res) => {
+  app.post("/api/cyber/ip-lookup", async (req, res) => {
     const { ip } = req.body || {};
     if (!ip) return res.status(400).json({ error: "ip_required" });
     try {
@@ -1413,7 +1588,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.get("/api/cyber/code-audit", res) => {
+  app.get("/api/cyber/code-audit", async (_req, res) => {
     try {
       const result = await cyberSecurityService.scanCodeSecurityAudit();
       res.json({ ok: true, ...result });
@@ -1422,7 +1597,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/cyber/threat-model", res) => {
+  app.post("/api/cyber/threat-model", async (req, res) => {
     try {
       const { component } = req.body || {};
       const result = await cyberSecurityService.runThreatModeling(component ? String(component) : undefined);
@@ -1432,11 +1607,13 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/cyber/wifi-audit", res) => {
+  app.post("/api/cyber/wifi-audit", (req, res) => {
     try {
       const { protocol, hasWps, passwordLength } = req.body || {};
       const result = cyberSecurityService.auditWifiSecurityConfig(
-        String(protocol || "WPA2-PSK"), Boolean(hasWps), Number(passwordLength || 8)
+        String(protocol || "WPA2-PSK"),
+        Boolean(hasWps),
+        Number(passwordLength || 8)
       );
       res.json({ ok: true, ...result });
     } catch (e: any) {
@@ -1444,7 +1621,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.get("/api/code-agent/requests", res) => {
+  app.get("/api/code-agent/requests", async (_req, res) => {
     try {
       res.json({ requests: await codeAgentService.getRequests() });
     } catch (e) {
@@ -1452,7 +1629,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/code-agent/requests", res) => {
+  app.post("/api/code-agent/requests", async (req, res) => {
     try {
       const { instruction } = req.body;
       if (!instruction || !String(instruction).trim()) {
@@ -1465,7 +1642,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/code-agent/requests/:id/approve", res) => {
+  app.post("/api/code-agent/requests/:id/approve", async (req, res) => {
     try {
       await codeAgentService.approve(req.params.id);
       res.json({ ok: true });
@@ -1474,7 +1651,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/code-agent/requests/:id/deny", res) => {
+  app.post("/api/code-agent/requests/:id/deny", async (req, res) => {
     try {
       await codeAgentService.deny(req.params.id);
       res.json({ ok: true });
@@ -1483,7 +1660,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/code-agent/requests/:id/push-to-main", res) => {
+  app.post("/api/code-agent/requests/:id/push-to-main", async (req, res) => {
     try {
       const result = await codeAgentService.pushToMain(req.params.id);
       res.json({ ok: true, ...result });
@@ -1492,7 +1669,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/code-agent/requests/:id/retry", res) => {
+  app.post("/api/code-agent/requests/:id/retry", async (req, res) => {
     try {
       const updated = await codeAgentService.retry(req.params.id);
       res.json({ ok: true, request: updated });
@@ -1501,7 +1678,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/code-agent/requests/:id/stop", res) => {
+  app.post("/api/code-agent/requests/:id/stop", async (req, res) => {
     try {
       await codeAgentService.stop(req.params.id);
       res.json({ ok: true });
@@ -1510,7 +1687,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.get("/api/code-agent/requests/:id/diff", res) => {
+  app.get("/api/code-agent/requests/:id/diff", async (req, res) => {
     try {
       const changes = await codeAgentService.generateDiffPreview(req.params.id);
       res.json({ ok: true, changes });
@@ -1519,7 +1696,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/code-agent/requests/:id/refine", res) => {
+  app.post("/api/code-agent/requests/:id/refine", async (req, res) => {
     const { additionalInstruction } = req.body || {};
     try {
       const updated = await codeAgentService.refinePlan(req.params.id, String(additionalInstruction || ""));
@@ -1529,7 +1706,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/code-agent/rollback", res) => {
+  app.post("/api/code-agent/rollback", async (req, res) => {
     try {
       const result = await codeAgentService.rollback();
       res.json({ ok: true, ...result });
@@ -1538,7 +1715,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/code-agent/clean", res) => {
+  app.post("/api/code-agent/clean", async (req, res) => {
     try {
       const result = await codeAgentService.runCodebaseCleanup();
       res.json({ ok: true, ...result });
@@ -1547,7 +1724,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.delete("/api/code-agent/history/:id", res) => {
+  app.delete("/api/code-agent/history/:id", async (req, res) => {
     try {
       await codeAgentService.deleteTask(req.params.id);
       res.json({ ok: true, message: "Task deleted successfully" });
@@ -1556,7 +1733,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/code-agent/history/batch-delete", res) => {
+  app.post("/api/code-agent/history/batch-delete", async (req, res) => {
     try {
       const { ids } = req.body || {};
       const result = await codeAgentService.batchDeleteTasks(ids);
@@ -1566,7 +1743,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.delete("/api/code-agent/history", res) => {
+  app.delete("/api/code-agent/history", async (req, res) => {
     try {
       const { onlyInactive } = req.query;
       const result = await codeAgentService.clearHistory(onlyInactive === "true");
@@ -1577,7 +1754,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   });
 
   // ── RailRadar Indian Railways Live Train Intelligence Endpoints ──────────
-  app.get("/api/railradar/train/:number/live", res) => {
+  app.get("/api/railradar/train/:number/live", async (req, res) => {
     try {
       const data = await railRadarService.getLiveTrainStatus(req.params.number);
       res.json(data);
@@ -1586,7 +1763,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.get("/api/railradar/pnr/:pnr", res) => {
+  app.get("/api/railradar/pnr/:pnr", async (req, res) => {
     try {
       const data = await railRadarService.getPnrStatus(req.params.pnr);
       res.json(data);
@@ -1595,7 +1772,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.get("/api/railradar/station/:code/live", res) => {
+  app.get("/api/railradar/station/:code/live", async (req, res) => {
     try {
       const data = await railRadarService.getLiveStationBoard(req.params.code);
       res.json(data);
@@ -1604,17 +1781,17 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.get("/api/railradar/train/:number/fare", res) => {
+  app.get("/api/railradar/train/:number/fare", async (req, res) => {
     try {
       const { from, to, date } = req.query as { from?: string; to?: string; date?: string };
-      const data = await railRadarService.getTrainFares(req.params.number, from, date);
+      const data = await railRadarService.getTrainFares(req.params.number, from, to, date);
       res.json(data);
     } catch (e: any) {
       res.status(500).json({ success: false, error: e?.message || "train_fare_failed" });
     }
   });
 
-  app.get("/api/railradar/train/:number/coach", res) => {
+  app.get("/api/railradar/train/:number/coach", async (req, res) => {
     try {
       const data = await railRadarService.getCoachPosition(req.params.number);
       res.json(data);
@@ -1623,7 +1800,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.get("/api/railradar/train/:number/stops/:station", res) => {
+  app.get("/api/railradar/train/:number/stops/:station", async (req, res) => {
     try {
       const data = await railRadarService.checkTrainStoppage(req.params.number, req.params.station);
       res.json(data);
@@ -1632,13 +1809,20 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.get("/api/railradar/between", date } = req.query as { from?: string; to?: string; date?: string };
-      const data = await railRadarService.searchTrainsBetweenStations(String(from || "GAYA"), String(to || "PNBE"), error: e?.message || "between_stations_failed" });
+  app.get("/api/railradar/between", async (req, res) => {
+    try {
+      const { from, to, date } = req.query as { from?: string; to?: string; date?: string };
+      const data = await railRadarService.searchTrainsBetweenStations(String(from || "GAYA"), String(to || "PNBE"), date);
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || "between_stations_failed" });
     }
   });
 
-  app.get("/api/railradar/train/:number/seats", date, class: cls } = req.query as { from?: string; to?: string; date?: string; class?: string };
-      const data = await railRadarService.getSeatAvailability(req.params.number, cls);
+  app.get("/api/railradar/train/:number/seats", async (req, res) => {
+    try {
+      const { from, to, date, class: cls } = req.query as { from?: string; to?: string; date?: string; class?: string };
+      const data = await railRadarService.getSeatAvailability(req.params.number, from, to, date, cls);
       res.json(data);
     } catch (e: any) {
       res.status(500).json({ success: false, error: e?.message || "seat_availability_failed" });
@@ -1646,7 +1830,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   });
 
   // ── WeatherAPI.com Intelligence Endpoints ─────────────────────────────────
-  app.get("/api/weather/current", res) => {
+  app.get("/api/weather/current", async (req, res) => {
     try {
       const q = String(req.query.q || "Patna");
       const data = await weatherService.getCurrentWeather(q);
@@ -1656,7 +1840,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.get("/api/weather/forecast", res) => {
+  app.get("/api/weather/forecast", async (req, res) => {
     try {
       const q = String(req.query.q || "Patna");
       const days = Number(req.query.days || 3);
@@ -1667,7 +1851,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.get("/api/weather/astronomy", res) => {
+  app.get("/api/weather/astronomy", async (req, res) => {
     try {
       const q = String(req.query.q || "Patna");
       const data = await weatherService.getAstronomy(q);
@@ -1677,7 +1861,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.get("/api/weather/marine", res) => {
+  app.get("/api/weather/marine", async (req, res) => {
     try {
       const q = String(req.query.q || "Mumbai");
       const data = await weatherService.getMarineWeather(q);
@@ -1687,7 +1871,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.get("/api/weather/sports", res) => {
+  app.get("/api/weather/sports", async (req, res) => {
     try {
       const q = String(req.query.q || "London");
       const data = await weatherService.getSportsWeather(q);
@@ -1698,52 +1882,58 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   });
 
   // ── NewsData.io & Live News Intelligence Endpoints ─────────────────────────
-  app.get("/api/news/latest", res) => {
+  app.get("/api/news/latest", async (req, res) => {
     try {
       const q = req.query.q ? String(req.query.q) : undefined;
       const category = req.query.category ? String(req.query.category) : undefined;
       const country = String(req.query.country || "in");
       const count = Number(req.query.count || 10);
       const engine = (req.query.engine as any) || "auto";
-      const data = await newsService.getLatestNews(q, country, "en", count, engine);
+      const data = await newsService.getLatestNews(q, category, country, "en", count, engine);
       res.json(data);
     } catch (e: any) {
       res.status(500).json({ success: false, error: e?.message || "news_fetch_failed" });
     }
   });
 
-  app.get("/api/news/newsdata", res) => {
+  app.get("/api/news/newsdata", async (req, res) => {
     try {
       const q = req.query.q ? String(req.query.q) : undefined;
       const category = req.query.category ? String(req.query.category) : undefined;
       const country = String(req.query.country || "in");
       const count = Number(req.query.count || 10);
-      const data = await newsService.getNewsDataLatest(q, count);
+      const data = await newsService.getNewsDataLatest(q, category, country, "en", count);
       res.json(data);
     } catch (e: any) {
       res.status(500).json({ success: false, error: e?.message || "newsdata_fetch_failed" });
     }
   });
 
-  app.get("/api/news/newsapi", res) => {
+  app.get("/api/news/newsapi", async (req, res) => {
     try {
       const q = req.query.q ? String(req.query.q) : undefined;
       const category = req.query.category ? String(req.query.category) : undefined;
       const country = String(req.query.country || "in");
       const count = Number(req.query.count || 10);
-      const data = await newsService.getNewsApiOrgLatest(q, error: e?.message || "newsapi_fetch_failed" });
+      const data = await newsService.getNewsApiOrgLatest(q, category, country, count);
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || "newsapi_fetch_failed" });
     }
   });
 
-  app.get("/api/news/crypto", res) => {
+  app.get("/api/news/crypto", async (req, res) => {
     try {
       const coin = String(req.query.coin || "Bitcoin");
       const count = Number(req.query.count || 8);
-      const data = await newsService.getCryptoNews(coin, error: e?.message || "crypto_news_failed" });
+      const data = await newsService.getCryptoNews(coin, count);
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || "crypto_news_failed" });
     }
   });
 
-  app.get("/api/news/archive", res) => {
+  app.get("/api/news/archive", async (req, res) => {
     try {
       const q = String(req.query.q || "India");
       const fromDate = req.query.from ? String(req.query.from) : undefined;
@@ -1755,7 +1945,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.get("/api/news/sources", res) => {
+  app.get("/api/news/sources", async (req, res) => {
     try {
       const country = String(req.query.country || "in");
       const category = req.query.category ? String(req.query.category) : undefined;
@@ -1766,15 +1956,19 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.get("/api/background-tasks", res) => {
+  app.get("/api/background-tasks", (_req, res) => {
     res.json({
-      ok: true, activeTasks: backgroundTasksService.getActiveTasks(), unnotifiedTasks: backgroundTasksService.getUnnotifiedCompletedTasks(), recentTasks: backgroundTasksService.getAllRecentTasks(), });
+      ok: true,
+      activeTasks: backgroundTasksService.getActiveTasks(),
+      unnotifiedTasks: backgroundTasksService.getUnnotifiedCompletedTasks(),
+      recentTasks: backgroundTasksService.getAllRecentTasks(),
+    });
   });
 
   // ---------------------------------------------------------------------------
   // Web Crawler & AI Intelligence Endpoints (Crawl, Deep Crawl, Query, Summarize, JSON)
   // ---------------------------------------------------------------------------
-  app.post("/api/crawler/crawl", res) => {
+  app.post("/api/crawler/crawl", async (req, res) => {
     try {
       const { url, respectRobots } = req.body || {};
       if (!url) return res.status(400).json({ error: "URL is required" });
@@ -1785,16 +1979,22 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/crawler/deep-crawl", maxPages, maxDepth, respectRobots } = req.body || {};
+  app.post("/api/crawler/deep-crawl", async (req, res) => {
+    try {
+      const { url, maxPages, maxDepth, respectRobots } = req.body || {};
       if (!url) return res.status(400).json({ error: "Root URL is required" });
       const result = await webCrawlerService.deepCrawl(String(url), {
-        maxPages: maxPages ? Number(maxPages) : 5, maxDepth: maxDepth ? Number(maxDepth) : 2, respectRobotsTxt: respectRobots !== false, result });
+        maxPages: maxPages ? Number(maxPages) : 5,
+        maxDepth: maxDepth ? Number(maxDepth) : 2,
+        respectRobotsTxt: respectRobots !== false,
+      });
+      res.json({ ok: true, result });
     } catch (e: any) {
       res.status(500).json({ error: e?.message || "failed_to_deep_crawl" });
     }
   });
 
-  app.post("/api/crawler/query", res) => {
+  app.post("/api/crawler/query", async (req, res) => {
     try {
       const { urlOrMarkdown, query } = req.body || {};
       if (!urlOrMarkdown || !query) return res.status(400).json({ error: "urlOrMarkdown and query are required" });
@@ -1805,7 +2005,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/crawler/summarize", res) => {
+  app.post("/api/crawler/summarize", async (req, res) => {
     try {
       const { urlOrMarkdown } = req.body || {};
       if (!urlOrMarkdown) return res.status(400).json({ error: "urlOrMarkdown is required" });
@@ -1816,7 +2016,9 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/crawler/extract-json", schema } = req.body || {};
+  app.post("/api/crawler/extract-json", async (req, res) => {
+    try {
+      const { urlOrMarkdown, schema } = req.body || {};
       if (!urlOrMarkdown || !schema) return res.status(400).json({ error: "urlOrMarkdown and schema are required" });
       const extracted = await webCrawlerService.extractStructuredJSON(String(urlOrMarkdown), String(schema));
       res.json({ ok: true, data: extracted });
@@ -1832,7 +2034,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   /** POST /api/phone-intelligence/lookup — Deep Phone Carrier & Circle & Risk Intel
    *  Body: { phone: string }
    */
-  app.post("/api/phone-intelligence/lookup", res) => {
+  app.post("/api/phone-intelligence/lookup", async (req, res) => {
     try {
       const { phone } = req.body || {};
       if (!phone || typeof phone !== "string") {
@@ -1848,14 +2050,20 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   /** POST /api/phone-intelligence/unmask-email — Smart OSINT Email Permutation & Unmasker
    *  Body: { phone: string, name?: string, nickname?: string, maskPattern?: string, targetDomain?: string }
    */
-  app.post("/api/phone-intelligence/unmask-email", res) => {
+  app.post("/api/phone-intelligence/unmask-email", async (req, res) => {
     try {
-      const { phone, nickname, maskPattern, targetDomain } = req.body || {};
+      const { phone, name, nickname, maskPattern, targetDomain } = req.body || {};
       if (!phone) {
         return res.status(400).json({ ok: false, error: "phone is required" });
       }
       const candidates = phoneIntelligenceService.decodeMaskedEmail({
-        phoneDigits: String(phone), targetDomain, candidates });
+        phoneDigits: String(phone),
+        name,
+        nickname,
+        maskPattern,
+        targetDomain,
+      });
+      res.json({ ok: true, candidates });
     } catch (e: any) {
       res.status(500).json({ ok: false, error: e?.message || "unmask_failed" });
     }
@@ -1867,7 +2075,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   // ---------------------------------------------------------------------------
 
   /** GET /api/osint/sherlock/status — Check if Sherlock is installed */
-  app.get("/api/osint/sherlock/status", res) => {
+  app.get("/api/osint/sherlock/status", async (_req, res) => {
     try {
       const status = await sherlockService.getStatus();
       res.json({ ok: true, ...status });
@@ -1879,23 +2087,25 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   /** POST /api/osint/sherlock/search — Search username across 300+ platforms
    *  Body: { username: string, timeout?: number, nsfw?: boolean, onlyFound?: boolean }
    */
-  app.post("/api/osint/sherlock/search", res) => {
+  app.post("/api/osint/sherlock/search", async (req, res) => {
     try {
       const { username, timeout, nsfw, onlyFound } = req.body || {};
       if (!username || typeof username !== "string") {
         return res.status(400).json({ ok: false, error: "username is required" });
       }
       const result = await sherlockService.searchUsername(username.trim(), {
-        timeout: timeout ? Number(timeout) : 30, result });
+        timeout: timeout ? Number(timeout) : 30,
+      });
+      res.json({ ok: true, result });
     } catch (e: any) {
       res.status(500).json({ ok: false, error: e?.message || "sherlock_search_failed" });
     }
   });
 
   /** POST /api/osint/sherlock/search-multi — Search multiple usernames at once
-   *  Body: { usernames: string[], nsfw?: boolean }
+   *  Body: { usernames: string[], timeout?: number, nsfw?: boolean }
    */
-  app.post("/api/osint/sherlock/search-multi", res) => {
+  app.post("/api/osint/sherlock/search-multi", async (req, res) => {
     try {
       const { usernames, timeout } = req.body || {};
       if (!Array.isArray(usernames) || usernames.length === 0) {
@@ -1905,7 +2115,8 @@ export function createApiRouter(context: ApiRoutesContext): Router {
         return res.status(400).json({ ok: false, error: "Max 5 usernames per request" });
       }
       const results = await sherlockService.searchMultipleUsernames(
-        usernames.map((u: any) => String(u).trim()), { timeout: timeout ? Number(timeout) : 30 }
+        usernames.map((u: any) => String(u).trim()),
+        { timeout: timeout ? Number(timeout) : 30 }
       );
       res.json({ ok: true, results });
     } catch (e: any) {
@@ -1914,7 +2125,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   });
 
   /** GET /api/osint/sherlock/sites — List all supported social media platforms */
-  app.get("/api/osint/sherlock/sites", res) => {
+  app.get("/api/osint/sherlock/sites", async (_req, res) => {
     try {
       const sites = await sherlockService.getSupportedSites();
       res.json({ ok: true, totalSites: sites.length, sites });
@@ -1931,58 +2142,76 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   // ---------------------------------------------------------------------------
 
   /** GET /api/osint/harvester/status — Service status and sources */
-  app.get("/api/osint/harvester/status", ...theHarvesterService.getStatus() });
+  app.get("/api/osint/harvester/status", (_req, res) => {
+    res.json({ ok: true, ...theHarvesterService.getStatus() });
   });
 
   /** POST /api/osint/harvester/harvest — Full OSINT harvest for a domain
    *  Body: { domain: string, resolveIps?: boolean, shodanScan?: boolean }
    */
-  app.post("/api/osint/harvester/harvest", res) => {
+  app.post("/api/osint/harvester/harvest", async (req, res) => {
     try {
       const { domain, resolveIps, shodanScan, virusTotalKey, hunterKey } = req.body || {};
       if (!domain || typeof domain !== "string") {
         return res.status(400).json({ ok: false, error: "domain is required" });
       }
       const report = await theHarvesterService.harvest(domain.trim(), {
-        resolveIps: resolveIps !== false, shodanScan: shodanScan !== false, hunterKey, error: e?.message || "harvester_failed" });
+        resolveIps: resolveIps !== false,
+        shodanScan: shodanScan !== false,
+        virusTotalKey,
+        hunterKey,
+      });
+      res.json({ ok: true, report });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "harvester_failed" });
     }
   });
 
   /** POST /api/osint/harvester/subdomains — Quick subdomain enumeration only
    *  Body: { domain: string }
    */
-  app.post("/api/osint/harvester/subdomains", res) => {
+  app.post("/api/osint/harvester/subdomains", async (req, res) => {
     try {
       const { domain } = req.body || {};
       if (!domain || typeof domain !== "string") {
         return res.status(400).json({ ok: false, error: "domain is required" });
       }
       const result = await theHarvesterService.findSubdomains(domain.trim());
-      res.json({ ok: true, error: e?.message || "subdomain_scan_failed" });
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "subdomain_scan_failed" });
     }
   });
 
   /** POST /api/osint/harvester/dns — DNS records for a domain
    *  Body: { domain: string }
    */
-  app.post("/api/osint/harvester/dns", error: "domain is required" });
+  app.post("/api/osint/harvester/dns", async (req, res) => {
+    try {
+      const { domain } = req.body || {};
+      if (!domain || typeof domain !== "string") {
+        return res.status(400).json({ ok: false, error: "domain is required" });
       }
       const result = await theHarvesterService.getDnsRecords(domain.trim());
-      res.json({ ok: true, error: e?.message || "dns_lookup_failed" });
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "dns_lookup_failed" });
     }
   });
 
   /** POST /api/osint/harvester/ip-scan — Shodan InternetDB scan for an IP
    *  Body: { ip: string }
    */
-  app.post("/api/osint/harvester/ip-scan", res) => {
+  app.post("/api/osint/harvester/ip-scan", async (req, res) => {
     try {
       const { ip } = req.body || {};
       if (!ip || typeof ip !== "string") {
         return res.status(400).json({ ok: false, error: "ip is required" });
       }
       const result = await theHarvesterService.scanIp(ip.trim());
-      res.json({ ok: true, error: e?.message || "ip_scan_failed" });
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "ip_scan_failed" });
     }
   });
 
@@ -1995,42 +2224,61 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   // ---------------------------------------------------------------------------
 
   /** GET /api/osint/sqlmap/status — Service status and payload count */
-  app.get("/api/osint/sqlmap/status", ...sqlMapService.getStatus() });
+  app.get("/api/osint/sqlmap/status", (_req, res) => {
+    res.json({ ok: true, ...sqlMapService.getStatus() });
   });
 
   /** POST /api/osint/sqlmap/scan — Full SQL injection scan
    *  Body: {
-   *    url: string, *    method?: "GET"|"POST", *    postData?: string, // e.g. "user=admin&pass=test"
-   *    params?: string[], // specific params to test
-   *    cookies?: string, *    techniques?: string[], // ["error", "boolean", "time", "union"]
+   *    url: string,
+   *    method?: "GET"|"POST",
+   *    postData?: string,        // e.g. "user=admin&pass=test"
+   *    params?: string[],        // specific params to test
+   *    cookies?: string,
+   *    techniques?: string[],    // ["error","boolean","time","union"]
    *    timeThreshold?: number    // ms delay for time-based (default 2800)
    *  }
    */
-  app.post("/api/osint/sqlmap/scan", method, postData, params, cookies, techniques, timeThreshold } = req.body || {};
+  app.post("/api/osint/sqlmap/scan", async (req, res) => {
+    try {
+      const { url, method, postData, params, cookies, techniques, timeThreshold } = req.body || {};
       if (!url || typeof url !== "string") {
         return res.status(400).json({ ok: false, error: "url is required" });
       }
       const report = await sqlMapService.scan(url.trim(), {
-        method: method || "GET", params: Array.isArray(params) ? params : undefined, techniques: Array.isArray(techniques) ? techniques : undefined, timeThreshold: timeThreshold ? Number(timeThreshold) : undefined, error: e?.message || "sqlmap_scan_failed" });
+        method: method || "GET",
+        postData,
+        params: Array.isArray(params) ? params : undefined,
+        cookies,
+        techniques: Array.isArray(techniques) ? techniques : undefined,
+        timeThreshold: timeThreshold ? Number(timeThreshold) : undefined,
+      });
+      res.json({ ok: true, report });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "sqlmap_scan_failed" });
     }
   });
 
   /** POST /api/osint/sqlmap/quick-test — Test single param with one payload
    *  Body: { url: string, param: string, payload: string }
    */
-  app.post("/api/osint/sqlmap/quick-test", param, payload } = req.body || {};
+  app.post("/api/osint/sqlmap/quick-test", async (req, res) => {
+    try {
+      const { url, param, payload } = req.body || {};
       if (!url || !param || !payload) {
-        return res.status(400).json({ ok: false, error: "url, and payload are required" });
+        return res.status(400).json({ ok: false, error: "url, param, and payload are required" });
       }
       const result = await sqlMapService.quickTest(String(url), String(param), String(payload));
-      res.json({ ok: true, error: e?.message || "quick_test_failed" });
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "quick_test_failed" });
     }
   });
 
   /** POST /api/osint/sqlmap/analyze-url — Analyze URL for injectable parameters
    *  Body: { url: string }
    */
-  app.post("/api/osint/sqlmap/analyze-url", res) => {
+  app.post("/api/osint/sqlmap/analyze-url", async (req, res) => {
     try {
       const { url } = req.body || {};
       if (!url || typeof url !== "string") {
@@ -2044,7 +2292,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   });
 
   /** GET /api/osint/sqlmap/payloads — Get all SQL injection payloads (educational) */
-  app.get("/api/osint/sqlmap/payloads", res) => {
+  app.get("/api/osint/sqlmap/payloads", (_req, res) => {
     try {
       const payloads = sqlMapService.getPayloads();
       res.json({ ok: true, ...payloads });
@@ -2062,32 +2310,57 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   // ---------------------------------------------------------------------------
 
   /** GET /api/osint/nikto/status — Service info and total checks */
-  app.get("/api/osint/nikto/status", ...niktoService.getStatus() });
+  app.get("/api/osint/nikto/status", (_req, res) => {
+    res.json({ ok: true, ...niktoService.getStatus() });
   });
 
   /** POST /api/osint/nikto/scan — Full web server vulnerability scan
    *  Body: {
-   *    url: string, *    checkPaths?: boolean, // scan dangerous paths (default: true)
-   *    checkHeaders?: boolean, // check security headers (default: true)
-   *    checkMethods?: boolean, // check HTTP methods (default: true)
-   *    maxPaths?: number, // limit path checks for speed
+   *    url: string,
+   *    checkPaths?: boolean,     // scan dangerous paths (default: true)
+   *    checkHeaders?: boolean,   // check security headers (default: true)
+   *    checkMethods?: boolean,   // check HTTP methods (default: true)
+   *    maxPaths?: number,        // limit path checks for speed
    *    concurrency?: number      // parallel requests (default: 15)
    *  }
    */
-  app.post("/api/osint/nikto/scan", checkPaths, checkHeaders, checkMethods, maxPaths, concurrency } = req.body || {};
+  app.post("/api/osint/nikto/scan", async (req, res) => {
+    try {
+      const { url, checkPaths, checkHeaders, checkMethods, maxPaths, concurrency } = req.body || {};
       if (!url || typeof url !== "string") {
         return res.status(400).json({ ok: false, error: "url is required" });
       }
       const report = await niktoService.scan(url.trim(), {
-        checkPaths: checkPaths !== false, checkHeaders: checkHeaders !== false, checkMethods: checkMethods !== false, maxPaths: maxPaths ? Number(maxPaths) : undefined, concurrency: concurrency ? Number(concurrency) : 15, error: e?.message || "nikto_scan_failed" });
+        checkPaths: checkPaths !== false,
+        checkHeaders: checkHeaders !== false,
+        checkMethods: checkMethods !== false,
+        maxPaths: maxPaths ? Number(maxPaths) : undefined,
+        concurrency: concurrency ? Number(concurrency) : 15,
+      });
+      res.json({ ok: true, report });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "nikto_scan_failed" });
     }
   });
 
   /** POST /api/osint/nikto/headers-only — Check only security headers (fast)
    *  Body: { url: string }
    */
-  app.post("/api/osint/nikto/headers-only", {
-        checkPaths: false, checkHeaders: true, checkMethods: true, maxPaths: 0, error: e?.message || "header_check_failed" });
+  app.post("/api/osint/nikto/headers-only", async (req, res) => {
+    try {
+      const { url } = req.body || {};
+      if (!url || typeof url !== "string") {
+        return res.status(400).json({ ok: false, error: "url is required" });
+      }
+      const report = await niktoService.scan(url.trim(), {
+        checkPaths: false,
+        checkHeaders: true,
+        checkMethods: true,
+        maxPaths: 0,
+      });
+      res.json({ ok: true, report });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "header_check_failed" });
     }
   });
 
@@ -2100,13 +2373,14 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   // ---------------------------------------------------------------------------
 
   /** GET /api/osint/set/status */
-  app.get("/api/osint/set/status", ...socialEngineerToolkitService.getStatus() });
+  app.get("/api/osint/set/status", (_req, res) => {
+    res.json({ ok: true, ...socialEngineerToolkitService.getStatus() });
   });
 
   /** GET /api/osint/set/phishing-templates — Get all phishing email templates
    *  Query: ?category=corporate|banking|tech|hr|urgent|delivery|healthcare
    */
-  app.get("/api/osint/set/phishing-templates", res) => {
+  app.get("/api/osint/set/phishing-templates", (req, res) => {
     try {
       const category = req.query.category as any;
       const templates = socialEngineerToolkitService.getPhishingTemplates(category);
@@ -2119,21 +2393,24 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   /** POST /api/osint/set/generate-phishing — Generate customized phishing email
    *  Body: { templateId: string, targetName?: string, phishingLink?: string, companyName?: string }
    */
-  app.post("/api/osint/set/generate-phishing", res) => {
+  app.post("/api/osint/set/generate-phishing", (req, res) => {
     try {
       const { templateId, targetName, targetEmail, phishingLink, companyName, senderName } = req.body || {};
       if (!templateId) return res.status(400).json({ ok: false, error: "templateId is required" });
       const result = socialEngineerToolkitService.generatePhishingEmail(String(templateId), {
-        targetName, senderName, });
+        targetName, targetEmail, phishingLink, companyName, senderName,
+      });
       if (!result.template) return res.status(404).json({ ok: false, error: "Template not found" });
-      res.json({ ok: true, error: e?.message });
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
     }
   });
 
   /** GET /api/osint/set/pretexting — Get pretexting scripts
    *  Query: ?scenario=it-helpdesk
    */
-  app.get("/api/osint/set/pretexting", res) => {
+  app.get("/api/osint/set/pretexting", (req, res) => {
     try {
       const scenario = req.query.scenario as string | undefined;
       const scripts = socialEngineerToolkitService.getPretextingScripts(scenario);
@@ -2146,26 +2423,30 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   /** GET /api/osint/set/smishing — Get SMS phishing templates
    *  Query: ?category=Banking|Delivery|Government
    */
-  app.get("/api/osint/set/smishing", res) => {
+  app.get("/api/osint/set/smishing", (req, res) => {
     try {
       const category = req.query.category as string | undefined;
       const templates = socialEngineerToolkitService.getSmishingTemplates(category);
-      res.json({ ok: true, error: e?.message });
+      res.json({ ok: true, count: templates.length, templates });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
     }
   });
 
   /** GET /api/osint/set/vishing — Get voice phishing scripts */
-  app.get("/api/osint/set/vishing", res) => {
+  app.get("/api/osint/set/vishing", (_req, res) => {
     try {
       const scripts = socialEngineerToolkitService.getVishingScripts();
-      res.json({ ok: true, error: e?.message });
+      res.json({ ok: true, count: scripts.length, scripts });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
     }
   });
 
   /** POST /api/osint/set/analyze-url — Phishing URL analyzer
    *  Body: { url: string }
    */
-  app.post("/api/osint/set/analyze-url", res) => {
+  app.post("/api/osint/set/analyze-url", (req, res) => {
     try {
       const { url } = req.body || {};
       if (!url) return res.status(400).json({ ok: false, error: "url is required" });
@@ -2179,13 +2460,13 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   /** POST /api/osint/set/build-campaign — Build a social engineering campaign
    *  Body: { name: string, type: "phishing"|"smishing"|"vishing", targetDescription: string }
    */
-  app.post("/api/osint/set/build-campaign", res) => {
+  app.post("/api/osint/set/build-campaign", (req, res) => {
     try {
-      const { name, targetDescription, duration } = req.body || {};
+      const { name, type, targetDescription, duration } = req.body || {};
       if (!name || !type || !targetDescription) {
-        return res.status(400).json({ ok: false, error: "name, and targetDescription are required" });
+        return res.status(400).json({ ok: false, error: "name, type, and targetDescription are required" });
       }
-      const campaign = socialEngineerToolkitService.buildCampaign({ name, duration });
+      const campaign = socialEngineerToolkitService.buildCampaign({ name, type, targetDescription, duration });
       res.json({ ok: true, campaign });
     } catch (e: any) {
       res.status(500).json({ ok: false, error: e?.message });
@@ -2193,7 +2474,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   });
 
   /** GET /api/osint/set/awareness-quiz — Social engineering awareness quiz */
-  app.get("/api/osint/set/awareness-quiz", res) => {
+  app.get("/api/osint/set/awareness-quiz", (_req, res) => {
     try {
       const quiz = socialEngineerToolkitService.getAwarenessQuiz();
       res.json({ ok: true, count: quiz.length, quiz });
@@ -2203,10 +2484,12 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   });
 
   /** GET /api/osint/set/harvester-templates — Fake login page examples (educational) */
-  app.get("/api/osint/set/harvester-templates", res) => {
+  app.get("/api/osint/set/harvester-templates", (_req, res) => {
     try {
       const templates = socialEngineerToolkitService.getHarvesterTemplates();
-      res.json({ ok: true, error: e?.message });
+      res.json({ ok: true, count: templates.length, templates });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
     }
   });
 
@@ -2219,39 +2502,48 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   // ---------------------------------------------------------------------------
 
   /** GET /api/osint/john/status */
-  app.get("/api/osint/john/status", ...johnTheRipperService.getStatus() });
+  app.get("/api/osint/john/status", (_req, res) => {
+    res.json({ ok: true, ...johnTheRipperService.getStatus() });
   });
 
   /** POST /api/osint/john/identify — Identify hash type
    *  Body: { hash: string }
    */
-  app.post("/api/osint/john/identify", res) => {
+  app.post("/api/osint/john/identify", (req, res) => {
     try {
       const { hash } = req.body || {};
       if (!hash) return res.status(400).json({ ok: false, error: "hash is required" });
       const result = johnTheRipperService.identifyHash(String(hash));
-      res.json({ ok: true, error: e?.message });
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
     }
   });
 
   /** POST /api/osint/john/crack — Crack a single hash
    *  Body: { hash: string, hashType?: string, useOnlineLookup?: boolean, customWordlist?: string[] }
    */
-  app.post("/api/osint/john/crack", res) => {
+  app.post("/api/osint/john/crack", async (req, res) => {
     try {
       const { hash, hashType, useOnlineLookup, customWordlist } = req.body || {};
       if (!hash) return res.status(400).json({ ok: false, error: "hash is required" });
       const result = await johnTheRipperService.crackHash(String(hash), {
-        hashType, useOnlineLookup: useOnlineLookup !== false, customWordlist: Array.isArray(customWordlist) ? customWordlist : undefined, error: e?.message });
+        hashType,
+        useOnlineLookup: useOnlineLookup !== false,
+        customWordlist: Array.isArray(customWordlist) ? customWordlist : undefined,
+      });
+      res.json({ ok: true, result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
     }
   });
 
   /** POST /api/osint/john/crack-multiple — Crack multiple hashes
-   *  Body: { hashes: string[], useOnlineLookup?: boolean }
+   *  Body: { hashes: string[], hashType?: string, useOnlineLookup?: boolean }
    */
-  app.post("/api/osint/john/crack-multiple", res) => {
+  app.post("/api/osint/john/crack-multiple", async (req, res) => {
     try {
-      const { hashes, useOnlineLookup } = req.body || {};
+      const { hashes, hashType, useOnlineLookup } = req.body || {};
       if (!Array.isArray(hashes) || hashes.length === 0) {
         return res.status(400).json({ ok: false, error: "hashes array is required" });
       }
@@ -2259,7 +2551,8 @@ export function createApiRouter(context: ApiRoutesContext): Router {
         return res.status(400).json({ ok: false, error: "Max 20 hashes per request" });
       }
       const results = await johnTheRipperService.crackMultiple(
-        hashes.map(String), { hashType, useOnlineLookup: useOnlineLookup !== false }
+        hashes.map(String),
+        { hashType, useOnlineLookup: useOnlineLookup !== false }
       );
       res.json({ ok: true, results, crackedCount: results.filter(r => r.cracked).length });
     } catch (e: any) {
@@ -2270,19 +2563,21 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   /** POST /api/osint/john/analyze-password — Password strength analysis + hashes
    *  Body: { password: string }
    */
-  app.post("/api/osint/john/analyze-password", res) => {
+  app.post("/api/osint/john/analyze-password", (req, res) => {
     try {
       const { password } = req.body || {};
       if (!password) return res.status(400).json({ ok: false, error: "password is required" });
       const result = johnTheRipperService.analyzePassword(String(password));
-      res.json({ ok: true, error: e?.message });
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
     }
   });
 
   /** POST /api/osint/john/generate-hashes — Generate all hash types for plaintext
    *  Body: { plaintext: string }
    */
-  app.post("/api/osint/john/generate-hashes", res) => {
+  app.post("/api/osint/john/generate-hashes", (req, res) => {
     try {
       const { plaintext } = req.body || {};
       if (!plaintext) return res.status(400).json({ ok: false, error: "plaintext is required" });
@@ -2296,13 +2591,16 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   /** POST /api/osint/john/brute-force-estimate — Estimate brute force time
    *  Body: { passwordLength: number, charset?: "numeric"|"alpha"|"alphanumeric"|"full" }
    */
-  app.post("/api/osint/john/brute-force-estimate", res) => {
+  app.post("/api/osint/john/brute-force-estimate", (req, res) => {
     try {
       const { passwordLength, charset } = req.body || {};
       if (!passwordLength) return res.status(400).json({ ok: false, error: "passwordLength is required" });
       if (Number(passwordLength) > 20) return res.status(400).json({ ok: false, error: "Max length: 20" });
       const estimate = johnTheRipperService.estimateBruteForce({
-        passwordLength: Number(passwordLength), charset: charset || "full", ...estimate });
+        passwordLength: Number(passwordLength),
+        charset: charset || "full",
+      });
+      res.json({ ok: true, ...estimate });
     } catch (e: any) {
       res.status(500).json({ ok: false, error: e?.message });
     }
@@ -2311,26 +2609,34 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   /** POST /api/osint/john/check-common — Check if password is in common list
    *  Body: { password: string }
    */
-  app.post("/api/osint/john/check-common", error: "password is required" });
+  app.post("/api/osint/john/check-common", (req, res) => {
+    try {
+      const { password } = req.body || {};
+      if (!password) return res.status(400).json({ ok: false, error: "password is required" });
       const result = johnTheRipperService.checkCommonPassword(String(password));
-      res.json({ ok: true, error: e?.message });
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
     }
   });
 
   /** POST /api/osint/john/check-policy — Check password against security policy
    *  Body: { password: string, policy?: { minLength, requireUppercase, ... } }
    */
-  app.post("/api/osint/john/check-policy", res) => {
+  app.post("/api/osint/john/check-policy", (req, res) => {
     try {
       const { password, policy } = req.body || {};
       if (!password) return res.status(400).json({ ok: false, error: "password is required" });
       const result = johnTheRipperService.checkPasswordPolicy(String(password), policy);
-      res.json({ ok: true, error: e?.message });
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
     }
   });
 
   /** GET /api/osint/john/wordlist-stats — Wordlist statistics */
-  app.get("/api/osint/john/wordlist-stats", ...johnTheRipperService.getWordlistStats() });
+  app.get("/api/osint/john/wordlist-stats", (_req, res) => {
+    res.json({ ok: true, ...johnTheRipperService.getWordlistStats() });
   });
 
 
@@ -2341,11 +2647,29 @@ export function createApiRouter(context: ApiRoutesContext): Router {
 
   const VOICE_CATEGORIES_API = {
     female: [
-      { name: "Aoede", style: "Breezy" }, { name: "Kore", style: "Firm" }, { name: "Zephyr", style: "Bright" }, { name: "Autonoe", { name: "Erinome", style: "Clear" }, { name: "Laomedeia", style: "Upbeat" }, { name: "Schedar", style: "Even" }, { name: "Achernar", style: "Soft" }, { name: "Leda", style: "Youthful" }, { name: "Callirrhoe", style: "Easy-going" }, { name: "Despina", style: "Smooth" }, { name: "Vindemiatrix", style: "Gentle" }, { name: "Sulafat", style: "Warm" }, { name: "Pulcherrima", style: "Forward" }, { name: "Sadachbia", style: "Lively" }, ], male: [
-      { name: "Puck", { name: "Charon", style: "Informative" }, { name: "Fenrir", style: "Excitable" }, { name: "Orus", { name: "Umbriel", { name: "Achird", style: "Friendly" }, { name: "Enceladus", style: "Breathy" }, { name: "Algieba", { name: "Algenib", style: "Gravelly" }, { name: "Gacrux", style: "Mature" }, { name: "Zubenelgenubi", style: "Casual" }, { name: "Sadaltager", style: "Knowledgeable" }, { name: "Iapetus", { name: "Rasalgethi", { name: "Alnilam", };
+      { name: "Aoede", style: "Breezy" }, { name: "Kore", style: "Firm" },
+      { name: "Zephyr", style: "Bright" }, { name: "Autonoe", style: "Bright" },
+      { name: "Erinome", style: "Clear" }, { name: "Laomedeia", style: "Upbeat" },
+      { name: "Schedar", style: "Even" }, { name: "Achernar", style: "Soft" },
+      { name: "Leda", style: "Youthful" }, { name: "Callirrhoe", style: "Easy-going" },
+      { name: "Despina", style: "Smooth" }, { name: "Vindemiatrix", style: "Gentle" },
+      { name: "Sulafat", style: "Warm" }, { name: "Pulcherrima", style: "Forward" },
+      { name: "Sadachbia", style: "Lively" },
+    ],
+    male: [
+      { name: "Puck", style: "Upbeat" }, { name: "Charon", style: "Informative" },
+      { name: "Fenrir", style: "Excitable" }, { name: "Orus", style: "Firm" },
+      { name: "Umbriel", style: "Easy-going" }, { name: "Achird", style: "Friendly" },
+      { name: "Enceladus", style: "Breathy" }, { name: "Algieba", style: "Smooth" },
+      { name: "Algenib", style: "Gravelly" }, { name: "Gacrux", style: "Mature" },
+      { name: "Zubenelgenubi", style: "Casual" }, { name: "Sadaltager", style: "Knowledgeable" },
+      { name: "Iapetus", style: "Clear" }, { name: "Rasalgethi", style: "Informative" },
+      { name: "Alnilam", style: "Firm" },
+    ],
+  };
 
   /** GET /api/voices/saved-preference — Firebase se saved voice load karo */
-  app.get("/api/voices/saved-preference", res) => {
+  app.get("/api/voices/saved-preference", async (_req, res) => {
     try {
       const prefs = await voicePersonaService.getSavedPreferences();
       res.json({ ok: true, ...prefs });
@@ -2355,14 +2679,20 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   });
 
   /** GET /api/voices — Sabhi voices list with categories */
-  app.get("/api/voices", total: 30, categories: VOICE_CATEGORIES_API, all: [...VOICE_CATEGORIES_API.female, ...VOICE_CATEGORIES_API.male], });
+  app.get("/api/voices", (_req, res) => {
+    res.json({
+      ok: true,
+      total: 30,
+      categories: VOICE_CATEGORIES_API,
+      all: [...VOICE_CATEGORIES_API.female, ...VOICE_CATEGORIES_API.male],
+    });
   });
 
   /** POST /api/voices/suggest — Friday ke liye voice suggest karo
    *  Body: { gender?: "male"|"female", style?: string, voiceName?: string }
    *  Friday isko call karta hai jab user bole "male voice lagao"
    */
-  app.post("/api/voices/suggest", res) => {
+  app.post("/api/voices/suggest", (req, res) => {
     try {
       const { gender, style, voiceName } = req.body || {};
 
@@ -2396,20 +2726,34 @@ export function createApiRouter(context: ApiRoutesContext): Router {
       const pickedGender = VOICE_CATEGORIES_API.female.find(v => v.name === pick.name) ? "female" : "male";
 
       res.json({
-        ok: true, suggested: pick.name, style: pick.style, gender: pickedGender, message: `${pick.name} voice suggest ki — ${pickedGender === "female" ? "♀ Female" : "♂ Male"}, style: ${pick.style}`, instruction: `Frontend pe selectedVoice ko "${pick.name}" set karo aur session reinitialize karo`, });
+        ok: true,
+        suggested: pick.name,
+        style: pick.style,
+        gender: pickedGender,
+        message: `${pick.name} voice suggest ki — ${pickedGender === "female" ? "♀ Female" : "♂ Male"}, style: ${pick.style}`,
+        instruction: `Frontend pe selectedVoice ko "${pick.name}" set karo aur session reinitialize karo`,
+      });
     } catch (e: any) {
       res.status(500).json({ ok: false, error: e?.message });
     }
   });
 
   // ── 🔥 Perchance AI Photo Studio & Diagnostics Endpoints ──────────────────
-  app.get("/api/perchance/status", res) => {
+  app.get("/api/perchance/status", (_req, res) => {
     try {
       const { perchanceService } = require("../services/perchanceService");
       const execPath = perchanceService.getExecutablePath();
       const isCloud = !!(process.env.BROWSER_WS_ENDPOINT || process.env.BROWSERLESS_API_KEY);
       res.json({
-        ok: true, isAvailable: isCloud || !!execPath, isCloud, engineType: isCloud ? "Cloud Browserless.io (0MB RAM)" : "Local Headless Chrome", executablePath: isCloud ? "Cloud WebSocket Gateway" : (execPath || null), os: process.platform, error: e?.message });
+        ok: true,
+        isAvailable: isCloud || !!execPath,
+        isCloud,
+        engineType: isCloud ? "Cloud Browserless.io (0MB RAM)" : "Local Headless Chrome",
+        executablePath: isCloud ? "Cloud WebSocket Gateway" : (execPath || null),
+        os: process.platform,
+      });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
     }
   });
 
@@ -2439,7 +2783,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   }, 60 * 1000);
 
-  app.post("/api/perchance/jobs/create", res) => {
+  app.post("/api/perchance/jobs/create", async (req, res) => {
     try {
       const prompt = String(req.body?.prompt || "").trim();
       const timeoutMs = Number(req.body?.timeoutMs) || 150000;
@@ -2449,9 +2793,19 @@ export function createApiRouter(context: ApiRoutesContext): Router {
 
       const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
       const job: PerchanceJob = {
-        id: jobId, prompt, status: "running", logs: [
+        id: jobId,
+        prompt,
+        status: "running",
+        logs: [
           {
-            level: "info", step: "Job Queue", message: `Created asynchronous generation task [${jobId}] for prompt: "${prompt}"`, timestamp: new Date().toLocaleTimeString(), createdAt: Date.now(), };
+            level: "info",
+            step: "Job Queue",
+            message: `Created asynchronous generation task [${jobId}] for prompt: "${prompt}"`,
+            timestamp: new Date().toLocaleTimeString(),
+          },
+        ],
+        createdAt: Date.now(),
+      };
 
       perchanceJobs.set(jobId, job);
 
@@ -2468,7 +2822,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
 
           if (result.success && result.buffer) {
             job.status = "completed";
-            job.image = `data:${result.mimeType || "image/jpeg"};base64, ${result.buffer.toString("base64")}`;
+            job.image = `data:${result.mimeType || "image/jpeg"};base64,${result.buffer.toString("base64")}`;
             job.bytes = result.buffer.length;
             job.durationMs = result.durationMs;
             if (result.livePreview) job.livePreview = result.livePreview;
@@ -2497,7 +2851,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.get("/api/perchance/jobs/:jobId/status", res) => {
+  app.get("/api/perchance/jobs/:jobId/status", (req, res) => {
     try {
       const jobId = req.params.jobId;
       const job = perchanceJobs.get(jobId);
@@ -2506,11 +2860,23 @@ export function createApiRouter(context: ApiRoutesContext): Router {
       }
 
       res.json({
-        ok: true, jobId: job.id, status: job.status, prompt: job.prompt, image: job.image, bytes: job.bytes, durationMs: job.durationMs, logs: job.logs, livePreview: job.livePreview, error: job.error, error: e?.message });
+        ok: true,
+        jobId: job.id,
+        status: job.status,
+        prompt: job.prompt,
+        image: job.image,
+        bytes: job.bytes,
+        durationMs: job.durationMs,
+        logs: job.logs,
+        livePreview: job.livePreview,
+        error: job.error,
+      });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
     }
   });
 
-  app.get("/api/perchance/generate-stream", res) => {
+  app.get("/api/perchance/generate-stream", async (req, res) => {
     const prompt = String(req.query.prompt || "").trim();
     const timeoutMs = Number(req.query.timeoutMs) || 120000;
 
@@ -2537,24 +2903,39 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     };
 
     sendEvent("log", {
-      level: "info", step: "Request Received", message: `Received generation request for prompt: "${prompt}"`, });
+      level: "info",
+      step: "Request Received",
+      message: `Received generation request for prompt: "${prompt}"`,
+      timestamp: new Date().toLocaleTimeString(),
+    });
 
     try {
       const { perchanceService } = await import("../services/perchanceService");
-      const result = await perchanceService.generateImage(prompt, (stepLog) => {
+      const result = await perchanceService.generateImage(prompt, timeoutMs, (stepLog) => {
         sendEvent("log", stepLog);
       });
 
       if (result.success && result.buffer) {
         sendEvent("complete", {
-          success: true, image: `data:${result.mimeType || "image/jpeg"};base64, ${result.buffer.toString("base64")}`, bytes: result.buffer.length, durationMs: result.durationMs, logs: result.logs, });
+          success: true,
+          image: `data:${result.mimeType || "image/jpeg"};base64,${result.buffer.toString("base64")}`,
+          bytes: result.buffer.length,
+          durationMs: result.durationMs,
+          logs: result.logs,
+        });
       } else {
         sendEvent("error", {
-          success: false, error: result.error || "Generation failed", });
+          success: false,
+          error: result.error || "Generation failed",
+          durationMs: result.durationMs,
+          logs: result.logs,
+        });
       }
     } catch (err: any) {
       sendEvent("error", {
-        success: false, error: err?.message || "Unexpected execution error", });
+        success: false,
+        error: err?.message || "Unexpected execution error",
+      });
     } finally {
       clearInterval(keepAliveTimer);
       try {
@@ -2564,7 +2945,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   });
 
   // ── 4K Cloudflare AI Photo Generation & WhatsApp Delivery Endpoint ────────
-  app.post("/api/generate-photo", res) => {
+  app.post("/api/generate-photo", async (req, res) => {
     try {
       const { prompt, aspectRatio, sendToWhatsApp, targetRecipient } = req.body || {};
       if (!prompt || !String(prompt).trim()) {
@@ -2572,7 +2953,10 @@ export function createApiRouter(context: ApiRoutesContext): Router {
       }
 
       const result = await toolsEngine.generateAiPhoto(String(prompt).trim(), {
-        aspectRatio: aspectRatio || "9:16", sendToWhatsApp: !!sendToWhatsApp, targetRecipient: targetRecipient || "boss", });
+        aspectRatio: aspectRatio || "9:16",
+        sendToWhatsApp: !!sendToWhatsApp,
+        targetRecipient: targetRecipient || "boss",
+      });
 
       res.json({ ok: result.success, ...result });
     } catch (err: any) {
@@ -2581,12 +2965,12 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   });
 
   // ── Send Photo to WhatsApp Endpoint ────────────────────────────────────────
-  app.post("/api/whatsapp/send-photo", res) => {
+  app.post("/api/whatsapp/send-photo", async (req, res) => {
     try {
-      const { contactNameOrPhone, imageBase64, caption } = req.body || {};
+      const { contactNameOrPhone, imageBase64, imageUrl, caption } = req.body || {};
       let imagePayload: any = imageUrl;
       if (imageBase64) {
-        const cleanB64 = imageBase64.replace(/^data:image\/\w+;base64, /, "");
+        const cleanB64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
         imagePayload = Buffer.from(cleanB64, "base64");
       }
 
@@ -2595,7 +2979,9 @@ export function createApiRouter(context: ApiRoutesContext): Router {
       }
 
       const sendRes = await toolsEngine.sendPhotoToWhatsApp(
-        contactNameOrPhone || "boss", imagePayload, caption || "📸 Photo from Friday AI"
+        contactNameOrPhone || "boss",
+        imagePayload,
+        caption || "📸 Photo from Friday AI"
       );
 
       res.json({ ok: sendRes.success, ...sendRes });
@@ -2605,19 +2991,25 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   });
 
   // ── Free Fire AI Gaming & Autonomous Spectator/Coach Endpoints ─────────────
-  app.get("/api/gaming/freefire/status", res) => {
+  app.get("/api/gaming/freefire/status", (_req, res) => {
     res.json({ 
-      ok: true, status: freeFireGamingService.getStatus(), helper: freeFireGamingService.getAndroidHelperStatus()
+      ok: true, 
+      status: freeFireGamingService.getStatus(),
+      helper: freeFireGamingService.getAndroidHelperStatus()
     });
   });
 
-  app.get("/api/gaming/freefire/helper/status", helper: freeFireGamingService.getAndroidHelperStatus() });
+  app.get("/api/gaming/freefire/helper/status", (_req, res) => {
+    res.json({ ok: true, helper: freeFireGamingService.getAndroidHelperStatus() });
   });
 
-  app.get("/api/gaming/freefire/helper/download", res) => {
+  app.get("/api/gaming/freefire/helper/download", (_req, res) => {
     try {
       const apkPaths = [
-        path.resolve(process.cwd(), "public", "downloads", "FridayGamingBridge.apk"), path.resolve(process.cwd(), "android-helper", "app", "build", "outputs", "apk", "release", "app-release.apk"), ];
+        path.resolve(process.cwd(), "public", "downloads", "FridayGamingBridge.apk"),
+        path.resolve(process.cwd(), "android-helper", "app", "build", "outputs", "apk", "release", "app-release.apk"),
+        path.resolve(process.cwd(), "android-helper", "FridayGamingBridge.apk"),
+      ];
 
       for (const p of apkPaths) {
         if (fs.existsSync(p)) {
@@ -2625,7 +3017,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
         }
       }
 
-      const zipPath = path.resolve(process.cwd(), "FridayGamingBridge-Source.zip");
+      const zipPath = path.resolve(process.cwd(), "public", "downloads", "FridayGamingBridge-Source.zip");
       if (fs.existsSync(zipPath)) {
         return res.download(zipPath, "FridayGamingBridge-Android-App.zip");
       }
@@ -2641,14 +3033,17 @@ export function createApiRouter(context: ApiRoutesContext): Router {
       }
 
       res.status(404).json({
-        ok: false, error: "PACKAGE_NOT_FOUND", message: "Friday Gaming Bridge files are preparing. Please try again shortly.", });
+        ok: false,
+        error: "PACKAGE_NOT_FOUND",
+        message: "Friday Gaming Bridge files are preparing. Please try again shortly.",
+      });
     } catch (err: any) {
       console.error("[Download Helper] Error generating download package:", err);
       res.status(500).json({ ok: false, error: err?.message || "Failed to generate helper package" });
     }
   });
 
-  app.get("/api/gaming/freefire/devices", res) => {
+  app.get("/api/gaming/freefire/devices", async (_req, res) => {
     try {
       const devices = await freeFireGamingService.listDevices();
       const helper = freeFireGamingService.getAndroidHelperStatus();
@@ -2658,44 +3053,64 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/gaming/freefire/connect", port, pairingCode, pairingPort } = req.body || {};
+  app.post("/api/gaming/freefire/connect", async (req, res) => {
+    try {
+      const { ip, port, pairingCode, pairingPort } = req.body || {};
       if (!ip) {
         return res.status(400).json({ ok: false, error: "Device IP address is required" });
       }
       const result = await freeFireGamingService.connectWirelessAdb(
-        ip, Number(port) || 5555, pairingCode ? String(pairingCode) : undefined, pairingPort ? Number(pairingPort) : undefined
+        ip,
+        Number(port) || 5555,
+        pairingCode ? String(pairingCode) : undefined,
+        pairingPort ? Number(pairingPort) : undefined
       );
-      res.json({ ok: result.success, error: err?.message || "Failed to connect to device" });
+      res.json({ ok: result.success, ...result });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || "Failed to connect to device" });
     }
   });
 
-  app.post("/api/gaming/freefire/custom-room/join", res) => {
+  app.post("/api/gaming/freefire/custom-room/join", async (req, res) => {
     try {
-      const { roomId, role, slotNumber } = req.body || {};
+      const { roomId, password, role, slotNumber } = req.body || {};
       if (!roomId) {
         return res.status(400).json({ ok: false, error: "Custom Room ID is required" });
       }
       const result = await freeFireGamingService.joinCustomRoom({
-        roomId: String(roomId), password: password ? String(password) : undefined, role: role === "player" ? "player" : "spectate", slotNumber: slotNumber ? Number(slotNumber) : undefined, });
-      res.json({ ok: result.success, error: err?.message || "Failed to join custom room" });
+        roomId: String(roomId),
+        password: password ? String(password) : undefined,
+        role: role === "player" ? "player" : "spectate",
+        slotNumber: slotNumber ? Number(slotNumber) : undefined,
+      });
+      res.json({ ok: result.success, ...result });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || "Failed to join custom room" });
     }
   });
 
-  app.post("/api/gaming/freefire/action", res) => {
+  app.post("/api/gaming/freefire/action", async (req, res) => {
     try {
       const { action, gunType, direction, durationMs } = req.body || {};
       if (!action) {
         return res.status(400).json({ ok: false, error: "Game action is required" });
       }
       const result = await freeFireGamingService.executeGameAction({
-        action, durationMs, error: err?.message || "Failed to execute game action" });
+        action,
+        gunType,
+        direction,
+        durationMs,
+      });
+      res.json({ ok: result.success, ...result });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || "Failed to execute game action" });
     }
   });
 
-  app.post("/api/gaming/freefire/radar-frame", res) => {
+  app.post("/api/gaming/freefire/radar-frame", async (req, res) => {
     try {
       const { imageBase64 } = req.body || {};
-      const cleanB64 = imageBase64 ? imageBase64.replace(/^data:image\/\w+;base64, "") : undefined;
+      const cleanB64 = imageBase64 ? imageBase64.replace(/^data:image\/\w+;base64,/, "") : undefined;
       const result = await freeFireGamingService.analyzeLiveRadarFrame(cleanB64);
       res.json({ ok: true, radar: result });
     } catch (err: any) {
@@ -2703,34 +3118,43 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/gaming/freefire/post-match-report", res) => {
+  app.post("/api/gaming/freefire/post-match-report", async (req, res) => {
     try {
       const { playerTag, customRoomId, gameplayNotes, matchFramesBase64 } = req.body || {};
       const frames = Array.isArray(matchFramesBase64)
-        ? matchFramesBase64.map((f: string) => f.replace(/^data:image\/\w+;base64, ""))
+        ? matchFramesBase64.map((f: string) => f.replace(/^data:image\/\w+;base64,/, ""))
         : undefined;
 
       const report = await freeFireGamingService.generatePostMatchAnalysis({
-        playerTag, matchFramesBase64: frames, report });
+        playerTag,
+        customRoomId,
+        gameplayNotes,
+        matchFramesBase64: frames,
+      });
+      res.json({ ok: true, report });
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err?.message || "Failed to generate post match report" });
     }
   });
 
-  app.post("/api/gaming/freefire/send-sensitivity-whatsapp", res) => {
+  app.post("/api/gaming/freefire/send-sensitivity-whatsapp", async (req, res) => {
     try {
       const { targetPhone, playerTag, autoBotActive } = req.body || {};
       const result = await freeFireGamingService.sendSensitivityToWhatsApp(targetPhone, {
-        playerTag, autoBotActive, message: result.message });
+        playerTag,
+        autoBotActive,
+      });
+      res.json({ ok: result.success, message: result.message });
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err?.message || "Failed to dispatch sensitivity to WhatsApp" });
     }
   });
 
-  app.get("/api/gaming/freefire/copilot/config", config: freeFireGamingService.getCoPilotConfig() });
+  app.get("/api/gaming/freefire/copilot/config", (_req, res) => {
+    res.json({ ok: true, config: freeFireGamingService.getCoPilotConfig() });
   });
 
-  app.post("/api/gaming/freefire/copilot/config", res) => {
+  app.post("/api/gaming/freefire/copilot/config", (req, res) => {
     try {
       const updated = freeFireGamingService.updateCoPilotConfig(req.body || {});
       res.json({ ok: true, config: updated });
@@ -2739,36 +3163,44 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  app.post("/api/gaming/freefire/copilot/pilot", res) => {
+  app.post("/api/gaming/freefire/copilot/pilot", (req, res) => {
     try {
       const { pilot } = req.body || {};
       const result = freeFireGamingService.setPilot(pilot === "friday" ? "friday" : "boss");
-      res.json({ ok: true, error: err?.message || "Failed to switch pilot" });
+      res.json({ ok: true, ...result });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || "Failed to switch pilot" });
     }
   });
 
-  app.post("/api/gaming/freefire/copilot/assist", res) => {
+  app.post("/api/gaming/freefire/copilot/assist", async (req, res) => {
     try {
       const { assistType, gunType } = req.body || {};
       if (!assistType) {
         return res.status(400).json({ ok: false, error: "assistType is required" });
       }
       const result = await freeFireGamingService.triggerCoPilotAssist(assistType, gunType);
-      res.json({ ok: result.success, error: err?.message || "Failed to trigger co-pilot assist" });
+      res.json({ ok: result.success, ...result });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || "Failed to trigger co-pilot assist" });
     }
   });
 
-  app.post("/api/gaming/freefire/copilot/start-daemon", res) => {
+  app.post("/api/gaming/freefire/copilot/start-daemon", (_req, res) => {
     try {
       const result = freeFireGamingService.startAutoCoPilotDaemon();
-      res.json({ ok: true, error: err?.message || "Failed to start daemon" });
+      res.json({ ok: true, ...result });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || "Failed to start daemon" });
     }
   });
 
-  app.post("/api/gaming/freefire/copilot/stop-daemon", res) => {
+  app.post("/api/gaming/freefire/copilot/stop-daemon", (_req, res) => {
     try {
       const result = freeFireGamingService.stopAutoCoPilotDaemon();
-      res.json({ ok: true, error: err?.message || "Failed to stop daemon" });
+      res.json({ ok: true, ...result });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || "Failed to stop daemon" });
     }
   });
 
@@ -2777,7 +3209,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   // ══════════════════════════════════════════════════════════════════════════
 
   // 1. Inbound Call Webhook (Exotel Passthru Applet Entrypoint)
-  app.all(["/api/exotel/incoming-call", "/api/exotel/passthru"], res) => {
+  app.all(["/api/exotel/incoming-call", "/api/exotel/passthru"], async (req, res) => {
     const traceId = `trace_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const clientIp = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "Unknown";
     console.log(`[ExotelDiagnostic:${traceId}] 📥 INCOMING_CALL Webhook Hit: Method=${req.method} IP=${clientIp}`);
@@ -2793,7 +3225,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
       const protocol = req.protocol === "https" || req.headers["x-forwarded-proto"] === "https" ? "https" : "http";
       const baseUrl = `${protocol}://${host}`;
 
-      const { exml } = await exotelService.handleIncomingCall({ callSid, baseUrl });
+      const { exml } = await exotelService.handleIncomingCall({ callSid, from, to, baseUrl });
       console.log(`[ExotelDiagnostic:${traceId}] 📤 Returning ExML (Length: ${exml.length} chars):\n${exml}`);
       res.set("Content-Type", "text/xml; charset=utf-8");
       res.status(200).send(exml);
@@ -2805,10 +3237,13 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   });
 
   // 2. Process Caller's Voice Speech (Multi-Turn Voice Dialogue Loop)
-  app.all("/api/exotel/process-speech", 6)}`;
+  app.all("/api/exotel/process-speech", async (req, res) => {
+    const traceId = `trace_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const clientIp = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "Unknown";
     console.log(`[ExotelDiagnostic:${traceId}] 🎙️ PROCESS_SPEECH Webhook Hit: Method=${req.method} IP=${clientIp}`);
-    console.log(`[ExotelDiagnostic:${traceId}] Query:`, req.headers["user-agent"]);
+    console.log(`[ExotelDiagnostic:${traceId}] Query:`, JSON.stringify(req.query));
+    console.log(`[ExotelDiagnostic:${traceId}] Body:`, JSON.stringify(req.body));
+    console.log(`[ExotelDiagnostic:${traceId}] User-Agent:`, req.headers["user-agent"]);
 
     try {
       const callSid = String(req.query.callSid || req.query.CallSid || req.body.CallSid || "");
@@ -2823,15 +3258,18 @@ export function createApiRouter(context: ApiRoutesContext): Router {
       res.set("Content-Type", "text/xml; charset=utf-8");
       res.status(200).send(exml);
     } catch (e: any) {
-      console.error(`[ExotelDiagnostic:${traceId}] ❌ Process speech webhook error:`, "text/xml; charset=utf-8");
+      console.error(`[ExotelDiagnostic:${traceId}] ❌ Process speech webhook error:`, e);
+      res.set("Content-Type", "text/xml; charset=utf-8");
       res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="female">धन्यवाद, मैंने आपकी बात नोट कर ली है।</Say><Hangup/></Response>`);
     }
   });
 
   // 3. Status Callback (Call Ended, Duration, and Recording Delivered)
-  app.all("/api/exotel/call-status", 6)}`;
+  app.all("/api/exotel/call-status", async (req, res) => {
+    const traceId = `trace_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     console.log(`[ExotelDiagnostic:${traceId}] 📊 CALL_STATUS Webhook Hit: Method=${req.method}`);
-    console.log(`[ExotelDiagnostic:${traceId}] Query:`, JSON.stringify(req.body));
+    console.log(`[ExotelDiagnostic:${traceId}] Query:`, JSON.stringify(req.query));
+    console.log(`[ExotelDiagnostic:${traceId}] Body:`, JSON.stringify(req.body));
 
     try {
       const callSid = String(req.query.CallSid || req.body.CallSid || "");
@@ -2840,16 +3278,21 @@ export function createApiRouter(context: ApiRoutesContext): Router {
       const recordingUrl = String(req.query.RecordingUrl || req.body.RecordingUrl || "");
 
       const session = await exotelService.handleCallStatus({
-        callSid, status, duration: Number(duration), recordingUrl: recordingUrl || undefined, });
+        callSid,
+        status,
+        duration: Number(duration),
+        recordingUrl: recordingUrl || undefined,
+      });
 
       res.json({ ok: true, session });
     } catch (e: any) {
-      console.error(`[ExotelDiagnostic:${traceId}] ❌ Call status callback error:`, error: e?.message });
+      console.error(`[ExotelDiagnostic:${traceId}] ❌ Call status callback error:`, e);
+      res.status(500).json({ ok: false, error: e?.message });
     }
   });
 
   // 4. Serve Dynamic Friday Voice MP3 Audio to Exotel (Full HTTP 206 Range & Telephony HEAD Support)
-  app.all("/api/exotel/audio/:audioId", res) => {
+  app.all("/api/exotel/audio/:audioId", (req, res) => {
     const audioId = req.params.audioId;
     console.log(`[ExotelDiagnostic] 🔊 AUDIO_FETCH Request: Method=${req.method} AudioId=${audioId} Range=${req.headers.range || "none"}`);
     const audio = exotelService.getAudio(audioId);
@@ -2861,7 +3304,12 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     const rangeHeader = req.headers.range;
 
     res.set({
-      "Content-Type": audio.mimeType || "audio/mpeg", max-age=1800", "Content-Disposition": "inline", "Connection": "keep-alive", });
+      "Content-Type": audio.mimeType || "audio/mpeg",
+      "Accept-Ranges": "bytes",
+      "Cache-Control": "public, max-age=1800",
+      "Content-Disposition": "inline",
+      "Connection": "keep-alive",
+    });
 
     if (req.method === "HEAD") {
       res.set("Content-Length", totalLength.toString());
@@ -2877,7 +3325,9 @@ export function createApiRouter(context: ApiRoutesContext): Router {
 
       res.status(206);
       res.set({
-        "Content-Range": `bytes ${start}-${end}/${totalLength}`, "Content-Length": chunksize.toString(), });
+        "Content-Range": `bytes ${start}-${end}/${totalLength}`,
+        "Content-Length": chunksize.toString(),
+      });
       return res.end(slicedBuffer);
     }
 
@@ -2886,18 +3336,21 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   });
 
   // 5. Exotel Config Management
-  app.get("/api/exotel/config", config: exotelService.getConfig() });
+  app.get("/api/exotel/config", (_req, res) => {
+    res.json({ ok: true, config: exotelService.getConfig() });
   });
 
-  app.post("/api/exotel/config", res) => {
+  app.post("/api/exotel/config", (req, res) => {
     try {
       const result = exotelService.saveConfig(req.body || {});
-      res.json({ ok: true, error: e?.message });
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message });
     }
   });
 
   // 6. Outbound Phone Call Trigger
-  app.post("/api/exotel/make-call", res) => {
+  app.post("/api/exotel/make-call", async (req, res) => {
     try {
       const { to, customMessage } = req.body || {};
       if (!to) {
@@ -2906,119 +3359,98 @@ export function createApiRouter(context: ApiRoutesContext): Router {
       const host = req.get("host") || "localhost:3000";
       const protocol = req.protocol === "https" || req.headers["x-forwarded-proto"] === "https" ? "https" : "http";
       const result = await exotelService.makeOutboundCall({
-        to: String(to), customMessage: customMessage ? String(customMessage) : undefined, baseUrl: `${protocol}://${host}`, error: e?.message || "Outbound call failed" });
+        to: String(to),
+        customMessage: customMessage ? String(customMessage) : undefined,
+        baseUrl: `${protocol}://${host}`,
+      });
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || "Outbound call failed" });
     }
   });
 
-  // 8. Google AI Studio Model Sandbox Testing API
-  app.post("/api/model-tester/chat", res) => {
+  // 7. Call Logs Management
+  app.get("/api/exotel/call-logs", (req, res) => {
+    const limit = Number(req.query.limit) || 50;
+    res.json({ ok: true, logs: exotelService.getCallLogs(limit) });
+  });
+
+  app.post("/api/exotel/call-logs/clear", (_req, res) => {
+    res.json({ ok: exotelService.clearCallLogs() });
+  });
+
+  // ── Google AI Studio Model Sandbox Testing Endpoint ─────────────────────
+  app.post("/api/model-tester/chat", async (req, res) => {
     const startTime = Date.now();
     try {
-      const { model, history, media } = req.body || {};
-      const targetModel = (model || "gemini-3.5-flash").trim();
-      const apiKey = process.env.GEMINI_API_KEY?.trim();
-
+      const { model = "gemini-3.5-flash", prompt, history = [], attachments = [] } = req.body || {};
+      const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
-        return res.status(400).json({ ok: false, error: "GEMINI_API_KEY is not configured in server environment." });
+        return res.status(400).json({ ok: false, error: "GEMINI_API_KEY is not configured on server." });
       }
 
-      const { GoogleGenAI } = await import("@google/genai");
       const ai = new GoogleGenAI({ apiKey });
-
-      // Build parts array (text + multimodal inlineData)
-      const parts: any[] = [];
-
-      if (media && media.base64 && media.mimeType) {
-        // Strip data:mime/type;base64, prefix if present
-        const cleanBase64 = media.base64.replace(/^data:[^;]+;base64, /, "");
-        parts.push({
-          inlineData: {
-            mimeType: media.mimeType, data: cleanBase64, }, });
-      }
-
-      if (prompt && prompt.trim()) {
-        parts.push({ text: prompt.trim() });
-      } else if (parts.length > 0) {
-        parts.push({ text: "Please analyze this attached media and describe its contents thoroughly." });
-      } else {
-        parts.push({ text: "Hello! Testing connection." });
-      }
-
-      // Build conversation contents with history if available
       const contents: any[] = [];
+
+      // Add prior conversation turns
       if (Array.isArray(history) && history.length > 0) {
-        for (const h of history.slice(-6)) {
-          contents.push({
-            role: h.role === "user" ? "user" : "model", parts: [{ text: h.text }], });
-        }
-      }
-      contents.push({ role: "user", parts });
-
-      // Special handling for Nano Banana / Image generation models
-      if (targetModel.includes("nano-banana") || targetModel.includes("imagen")) {
-        const { imageGenerationService } = await import("../services/imageGenerationService");
-        const imgRes = await imageGenerationService.generateImage({
-          prompt: prompt || "Futuristic AI Studio neural network holographic visualization", });
-        const latencyMs = Date.now() - startTime;
-        if (imgRes.success && imgRes.imageUrl) {
-          return res.json({
-            ok: true, reply: `🎨 **Image Generated Successfully via ${targetModel}**\n\n![Generated Image](${imgRes.imageUrl})\n\n_Prompt: ${prompt}_`, modelUsed: targetModel, latencyMs, });
-        }
-      }
-
-      // Standard Gemini Multimodal / Text Generation with Fallback
-      let resultText = "";
-      let actualModelUsed = targetModel;
-
-      const fallbackList = [
-        targetModel, "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite"];
-
-      for (const m of Array.from(new Set(fallbackList))) {
-        try {
-          const response = await ai.models.generateContent({
-            model: m,
-            contents: contents,
-            config: {
-              temperature: 0.7,
-            },
-          });
-          const text = response.text?.trim();
-          if (text) {
-            resultText = text;
-            actualModelUsed = m;
-            break;
-          }
-        } catch (err: any) {
-          console.warn(`[ModelTester] Model ${m} test attempt notice:`, err?.message || err);
-          if (m === targetModel && fallbackList.length === 1) {
-            throw err;
+        for (const item of history) {
+          if (item.text && item.text.trim()) {
+            contents.push({
+              role: item.role === "model" || item.role === "assistant" ? "model" : "user",
+              parts: [{ text: item.text }],
+            });
           }
         }
       }
 
-      const latencyMs = Date.now() - startTime;
-
-      if (!resultText) {
-        return res.status(500).json({
-          ok: false,
-          error: `Model ${targetModel} did not return a response.`,
-          latencyMs,
-        });
+      // Construct current turn parts (attachments + prompt text)
+      const currentParts: any[] = [];
+      if (Array.isArray(attachments) && attachments.length > 0) {
+        for (const att of attachments) {
+          if (att.base64) {
+            const rawBase64 = att.base64.includes(",") ? att.base64.split(",")[1] : att.base64;
+            currentParts.push({
+              inlineData: {
+                mimeType: att.type || "image/jpeg",
+                data: rawBase64,
+              },
+            });
+          }
+        }
       }
+
+      if (prompt && String(prompt).trim()) {
+        currentParts.push({ text: String(prompt).trim() });
+      } else if (currentParts.length === 0) {
+        return res.status(400).json({ ok: false, error: "Prompt or attachment is required." });
+      }
+
+      contents.push({
+        role: "user",
+        parts: currentParts,
+      });
+
+      const response = await ai.models.generateContent({
+        model: String(model).trim(),
+        contents,
+      });
+
+      const replyText = response.text || "(No response text returned by model)";
+      const durationMs = Date.now() - startTime;
 
       res.json({
         ok: true,
-        reply: resultText,
-        modelUsed: actualModelUsed,
-        latencyMs,
+        text: replyText,
+        model,
+        durationMs,
       });
-    } catch (e: any) {
-      const latencyMs = Date.now() - startTime;
-      console.error("[ModelTester] Error running inference:", e);
+    } catch (err: any) {
+      console.error("[ModelTester] Chat error:", err);
       res.status(500).json({
         ok: false,
-        error: e?.message || "Failed to execute model inference",
-        latencyMs,
+        error: err?.message || "Failed to generate content with selected model",
+        durationMs: Date.now() - startTime,
       });
     }
   });

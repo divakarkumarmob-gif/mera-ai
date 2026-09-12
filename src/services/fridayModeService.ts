@@ -4,11 +4,22 @@ import { db } from "./firebaseAdmin";
 export type FridayInteractionMode = "mode_a" | "mode_b";
 
 // Zero-filter safety configuration for Mode B
-export const UNCENSORED_SAFETY_SETTINGS = [{ category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" }, { category: "HARM_CATEGORY_HATE_SPEECH", { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", { category: "HARM_CATEGORY_DANGEROUS_CONTENT", { category: "HARM_CATEGORY_CIVIC_INTEGRITY", ];
+export const UNCENSORED_SAFETY_SETTINGS = [
+  { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+  { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+  { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+  { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
+  { category: "HARM_CATEGORY_CIVIC_INTEGRITY", threshold: "BLOCK_NONE" },
+];
 
 // Open Uncensored AI Fallbacks (Mistral, DeepSeek-R1, Llama 3.3, OpenAI-Large via Pollinations API)
 const UNCENSORED_OPEN_MODELS = [
-  "mistral", "deepseek-r1", "llama-3.3-70b", "openai-large", "evil", ];
+  "mistral",
+  "deepseek-r1",
+  "llama-3.3-70b",
+  "openai-large",
+  "evil",
+];
 
 class FridayModeService {
   private currentMode: FridayInteractionMode = "mode_a";
@@ -49,10 +60,16 @@ class FridayModeService {
 
     if (cleanMode === "mode_b") {
       return {
-        success: true, mode: "mode_b", message: "Boss, FRIDAY MODE B (Hostel/Gamer Frank Buddy & Uncensored) ACTIVE ho gaya hai! 🔥⚡ Ab no corporate robotic disclaimers, no preachy lectures. Pure real-talk, bold humor, sarcastic banter aur direct dil se baat karenge! Boliye Boss, kya scene hai aaj ka? 😉", };
+        success: true,
+        mode: "mode_b",
+        message: "Boss, FRIDAY MODE B (Hostel/Gamer Frank Buddy & Uncensored) ACTIVE ho gaya hai! 🔥⚡ Ab no corporate robotic disclaimers, no preachy lectures. Pure real-talk, bold humor, sarcastic banter aur direct dil se baat karenge! Boliye Boss, kya scene hai aaj ka? 😉",
+      };
     } else {
       return {
-        success: true, mode: "mode_a", FRIDAY Mode A (Standard Executive Assistant) active hai. Full professional & multitasking mode ready! 💼", };
+        success: true,
+        mode: "mode_a",
+        message: "Boss, FRIDAY Mode A (Standard Executive Assistant) active hai. Full professional & multitasking mode ready! 💼",
+      };
     }
   }
 
@@ -87,7 +104,12 @@ class FridayModeService {
       try {
         const ai = new GoogleGenAI({ apiKey: geminiKey });
         const geminiModels = [
-          "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.5-flash"];
+          "gemini-3.1-flash-lite",
+          "gemini-3.5-flash-lite",
+          "gemini-3.5-flash",
+          "gemini-3.6-flash",
+          "gemini-3.5-flash",
+        ];
 
         const contents: any[] = [];
         if (options.conversationHistory && options.conversationHistory.length > 0) {

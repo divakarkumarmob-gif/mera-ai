@@ -20,10 +20,12 @@ export interface DocumentQueryResult {
 
 class DocumentCopilotService {
   /**
-   * Deeply analyzes a document text using Gemini AI semantic comprehension, * extracting structured summaries, critical clauses, and risk assessment.
+   * Deeply analyzes a document text using Gemini AI semantic comprehension,
+   * extracting structured summaries, critical clauses, and risk assessment.
    */
   public async analyzeDocument(
-    documentTextOrSnippet: string, docTitle = "Document"
+    documentTextOrSnippet: string,
+    docTitle = "Document"
   ): Promise<DocumentAnalysisResult> {
     const text = (documentTextOrSnippet || "").trim();
     if (!text) {
@@ -58,15 +60,20 @@ CONTENT:
 
 Return a valid JSON object matching this schema EXACTLY:
 {
-  "executiveSummary": "Concise 2-3 sentence executive summary of the document's core purpose and key terms in conversational Hinglish/English.", "keyClausesOrHighlights": [
-    "Key clause or important highlight 1", "Key clause or important highlight 2", "Key clause or important highlight 3"
-  ], "riskOrActionItems": [
-    "Identified risk, obligation, penalty, or action item 1", "Identified risk, or action item 2"
+  "executiveSummary": "Concise 2-3 sentence executive summary of the document's core purpose and key terms in conversational Hinglish/English.",
+  "keyClausesOrHighlights": [
+    "Key clause or important highlight 1",
+    "Key clause or important highlight 2",
+    "Key clause or important highlight 3"
+  ],
+  "riskOrActionItems": [
+    "Identified risk, obligation, penalty, or action item 1",
+    "Identified risk, obligation, penalty, or action item 2"
   ]
 }
 Return ONLY valid JSON. No markdown code fences.`;
 
-        const models = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.6-flash"];
+        const models = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash"];
         for (const model of models) {
           try {
             const resp = await ai.models.generateContent({ model, contents: prompt });
@@ -81,7 +88,9 @@ Return ONLY valid JSON. No markdown code fences.`;
                   documentType: type,
                   executiveSummary: parsed.executiveSummary,
                   keyClausesOrHighlights: parsed.keyClausesOrHighlights,
-                  riskOrActionItems: parsed.riskOrActionItems || [], message: `Boss, "${docTitle}" (${type.toUpperCase()}) ka deep AI analysis complete ho gaya hai! Executive summary: ${parsed.executiveSummary}`, };
+                  riskOrActionItems: parsed.riskOrActionItems || [],
+                  message: `Boss, "${docTitle}" (${type.toUpperCase()}) ka deep AI analysis complete ho gaya hai! Executive summary: ${parsed.executiveSummary}`,
+                };
               }
             }
           } catch {}
@@ -110,14 +119,22 @@ Return ONLY valid JSON. No markdown code fences.`;
     const message = `Boss, "${docTitle}" (${type.toUpperCase()}) ka analysis complete ho gaya hai! Executive summary: ${executiveSummary}`;
 
     return {
-      success: true, documentTitle: docTitle, documentType: type, executiveSummary, keyClausesOrHighlights: highlights, riskOrActionItems, message, };
+      success: true,
+      documentTitle: docTitle,
+      documentType: type,
+      executiveSummary,
+      keyClausesOrHighlights: highlights,
+      riskOrActionItems,
+      message,
+    };
   }
 
   /**
    * Answers questions based strictly on the provided document text using semantic AI search.
    */
   public async queryDocument(
-    documentText: string, question: string
+    documentText: string,
+    question: string
   ): Promise<DocumentQueryResult> {
     const text = (documentText || "").trim();
     const q = (question || "").trim();
@@ -139,7 +156,7 @@ QUESTION: "${q}"
 
 Provide a clear, accurate, and concise answer in Friday's natural Hinglish voice based strictly on the facts in the document. Quote relevant snippets where helpful. If the document does not contain the answer, say "Boss, is document me is baare me koi direct information nahi mili."`;
 
-        const models = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.6-flash"];
+        const models = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash"];
         for (const model of models) {
           try {
             const resp = await ai.models.generateContent({ model, contents: prompt });

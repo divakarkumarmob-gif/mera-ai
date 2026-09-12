@@ -176,7 +176,16 @@ export class WhatsAppGroupSuperPowersEngine {
   // ── Main Super Power Dispatcher ───────────────────────────────────────────
 
   public async handleSuperPowerCommand(
-    sock: any, groupJid: string, groupName: string, rawText: string, senderName: string, senderPhone: string, senderJid: string, messageKey: any, quotedMessage?: QuotedMessageContext | null, isOwner = false
+    sock: any,
+    groupJid: string,
+    groupName: string,
+    rawText: string,
+    senderName: string,
+    senderPhone: string,
+    senderJid: string,
+    messageKey: any,
+    quotedMessage?: QuotedMessageContext | null,
+    isOwner = false
   ): Promise<{ handled: boolean; replyText?: string; mentions?: string[] }> {
     const clean = (rawText || "").toLowerCase().trim();
 
@@ -212,42 +221,42 @@ export class WhatsAppGroupSuperPowersEngine {
       clean.startsWith("/praise") ||
       clean.startsWith("@hypeman")
     ) {
-      return await this.handleRoastAndPraise(rawText, senderName);
+      return await this.handleRoastAndPraise(rawText, quotedMessage, senderName);
     }
 
     // 4. @quiz / @trivia Live Group Game Arena
     if (clean.startsWith("@quiz") || clean.startsWith("/quiz") || clean.startsWith("@trivia") || clean.startsWith("/trivia")) {
-      return await this.handleGroupQuiz(groupJid, senderName, senderPhone);
+      return await this.handleGroupQuiz(groupJid, rawText, senderName, senderPhone);
     }
 
     // 5. @split / @bill / @hisab Expense Splitter
     if (clean.startsWith("@split") || clean.startsWith("/split") || clean.startsWith("@bill") || clean.startsWith("/bill") || clean.startsWith("@hisab")) {
-      return await this.handleBillSplit(rawText, senderName);
+      return await this.handleBillSplit(rawText, groupName, senderName);
     }
 
     // 6. @decision / @todo / @notes Action-Item Tracker
     if (clean.startsWith("@decision") || clean.startsWith("/decision") || clean.startsWith("@todo") || clean.startsWith("/todo") || clean.startsWith("@notes")) {
-      return await this.handleDecisionTracker(groupJid, quotedMessage);
+      return await this.handleDecisionTracker(groupJid, groupName, rawText, quotedMessage);
     }
 
     // 7. @birthday / @bday Auto-Celebrator
     if (clean.startsWith("@birthday") || clean.startsWith("/birthday") || clean.startsWith("@bday") || clean.startsWith("/bday")) {
-      return await this.handleBirthdayManager(groupJid, senderPhone, quotedMessage);
+      return await this.handleBirthdayManager(groupJid, groupName, rawText, senderName, senderPhone, quotedMessage);
     }
 
     // 8. @meme AI Meme & Sticker Generator
     if (clean.startsWith("@meme") || clean.startsWith("/meme") || clean.startsWith("meme")) {
-      return await this.handleMemeGenerator(sock, quotedMessage);
+      return await this.handleMemeGenerator(sock, groupJid, rawText, senderName, quotedMessage);
     }
 
     // 9. @poll WhatsApp Interactive Poll Creator
     if (clean.startsWith("@poll") || clean.startsWith("/poll") || clean.startsWith("poll")) {
-      return await this.handlePollCreator(sock, senderName);
+      return await this.handlePollCreator(sock, groupJid, rawText, senderName);
     }
 
     // 10. @translate Multi-Language Live Translator
     if (clean.startsWith("@translate") || clean.startsWith("/translate") || clean.startsWith("translate")) {
-      return await this.handleLiveTranslator(rawText, senderName);
+      return await this.handleLiveTranslator(rawText, quotedMessage, senderName);
     }
 
     // 11. @vibe / @icebreaker / @joke Group Mood & Icebreaker
@@ -259,7 +268,7 @@ export class WhatsAppGroupSuperPowersEngine {
       clean.startsWith("@joke") ||
       clean.startsWith("/joke")
     ) {
-      return await this.handleVibeRadarAndIcebreaker(groupJid, senderName);
+      return await this.handleVibeRadarAndIcebreaker(groupJid, groupName, rawText, senderName);
     }
 
     // 12. @liedetector / @psychology Polygraph & Lie Detector
@@ -270,12 +279,12 @@ export class WhatsAppGroupSuperPowersEngine {
       clean.startsWith("/lie") ||
       clean.startsWith("@psychology")
     ) {
-      return await this.handleLieDetector(rawText, senderName);
+      return await this.handleLieDetector(rawText, quotedMessage, senderName);
     }
 
     // 13. @rap Desi Hip-Hop Rap Generator
     if (clean.startsWith("@rap") || clean.startsWith("/rap") || clean.startsWith("rap")) {
-      return await this.handleDesiRapGenerator(rawText, senderName);
+      return await this.handleDesiRapGenerator(rawText, quotedMessage, senderName);
     }
 
     // 14. @future / @oracle Time-Machine Future Prediction
@@ -286,7 +295,7 @@ export class WhatsAppGroupSuperPowersEngine {
       clean.startsWith("/oracle") ||
       clean.startsWith("@kismat")
     ) {
-      return await this.handleFutureOracle(rawText, senderName);
+      return await this.handleFutureOracle(rawText, quotedMessage, senderName);
     }
 
     // 15. @srk / @tonystark / @amitabh / @modi / @speakas Celebrity Clone
@@ -300,17 +309,17 @@ export class WhatsAppGroupSuperPowersEngine {
       clean.startsWith("@speakas") ||
       clean.startsWith("/speakas")
     ) {
-      return await this.handleCelebrityClone(rawText, senderName);
+      return await this.handleCelebrityClone(rawText, quotedMessage, senderName);
     }
 
     // 16. @mimic / @clone Member Doppelgänger
     if (clean.startsWith("@mimic") || clean.startsWith("/mimic") || clean.startsWith("@clone") || clean.startsWith("/clone")) {
-      return await this.handleMemberMimic(rawText, senderName);
+      return await this.handleMemberMimic(rawText, quotedMessage, senderName);
     }
 
     // 17. @movie / @poster Movie Cast & Poster Generator
     if (clean.startsWith("@movie") || clean.startsWith("/movie") || clean.startsWith("@poster") || clean.startsWith("/poster")) {
-      return await this.handleMovieCastPoster(sock, senderName);
+      return await this.handleMovieCastPoster(sock, groupJid, rawText, senderName);
     }
 
     // 18. @commentary Bhojpuri & Sidhu Sports Commentary
@@ -327,22 +336,22 @@ export class WhatsAppGroupSuperPowersEngine {
       clean.startsWith("@music") ||
       clean.startsWith("/music")
     ) {
-      return await this.handleSongFinder(sock, messageKey);
+      return await this.handleSongFinder(sock, groupJid, rawText, senderName, messageKey);
     }
 
     // 20. @hum / @shazam Voice Humming & Audio Song Identifier
     if (clean.startsWith("@hum") || clean.startsWith("/hum") || clean.startsWith("@shazam") || clean.startsWith("/shazam")) {
-      return await this.handleHummingShazam(sock, messageKey);
+      return await this.handleHummingShazam(sock, groupJid, rawText, senderName, quotedMessage, messageKey);
     }
 
     // 21. @reel / @bgm Reel & Shorts Background Music Extractor
     if (clean.startsWith("@reel") || clean.startsWith("/reel") || clean.startsWith("@bgm") || clean.startsWith("/bgm") || clean.startsWith("@short")) {
-      return await this.handleReelBgmExtractor(sock, messageKey);
+      return await this.handleReelBgmExtractor(sock, groupJid, rawText, senderName, messageKey);
     }
 
     // 22. @groupchart / @topchart Weekly Group Billboard Chart
     if (clean.startsWith("@groupchart") || clean.startsWith("/groupchart") || clean.startsWith("@topchart") || clean.startsWith("/topchart") || clean.startsWith("@chart")) {
-      return await this.handleGroupMusicChart(groupJid, senderName);
+      return await this.handleGroupMusicChart(groupJid, groupName, senderName);
     }
 
     return { handled: false };
@@ -351,7 +360,11 @@ export class WhatsAppGroupSuperPowersEngine {
   // ── 1. @tagall / @everyone Engine ──────────────────────────────────────────
 
   private async handleTagAll(
-    sock: any, senderName: string
+    sock: any,
+    groupJid: string,
+    groupName: string,
+    rawText: string,
+    senderName: string
   ): Promise<{ handled: boolean; replyText?: string; mentions?: string[] }> {
     if (!sock) return { handled: true, replyText: "⚠️ Friday WhatsApp connection error." };
 
@@ -389,7 +402,10 @@ export class WhatsAppGroupSuperPowersEngine {
 ${memberTagsList}${extraCount}`;
 
       return {
-        handled: true, replyText: card, mentions, };
+        handled: true,
+        replyText: card,
+        mentions,
+      };
     } catch (err: any) {
       console.error("[GroupSuperPowers] TagAll error:", err);
       return { handled: true, replyText: `⚠️ Tag All failed: ${err?.message || err}` };
@@ -399,7 +415,9 @@ ${memberTagsList}${extraCount}`;
   // ── 2. @judge / @factcheck AI Courtroom Engine ──────────────────────────────
 
   private async handleJudgeFactCheck(
-    rawText: string, senderName = "Member"
+    rawText: string,
+    quotedMessage?: QuotedMessageContext | null,
+    senderName = "Member"
   ): Promise<{ handled: boolean; replyText?: string }> {
     const claim = rawText
       .replace(/^(?:@judge|@factcheck|@debate|\/judge|\/factcheck|\/debate)\s*[:=-]?\s*/i, "")
@@ -411,7 +429,9 @@ ${memberTagsList}${extraCount}`;
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       return {
-        handled: true, replyText: `⚖️ *AI Courtroom:* Statement verify karne ke liye GEMINI_API_KEY configure hona zaroori hai.`, };
+        handled: true,
+        replyText: `⚖️ *AI Courtroom:* Statement verify karne ke liye GEMINI_API_KEY configure hona zaroori hai.`,
+      };
     }
 
     try {
@@ -437,7 +457,7 @@ Structure your response EXACTLY like this:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 📊 *Accuracy Confidence:* 99% Verified`;
 
-      for (const model of ["gemini-3.6-flash", "gemini-3.6-flash", "gemini-3.1-flash-lite"]) {
+      for (const model of ["gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.1-flash-lite"]) {
         try {
           const resp = await ai.models.generateContent({ model, contents: prompt });
           const text = resp.text?.trim();
@@ -472,9 +492,11 @@ Structure your response EXACTLY like this:
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       return {
-        handled: true, replyText: isPraise
+        handled: true,
+        replyText: isPraise
           ? `🌟 *Hype Card:* ${targetPerson} is simply legendary! 🚀🔥`
-          : `🔥 *Roast:* ${targetPerson} bhai ka swag hi alag hai! 😂`, };
+          : `🔥 *Roast:* ${targetPerson} bhai ka swag hi alag hai! 😂`,
+      };
     }
 
     try {
@@ -490,7 +512,7 @@ Context: ${targetContext}
 CRITICAL SAFETY RULE: NEVER use vulgar, sexual, abusive slurs (no MC/BC/slurs). Keep it classy, extremely clever, funny, sarcastic college/hostel-style friendly leg-pulling in natural Hinglish.
 Use playful punchlines and keep it within 4-5 lines.`;
 
-      for (const model of ["gemini-3.6-flash", "gemini-3.6-flash", "gemini-3.1-flash-lite"]) {
+      for (const model of ["gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.1-flash-lite"]) {
         try {
           const resp = await ai.models.generateContent({ model, contents: prompt });
           const text = resp.text?.trim();
@@ -575,11 +597,15 @@ Use playful punchlines and keep it within 4-5 lines.`;
           const finalScoreboard = this.getLeaderboardText(active);
           this.activeQuizzes.delete(groupJid);
           return {
-            handled: true, replyText: `${ansCard}\n\n🏆 *QUIZ COMPLETED! GRAND FINALE* 🎊\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n${finalScoreboard}`, };
+            handled: true,
+            replyText: `${ansCard}\n\n🏆 *QUIZ COMPLETED! GRAND FINALE* 🎊\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n${finalScoreboard}`,
+          };
         }
       } else {
         return {
-          handled: true, replyText: `❌ *Galat Jawab!* @${senderPhone || senderName} (Option ${userAns} galat hai). Koi aur try karein!`, };
+          handled: true,
+          replyText: `❌ *Galat Jawab!* @${senderPhone || senderName} (Option ${userAns} galat hai). Koi aur try karein!`,
+        };
       }
     }
 
@@ -588,7 +614,15 @@ Use playful punchlines and keep it within 4-5 lines.`;
 
     const question = await this.generateQuizQuestion(topic);
     const newQuiz: ActiveGroupQuiz = {
-      groupId: groupJid, topic, round: 1, maxRounds: 5, currentQuestion: question, scores: new Map(), startTime: Date.now(), answeredUsers: new Set(), };
+      groupId: groupJid,
+      topic,
+      round: 1,
+      maxRounds: 5,
+      currentQuestion: question,
+      scores: new Map(),
+      startTime: Date.now(),
+      answeredUsers: new Set(),
+    };
     this.activeQuizzes.set(groupJid, newQuiz);
 
     const card = `🎮 *FRIDAY LIVE GROUP QUIZ SHOWDOWN* ⚡
@@ -618,17 +652,30 @@ ${question.question}
 Topic: "${topic}".
 Output MUST be strict JSON only in this schema:
 {
-  "question": "Question in natural Hinglish or English", "options": {
-    "A": "Option A text", "B": "Option B text", "C": "Option C text", "D": "Option D text"
-  }, "correctAnswer": "A", "explanation": "1-line interesting fun fact why this is correct"
+  "question": "Question in natural Hinglish or English",
+  "options": {
+    "A": "Option A text",
+    "B": "Option B text",
+    "C": "Option C text",
+    "D": "Option D text"
+  },
+  "correctAnswer": "A",
+  "explanation": "1-line interesting fun fact why this is correct"
 }`;
         const resp = await ai.models.generateContent({
-          model: "gemini-3.6-flash", contents: prompt, config: { responseMimeType: "application/json" }, });
+          model: "gemini-3.5-flash",
+          contents: prompt,
+          config: { responseMimeType: "application/json" },
+        });
 
         const json = JSON.parse(resp.text?.trim() || "{}");
         if (json.question && json.options && json.correctAnswer) {
           return {
-            question: json.question, options: json.options, correctAnswer: (json.correctAnswer || "A").toUpperCase(), explanation: json.explanation || "Correct answer!", };
+            question: json.question,
+            options: json.options,
+            correctAnswer: (json.correctAnswer || "A").toUpperCase(),
+            explanation: json.explanation || "Correct answer!",
+          };
         }
       } catch (e) {
         console.warn("[GroupSuperPowers] Quiz AI generation error:", e);
@@ -662,7 +709,9 @@ Output MUST be strict JSON only in this schema:
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       return {
-        handled: true, replyText: `💳 *Group Expense Splitter:* Please provide amount and members (e.g. \`@split 1500 Pizza Rohan Aman DK\`).`, };
+        handled: true,
+        replyText: `💳 *Group Expense Splitter:* Please provide amount and members (e.g. \`@split 1500 Pizza Rohan Aman DK\`).`,
+      };
     }
 
     try {
@@ -693,7 +742,7 @@ Format a clean, crystal-clear WhatsApp Expense Card in natural Hinglish:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 ✅ _Hisaab cleared by Friday AI!_`;
 
-      const resp = await ai.models.generateContent({ model: "gemini-3.6-flash", contents: prompt });
+      const resp = await ai.models.generateContent({ model: "gemini-3.5-flash", contents: prompt });
       const text = resp.text?.trim();
       if (text) {
         expenseCol().add({ groupName, rawText: clean, createdAt: Date.now() }).catch(() => {});
@@ -709,7 +758,10 @@ Format a clean, crystal-clear WhatsApp Expense Card in natural Hinglish:
   // ── 6. @decision / @todo Action Tracker ───────────────────────────────────
 
   private async handleDecisionTracker(
-    groupJid: string, groupName: string, rawText: string, quotedMessage?: QuotedMessageContext | null
+    groupJid: string,
+    groupName: string,
+    rawText: string,
+    quotedMessage?: QuotedMessageContext | null
   ): Promise<{ handled: boolean; replyText?: string }> {
     let recentMessagesText = "";
     if (quotedMessage) {
@@ -724,7 +776,14 @@ Format a clean, crystal-clear WhatsApp Expense Card in natural Hinglish:
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       return {
-        handled: true, replyText: `📌 *Decisions & Notes:* GEMINI_API_KEY is required to analyze group conversation.`, acting as the Executive Meeting Secretary for a WhatsApp Group.
+        handled: true,
+        replyText: `📌 *Decisions & Notes:* GEMINI_API_KEY is required to analyze group conversation.`,
+      };
+    }
+
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+      const prompt = `You are Friday AI, acting as the Executive Meeting Secretary for a WhatsApp Group.
 Here is the recent group conversation history:
 """
 ${recentMessagesText || rawText}
@@ -753,7 +812,7 @@ Format your output EXACTLY as a pinned executive checklist:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 💡 _Friday ne decisions note kar liye hain. Sabhi log apne tasks time par complete karein!_`;
 
-      const resp = await ai.models.generateContent({ model: "gemini-3.6-flash", contents: prompt });
+      const resp = await ai.models.generateContent({ model: "gemini-3.5-flash", contents: prompt });
       const text = resp.text?.trim();
       if (text) {
         decisionCol().add({ groupId: groupJid, groupName, text, createdAt: Date.now() }).catch(() => {});
@@ -769,7 +828,12 @@ Format your output EXACTLY as a pinned executive checklist:
   // ── 7. @birthday Auto-Celebrator ──────────────────────────────────────────
 
   private async handleBirthdayManager(
-    groupJid: string, groupName: string, rawText: string, senderName: string, senderPhone: string, quotedMessage?: QuotedMessageContext | null
+    groupJid: string,
+    groupName: string,
+    rawText: string,
+    senderName: string,
+    senderPhone: string,
+    quotedMessage?: QuotedMessageContext | null
   ): Promise<{ handled: boolean; replyText?: string }> {
     const clean = rawText.toLowerCase().trim();
 
@@ -799,10 +863,12 @@ Format your output EXACTLY as a pinned executive checklist:
       const targetName = quotedMessage?.sender || senderName;
 
       // Extract day and month
-      const dateMatch = rawText.match(/\b(\d{1, 2})[\/\-\s]([0-1]?\d|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b/i);
+      const dateMatch = rawText.match(/\b(\d{1,2})[\/\-\s]([0-1]?\d|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b/i);
       if (!dateMatch) {
         return {
-          handled: true, replyText: `⚠️ Kripya sahi date format me likhein. Example: \`@birthday add @Rohan 25-10\` ya \`@birthday add 15 Aug\``, };
+          handled: true,
+          replyText: `⚠️ Kripya sahi date format me likhein. Example: \`@birthday add @Rohan 25-10\` ya \`@birthday add 15 Aug\``,
+        };
       }
 
       const day = parseInt(dateMatch[1], 10);
@@ -810,7 +876,9 @@ Format your output EXACTLY as a pinned executive checklist:
       const monthRaw = dateMatch[2].toLowerCase();
 
       const monthMap: { [k: string]: number } = {
-        jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12, };
+        jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
+        jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+      };
 
       if (monthMap[monthRaw]) {
         month = monthMap[monthRaw];
@@ -823,7 +891,14 @@ Format your output EXACTLY as a pinned executive checklist:
       }
 
       const newBday: GroupBirthday = {
-        groupId: groupJid, memberPhone: targetPhone, memberName: targetName, day, month, addedBy: senderName, addedAt: Date.now(), };
+        groupId: groupJid,
+        memberPhone: targetPhone,
+        memberName: targetName,
+        day,
+        month,
+        addedBy: senderName,
+        addedAt: Date.now(),
+      };
 
       const existing = this.birthdayCache.get(groupJid) || [];
       const updated = existing.filter((b) => b.memberPhone !== targetPhone);
@@ -834,7 +909,9 @@ Format your output EXACTLY as a pinned executive checklist:
       await bdayCol().doc(docId).set(newBday, { merge: true });
 
       return {
-        handled: true, replyText: `🎂 *BIRTHDAY SAVED SUCCESSFULLY!* 🎉\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n👤 *Member:* ${targetName} (@${targetPhone})\n📅 *Date:* ${String(day).padStart(2, "0")}/${String(month).padStart(2, "0")}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\nFriday theek 12:00 AM par group me custom celebration poster aur sweet wish post karegi! 🥳✨`, };
+        handled: true,
+        replyText: `🎂 *BIRTHDAY SAVED SUCCESSFULLY!* 🎉\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n👤 *Member:* ${targetName} (@${targetPhone})\n📅 *Date:* ${String(day).padStart(2, "0")}/${String(month).padStart(2, "0")}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\nFriday theek 12:00 AM par group me custom celebration poster aur sweet wish post karegi! 🥳✨`,
+      };
     }
 
     // Instant Wish Generator (@birthday wish @Member)
@@ -846,23 +923,29 @@ Format your output EXACTLY as a pinned executive checklist:
       try {
         const ai = new GoogleGenAI({ apiKey });
         const prompt = `Write a super sweet, warm, high-energy, 4-line Birthday Celebration Poem + funny blessing in natural Hinglish for "${targetPerson}" in a WhatsApp group. Use emojis.`;
-        const resp = await ai.models.generateContent({ model: "gemini-3.6-flash", contents: prompt });
+        const resp = await ai.models.generateContent({ model: "gemini-3.5-flash", contents: prompt });
         if (resp.text) customPoem = resp.text.trim();
       } catch {}
     }
 
     return {
-      handled: true, replyText: `🎂🎉 *HAPPY BIRTHDAY ${targetPerson.toUpperCase()}!* 🥳🎈
+      handled: true,
+      replyText: `🎂🎉 *HAPPY BIRTHDAY ${targetPerson.toUpperCase()}!* 🥳🎈
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 ${customPoem}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
-👑 _Treat kab mil rahi hai sabko? Party toh banti hai!_ 🍕🍻`, };
+👑 _Treat kab mil rahi hai sabko? Party toh banti hai!_ 🍕🍻`,
+    };
   }
 
   // ── 8. @meme AI Meme & Sticker Generator ──────────────────────────────────
 
   public async handleMemeGenerator(
-    sock: any, groupJid: string, rawText: string, senderName: string, quotedMessage?: QuotedMessageContext | null
+    sock: any,
+    groupJid: string,
+    rawText: string,
+    senderName: string,
+    quotedMessage?: QuotedMessageContext | null
   ): Promise<{ handled: boolean; replyText?: string }> {
     const topic = rawText
       .replace(/^(?:@meme|\/meme|meme\s*banao|meme)\s*[:=-]?\s*/i, "")
@@ -878,11 +961,12 @@ ${customPoem}
       try {
         const ai = new GoogleGenAI({ apiKey });
         const res = await ai.models.generateContent({
-          model: "gemini-3.6-flash",
+          model: "gemini-3.5-flash",
           contents: `Create a super funny, relatable Indian Hinglish meme punchline about: "${target}".
 Format:
 Caption: [1-2 line funny punchline]
-ImagePrompt: [Visual description for 3D animated or photorealistic funny meme scene]`, });
+ImagePrompt: [Visual description for 3D animated or photorealistic funny meme scene]`,
+        });
         const full = res.text?.trim() || "";
         const capMatch = full.match(/Caption:\s*([\s\S]*?)(?:ImagePrompt:|$)/i);
         const promptMatch = full.match(/ImagePrompt:\s*([\s\S]*)/i);
@@ -896,7 +980,9 @@ ImagePrompt: [Visual description for 3D animated or photorealistic funny meme sc
       const genRes = await imageGenerationService.generateImage(memePrompt, { aspectRatio: "1:1" });
       if (genRes.success && genRes.buffer && sock) {
         await sock.sendMessage(groupJid, {
-          image: genRes.buffer, caption: memeCaption, });
+          image: genRes.buffer,
+          caption: memeCaption,
+        });
         return { handled: true };
       }
     } catch (imgErr) {
@@ -904,13 +990,18 @@ ImagePrompt: [Visual description for 3D animated or photorealistic funny meme sc
     }
 
     return {
-      handled: true, replyText: `${memeCaption}\n\n🖼️ _(Meme Scene: ${memePrompt})_`, };
+      handled: true,
+      replyText: `${memeCaption}\n\n🖼️ _(Meme Scene: ${memePrompt})_`,
+    };
   }
 
   // ── 9. @poll WhatsApp Native Interactive Poll Creator ─────────────────────
 
   public async handlePollCreator(
-    sock: any, groupJid: string, rawText: string, senderName: string
+    sock: any,
+    groupJid: string,
+    rawText: string,
+    senderName: string
   ): Promise<{ handled: boolean; replyText?: string }> {
     const clean = rawText.replace(/^(?:@poll|\/poll|poll\s*banao|poll)\s*[:=-]?\s*/i, "").trim();
 
@@ -926,10 +1017,14 @@ Input: "${clean || "Sunday Cricket match"}"
 
 Output STRICT JSON ONLY:
 {
-  "question": "Clear poll title / question", "options": ["Option 1", "Option 2", "Option 3"]
+  "question": "Clear poll title / question",
+  "options": ["Option 1", "Option 2", "Option 3"]
 }`;
         const resp = await ai.models.generateContent({
-          model: "gemini-3.6-flash", contents: prompt, config: { responseMimeType: "application/json" }, });
+          model: "gemini-3.5-flash",
+          contents: prompt,
+          config: { responseMimeType: "application/json" },
+        });
         const json = JSON.parse(resp.text?.trim() || "{}");
         if (json.question && Array.isArray(json.options) && json.options.length >= 2) {
           question = json.question.slice(0, 250);
@@ -957,13 +1052,17 @@ Output STRICT JSON ONLY:
 
     const optionsList = options.map((opt, i) => `${i + 1}️⃣ ${opt}`).join("\n");
     return {
-      handled: true, replyText: `📊 *GROUP LIVE POLL: ${question}* 🗳️\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n${optionsList}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n_Apna option chunein!_`, };
+      handled: true,
+      replyText: `📊 *GROUP LIVE POLL: ${question}* 🗳️\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n${optionsList}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n_Apna option chunein!_`,
+    };
   }
 
   // ── 10. @translate Multi-Language Live Translator ─────────────────────────
 
   public async handleLiveTranslator(
-    rawText: string, quotedMessage?: QuotedMessageContext | null, senderName = "Member"
+    rawText: string,
+    quotedMessage?: QuotedMessageContext | null,
+    senderName = "Member"
   ): Promise<{ handled: boolean; replyText?: string }> {
     const clean = rawText.replace(/^(?:@translate|\/translate|@tarjuma|translate|anuvad)\s*[:=-]?\s*/i, "").trim();
 
@@ -974,7 +1073,9 @@ Output STRICT JSON ONLY:
 
     if (!textToTranslate) {
       return {
-        handled: true, replyText: `🌐 *Language Translator:* Kripya kisi message par swipe karke \`@translate [Language]\` likhein ya text ke sath language batayein (Jaise: \`@translate in Bengali "Hello how are you"\`).`, };
+        handled: true,
+        replyText: `🌐 *Language Translator:* Kripya kisi message par swipe karke \`@translate [Language]\` likhein ya text ke sath language batayein (Jaise: \`@translate in Bengali "Hello how are you"\`).`,
+      };
     }
 
     const apiKey = process.env.GEMINI_API_KEY;
@@ -994,7 +1095,7 @@ Format Output:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 💡 _Translation accurate and context-aware!_`;
 
-        const resp = await ai.models.generateContent({ model: "gemini-3.6-flash", contents: prompt });
+        const resp = await ai.models.generateContent({ model: "gemini-3.5-flash", contents: prompt });
         const text = resp.text?.trim();
         if (text) return { handled: true, replyText: text };
       } catch (e: any) {
@@ -1003,13 +1104,18 @@ Format Output:
     }
 
     return {
-      handled: true, replyText: `🌐 *Translation (${targetLanguage}):*\n"${textToTranslate}"`, };
+      handled: true,
+      replyText: `🌐 *Translation (${targetLanguage}):*\n"${textToTranslate}"`,
+    };
   }
 
   // ── 11. @vibe / @icebreaker Group Mood & Fight Cooler ─────────────────────
 
   public async handleVibeRadarAndIcebreaker(
-    groupJid: string, groupName: string, rawText: string, senderName: string
+    groupJid: string,
+    groupName: string,
+    rawText: string,
+    senderName: string
   ): Promise<{ handled: boolean; replyText?: string }> {
     const isJoke = /\b(joke|chutkula|hasao|funny)\b/i.test(rawText);
     const isFightCooler = /\b(ladai|fight|gussa|shant|cool|jhagda)\b/i.test(rawText);
@@ -1017,7 +1123,9 @@ Format Output:
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       return {
-        handled: true, replyText: `🌟 *Group Vibe Check:* Group ka mahaul 100% positive and energetic hai! Sab log chill karein! 😎✨`, };
+        handled: true,
+        replyText: `🌟 *Group Vibe Check:* Group ka mahaul 100% positive and energetic hai! Sab log chill karein! 😎✨`,
+      };
     }
 
     try {
@@ -1027,14 +1135,16 @@ Format Output:
         : isFightCooler
         ? `Two people or members are arguing in this WhatsApp group. Write a hilarious, witty, lighthearted intervention that immediately diffuses the tension and makes everyone laugh. Use Bollywood punchlines or relatable banter.`
         : `You are Friday AI, checking the vibe of WhatsApp group "${groupName}".
-Drop an irresistible, ultra-engaging icebreaker question or "Would You Rather" scenario that forces all silent group members to reply and start chatting! Use emojis.`;
+Drop an irresistible, hilarious, ultra-engaging icebreaker question or "Would You Rather" scenario that forces all silent group members to reply and start chatting! Use emojis.`;
 
-      const resp = await ai.models.generateContent({ model: "gemini-3.6-flash", contents: prompt });
+      const resp = await ai.models.generateContent({ model: "gemini-3.5-flash", contents: prompt });
       const text = resp.text?.trim();
       if (text) {
         const title = isJoke ? `😂 *FRIDAY JOKE OF THE DAY* 🎤` : isFightCooler ? `🕊️ *FRIDAY PEACE & CHILL RADAR* 🧊` : `⚡ *FRIDAY GROUP VIBE CHECK & ICEBREAKER* 🎯`;
         return {
-          handled: true, replyText: `${title}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n${text}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n_Mahaul set hai, sab log participate karein!_ 🔥`, };
+          handled: true,
+          replyText: `${title}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n${text}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n_Mahaul set hai, sab log participate karein!_ 🔥`,
+        };
       }
     } catch (e: any) {
       return { handled: true, replyText: `⚠️ Vibe check error: ${e?.message || e}` };
@@ -1046,7 +1156,9 @@ Drop an irresistible, ultra-engaging icebreaker question or "Would You Rather" s
   // ── 12. @liedetector / @psychology Polygraph & Lie Detector ───────────────
 
   public async handleLieDetector(
-    rawText: string, senderName = "Member"
+    rawText: string,
+    quotedMessage?: QuotedMessageContext | null,
+    senderName = "Member"
   ): Promise<{ handled: boolean; replyText?: string }> {
     const claim = rawText
       .replace(/^(?:@liedetector|@lie|@psychology|\/liedetector|\/lie|\/psychology|sach\s*ya\s*jhooth)\s*[:=-]?\s*/i, "")
@@ -1089,7 +1201,7 @@ Structure output EXACTLY like this:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 ⚖️ _Polygraph analysis completed by Friday AI!_`;
 
-      const resp = await ai.models.generateContent({ model: "gemini-3.6-flash", contents: prompt });
+      const resp = await ai.models.generateContent({ model: "gemini-3.5-flash", contents: prompt });
       const text = resp.text?.trim();
       if (text) return { handled: true, replyText: text };
     } catch (e: any) {
@@ -1102,7 +1214,9 @@ Structure output EXACTLY like this:
   // ── 13. @rap Desi Hip-Hop Rap Generator ───────────────────────────────────
 
   public async handleDesiRapGenerator(
-    rawText: string, quotedMessage?: QuotedMessageContext | null, senderName = "Member"
+    rawText: string,
+    quotedMessage?: QuotedMessageContext | null,
+    senderName = "Member"
   ): Promise<{ handled: boolean; replyText?: string }> {
     const target = rawText
       .replace(/^(?:@rap|\/rap|rap\s*banao|rap)\s*[:=-]?\s*/i, "")
@@ -1125,7 +1239,7 @@ Include funny Indian references (chai, bike, late aana, excuses, swag, gaming, d
 Rhymes must be tight and catchy in authentic Hinglish slang (hard, bantai, scene, boss).
 CRITICAL: No vulgar/abusive words. Keep it high vibe and purely for friendly laughter.`;
 
-      const resp = await ai.models.generateContent({ model: "gemini-3.6-flash", contents: prompt });
+      const resp = await ai.models.generateContent({ model: "gemini-3.5-flash", contents: prompt });
       const text = resp.text?.trim();
       if (text) {
         return {
@@ -1156,7 +1270,9 @@ CRITICAL: No vulgar/abusive words. Keep it high vibe and purely for friendly lau
 
     if (!apiKey) {
       return {
-        handled: true, replyText: `⏳ *Year 2031 Prediction:* ${targetPerson} will be a billionaire drinking coconut water on a private yacht! 🚀`, };
+        handled: true,
+        replyText: `⏳ *Year 2031 Prediction:* ${targetPerson} will be a billionaire drinking coconut water on a private yacht! 🚀`,
+      };
     }
 
     try {
@@ -1166,11 +1282,13 @@ Create a hilarious, ultra-detailed, witty "Future Biography & Destiny Card" for 
 Predict their future career, hilarious habits (that never changed), relationship status, and wealth in funny Hinglish.
 Keep it positive, clever, and laugh-out-loud funny.`;
 
-      const resp = await ai.models.generateContent({ model: "gemini-3.6-flash", contents: prompt });
+      const resp = await ai.models.generateContent({ model: "gemini-3.5-flash", contents: prompt });
       const text = resp.text?.trim();
       if (text) {
         return {
-          handled: true, replyText: `⏳ *FRIDAY TIME-MACHINE: YEAR 2031 DESTINY* 🔮✨\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n👤 *Subject:* ${targetPerson}\n\n${text}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n🌌 _Kismat locked in the blockchain of destiny!_ 🚀`, };
+          handled: true,
+          replyText: `⏳ *FRIDAY TIME-MACHINE: YEAR 2031 DESTINY* 🔮✨\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n👤 *Subject:* ${targetPerson}\n\n${text}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n🌌 _Kismat locked in the blockchain of destiny!_ 🚀`,
+        };
       }
     } catch (e: any) {
       return { handled: true, replyText: `⚠️ Future oracle error: ${e?.message || e}` };
@@ -1182,7 +1300,9 @@ Keep it positive, clever, and laugh-out-loud funny.`;
   // ── 15. @srk / @tonystark / @amitabh / @speakas Celebrity Clone ────────────
 
   public async handleCelebrityClone(
-    rawText: string, quotedMessage?: QuotedMessageContext | null, senderName = "Member"
+    rawText: string,
+    quotedMessage?: QuotedMessageContext | null,
+    senderName = "Member"
   ): Promise<{ handled: boolean; replyText?: string }> {
     let celeb = "Shah Rukh Khan";
     const clean = rawText.toLowerCase();
@@ -1217,7 +1337,7 @@ User speaking: ${senderName}.
 Use iconic catchphrases, dramatic pauses, signature dialogues, and authentic charisma of ${celeb} in natural Hindi/Hinglish.
 Keep it entertaining, 4-5 lines.`;
 
-      const resp = await ai.models.generateContent({ model: "gemini-3.6-flash", contents: prompt });
+      const resp = await ai.models.generateContent({ model: "gemini-3.5-flash", contents: prompt });
       const text = resp.text?.trim();
       if (text) {
         return {
@@ -1248,7 +1368,9 @@ Keep it entertaining, 4-5 lines.`;
 
     if (!apiKey) {
       return {
-        handled: true, replyText: `🤖 *Simulating @${targetPerson}:* "Haan bhai 2 min me aata hoon..." 😅`, };
+        handled: true,
+        replyText: `🤖 *Simulating @${targetPerson}:* "Haan bhai 2 min me aata hoon..." 😅`,
+      };
     }
 
     try {
@@ -1263,11 +1385,13 @@ Simulate EXACTLY how ${targetPerson} would reply in WhatsApp:
 - Punctuation quirks and casual, lazy typing.
 Keep it 2-3 lines and wildly relatable.`;
 
-      const resp = await ai.models.generateContent({ model: "gemini-3.6-flash", contents: prompt });
+      const resp = await ai.models.generateContent({ model: "gemini-3.5-flash", contents: prompt });
       const text = resp.text?.trim();
       if (text) {
         return {
-          handled: true, replyText: `🤖 *SIMULATING @${targetPerson.toUpperCase()}'S EXACT BRAIN* 👥⚡\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n${text}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n🤣 _(Pakka yehi bolte na? Sach batao!)_`, };
+          handled: true,
+          replyText: `🤖 *SIMULATING @${targetPerson.toUpperCase()}'S EXACT BRAIN* 👥⚡\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n${text}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n🤣 _(Pakka yehi bolte na? Sach batao!)_`,
+        };
       }
     } catch (e: any) {
       return { handled: true, replyText: `⚠️ Mimic error: ${e?.message || e}` };
@@ -1279,7 +1403,10 @@ Keep it 2-3 lines and wildly relatable.`;
   // ── 17. @movie / @poster Movie Cast & Poster Generator ────────────────────
 
   public async handleMovieCastPoster(
-    sock: any, groupJid: string, rawText: string, senderName: string
+    sock: any,
+    groupJid: string,
+    rawText: string,
+    senderName: string
   ): Promise<{ handled: boolean; replyText?: string }> {
     const clean = rawText
       .replace(/^(?:@movie|@poster|\/movie|\/poster|movie\s*cast)\s*[:=-]?\s*/i, "")
@@ -1294,12 +1421,13 @@ Keep it 2-3 lines and wildly relatable.`;
       try {
         const ai = new GoogleGenAI({ apiKey });
         const res = await ai.models.generateContent({
-          model: "gemini-3.6-flash",
+          model: "gemini-3.5-flash",
           contents: `Create an epic Bollywood/Hollywood crossover blockbuster movie cast and plot synopsis for: "${topic}".
 Assign funny dramatic character roles (e.g. Mastermind Hero, Sarcastic Tech Guy, Emotional Friend, Main Villain).
 Format:
 Synopsis: [3-4 lines dramatic trailer script]
-PosterPrompt: [Visual description for Hollywood-grade cinematic movie poster]`, });
+PosterPrompt: [Visual description for Hollywood-grade cinematic movie poster]`,
+        });
         const full = res.text?.trim() || "";
         const synMatch = full.match(/Synopsis:\s*([\s\S]*?)(?:PosterPrompt:|$)/i);
         const pMatch = full.match(/PosterPrompt:\s*([\s\S]*)/i);
@@ -1313,7 +1441,9 @@ PosterPrompt: [Visual description for Hollywood-grade cinematic movie poster]`, 
       const genRes = await imageGenerationService.generateImage(imagePrompt, { aspectRatio: "16:9" });
       if (genRes.success && genRes.buffer && sock) {
         await sock.sendMessage(groupJid, {
-          image: genRes.buffer, caption: synopsisText, });
+          image: genRes.buffer,
+          caption: synopsisText,
+        });
         return { handled: true };
       }
     } catch (imgErr) {
@@ -1321,13 +1451,16 @@ PosterPrompt: [Visual description for Hollywood-grade cinematic movie poster]`, 
     }
 
     return {
-      handled: true, replyText: `${synopsisText}\n\n🎟️ _In Cinemas Worldwide This Friday!_ 🌟`, };
+      handled: true,
+      replyText: `${synopsisText}\n\n🎟️ _In Cinemas Worldwide This Friday!_ 🌟`,
+    };
   }
 
   // ── 18. @commentary Bhojpuri & Sidhu Sports Commentary ────────────────────
 
   public async handleSportsCommentary(
-    rawText: string, senderName: string
+    rawText: string,
+    senderName: string
   ): Promise<{ handled: boolean; replyText?: string }> {
     const clean = rawText
       .replace(/^(?:@commentary|\/commentary|commentary)\s*[:=-]?\s*/i, "")
@@ -1338,7 +1471,9 @@ PosterPrompt: [Visual description for Hollywood-grade cinematic movie poster]`, 
 
     if (!apiKey) {
       return {
-        handled: true, replyText: `🎙️ *Bhojpuri Commentary:* Ee dekhi bhaiya, ball gail boundary ke paar! Chauka! 💥🏏`, };
+        handled: true,
+        replyText: `🎙️ *Bhojpuri Commentary:* Ee dekhi bhaiya, ball gail boundary ke paar! Chauka! 💥🏏`,
+      };
     }
 
     try {
@@ -1347,11 +1482,13 @@ PosterPrompt: [Visual description for Hollywood-grade cinematic movie poster]`, 
 Use authentic high-energy Bhojpuri & Sidhuisms punchlines ("Eee dekhi babua", "Thoko taali", "Dhuaan nikaal diye", "Gagan-chumbi chhakka").
 3-4 lines of pure adrenaline and entertainment.`;
 
-      const resp = await ai.models.generateContent({ model: "gemini-3.6-flash", contents: prompt });
+      const resp = await ai.models.generateContent({ model: "gemini-3.5-flash", contents: prompt });
       const text = resp.text?.trim();
       if (text) {
         return {
-          handled: true, replyText: `🎙️ *FRIDAY LIVE DHAMAKA COMMENTARY* 🏏🔥\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n${text}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n⚡ _Thoko taali! Boundary paar!_ 💥`, };
+          handled: true,
+          replyText: `🎙️ *FRIDAY LIVE DHAMAKA COMMENTARY* 🏏🔥\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n${text}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n⚡ _Thoko taali! Boundary paar!_ 💥`,
+        };
       }
     } catch (e: any) {
       return { handled: true, replyText: `⚠️ Commentary error: ${e?.message || e}` };
@@ -1363,7 +1500,11 @@ Use authentic high-energy Bhojpuri & Sidhuisms punchlines ("Eee dekhi babua", "T
   // ── 19. @song / @gaana / @music Instant Song Radar & Streaming Links ──────
 
   public async handleSongFinder(
-    sock: any, groupJid: string, rawText: string, senderName = "Member", messageKey?: any
+    sock: any,
+    groupJid: string,
+    rawText: string,
+    senderName = "Member",
+    messageKey?: any
   ): Promise<{ handled: boolean; replyText?: string }> {
     const { whatsappFeatureEngine } = await import("../whatsappFeatureEngine");
     const res = await whatsappFeatureEngine.searchMusicWithLyrics(rawText, senderName, groupJid);
@@ -1372,7 +1513,10 @@ Use authentic high-energy Bhojpuri & Sidhuisms punchlines ("Eee dekhi babua", "T
     if (res.audioBuffer && sock && groupJid) {
       try {
         await sock.sendMessage(groupJid, {
-          audio: res.audioBuffer, mimetype: "audio/mp4", ptt: false, });
+          audio: res.audioBuffer,
+          mimetype: "audio/mp4",
+          ptt: false,
+        });
       } catch (audioErr) {
         console.warn("[GroupSuperPowers] Failed to send preview audio:", audioErr);
       }
@@ -1483,7 +1627,9 @@ Bhagwan aapko lambi umar, beshumar khushiyan, aur bohot saari success de! 🚀�
 
           try {
             await sock.sendMessage(groupId, {
-              text: greetingCard, mentions: [`${b.memberPhone}@s.whatsapp.net`], });
+              text: greetingCard,
+              mentions: [`${b.memberPhone}@s.whatsapp.net`],
+            });
             wishedCount++;
             console.log(`[GroupSuperPowers] Sent midnight birthday wish to @${b.memberPhone} in ${groupId}`);
           } catch (sendErr) {
@@ -1498,7 +1644,16 @@ Bhagwan aapko lambi umar, beshumar khushiyan, aur bohot saari success de! 🚀�
   // ── 9. Natural Language Command Intent Resolver & Smart Suggestion Engine ──
 
   public async detectAndResolveNaturalCommand(
-    sock: any, groupJid: string, groupName: string, rawText: string, senderName: string, senderPhone: string, senderJid: string, messageKey: any, quotedMessage?: QuotedMessageContext | null, isOwner = false
+    sock: any,
+    groupJid: string,
+    groupName: string,
+    rawText: string,
+    senderName: string,
+    senderPhone: string,
+    senderJid: string,
+    messageKey: any,
+    quotedMessage?: QuotedMessageContext | null,
+    isOwner = false
   ): Promise<{ handled: boolean; replyText?: string; mentions?: string[] }> {
     const clean = (rawText || "").toLowerCase().trim();
     if (!clean || clean.length < 4) return { handled: false };
@@ -1525,7 +1680,7 @@ Bhagwan aapko lambi umar, beshumar khushiyan, aur bohot saari success de! 🚀�
     // 3. Praise / Hype-man Intent
     if (/(?:praise|tareef|hype|appreciate|badaai)\s*(?:karo|kar\s*do|karna)?/i.test(clean)) {
       const target = rawText.replace(/^(?:friday|hey\s*friday)?\s*(?:praise|tareef|hype|appreciate)\s*(?:karo|kar\s*do|karna)?\s*(?:ka|ki|ko)?\s*/i, "").trim();
-      return await this.handleRoastAndPraise(`@praise ${target}`, senderName);
+      return await this.handleRoastAndPraise(`@praise ${target}`, quotedMessage, senderName);
     }
 
     // 4. Group Quiz Intent
@@ -1536,25 +1691,25 @@ Bhagwan aapko lambi umar, beshumar khushiyan, aur bohot saari success de! 🚀�
 
     // 5. Bill Split / Hisaab Intent
     if (/(?:hisaab|hisab|bill|kharcha|paisa|rupees?|split)\s*(?:split|baant|calculate|karo|batao|divide)/i.test(clean) || /(?:split|divide)\s*(?:karo|kar\s*do)?\s*\d+/i.test(clean)) {
-      return await this.handleBillSplit(rawText, senderName);
+      return await this.handleBillSplit(rawText, groupName, senderName);
     }
 
     // 6. Fact Check / Judge Intent
     if (/(?:fact\s*check|sach\s*kya\s*hai|sahi\s*bol\s*raha|faisla|asliyat\s*batao|kya\s*ye\s*sach)/i.test(clean)) {
-      return await this.handleJudgeFactCheck(rawText, senderName);
+      return await this.handleJudgeFactCheck(rawText, quotedMessage, senderName);
     }
 
     // 7. Decisions / Notes Intent
     if (/(?:kya\s*decide\s*hua|decision|meeting\s*notes|to-?do|tasks?|final\s*kya\s*hua|kya\s*faisla)/i.test(clean)) {
-      return await this.handleDecisionTracker(groupJid, rawText, quotedMessage);
+      return await this.handleDecisionTracker(groupJid, groupName, rawText, quotedMessage);
     }
 
     // 8. Birthday Add / List Intent
     if (/(?:birthday|bday|janamdin)\s*(?:add|save|note|set)\s*(?:karo|kar\s*do)?/i.test(clean) || /(?:ka\s*birthday|ka\s*janamdin)\s*(?:hai|aata|padta)/i.test(clean)) {
-      return await this.handleBirthdayManager(groupJid, `@birthday add ${rawText}`, senderPhone, quotedMessage);
+      return await this.handleBirthdayManager(groupJid, groupName, `@birthday add ${rawText}`, senderName, senderPhone, quotedMessage);
     }
     if (/(?:birthdays?|janamdin)\s*(?:list|kab\s*hai|upcoming|batao)/i.test(clean)) {
-      return await this.handleBirthdayManager(groupJid, "@birthday list", quotedMessage);
+      return await this.handleBirthdayManager(groupJid, groupName, "@birthday list", senderName, senderPhone, quotedMessage);
     }
 
     // 9. Safety @block safe / @allow all Intent
@@ -1579,17 +1734,17 @@ Bhagwan aapko lambi umar, beshumar khushiyan, aur bohot saari success de! 🚀�
 
     // 11. Meme & Sticker Generator Intent
     if (/(?:meme\s*banao|koi\s*meme|funny\s*meme|meme\s*create|roast\s*meme|meme\s*dikhao)/i.test(clean)) {
-      return await this.handleMemeGenerator(sock, quotedMessage);
+      return await this.handleMemeGenerator(sock, groupJid, rawText, senderName, quotedMessage);
     }
 
     // 12. Poll Creator Intent
     if (/(?:poll\s*banao|voting\s*start|kisi\s*baat\s*ka\s*poll|poll\s*create|poll\s*dalo)/i.test(clean)) {
-      return await this.handlePollCreator(sock, senderName);
+      return await this.handlePollCreator(sock, groupJid, rawText, senderName);
     }
 
     // 13. Live Translator Intent
     if (/(?:translate\s*karo|anuvad\s*karo|isko\s*hindi\s*me|isko\s*english\s*me|isko\s*bengali\s*me|isko\s*marathi\s*me|isko\s*tamil\s*me|isko\s*telugu\s*me)/i.test(clean)) {
-      return await this.handleLiveTranslator(rawText, senderName);
+      return await this.handleLiveTranslator(rawText, quotedMessage, senderName);
     }
 
     // 13B. Instant Exotel Phone Call Intent ("call karo", "mujhe call karo", "call me", "call boss", "phone karo", etc.)
@@ -1598,7 +1753,7 @@ Bhagwan aapko lambi umar, beshumar khushiyan, aur bohot saari success de! 🚀�
       /^(?:friday|hey\s*friday)?\s*(?:call|phone)\s*(?:karo|lagao|kijiye|kar\s*do)\b/i.test(clean) ||
       /\bcall\s+(?:\+91[\s-]?)?[6-9]\d{9}\b/i.test(clean)
     ) {
-      const extractedNumber = rawText.match(/(?:\+91[\s-]?)?[6-9]\d{9}/) || rawText.match(/\b\d{10, 12}\b/);
+      const extractedNumber = rawText.match(/(?:\+91[\s-]?)?[6-9]\d{9}/) || rawText.match(/\b\d{10,12}\b/);
       const { exotelService } = await import("../exotelService");
       const config = exotelService.getConfig();
       const targetPhone = extractedNumber
@@ -1606,50 +1761,56 @@ Bhagwan aapko lambi umar, beshumar khushiyan, aur bohot saari success de! 🚀�
         : (isOwner && senderPhone ? senderPhone : config.bossNotificationNumber || process.env.BOSS_WHATSAPP_NUMBER || "919315570187").replace(/\D/g, "");
 
       const callRes = await exotelService.makeOutboundCall({
-        to: targetPhone, customMessage: "Boss, aapne WhatsApp par call karne ko bola tha, isliye maine call lagayi hai.", });
+        to: targetPhone,
+        customMessage: "Boss, aapne WhatsApp par call karne ko bola tha, isliye maine call lagayi hai.",
+      });
 
       if (callRes.success) {
         return {
-          handled: true, replyText: `📞 *Ji Boss! Main abhi aapko (+${targetPhone}) par Exotel Telephony se call laga rahi hoon... Phone uthaiye!* ⚡`, };
+          handled: true,
+          replyText: `📞 *Ji Boss! Main abhi aapko (+${targetPhone}) par Exotel Telephony se call laga rahi hoon... Phone uthaiye!* ⚡`,
+        };
       } else {
         return {
-          handled: true, replyText: `⚠️ *Call connect nahi ho paayi:* ${callRes.message}\n_Kripya Exotel settings me API keys aur Virtual number check karein._`, };
+          handled: true,
+          replyText: `⚠️ *Call connect nahi ho paayi:* ${callRes.message}\n_Kripya Exotel settings me API keys aur Virtual number check karein._`,
+        };
       }
     }
 
     // 14. Vibe Radar, Icebreaker & Joke Intent
     if (/(?:vibe\s*check|icebreaker|joke\s*sunao|chutkula\s*sunao|group\s*ka\s*mahaul|ladai\s*rok|jhagda\s*rok|bore\s*ho\s*raha)/i.test(clean)) {
-      return await this.handleVibeRadarAndIcebreaker(groupJid, senderName);
+      return await this.handleVibeRadarAndIcebreaker(groupJid, groupName, rawText, senderName);
     }
 
     // 15. AI Lie Detector & Cinematic Polygraph Intent
     if (/(?:sach\s*ya\s*jhooth|jhooth\s*pakdo|jhooth\s*bol\s*raha|lie\s*detector|polygraph|psychology\s*test|stress\s*analysis)/i.test(clean)) {
-      return await this.handleLieDetector(rawText, senderName);
+      return await this.handleLieDetector(rawText, quotedMessage, senderName);
     }
 
     // 16. AI Desi Hip-Hop / Gully Boy Rap Intent
     if (/(?:rap\s*banao|desi\s*rap|gully\s*rap|cypher\s*banao|rap\s*sunao|diss\s*track)/i.test(clean)) {
-      return await this.handleDesiRapGenerator(rawText, senderName);
+      return await this.handleDesiRapGenerator(rawText, quotedMessage, senderName);
     }
 
     // 17. Time-Machine Future Prediction / Oracle Intent
     if (/(?:future\s*batao|5\s*saal\s*baad|kismat\s*batao|bhavishya\s*batao|future\s*prediction|oracle|kismat\s*khol)/i.test(clean)) {
-      return await this.handleFutureOracle(rawText, senderName);
+      return await this.handleFutureOracle(rawText, quotedMessage, senderName);
     }
 
     // 18. Celebrity Clone & SpeakAs Intent
     if (/(?:srk\s*style|shahrukh\s*style|tony\s*stark\s*style|amitabh\s*style|modi\s*style|speakas|celebrity\s*style)/i.test(clean)) {
-      return await this.handleCelebrityClone(rawText, senderName);
+      return await this.handleCelebrityClone(rawText, quotedMessage, senderName);
     }
 
     // 19. Member Doppelganger / Ghost Mimic Intent
     if (/(?:mimic\s*karo|copy\s*karo|iski\s*tarah\s*bolo|clone\s*karo|acting\s*karo|doppelganger)/i.test(clean)) {
-      return await this.handleMemberMimic(rawText, senderName);
+      return await this.handleMemberMimic(rawText, quotedMessage, senderName);
     }
 
     // 20. Movie Cast, Script & Poster Intent
     if (/(?:movie\s*cast|poster\s*banao|filmi\s*poster|film\s*banao|trailer\s*banao|blockbuster\s*movie)/i.test(clean)) {
-      return await this.handleMovieCastPoster(sock, senderName);
+      return await this.handleMovieCastPoster(sock, groupJid, rawText, senderName);
     }
 
     // 21. High-Energy Cricket / Sports Commentary Intent
@@ -1660,7 +1821,7 @@ Bhagwan aapko lambi umar, beshumar khushiyan, aur bohot saari success de! 🚀�
     // 22. Follow-Up "Iska link do" / "Link bhejo" for Songs
     const { whatsappFeatureEngine } = await import("../whatsappFeatureEngine");
     if (whatsappFeatureEngine.isSongLinkFollowUp(rawText, quotedMessage?.text)) {
-      const linkReply = whatsappFeatureEngine.handleSongLinkFollowUp(groupJid, quotedMessage?.text);
+      const linkReply = whatsappFeatureEngine.handleSongLinkFollowUp(groupJid, rawText, quotedMessage?.text);
       if (linkReply) {
         return { handled: true, replyText: linkReply };
       }
@@ -1668,7 +1829,7 @@ Bhagwan aapko lambi umar, beshumar khushiyan, aur bohot saari success de! 🚀�
 
     // 22.1. Song Details Follow-Up ("Singer kaun hai", "Movie name", "Album", "Lyrics", etc.)
     if (whatsappFeatureEngine.isSongDetailsQuery(rawText, quotedMessage?.text)) {
-      const detailsReply = whatsappFeatureEngine.handleSongDetailsQuery(groupJid, quotedMessage?.text);
+      const detailsReply = whatsappFeatureEngine.handleSongDetailsQuery(groupJid, rawText, quotedMessage?.text);
       if (detailsReply) {
         return { handled: true, replyText: detailsReply };
       }
@@ -1681,7 +1842,10 @@ Bhagwan aapko lambi umar, beshumar khushiyan, aur bohot saari success de! 🚀�
         if (altRes.audioBuffer && sock) {
           try {
             await sock.sendMessage(groupJid, {
-              audio: altRes.audioBuffer, mimetype: "audio/mp4", ptt: false, });
+              audio: altRes.audioBuffer,
+              mimetype: "audio/mp4",
+              ptt: false,
+            });
           } catch (e) {}
         }
         return { handled: true, replyText: altRes.replyText };
@@ -1690,12 +1854,18 @@ Bhagwan aapko lambi umar, beshumar khushiyan, aur bohot saari success de! 🚀�
 
     // 22.3. Full Song Request ("Full song" / "Pura gaana" from JioSaavn)
     if (whatsappFeatureEngine.isFullSongRequest(rawText, quotedMessage?.text)) {
-      const fullRes = await whatsappFeatureEngine.handleFullSongRequest(groupJid, senderName);
+      const fullRes = await whatsappFeatureEngine.handleFullSongRequest(groupJid, rawText, senderName);
       if (fullRes.handled && fullRes.replyText) {
         if (fullRes.audioBuffer && sock) {
           try {
             await sock.sendMessage(groupJid, {
-              audio: fullRes.audioBuffer, replyText: fullRes.replyText };
+              audio: fullRes.audioBuffer,
+              mimetype: "audio/mp4",
+              ptt: false,
+            });
+          } catch (e) {}
+        }
+        return { handled: true, replyText: fullRes.replyText };
       }
     }
 
@@ -1706,28 +1876,34 @@ Bhagwan aapko lambi umar, beshumar khushiyan, aur bohot saari success de! 🚀�
         if (nextRes.audioBuffer && sock) {
           try {
             await sock.sendMessage(groupJid, {
-              audio: nextRes.audioBuffer, replyText: nextRes.replyText };
+              audio: nextRes.audioBuffer,
+              mimetype: "audio/mp4",
+              ptt: false,
+            });
+          } catch (e) {}
+        }
+        return { handled: true, replyText: nextRes.replyText };
       }
     }
 
     // 23. Instant Song & Music Radar Intent
     if (/(?:(?:koi\s+)?(?:song|gaana|music)\s+(?:dhundo|sunao|chalao|ka\s*link|bhejo|play\s*karo|preview)|(?:ye\s+)?kaun\s*sa\s*(?:song|gaana)\s*hai)/i.test(clean)) {
-      return await this.handleSongFinder(sock, messageKey);
+      return await this.handleSongFinder(sock, groupJid, rawText, senderName, messageKey);
     }
 
     // 24. AI Shazam & Humming Intent
     if (/(?:ye\s*kaun\s*sa\s*gaana|shazam|humming|gunguna|audio\s*pehchano)/i.test(clean)) {
-      return await this.handleHummingShazam(sock, messageKey);
+      return await this.handleHummingShazam(sock, groupJid, rawText, senderName, quotedMessage, messageKey);
     }
 
     // 25. Reel & Shorts BGM Intent
     if (/(?:reel\s*ka\s*gaana|background\s*music|bgm\s*batao|shorts?\s*ka\s*gaana|reel\s*audio)/i.test(clean)) {
-      return await this.handleReelBgmExtractor(sock, messageKey);
+      return await this.handleReelBgmExtractor(sock, groupJid, rawText, senderName, messageKey);
     }
 
     // 26. Group Billboard Chart Intent
     if (/(?:group\s*chart|top\s*chart|billboard\s*chart|sabse\s*zyada\s*kaun\s*sa\s*gaana|group\s*ka\s*top\s*song)/i.test(clean)) {
-      return await this.handleGroupMusicChart(groupJid, senderName);
+      return await this.handleGroupMusicChart(groupJid, groupName, senderName);
     }
 
     // ── Phase 2: Suspicious / Ambiguous Intent Classifier (Gemini AI Powered) ─
@@ -1774,13 +1950,20 @@ Determine:
 
 Output STRICT JSON only:
 {
-  "action": "EXECUTE" | "SUGGEST" | "IGNORE", "command": "@everyone", "args": "message text", "matchedCommands": [
-    { "cmd": "@tagall [Message]", "desc": "Group ke sabhi members ko urgent notice ke liye tag karega." }, { "cmd": "@quiz start [Topic]", "desc": "Group me live trivia quiz shuru karega." }
+  "action": "EXECUTE" | "SUGGEST" | "IGNORE",
+  "command": "@everyone",
+  "args": "message text",
+  "matchedCommands": [
+    { "cmd": "@tagall [Message]", "desc": "Group ke sabhi members ko urgent notice ke liye tag karega." },
+    { "cmd": "@quiz start [Topic]", "desc": "Group me live trivia quiz shuru karega." }
   ]
 }`;
 
           const resp = await ai.models.generateContent({
-            model: "gemini-3.6-flash", contents: prompt, config: { responseMimeType: "application/json" }, });
+            model: "gemini-3.5-flash",
+            contents: prompt,
+            config: { responseMimeType: "application/json" },
+          });
 
           const json = JSON.parse(resp.text?.trim() || "{}");
 
@@ -1788,7 +1971,16 @@ Output STRICT JSON only:
             const execCmd = `${json.command} ${json.args || ""}`.trim();
             if (this.isSuperPowerCommand(execCmd)) {
               return await this.handleSuperPowerCommand(
-                sock, execCmd, senderJid, messageKey, isOwner
+                sock,
+                groupJid,
+                groupName,
+                execCmd,
+                senderName,
+                senderPhone,
+                senderJid,
+                messageKey,
+                quotedMessage,
+                isOwner
               );
             }
           } else if (json.action === "SUGGEST" && Array.isArray(json.matchedCommands) && json.matchedCommands.length > 0) {

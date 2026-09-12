@@ -143,17 +143,37 @@ ${caption ? `User caption: "${caption}"` : ""}`;
               ? (lowerMime.includes("ogg") ? "audio/ogg" : "audio/mp3")
               : (lowerMime.includes("png") ? "image/png" : lowerMime.includes("webp") ? "image/webp" : "image/jpeg");
 
-        const VISION_FALLBACK_MODELS = ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3-flash"];
+        const VISION_FALLBACK_MODELS = [
+          "gemini-3.1-flash-lite",
+          "gemini-3.5-flash-lite",
+          "gemini-3.5-flash",
+          "gemini-3.1-flash-lite",
+          "gemini-3.6-flash",
+          "gemini-3.5-flash",
+          "gemini-3.5-flash",
+          "gemini-3.5-flash-lite",
+          "gemini-3.1-flash-lite",
+        ];
 
         for (const model of VISION_FALLBACK_MODELS) {
           try {
             const response = await ai.models.generateContent({
               model,
-              contents: [{
-                  role: "user", parts: [
-                    { text: prompt }, {
+              contents: [
+                {
+                  role: "user",
+                  parts: [
+                    { text: prompt },
+                    {
                       inlineData: {
-                        mimeType: normalizedMime, data: base64Data, }, ], });
+                        mimeType: normalizedMime,
+                        data: base64Data,
+                      },
+                    },
+                  ],
+                },
+              ],
+            });
 
             if (response.text && response.text.trim()) {
               analysis = response.text;
@@ -180,7 +200,16 @@ ${caption ? `User caption: "${caption}"` : ""}`;
 
     // Cache latest media in memory and per-chat
     const cachedItem: CachedMediaContext = {
-      buffer, mimeType, sender, caption: caption || fileName, fileName, analysis, ocrText, timestamp: Date.now(), shortSummary, };
+      buffer,
+      mimeType,
+      sender,
+      caption: caption || fileName,
+      fileName,
+      analysis,
+      ocrText,
+      timestamp: Date.now(),
+      shortSummary,
+    };
     this.latestMedia = cachedItem;
     if (chatId) {
       this.latestMediaPerChat.set(chatId, cachedItem);
@@ -192,12 +221,22 @@ ${caption ? `User caption: "${caption}"` : ""}`;
       const thumbBase64 = buffer.length < 500000 ? buffer.toString("base64") : buffer.subarray(0, 400000).toString("base64");
 
       await db.collection("whatsappMediaArchive").doc(mediaId).set({
-        id: mediaId, mediaCategory, caption: caption || fileName || "", ocrText: ocrText || "", photoBase64: thumbBase64, });
+        id: mediaId,
+        sender,
+        mimeType,
+        mediaCategory,
+        caption: caption || fileName || "",
+        analysis,
+        ocrText: ocrText || "",
+        shortSummary,
+        timestamp: Date.now(),
+        photoBase64: thumbBase64,
+      });
     } catch (e) {
       console.warn("[VisionMemoryService] Failed to archive media in Firestore:", e);
     }
 
-    return { analysis, shortSummary };
+    return { analysis, ocrText, mediaCategory, shortSummary };
   }
 
   /**
@@ -221,26 +260,42 @@ ${caption ? `User caption: "${caption}"` : ""}`;
         if (!snap.empty) {
           const doc = snap.docs[0].data() as StoredMediaItem;
           return {
-            hasMedia: true, analysis: doc.analysis, sender: doc.sender, caption: doc.caption, timeAgo: "kuch der pehle", };
+            hasMedia: true,
+            analysis: doc.analysis,
+            sender: doc.sender,
+            caption: doc.caption,
+            timeAgo: "kuch der pehle",
+          };
         }
       } catch (e) {
         console.warn("[VisionMemoryService] Firestore fallback error:", e);
       }
 
       return {
-        hasMedia: false, analysis: "Boss, abhi tak WhatsApp par koi naya photo ya document receive nahi hua hai.", };
+        hasMedia: false,
+        analysis: "Boss, abhi tak WhatsApp par koi naya photo ya document receive nahi hua hai.",
+      };
     }
 
     const minutesAgo = Math.max(1, Math.round((Date.now() - this.latestMedia.timestamp) / 60000));
     return {
-      hasMedia: true, analysis: this.latestMedia.analysis, sender: this.latestMedia.sender, caption: this.latestMedia.caption, timeAgo: `${minutesAgo} minute pehle`, };
+      hasMedia: true,
+      analysis: this.latestMedia.analysis,
+      sender: this.latestMedia.sender,
+      caption: this.latestMedia.caption,
+      timeAgo: `${minutesAgo} minute pehle`,
+    };
   }
 
   /**
    * Generates a comprehensive, beautifully structured executive summary of a photo, PDF, document, or video.
    */
   public async generateMediaSummary(
-    buffer: Buffer, mimeType: string, userInstruction?: string, fileName?: string, chatId?: string
+    buffer: Buffer,
+    mimeType: string,
+    userInstruction?: string,
+    fileName?: string,
+    chatId?: string
   ): Promise<string> {
     const ai = this.getGenAI();
     if (!ai) {
@@ -276,23 +331,50 @@ STRUCTURE YOUR RESPONSE IN CLEAN WHATSAPP FORMAT:
 Use WhatsApp markdown (*bold*, _italic_, bullet points). Keep it clean, accurate, and easy to read.`;
 
     const VISION_FALLBACK_MODELS = [
-          "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash"];
+          "gemini-3.1-flash-lite",
+          "gemini-3.5-flash-lite",
+          "gemini-3.5-flash",
+          "gemini-3.1-flash-lite",
+          "gemini-3.6-flash",
+          "gemini-3.5-flash",
+          "gemini-3.5-flash",
+          "gemini-3.5-flash-lite",
+          "gemini-3.1-flash-lite",
+        ];
 
     for (const model of VISION_FALLBACK_MODELS) {
       try {
         const response = await ai.models.generateContent({
           model,
-          contents: [{
-              role: "user", parts: [
-                { text: prompt }, {
+          contents: [
+            {
+              role: "user",
+              parts: [
+                { text: prompt },
+                {
                   inlineData: {
-                    mimeType: normalizedMime, data: base64Data, }, ], });
+                    mimeType: normalizedMime,
+                    data: base64Data,
+                  },
+                },
+              ],
+            },
+          ],
+        });
 
         const reply = response.text?.trim();
         if (reply) {
           // Cache this summary in the chat context
           const cachedItem: CachedMediaContext = {
-            buffer, mimeType, sender: "User", caption: userInstruction || fileName, fileName, analysis: reply, timestamp: Date.now(), shortSummary: reply.slice(0, 180), };
+            buffer,
+            mimeType,
+            sender: "User",
+            caption: userInstruction || fileName,
+            fileName,
+            analysis: reply,
+            timestamp: Date.now(),
+            shortSummary: reply.slice(0, 180),
+          };
           this.latestMedia = cachedItem;
           if (chatId) {
             this.latestMediaPerChat.set(chatId, cachedItem);
@@ -324,7 +406,7 @@ Use WhatsApp markdown (*bold*, _italic_, bullet points). Keep it clean, accurate
       return "⚠️ AI service configured nahi hai. Kripya GEMINI_API_KEY check karein.";
     }
 
-    const { question, textContext, chatId } = options;
+    const { question, textContext, fileName, chatId } = options;
     let buffer = options.buffer;
     let mimeType = options.mimeType || "image/jpeg";
 
@@ -351,7 +433,16 @@ Use WhatsApp markdown (*bold*, _italic_, bullet points). Keep it clean, accurate
           : (lowerMime.includes("png") ? "image/png" : lowerMime.includes("webp") ? "image/webp" : "image/jpeg");
 
     const VISION_FALLBACK_MODELS = [
-          "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash"];
+          "gemini-3.1-flash-lite",
+          "gemini-3.5-flash-lite",
+          "gemini-3.5-flash",
+          "gemini-3.1-flash-lite",
+          "gemini-3.6-flash",
+          "gemini-3.5-flash",
+          "gemini-3.5-flash",
+          "gemini-3.5-flash-lite",
+          "gemini-3.1-flash-lite",
+        ];
 
     // Case 1: We have media buffer -> multimodal vision query
     if (buffer && buffer.length > 0) {
@@ -375,11 +466,21 @@ INSTRUCTIONS:
         try {
           const response = await ai.models.generateContent({
             model,
-            contents: [{
-                role: "user", parts: [
-                  { text: prompt }, {
+            contents: [
+              {
+                role: "user",
+                parts: [
+                  { text: prompt },
+                  {
                     inlineData: {
-                      mimeType: normalizedMime, data: base64Data, }, ], });
+                      mimeType: normalizedMime,
+                      data: base64Data,
+                    },
+                  },
+                ],
+              },
+            ],
+          });
 
           const reply = response.text?.trim();
           if (reply) return reply;
@@ -409,13 +510,23 @@ INSTRUCTIONS:
 4. If not found in the summary, state clearly what the summary contains.`;
 
       const TEXT_MODELS = [
-        "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash"];
+        "gemini-3.1-flash-lite",
+        "gemini-3.5-flash-lite",
+        "gemini-3.5-flash",
+        "gemini-3.1-flash-lite",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3.5-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite",
+      ];
 
       for (const model of TEXT_MODELS) {
         try {
           const response = await ai.models.generateContent({
             model,
-            contents: [{ role: "user", parts: [{ text: prompt }] }], });
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
+          });
           const reply = response.text?.trim();
           if (reply) return reply;
         } catch (err: any) {
@@ -432,7 +543,10 @@ INSTRUCTIONS:
    * e.g. "Is photo me jo hai uska naam Rahul hai, yaad rakhna".
    */
   public async savePersonMemory(
-    name: string, relation?: string, notes?: string, imageBuffer?: Buffer
+    name: string,
+    relation?: string,
+    notes?: string,
+    imageBuffer?: Buffer
   ): Promise<{ success: boolean; personId: string; summary: string }> {
     const targetBuffer = imageBuffer || this.latestMedia?.buffer;
     const targetMime = this.latestMedia?.mimeType || "image/jpeg";
@@ -452,15 +566,25 @@ Extract:
 2. Distinctive physical traits that remain identifiable over months/years.
 3. Summary of this person's visual fingerprint.`;
 
-        for (const model of ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash"]) {
+        for (const model of ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]) {
           try {
             const response = await ai.models.generateContent({
               model,
-              contents: [{
-                  role: "user", parts: [
-                    { text: prompt }, {
+              contents: [
+                {
+                  role: "user",
+                  parts: [
+                    { text: prompt },
+                    {
                       inlineData: {
-                        mimeType: targetMime, data: targetBuffer.toString("base64"), }, ], });
+                        mimeType: targetMime,
+                        data: targetBuffer.toString("base64"),
+                      },
+                    },
+                  ],
+                },
+              ],
+            });
             if (response.text) {
               visualSummary = response.text;
               break;
@@ -476,7 +600,15 @@ Extract:
     const photoBase64 = targetBuffer && targetBuffer.length < 400000 ? targetBuffer.toString("base64") : undefined;
 
     const memory: StoredPersonMemory = {
-      id: personId, name, relation: relation || "Contact", notes: notes || "", visualSummary, photoBase64, createdAt: Date.now(), updatedAt: Date.now(), };
+      id: personId,
+      name,
+      relation: relation || "Contact",
+      notes: notes || "",
+      visualSummary,
+      photoBase64,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
 
     this.inMemoryPersonMemories.set(personId, memory);
     try {
@@ -487,7 +619,10 @@ Extract:
     console.log(`[VisionMemoryService] Stored person visual memory for "${name}" (ID: ${personId})`);
 
     return {
-      success: true, personId, summary: `Boss, ${name} ka photo aur visual face data Firestore memory me permanently save ho gaya hai! Ab agar aap mahino baad bhi unki photo bhejenge, to main pehchan lungi.`, };
+      success: true,
+      personId,
+      summary: `Boss, ${name} ka photo aur visual face data Firestore memory me permanently save ho gaya hai! Ab agar aap mahino baad bhi unki photo bhejenge, to main pehchan lungi.`,
+    };
   }
 
   /**
@@ -505,7 +640,9 @@ Extract:
 
     if (!targetBuffer) {
       return {
-        identified: false, explanation: "Boss, pehchanne ke liye koi photo nahi mili. Kripya pehle WhatsApp par photo bhejien.", };
+        identified: false,
+        explanation: "Boss, pehchanne ke liye koi photo nahi mili. Kripya pehle WhatsApp par photo bhejien.",
+      };
     }
 
     // 1. Fetch all stored person memories from Firestore or local cache
@@ -516,7 +653,7 @@ Extract:
         memories = snap.docs.map((d) => d.data() as StoredPersonMemory);
       }
     } catch (e) {
-      console.warn("[VisionMemoryService] Firestore fetch error, e);
+      console.warn("[VisionMemoryService] Firestore fetch error, using in-memory cache:", e);
     }
 
     if (memories.length === 0) {
@@ -525,18 +662,27 @@ Extract:
 
     if (memories.length === 0) {
       return {
-        identified: false, memory me abhi koi person profile save nahi hai. Aap kisi ki photo bhej kar 'iska naam Rahul hai' bolenge to main save kar lungi.", };
+        identified: false,
+        explanation: "Boss, memory me abhi koi person profile save nahi hai. Aap kisi ki photo bhej kar 'iska naam Rahul hai' bolenge to main save kar lungi.",
+      };
     }
     const ai = this.getGenAI();
 
     if (!ai) {
       return {
-        identified: false, explanation: "AI Vision service currently unavailable.", };
+        identified: false,
+        explanation: "AI Vision service currently unavailable.",
+      };
     }
 
     try {
       const memoryContext = memories.map((m) => ({
-        id: m.id, name: m.name, relation: m.relation, notes: m.notes, visualSummary: m.visualSummary, }));
+        id: m.id,
+        name: m.name,
+        relation: m.relation,
+        notes: m.notes,
+        visualSummary: m.visualSummary,
+      }));
 
       const prompt = `You are Friday AI's Facial Recognition & Visual Memory Engine.
 Analyze this photo and determine if the person in the photo matches ANY of the saved person profiles in memory:
@@ -549,11 +695,15 @@ TASK:
 2. Compare with the visual descriptions of the saved profiles.
 3. Return ONLY a valid JSON object:
 {
-  "matched": true | false, "personName": "Exact Name or empty", "relation": "Relation or empty", "confidence": "high" | "medium" | "low" | "none", "explanation": "Friendly 2-sentence conversational response in Hindi/Hinglish addressing Boss (DK) stating who this is and why you recognize them."
+  "matched": true | false,
+  "personName": "Exact Name or empty",
+  "relation": "Relation or empty",
+  "confidence": "high" | "medium" | "low" | "none",
+  "explanation": "Friendly 2-sentence conversational response in Hindi/Hinglish addressing Boss (DK) stating who this is and why you recognize them."
 }`;
 
       let response: any = null;
-      for (const model of ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash"]) {
+      for (const model of ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]) {
         try {
           response = await ai.models.generateContent({
             model,

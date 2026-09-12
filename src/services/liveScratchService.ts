@@ -78,11 +78,20 @@ class LiveScratchService {
     const cleanText = text.trim();
     const now = Date.now();
     const spokenTimeIST = new Date(now).toLocaleString("en-IN", {
-      timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "medium", });
+      timeZone: "Asia/Kolkata",
+      dateStyle: "medium",
+      timeStyle: "medium",
+    });
 
     const id = "turn_" + Math.random().toString(36).substring(2, 9) + "_" + now;
     const turn: LiveScratchTurn = {
-      id, sessionId, sender, text: cleanText, timestamp: now, spokenTimeIST, };
+      id,
+      sessionId,
+      sender,
+      text: cleanText,
+      timestamp: now,
+      spokenTimeIST,
+    };
 
     // Keep inMemoryScratch bounded to avoid unbounded RAM growth
     if (this.inMemoryScratch.size > 300) {
@@ -98,7 +107,9 @@ class LiveScratchService {
 
     // Write encrypted asynchronously to Firestore
     const turnToStore = {
-      ...turn, text: encryptData(turn.text), };
+      ...turn,
+      text: encryptData(turn.text),
+    };
     scratchCol()
       .doc(id)
       .set(turnToStore)
@@ -153,7 +164,7 @@ class LiveScratchService {
         const dateRangeStr = `${earliestTime} – ${latestTime}`;
         try {
           let summary = "";
-          const summaryModels = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.6-flash", "gemini-3.5-flash"];
+          const summaryModels = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite"];
         for (const model of summaryModels) {
           try {
             const resp = await ai.models.generateContent({

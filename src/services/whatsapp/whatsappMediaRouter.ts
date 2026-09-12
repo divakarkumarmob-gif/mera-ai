@@ -98,7 +98,15 @@ export class WhatsAppMediaRouter {
     }
 
     return {
-      isReply: true, sender, senderPhone, text: text.trim(), mediaType, stanzaId: contextInfo.stanzaId, rawQuotedMessage: q, fileName: q.documentMessage?.fileName, };
+      isReply: true,
+      sender,
+      senderPhone,
+      text: text.trim(),
+      mediaType,
+      stanzaId: contextInfo.stanzaId,
+      rawQuotedMessage: q,
+      fileName: q.documentMessage?.fileName,
+    };
   }
 
   public detectPhotoEditIntent(text: string): { isEdit: boolean; isSticker: boolean; instruction: string } {
@@ -135,14 +143,21 @@ export class WhatsAppMediaRouter {
     const cleanInstruction = raw
       .replace(/^(?:@image\s*edit|@edit|\/edit|edit\s*photo|photo\s*edit|edit\s*karo|image\s*edit|edit\s*image|edit|@modify|\/modify|modify)\s*[:=-]?\s*/i, "")
       .replace(/^(?:is\s*photo|iss\s*photo|isme|is\s*image|is\s*pic)\s*(?:me|mein|ko|par|ka|ki|ke)?\s*/i, "")
-      .replace(/^[, .\s-]+/, "")
+      .replace(/^[,.\s-]+/, "")
       .trim() || raw;
 
-    return { isEdit, instruction: cleanInstruction };
+    return { isEdit, isSticker: false, instruction: cleanInstruction };
   }
 
   public async handleQuotedMediaSummary(
-    replyJid: string, rawText: string, quotedMessage: QuotedMessageContext, messageKey: any, sock: any, sendMsgFn: (jid: string, text: string, incomingText?: string, key?: any) => Promise<any>, sendMediaFn: (jid: string, content: any, key?: any, fallback?: string) => Promise<any>, sendVoiceFn: (jid: string, mime?: string) => Promise<any>
+    replyJid: string,
+    rawText: string,
+    quotedMessage: QuotedMessageContext,
+    messageKey: any,
+    sock: any,
+    sendMsgFn: (jid: string, text: string, incomingText?: string, key?: any) => Promise<any>,
+    sendMediaFn: (jid: string, content: any, key?: any, fallback?: string) => Promise<any>,
+    sendVoiceFn: (jid: string, buffer: Buffer, key?: any, mime?: string) => Promise<any>
   ): Promise<boolean> {
     const cleanText = rawText.toLowerCase().trim();
     const isSummaryIntent =
@@ -186,17 +201,17 @@ export class WhatsAppMediaRouter {
               .trim() || rawText.trim();
             await sendMsgFn(replyJid, `🎨 *AI Photo edit ho rahi hai...* ⚡\n📝 _"${editInstruction}"_`, rawText, messageKey);
           } else if (isQuotedSticker) {
-            await sendMsgFn(replyJid, `🪄 *Quoted photo se WhatsApp Sticker generate ho raha hai...* ⚡`, messageKey);
+            await sendMsgFn(replyJid, `🪄 *Quoted photo se WhatsApp Sticker generate ho raha hai...* ⚡`, rawText, messageKey);
           } else if (isQuotedExcel) {
-            await sendMsgFn(replyJid, `📊 *Quoted document/bill analyze karke Excel Sheet banayi ja rahi hai...* ⚡`, messageKey);
+            await sendMsgFn(replyJid, `📊 *Quoted document/bill analyze karke Excel Sheet banayi ja rahi hai...* ⚡`, rawText, messageKey);
           } else if (isQuotedAnimate) {
-            await sendMsgFn(replyJid, `🎬 *Quoted photo ko AI Motion Video me convert kiya ja raha hai...* ⚡`, messageKey);
+            await sendMsgFn(replyJid, `🎬 *Quoted photo ko AI Motion Video me convert kiya ja raha hai...* ⚡`, rawText, messageKey);
           } else if (isAudioMedia) {
-            await sendMsgFn(replyJid, `🎙️ *Quoted Audio / Voice Note decode & transcribe ho raha hai...* ⚡`, messageKey);
+            await sendMsgFn(replyJid, `🎙️ *Quoted Audio / Voice Note decode & transcribe ho raha hai...* ⚡`, rawText, messageKey);
           } else if (isSummaryIntent && !visionMemoryService.isMediaQuestionIntent(rawText)) {
-            await sendMsgFn(replyJid, `📑 *Quoted ${quotedMessage.mediaType.toUpperCase()} analyze & summarize ho raha hai...* ⚡`, messageKey);
+            await sendMsgFn(replyJid, `📑 *Quoted ${quotedMessage.mediaType.toUpperCase()} analyze & summarize ho raha hai...* ⚡`, rawText, messageKey);
           } else {
-            await sendMsgFn(replyJid, `🔍 *Quoted ${quotedMessage.mediaType.toUpperCase()} me se dhoondh kar jawab de rahi hoon...* ⚡`, messageKey);
+            await sendMsgFn(replyJid, `🔍 *Quoted ${quotedMessage.mediaType.toUpperCase()} me se dhoondh kar jawab de rahi hoon...* ⚡`, rawText, messageKey);
           }
 
           let buffer: Buffer | null = null;
@@ -225,10 +240,10 @@ export class WhatsAppMediaRouter {
 
             if (isAudioMedia) {
               const { voiceBridgeService } = await import("../voiceBridgeService");
-              const transcribed = await voiceBridgeService.transcribeAudio(buffer, "quoted_voice.ogg");
+              const transcribed = await voiceBridgeService.transcribeAudio(buffer, mimeType, "quoted_voice.ogg");
 
               if (!transcribed || !transcribed.trim()) {
-                await sendMsgFn(replyJid, "⚠️ Is voice note / audio me aawaz saaf sunai nahi de rahi ya audio empty hai.", messageKey);
+                await sendMsgFn(replyJid, "⚠️ Is voice note / audio me aawaz saaf sunai nahi de rahi ya audio empty hai.", rawText, messageKey);
                 return true;
               }
 
@@ -261,7 +276,7 @@ CRITICAL INSTRUCTIONS:
    - 📌 *Highlights:* (Any important dates, names, or tasks if present)
 3. In a final section tagged with [SPEAK_START] and [SPEAK_END], provide a natural, sweet 1-2 sentence spoken script in ${targetLanguage || "natural Hindi/Hinglish"} for Friday to speak out loud to Boss DK on WhatsApp (e.g. "Boss, is audio me wo keh rahe hain ki..."). Do NOT use any asterisks or markdown inside [SPEAK_START]...[SPEAK_END].`;
 
-                for (const model of ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.6-flash"]) {
+                for (const model of ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3.1-flash-lite"]) {
                   try {
                     const resp = await ai.models.generateContent({ model, contents: prompt });
                     const fullResp = resp.text?.trim();
@@ -305,36 +320,49 @@ CRITICAL INSTRUCTIONS:
                 if (editRes.success && editRes.buffer && sock) {
                   this.recordChatPhoto(replyJid, editRes.buffer, editRes.mimeType || "image/jpeg");
                   await sendMediaFn(
-                    replyJid, {
-                      image: editRes.buffer, mimetype: editRes.mimeType || "image/jpeg", }, editInstruction
+                    replyJid,
+                    {
+                      image: editRes.buffer,
+                      mimetype: editRes.mimeType || "image/jpeg",
+                    },
+                    messageKey,
+                    editInstruction
                   );
                   await sendMsgFn(
-                    replyJid, `🎨 *Photo Edited via Friday AI* 🚀\n\n✨ *Engine:* ${editRes.model}\n✏️ *Changes:* _${editInstruction}_`, "", messageKey
+                    replyJid,
+                    `🎨 *Photo Edited via Friday AI* 🚀\n\n✨ *Engine:* ${editRes.model}\n✏️ *Changes:* _${editInstruction}_`,
+                    "",
+                    messageKey
                   );
                   return true;
                 } else {
-                  await sendMsgFn(replyJid, `❌ Photo edit nahi ho payi: ${editRes.error || "Please try again."}`, messageKey);
+                  await sendMsgFn(replyJid, `❌ Photo edit nahi ho payi: ${editRes.error || "Please try again."}`, rawText, messageKey);
                   return true;
                 }
               } catch (eErr: any) {
                 console.error("[WhatsAppMediaRouter] Quoted photo edit error:", eErr);
-                await sendMsgFn(replyJid, `❌ Photo edit error: ${eErr?.message || eErr}`, messageKey);
+                await sendMsgFn(replyJid, `❌ Photo edit error: ${eErr?.message || eErr}`, rawText, messageKey);
                 return true;
               }
             }
 
             if (isQuotedSticker) {
-              await sendMsgFn(replyJid, `🪄 *Quoted photo se WhatsApp Sticker generate ho raha hai...* ⚡`, messageKey);
+              await sendMsgFn(replyJid, `🪄 *Quoted photo se WhatsApp Sticker generate ho raha hai...* ⚡`, rawText, messageKey);
               try {
                 const { mediaToolsService } = await import("../mediaToolsService");
                 const bgRes = await mediaToolsService.removeBackground(buffer, mimeType);
                 const finalBuf = bgRes.buffer || buffer;
                 if (sock) {
                   await sendMediaFn(
-                    replyJid, {
-                      sticker: finalBuf, mimetype: "image/webp", "Sticker"
+                    replyJid,
+                    {
+                      sticker: finalBuf,
+                      mimetype: "image/webp",
+                    },
+                    messageKey,
+                    "Sticker"
                   );
-                  await sendMsgFn(replyJid, `✨ *AI WhatsApp Sticker Ready!* 🚀`, messageKey);
+                  await sendMsgFn(replyJid, `✨ *AI WhatsApp Sticker Ready!* 🚀`, rawText, messageKey);
                   return true;
                 }
               } catch (sErr: any) {
@@ -343,19 +371,25 @@ CRITICAL INSTRUCTIONS:
             }
 
             if (isQuotedExcel) {
-              await sendMsgFn(replyJid, `📊 *Quoted document/bill analyze karke Excel Sheet banayi ja rahi hai...* ⚡`, messageKey);
+              await sendMsgFn(replyJid, `📊 *Quoted document/bill analyze karke Excel Sheet banayi ja rahi hai...* ⚡`, rawText, messageKey);
               try {
                 const { mediaToolsService } = await import("../mediaToolsService");
                 const excelRes = await mediaToolsService.convertImageToExcel(buffer, mimeType, rawText);
                 if (excelRes.success && excelRes.buffer && sock) {
                   await sendMediaFn(
-                    replyJid, {
-                      document: excelRes.buffer, mimetype: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName: excelRes.filename || "Friday_Extracted_Report.xlsx", "Excel Document"
+                    replyJid,
+                    {
+                      document: excelRes.buffer,
+                      mimetype: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                      fileName: excelRes.filename || "Friday_Extracted_Report.xlsx",
+                    },
+                    messageKey,
+                    "Excel Document"
                   );
-                  await sendMsgFn(replyJid, excelRes.summary || "📊 *Excel File ready hai!*", messageKey);
+                  await sendMsgFn(replyJid, excelRes.summary || "📊 *Excel File ready hai!*", rawText, messageKey);
                   return true;
                 } else {
-                  await sendMsgFn(replyJid, `❌ Excel generate nahi ho paya: ${excelRes.error || "Please try again."}`, messageKey);
+                  await sendMsgFn(replyJid, `❌ Excel generate nahi ho paya: ${excelRes.error || "Please try again."}`, rawText, messageKey);
                   return true;
                 }
               } catch (xErr: any) {
@@ -364,16 +398,21 @@ CRITICAL INSTRUCTIONS:
             }
 
             if (isQuotedAnimate) {
-              await sendMsgFn(replyJid, `🎬 *Quoted photo ko AI Motion Video me convert kiya ja raha hai...* ⚡`, messageKey);
+              await sendMsgFn(replyJid, `🎬 *Quoted photo ko AI Motion Video me convert kiya ja raha hai...* ⚡`, rawText, messageKey);
               try {
                 const { mediaToolsService } = await import("../mediaToolsService");
                 const animRes = await mediaToolsService.generateAiVideo(rawText || "Cinematic camera motion, ultra-realistic", buffer, mimeType);
                 if (animRes.success && animRes.buffer && sock) {
                   await sendMediaFn(
-                    replyJid, {
-                      video: animRes.buffer, mimetype: "video/mp4", "Animation Video"
+                    replyJid,
+                    {
+                      video: animRes.buffer,
+                      mimetype: "video/mp4",
+                    },
+                    messageKey,
+                    "Animation Video"
                   );
-                  await sendMsgFn(replyJid, `🎬 *AI Motion Animation via ${animRes.model || "Friday AI"}* 🚀`, messageKey);
+                  await sendMsgFn(replyJid, `🎬 *AI Motion Animation via ${animRes.model || "Friday AI"}* 🚀`, rawText, messageKey);
                   return true;
                 }
               } catch (aErr: any) {
@@ -382,12 +421,17 @@ CRITICAL INSTRUCTIONS:
             }
 
             if (isSummaryIntent && !visionMemoryService.isMediaQuestionIntent(rawText)) {
-              const summaryRes = await visionMemoryService.generateMediaSummary(buffer, fileName, replyJid);
-              await sendMsgFn(replyJid, summaryRes, messageKey);
+              const summaryRes = await visionMemoryService.generateMediaSummary(buffer, mimeType, rawText, fileName, replyJid);
+              await sendMsgFn(replyJid, summaryRes, rawText, messageKey);
             } else {
               const answerRes = await visionMemoryService.answerQuestionOnMedia({
-                buffer, question: rawText, chatId: replyJid, });
-              await sendMsgFn(replyJid, answerRes, messageKey);
+                buffer,
+                mimeType,
+                question: rawText,
+                fileName,
+                chatId: replyJid,
+              });
+              await sendMsgFn(replyJid, answerRes, rawText, messageKey);
             }
             return true;
           }
@@ -400,9 +444,9 @@ CRITICAL INSTRUCTIONS:
     // Case 2: Quoted message contains a URL / Link
     const urlMatch = quotedMessage.text.match(/(https?:\/\/[^\s]+)/i);
     if (urlMatch && isSummaryIntent) {
-      await sendMsgFn(replyJid, `🌐 *Quoted URL analyze ho raha hai...* ⚡\n🔗 _${urlMatch[1]}_`, messageKey);
+      await sendMsgFn(replyJid, `🌐 *Quoted URL analyze ho raha hai...* ⚡\n🔗 _${urlMatch[1]}_`, rawText, messageKey);
       const webSummary = await whatsappFeatureEngine.summarizeWebUrl(urlMatch[1], rawText);
-      await sendMsgFn(replyJid, webSummary, messageKey);
+      await sendMsgFn(replyJid, webSummary, rawText, messageKey);
       return true;
     }
 
@@ -419,18 +463,26 @@ CRITICAL INSTRUCTIONS:
           const editInstruction = rawText
             .replace(/^(?:@image\s*edit|@edit|\/edit|edit\s*photo|photo\s*edit|edit\s*karo|image\s*edit|edit\s*image|edit)\s*[:=-]?\s*/i, "")
             .trim() || rawText.trim();
-          await sendMsgFn(replyJid, `🎨 *AI Generated Photo edit ho rahi hai...* ⚡\n📝 _"${editInstruction}"_`, messageKey);
+          await sendMsgFn(replyJid, `🎨 *AI Generated Photo edit ho rahi hai...* ⚡\n📝 _"${editInstruction}"_`, rawText, messageKey);
           try {
             const { imageGenerationService } = await import("../imageGenerationService");
-            const editRes = await imageGenerationService.editImageWithAI(cached.buffer, cached.mimeType || "image/jpeg");
+            const editRes = await imageGenerationService.editImageWithAI(cached.buffer, editInstruction, cached.mimeType || "image/jpeg");
             if (editRes.success && editRes.buffer && sock) {
-              this.recordChatPhoto(replyJid, editRes.mimeType || "image/jpeg");
+              this.recordChatPhoto(replyJid, editRes.buffer, editRes.mimeType || "image/jpeg");
               await sendMediaFn(
-                replyJid, {
-                  image: editRes.buffer, editInstruction
+                replyJid,
+                {
+                  image: editRes.buffer,
+                  mimetype: editRes.mimeType || "image/jpeg",
+                },
+                messageKey,
+                editInstruction
               );
               await sendMsgFn(
-                replyJid, `🎨 *Photo Re-Edited via Friday AI* 🚀\n\n✨ *Engine:* ${editRes.model}\n✏️ *Changes:* _${editInstruction}_`, messageKey
+                replyJid,
+                `🎨 *Photo Re-Edited via Friday AI* 🚀\n\n✨ *Engine:* ${editRes.model}\n✏️ *Changes:* _${editInstruction}_`,
+                "",
+                messageKey
               );
               return true;
             }
@@ -455,7 +507,7 @@ CRITICAL INSTRUCTIONS:
           }
           const speechRes = await voiceBridgeService.generateSpeech(textToRead);
           if (speechRes && speechRes.buffer.length > 0) {
-            await sendVoiceFn(replyJid, speechRes.mimeType);
+            await sendVoiceFn(replyJid, speechRes.buffer, messageKey, speechRes.mimeType);
             return true;
           }
         } catch (vErr) {
@@ -487,7 +539,7 @@ CRITICAL LANGUAGE & TONE MANDATE:
    - It must sound like Friday speaking directly to Boss DK on WhatsApp voice note (e.g. "Haanji Boss, is message me likha hai ki...").
    - DO NOT include any markdown symbols (*, _, #) inside [SPEAK_START]...[SPEAK_END]. It must be pure dialogue.`;
 
-          for (const model of ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.6-flash"]) {
+          for (const model of ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3.1-flash-lite"]) {
             try {
               const resp = await ai.models.generateContent({ model, contents: prompt });
               const fullResp = resp.text?.trim();

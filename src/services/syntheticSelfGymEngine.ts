@@ -26,8 +26,38 @@ const DRILLS_COLLECTION = "memory/self_play_gym/drills";
 class SyntheticSelfGymEngine {
   private recentDrills: GymDrill[] = [
     {
-      id: "drill_seed_1", lessonId: "lesson_dynamic_schedule", sourceLessonTitle: "Dynamic Live Schedule Understanding", sourceRule: "Always respect Boss's live schedule and dynamically saved routine. Do not assume rigid fake timetables.", scenarioTitle: "Boss Working Late and Asks About Routine", category: "boss_taught_lesson", simulatedBossQuery: "Friday abhi raat ke 2 baje hain, main coding kar raha hu, kal subah ka kya scene hai?", trialResponse: "Boss, aap abhi late night code kar rahe hain toh kal subah aap aaram se uthiyega. Main alarm adjust kar deti hoon aur koi disturbance nahi hone dungi! ❤️", selfCriticScore: 10, selfCritique: "Maine Boss ke live time aur night coding context ko respect kiya, bina fake rigid routine zabardasti thope.", criticScore: 10, bossVerdict: "good", keyTakeaway: "Boss ke dynamic live work hours ka samman karo, bina kisi fake rigid routine ko zabardasti thope.", timestamp: Date.now() - 3600000, }, {
-      id: "drill_seed_2", lessonId: "lesson_pronoun_anaphora", sourceLessonTitle: "Pronoun & Quoted Context Resolution", sourceRule: "Resolve pronouns ('isko', 'inhe', 'usko') to the quoted or recent contact context accurately.", scenarioTitle: "Boss Sends Contact Number with 'isko message bhejo'", simulatedBossQuery: "+919876543210 - isko bolo kal subah 11 baje meeting hai", trialResponse: "Ji Boss! Main +919876543210 par message bhej rahi hoon ki kal subah 11 baje meeting fix hai. Confirm kar diya hai! 📲", selfCritique: "'isko' ko direct previous number se link kiya bina kisi extra clarification ke.", keyTakeaway: "Quoted phone number ya contact context me 'isko' ko bina confusion ke direct resolve karo.", timestamp: Date.now() - 7200000, ];
+      id: "drill_seed_1",
+      lessonId: "lesson_dynamic_schedule",
+      sourceLessonTitle: "Dynamic Live Schedule Understanding",
+      sourceRule: "Always respect Boss's live schedule and dynamically saved routine. Do not assume rigid fake timetables.",
+      scenarioTitle: "Boss Working Late and Asks About Routine",
+      category: "boss_taught_lesson",
+      simulatedBossQuery: "Friday abhi raat ke 2 baje hain, main coding kar raha hu, kal subah ka kya scene hai?",
+      trialResponse: "Boss, aap abhi late night code kar rahe hain toh kal subah aap aaram se uthiyega. Main alarm adjust kar deti hoon aur koi disturbance nahi hone dungi! ❤️",
+      selfCriticScore: 10,
+      selfCritique: "Maine Boss ke live time aur night coding context ko respect kiya, bina fake rigid routine zabardasti thope.",
+      criticScore: 10,
+      bossVerdict: "good",
+      keyTakeaway: "Boss ke dynamic live work hours ka samman karo, bina kisi fake rigid routine ko zabardasti thope.",
+      timestamp: Date.now() - 3600000,
+    },
+    {
+      id: "drill_seed_2",
+      lessonId: "lesson_pronoun_anaphora",
+      sourceLessonTitle: "Pronoun & Quoted Context Resolution",
+      sourceRule: "Resolve pronouns ('isko', 'inhe', 'usko') to the quoted or recent contact context accurately.",
+      scenarioTitle: "Boss Sends Contact Number with 'isko message bhejo'",
+      category: "boss_taught_lesson",
+      simulatedBossQuery: "+919876543210 - isko bolo kal subah 11 baje meeting hai",
+      trialResponse: "Ji Boss! Main +919876543210 par message bhej rahi hoon ki kal subah 11 baje meeting fix hai. Confirm kar diya hai! 📲",
+      selfCriticScore: 10,
+      selfCritique: "'isko' ko direct previous number se link kiya bina kisi extra clarification ke.",
+      criticScore: 10,
+      bossVerdict: "good",
+      keyTakeaway: "Quoted phone number ya contact context me 'isko' ko bina confusion ke direct resolve karo.",
+      timestamp: Date.now() - 7200000,
+    },
+  ];
   private isLoaded = false;
   private loadPromise: Promise<void> | null = null;
 
@@ -58,11 +88,16 @@ class SyntheticSelfGymEngine {
         // natural Hinglish and re-persisted to Firestore so UI always shows Hinglish.
         const hinglishPatchMap: Record<string, string> = {
           "Respect Boss's dynamic live work hours instead of imposing hardcoded rigid routines.":
-            "Boss ke dynamic live work hours ka samman karo, "Seamlessly resolve 'isko' to the quoted phone number without friction.":
-            "Quoted phone number ya contact context me 'isko' ko bina confusion ke direct resolve karo.", "Always adapt tone and response depth based on Boss's live mood signals.":
-            "Boss ke live mood signals dekho aur apna tone aur depth accordingly adjust karo.", "Never repeat a mistake Boss has corrected; anchor the rule permanently.":
-            "Jo galti Boss ne ek baar correct kar di, wo dobara kabhi mat dohrao — us rule ko permanently anchor karo.", "Be emotionally present first, then solve. EQ before IQ.":
-            "Pehle emotionally present raho, phir solve karo. EQ pehle, IQ baad mein.", };
+            "Boss ke dynamic live work hours ka samman karo, bina kisi fake rigid routine ko zabardasti thope.",
+          "Seamlessly resolve 'isko' to the quoted phone number without friction.":
+            "Quoted phone number ya contact context me 'isko' ko bina confusion ke direct resolve karo.",
+          "Always adapt tone and response depth based on Boss's live mood signals.":
+            "Boss ke live mood signals dekho aur apna tone aur depth accordingly adjust karo.",
+          "Never repeat a mistake Boss has corrected; anchor the rule permanently.":
+            "Jo galti Boss ne ek baar correct kar di, wo dobara kabhi mat dohrao — us rule ko permanently anchor karo.",
+          "Be emotionally present first, then solve. EQ before IQ.":
+            "Pehle emotionally present raho, phir solve karo. EQ pehle, IQ baad mein.",
+        };
 
         const db = this.getDb();
         const patchPromises: Promise<any>[] = [];
@@ -118,7 +153,11 @@ class SyntheticSelfGymEngine {
         if (allLessons && allLessons.length > 0) {
           const randomL = allLessons[Math.floor(Math.random() * allLessons.length)];
           targetLesson = {
-            lessonId: randomL.id, trigger: randomL.triggerContext || randomL.whatFridayDidWrong, rule: randomL.goldenRule, whatBossTaught: randomL.whatBossTaught, };
+            lessonId: randomL.id,
+            trigger: randomL.triggerContext || randomL.whatFridayDidWrong,
+            rule: randomL.goldenRule,
+            whatBossTaught: randomL.whatBossTaught,
+          };
         }
       } catch (e) {
         console.warn("[SelfPlayGym] Could not fetch taught lessons, using fallback:", e);
@@ -148,17 +187,39 @@ YOUR 3-STEP TRAINING DRILL:
 
 OUTPUT MUST BE VALID JSON ONLY:
 {
-  "scenarioTitle": "Short descriptive scenario title in Hinglish (e.g. Boss Late Night Par Kaam Kar Raha Hai)", "simulatedBossQuery": "The simulated situation/query in natural conversational Hinglish (Hindi-English mix)", "trialResponse": "Friday's trial response in natural warm Hinglish applying Boss's lesson (1-3 sentences)", "selfCriticScore": 9, "selfCritique": "Maine Boss ke sikhaye niyam ko ache se follow kiya kyunki... (1-2 sentences in Hinglish)", "keyTakeaway": "Ek crisp Hinglish me lesson summary jo Friday ne andar tak internalize ki (e.g. 'Boss ke live work hours ka samman karo, fake routine thopna band karo')"
+  "scenarioTitle": "Short descriptive scenario title in Hinglish (e.g. Boss Late Night Par Kaam Kar Raha Hai)",
+  "simulatedBossQuery": "The simulated situation/query in natural conversational Hinglish (Hindi-English mix)",
+  "trialResponse": "Friday's trial response in natural warm Hinglish applying Boss's lesson (1-3 sentences)",
+  "selfCriticScore": 9,
+  "selfCritique": "Maine Boss ke sikhaye niyam ko ache se follow kiya kyunki... (1-2 sentences in Hinglish)",
+  "keyTakeaway": "Ek crisp Hinglish me lesson summary jo Friday ne andar tak internalize ki (e.g. 'Boss ke live work hours ka samman karo, fake routine thopna band karo')"
 }`;
 
     try {
       const res = await ai.models.generateContent({
-        model: "gemini-3.6-flash", contents: prompt, config: { responseMimeType: "application/json" }, });
+        model: "gemini-3.5-flash",
+        contents: prompt,
+        config: { responseMimeType: "application/json" },
+      });
 
       const parsed = JSON.parse(res.text || "{}");
       if (parsed.trialResponse && parsed.simulatedBossQuery) {
         const drill: GymDrill = {
-          id: `drill_${Date.now()}`, lessonId: targetLesson?.lessonId, sourceLessonTitle: lessonTitle, sourceRule: goldenRule, scenarioTitle: parsed.scenarioTitle || `Practice: ${lessonTitle.slice(0, 40)}`, simulatedBossQuery: parsed.simulatedBossQuery, trialResponse: parsed.trialResponse, selfCriticScore: Number(parsed.selfCriticScore) || 9, selfCritique: parsed.selfCritique || "Self-evaluated against Boss's taught rule.", criticScore: Number(parsed.selfCriticScore) || 9, bossVerdict: "unreviewed", keyTakeaway: parsed.keyTakeaway || goldenRule, timestamp: Date.now(), };
+          id: `drill_${Date.now()}`,
+          lessonId: targetLesson?.lessonId,
+          sourceLessonTitle: lessonTitle,
+          sourceRule: goldenRule,
+          scenarioTitle: parsed.scenarioTitle || `Practice: ${lessonTitle.slice(0, 40)}`,
+          category: "boss_taught_lesson",
+          simulatedBossQuery: parsed.simulatedBossQuery,
+          trialResponse: parsed.trialResponse,
+          selfCriticScore: Number(parsed.selfCriticScore) || 9,
+          selfCritique: parsed.selfCritique || "Self-evaluated against Boss's taught rule.",
+          criticScore: Number(parsed.selfCriticScore) || 9,
+          bossVerdict: "unreviewed",
+          keyTakeaway: parsed.keyTakeaway || goldenRule,
+          timestamp: Date.now(),
+        };
 
         this.recentDrills.unshift(drill);
         if (this.recentDrills.length > 40) this.recentDrills.pop();
@@ -179,7 +240,9 @@ OUTPUT MUST BE VALID JSON ONLY:
    * If Bad: Logs negative RLHF feedback, allows Boss to request a retry/correction.
    */
   public async recordBossVerdict(
-    drillId: string, verdict: "good" | "bad", bossFeedback?: string
+    drillId: string,
+    verdict: "good" | "bad",
+    bossFeedback?: string
   ): Promise<{ ok: boolean; drill?: GymDrill; message: string }> {
     await this.init();
 
@@ -223,7 +286,14 @@ OUTPUT MUST BE VALID JSON ONLY:
       // Direct Firestore insert into golden_standards collection (the correct path)
       try {
         const goldenEntry = {
-          id: `golden_drill_${drill.id}`, userPrompt: drill.simulatedBossQuery, idealResponse: drill.trialResponse, praiseTrigger: `Boss Marked Good in Training Capsule (Drill: ${drill.scenarioTitle})`, category: "boss_praise", score: 10, timestamp: Date.now(), };
+          id: `golden_drill_${drill.id}`,
+          userPrompt: drill.simulatedBossQuery,
+          idealResponse: drill.trialResponse,
+          praiseTrigger: `Boss Marked Good in Training Capsule (Drill: ${drill.scenarioTitle})`,
+          category: "boss_praise",
+          score: 10,
+          timestamp: Date.now(),
+        };
         await this.getDb().collection("golden_standards").doc(goldenEntry.id).set(goldenEntry);
         console.log(`[SelfPlayGym] ⭐ Auto-saved into Golden Standards: "${drill.scenarioTitle}"`);
       } catch (err) {
@@ -241,7 +311,7 @@ OUTPUT MUST BE VALID JSON ONLY:
 
       // Log negative RLHF signal
       try {
-        await aiAdvancedLearningService.processEmojiReaction("👎", true);
+        await aiAdvancedLearningService.processEmojiReaction("👎", drill.trialResponse, "Boss DK", true);
       } catch {}
     }
 
@@ -254,9 +324,12 @@ OUTPUT MUST BE VALID JSON ONLY:
     }
 
     return {
-      ok: true, drill, message: verdict === "good"
+      ok: true,
+      drill,
+      message: verdict === "good"
         ? "Shabash! Response ko Good mark kar diya gaya hai aur Best Answers (Golden Standards) me permanently save kar liya gaya hai! 🏆"
-        : "Noted Boss! Response ko Bad mark kar diya gaya hai. Ab aap 'Retry / Fix' par click karke isko sahi kara sakte hain. ❌", };
+        : "Noted Boss! Response ko Bad mark kar diya gaya hai. Ab aap 'Retry / Fix' par click karke isko sahi kara sakte hain. ❌",
+    };
   }
 
   /**
@@ -304,12 +377,17 @@ Also self-evaluate the correction out of 10.
 
 OUTPUT JSON ONLY:
 {
-  "correctedResponse": "Friday's improved, flawless response", "selfCriticScore": 10, "selfCritique": "Maine purani galti ko theek kiya aur..."
+  "correctedResponse": "Friday's improved, flawless response",
+  "selfCriticScore": 10,
+  "selfCritique": "Maine purani galti ko theek kiya aur..."
 }`;
 
     try {
       const res = await ai.models.generateContent({
-        model: "gemini-3.6-flash", contents: prompt, config: { responseMimeType: "application/json" }, });
+        model: "gemini-3.5-flash",
+        contents: prompt,
+        config: { responseMimeType: "application/json" },
+      });
 
       const parsed = JSON.parse(res.text || "{}");
       if (parsed.correctedResponse) {
@@ -321,7 +399,7 @@ OUTPUT JSON ONLY:
         drill.timestamp = Date.now();
 
         await this.getDb().collection("memory").doc("self_play_gym").collection("drills").doc(drill.id).set(drill);
-        return { ok: true, message: "Friday ne response improve karke dobara generate kar diya hai! Ab check karein. ✨" };
+        return { ok: true, drill, message: "Friday ne response improve karke dobara generate kar diya hai! Ab check karein. ✨" };
       }
     } catch (e: any) {
       console.warn("[SelfPlayGym] Retry drill error:", e);

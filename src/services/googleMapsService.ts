@@ -61,7 +61,16 @@ export interface GoogleGeocodeResult {
 
 class GoogleMapsService {
   private static readonly MAP_GROUNDING_MODELS = [
-    "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash"];
+    "gemini-3.1-flash-lite",
+    "gemini-3.5-flash-lite",
+    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+  ];
 
   /**
    * Gemini 3.5 Transcribe Map Grounding Engine:

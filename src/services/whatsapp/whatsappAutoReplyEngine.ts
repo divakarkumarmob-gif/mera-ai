@@ -39,7 +39,16 @@ export class WhatsAppAutoReplyEngine {
   > = new Map();
 
   public static readonly AUTO_REPLY_MODEL_CHAIN = [
-    "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash"];
+    "gemini-3.1-flash-lite",
+    "gemini-3.5-flash-lite",
+    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+  ];
 
   public queueIncomingForAutoReply(
     senderName: string,

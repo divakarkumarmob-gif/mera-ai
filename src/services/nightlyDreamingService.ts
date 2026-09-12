@@ -57,12 +57,25 @@ ${dailyContext || "Active daily interactions and development sessions."}
 
 GENERATE JSON OUTPUT with the following structure:
 {
-  "bossMoodSummary": "Brief summary of Boss DK's mood, workload, and focus today", "keyEventsAndMilestones": ["Event 1", "Event 2"], "promisesAndFollowUps": ["Pending items to check on tomorrow"], "relationalLearnings": ["Things learned about friends, girlfriend, or family"], "syntheticWisdom": "Deep reflection on how Friday can be an even more loyal, warm, and proactive human companion tomorrow."
+  "bossMoodSummary": "Brief summary of Boss DK's mood, workload, and focus today",
+  "keyEventsAndMilestones": ["Event 1", "Event 2"],
+  "promisesAndFollowUps": ["Pending items to check on tomorrow"],
+  "relationalLearnings": ["Things learned about friends, girlfriend, or family"],
+  "syntheticWisdom": "Deep reflection on how Friday can be an even more loyal, warm, and proactive human companion tomorrow."
 }`;
 
     try {
       const models = [
-        "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash"];
+        "gemini-3.1-flash-lite",
+        "gemini-3.5-flash-lite",
+        "gemini-3.5-flash",
+        "gemini-3.1-flash-lite",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3.5-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite",
+      ];
       let rawText = "{}";
       for (const model of models) {
         try {

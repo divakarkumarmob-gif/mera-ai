@@ -13,18 +13,37 @@ import { db } from "./firebaseAdmin";
 // 6. RAG Semantic Chunking for large sites.
 // ---------------------------------------------------------------------------
 
-const MODEL_CHAIN = ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3-flash"];
+const MODEL_CHAIN = [
+  "gemini-3.1-flash-lite",
+  "gemini-3.5-flash-lite",
+  "gemini-3.5-flash",
+  "gemini-3.1-flash-lite",
+  "gemini-3.6-flash",
+  "gemini-3.5-flash",
+  "gemini-3.5-flash",
+  "gemini-3.5-flash-lite",
+  "gemini-3.1-flash-lite",
+];
 
 // Map Grounding Chain: 3.1 flash lite -> 2.5 flash -> 2.5 flash lite -> 2.0 flash
-const MAP_GROUNDING_CHAIN = ["gemini-3.1-flash-lite", "gemini-3.6-flash", "gemini-3.5-flash"];
+const MAP_GROUNDING_CHAIN = [
+  "gemini-3.1-flash-lite",
+  "gemini-3.5-flash",
+  "gemini-3.1-flash-lite",
+  "gemini-3.5-flash-lite",
+];
 
 // Search Grounding Chain: 2.5 flash -> 2.0 flash
-const SEARCH_GROUNDING_CHAIN = ["gemini-3.6-flash", "gemini-3.5-flash"];
+const SEARCH_GROUNDING_CHAIN = [
+  "gemini-3.5-flash",
+  "gemini-3.5-flash-lite",
+];
 
 // Vector Embedding Model Chain: Gemini Embedding 1 -> Gemini Embedding 2 -> Legacy 001
-const EMBEDDING_MODEL_CHAIN = ["text-embedding-004", // Gemini Embedding 1 (768/1536 dim SOTA)
+const EMBEDDING_MODEL_CHAIN = [
+  "text-embedding-004", // Gemini Embedding 1 (768/1536 dim SOTA)
   "text-embedding-002", // Gemini Embedding 2 (High-accuracy fallback)
-  "embedding-001", // Legacy Fallback
+  "embedding-001",      // Legacy Fallback
 ];
 
 export interface CrawledPageMeta {
@@ -102,7 +121,19 @@ class WebCrawlerService {
 
   private readonly DEFAULT_HEADERS = {
     "User-Agent":
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 (compatible; FridayAI/2.0; +https://github.com/divakarkumarmob-gif/mera-ai)", Accept: "text/html, application/xhtml+xml, application/xml;q=0.9, image/avif, image/webp, */*;q=0.8", "Accept-Language": "en-US, en;q=0.9, hi;q=0.8", "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"', "Sec-Ch-Ua-Mobile": "?0", "Sec-Ch-Ua-Platform": '"Windows"', "Sec-Fetch-Dest": "document", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Site": "none", "Sec-Fetch-User": "?1", "Upgrade-Insecure-Requests": "1", DNT: "1", };
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 (compatible; FridayAI/2.0; +https://github.com/divakarkumarmob-gif/mera-ai)",
+    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9,hi;q=0.8",
+    "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+    DNT: "1",
+  };
 
   /**
    * 1. Checks robots.txt compliance for a target URL.
@@ -117,7 +148,9 @@ class WebCrawlerService {
       if (cached && Date.now() - cached.timestamp < 3600000) {
         const isDisallowed = cached.disallowedPaths.some((p) => p && path.startsWith(p));
         return {
-          allowed: !isDisallowed, reason: isDisallowed ? `Robots.txt rule forbids path: ${path}` : "Allowed by robots.txt", };
+          allowed: !isDisallowed,
+          reason: isDisallowed ? `Robots.txt rule forbids path: ${path}` : "Allowed by robots.txt",
+        };
       }
 
       const robotsUrl = `${origin}/robots.txt`;
@@ -125,7 +158,9 @@ class WebCrawlerService {
       const timeout = setTimeout(() => controller.abort(), 4000);
 
       const resp = await fetch(robotsUrl, {
-        headers: this.DEFAULT_HEADERS, signal: controller.signal, }).catch(() => null);
+        headers: this.DEFAULT_HEADERS,
+        signal: controller.signal,
+      }).catch(() => null);
       clearTimeout(timeout);
 
       if (!resp || !resp.ok) {
@@ -151,11 +186,13 @@ class WebCrawlerService {
         }
       }
 
-      this.robotsCache.set(origin, disallowedPaths, timestamp: Date.now() });
+      this.robotsCache.set(origin, { allowed: true, disallowedPaths, timestamp: Date.now() });
 
       const isDisallowed = disallowedPaths.some((p) => p && path.startsWith(p));
       return {
-        allowed: !isDisallowed, reason: isDisallowed ? `Robots.txt explicitly disallows path: ${path}` : "Allowed by robots.txt", };
+        allowed: !isDisallowed,
+        reason: isDisallowed ? `Robots.txt explicitly disallows path: ${path}` : "Allowed by robots.txt",
+      };
     } catch {
       return { allowed: true, reason: "Defaulting to allow (robots check error)" };
     }
@@ -223,7 +260,10 @@ class WebCrawlerService {
           const baseDomain = new URL(baseUrl).hostname;
           const targetDomain = new URL(fullUrl).hostname;
           links.push({
-            text: linkText || fullUrl, url: fullUrl, isInternal: baseDomain === targetDomain, });
+            text: linkText || fullUrl,
+            url: fullUrl,
+            isInternal: baseDomain === targetDomain,
+          });
         }
       } catch {}
     }
@@ -272,41 +312,41 @@ class WebCrawlerService {
     clean = clean.replace(/<pre[^>]*><code(?: class=["'](?:language-)?([a-zA-Z0-9_-]+)["'])?[^>]*>([\s\S]*?)<\/code><\/pre>/gi, (_, lang, code) => {
       return `\n\n\`\`\`${lang || ""}\n${this.decodeHtmlEntities(this.stripTags(code)).trim()}\n\`\`\`\n\n`;
     });
-    clean = clean.replace(/<code[^>]*>([\s\S]*?)<\/code>/gi, code) => `\`${this.decodeHtmlEntities(this.stripTags(code)).trim()}\``);
+    clean = clean.replace(/<code[^>]*>([\s\S]*?)<\/code>/gi, (_, code) => `\`${this.decodeHtmlEntities(this.stripTags(code)).trim()}\``);
 
     // 2. Bold & Italics (Process before paragraph/block wrappers)
-    clean = clean.replace(/<(strong|b)[^>]*>([\s\S]*?)<\/\1>/gi, __, b) => `**${this.stripTags(b).trim()}**`);
-    clean = clean.replace(/<(em|i)[^>]*>([\s\S]*?)<\/\1>/gi, i) => `*${this.stripTags(i).trim()}*`);
+    clean = clean.replace(/<(strong|b)[^>]*>([\s\S]*?)<\/\1>/gi, (_, __, b) => `**${this.stripTags(b).trim()}**`);
+    clean = clean.replace(/<(em|i)[^>]*>([\s\S]*?)<\/\1>/gi, (_, __, i) => `*${this.stripTags(i).trim()}*`);
 
     // 3. Links & Images
-    clean = clean.replace(/<a[^>]*href=["']([^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi, href, text) => {
+    clean = clean.replace(/<a[^>]*href=["']([^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi, (_, href, text) => {
       const label = this.stripTags(text).trim() || href;
       return `[${label}](${href})`;
     });
 
     // 4. Headings
-    clean = clean.replace(/<h1[^>]*>([\s\S]*?)<\/h1>/gi, t) => `\n\n# ${this.stripTags(t).trim()}\n\n`);
-    clean = clean.replace(/<h2[^>]*>([\s\S]*?)<\/h2>/gi, t) => `\n\n## ${this.stripTags(t).trim()}\n\n`);
-    clean = clean.replace(/<h3[^>]*>([\s\S]*?)<\/h3>/gi, t) => `\n\n### ${this.stripTags(t).trim()}\n\n`);
-    clean = clean.replace(/<h[4-6][^>]*>([\s\S]*?)<\/h[4-6]>/gi, t) => `\n\n#### ${this.stripTags(t).trim()}\n\n`);
+    clean = clean.replace(/<h1[^>]*>([\s\S]*?)<\/h1>/gi, (_, t) => `\n\n# ${this.stripTags(t).trim()}\n\n`);
+    clean = clean.replace(/<h2[^>]*>([\s\S]*?)<\/h2>/gi, (_, t) => `\n\n## ${this.stripTags(t).trim()}\n\n`);
+    clean = clean.replace(/<h3[^>]*>([\s\S]*?)<\/h3>/gi, (_, t) => `\n\n### ${this.stripTags(t).trim()}\n\n`);
+    clean = clean.replace(/<h[4-6][^>]*>([\s\S]*?)<\/h[4-6]>/gi, (_, t) => `\n\n#### ${this.stripTags(t).trim()}\n\n`);
 
     // 5. Lists
-    clean = clean.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, item) => `\n* ${item.trim()}`);
+    clean = clean.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_, item) => `\n* ${item.trim()}`);
     clean = clean.replace(/<\/ul>|<\/ol>/gi, "\n\n");
 
     // 6. Blockquotes
-    clean = clean.replace(/<blockquote[^>]*>([\s\S]*?)<\/blockquote>/gi, q) => `\n> ${q.trim()}\n\n`);
+    clean = clean.replace(/<blockquote[^>]*>([\s\S]*?)<\/blockquote>/gi, (_, q) => `\n> ${q.trim()}\n\n`);
 
     // 7. Paragraphs & Line breaks
-    clean = clean.replace(/<p[^>]*>([\s\S]*?)<\/p>/gi, p) => `\n\n${p.trim()}\n\n`);
+    clean = clean.replace(/<p[^>]*>([\s\S]*?)<\/p>/gi, (_, p) => `\n\n${p.trim()}\n\n`);
     clean = clean.replace(/<br\s*\/?>/gi, "\n");
     clean = clean.replace(/<hr\s*\/?>/gi, "\n---\n");
 
     // 8. Strip any remaining dangling HTML tags
     const markdownBody = this.stripTags(clean);
     const decodedMarkdown = this.decodeHtmlEntities(markdownBody)
-      .replace(/\n{3, }/g, "\n\n")
-      .replace(/[ \t]{2, " ")
+      .replace(/\n{3,}/g, "\n\n")
+      .replace(/[ \t]{2,}/g, " ")
       .trim();
 
     // Final LLM-optimized Markdown Document
@@ -319,8 +359,21 @@ class WebCrawlerService {
     const cleanedText = finalizedMarkdown.replace(/[*_#`~>\[\]]/g, "").replace(/\s+/g, " ").trim();
 
     return {
-      markdown: finalizedMarkdown, cleanedText, metadata: {
-        title, description, author, canonicalUrl, ogImage, statusCode: 200, contentType: "text/html", }, links, headings, images: images.slice(0, 15), };
+      markdown: finalizedMarkdown,
+      cleanedText,
+      metadata: {
+        title,
+        description,
+        author,
+        canonicalUrl,
+        ogImage,
+        statusCode: 200,
+        contentType: "text/html",
+      },
+      links,
+      headings,
+      images: images.slice(0, 15),
+    };
   }
 
   /**
@@ -352,7 +405,11 @@ class WebCrawlerService {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 18000); // 18s timeout
 
-      const resp = await fetch(targetUrl, redirect: "follow", });
+      const resp = await fetch(targetUrl, {
+        headers: this.DEFAULT_HEADERS,
+        signal: controller.signal,
+        redirect: "follow",
+      });
       clearTimeout(timeout);
 
       const finalUrl = resp.url || targetUrl;
@@ -369,8 +426,27 @@ class WebCrawlerService {
       const estimatedTokens = Math.ceil(parsed.markdown.length / 3.8);
 
       const result: CrawledPageResult = {
-        id, url: targetUrl, finalUrl, domain, timestamp: Date.now(), metadata: {
-          ...parsed.metadata, statusCode, contentType, markdown: parsed.markdown, cleanedText: parsed.cleanedText, rawHtmlLength: rawHtml.length, markdownLength: parsed.markdown.length, estimatedTokens, links: parsed.links, headings: parsed.headings, images: parsed.images, robotsAllowed, crawlDurationMs: Date.now() - startTime, };
+        id,
+        url: targetUrl,
+        finalUrl,
+        domain,
+        timestamp: Date.now(),
+        metadata: {
+          ...parsed.metadata,
+          statusCode,
+          contentType,
+        },
+        markdown: parsed.markdown,
+        cleanedText: parsed.cleanedText,
+        rawHtmlLength: rawHtml.length,
+        markdownLength: parsed.markdown.length,
+        estimatedTokens,
+        links: parsed.links,
+        headings: parsed.headings,
+        images: parsed.images,
+        robotsAllowed,
+        crawlDurationMs: Date.now() - startTime,
+      };
 
       this.inMemoryCache.set(id, result);
       this.inMemoryCache.set(targetUrl, result);
@@ -382,7 +458,24 @@ class WebCrawlerService {
     } catch (err: any) {
       console.error(`[WebCrawler] Failed to crawl ${targetUrl}:`, err);
       const failedResult: CrawledPageResult = {
-        id, finalUrl: targetUrl, metadata: { title: "Crawl Failed", statusCode: 500, contentType: "unknown" }, markdown: `# Crawl Failed for ${targetUrl}\n\nError: ${err?.message || err}`, cleanedText: `Crawl Failed: ${err?.message || err}`, rawHtmlLength: 0, markdownLength: 0, estimatedTokens: 0, links: [], headings: [], images: [], error: err?.message || String(err), };
+        id,
+        url: targetUrl,
+        finalUrl: targetUrl,
+        domain,
+        timestamp: Date.now(),
+        metadata: { title: "Crawl Failed", statusCode: 500, contentType: "unknown" },
+        markdown: `# Crawl Failed for ${targetUrl}\n\nError: ${err?.message || err}`,
+        cleanedText: `Crawl Failed: ${err?.message || err}`,
+        rawHtmlLength: 0,
+        markdownLength: 0,
+        estimatedTokens: 0,
+        links: [],
+        headings: [],
+        images: [],
+        robotsAllowed,
+        crawlDurationMs: Date.now() - startTime,
+        error: err?.message || String(err),
+      };
       this.inMemoryCache.set(id, failedResult);
       return failedResult;
     }
@@ -394,7 +487,7 @@ class WebCrawlerService {
   public async deepCrawl(rootUrl: string, options: DeepCrawlOptions = {}): Promise<DeepCrawlSummary> {
     const startTime = Date.now();
     const maxPages = Math.min(Math.max(options.maxPages || 5, 1), 25);
-    const maxDepth = Math.min(Math.max(options.maxDepth || 2, 4);
+    const maxDepth = Math.min(Math.max(options.maxDepth || 2, 1), 4);
     const delayMs = options.delayBetweenRequestsMs || 500;
     const respectRobots = options.respectRobotsTxt !== false;
 
@@ -413,7 +506,10 @@ class WebCrawlerService {
       visitedUrls.add(current.url);
 
       options.onProgress?.({
-        visitedCount: pages.length + 1, currentUrl: current.url, queueLength: queue.length, });
+        visitedCount: pages.length + 1,
+        currentUrl: current.url,
+        queueLength: queue.length,
+      });
 
       const pageResult = await this.crawlUrl(current.url, respectRobots);
       if (!pageResult.error) {
@@ -462,14 +558,25 @@ class WebCrawlerService {
     }
 
     return {
-      rootUrl: normalizedRoot, domain: rootDomain, pagesCrawled: pages.length, totalPagesDiscovered: discoveredUrls.size, totalTokens, startTime, endTime: Date.now(), durationMs: Date.now() - startTime, pages, combinedMarkdown, };
+      rootUrl: normalizedRoot,
+      domain: rootDomain,
+      pagesCrawled: pages.length,
+      totalPagesDiscovered: discoveredUrls.size,
+      totalTokens,
+      startTime,
+      endTime: Date.now(),
+      durationMs: Date.now() - startTime,
+      pages,
+      combinedMarkdown,
+    };
   }
 
   /**
    * 5. AI LLM Integration: Ask Questions / Query Crawled Content (RAG & Direct Prompting).
    */
   public async queryCrawledContent(
-    crawledMarkdownOrUrl: string, userQuery: string
+    crawledMarkdownOrUrl: string,
+    userQuery: string
   ): Promise<WebAIQueryResponse> {
     let markdownContent = crawledMarkdownOrUrl;
     let sourceUrl = "Crawled Source";
@@ -481,7 +588,7 @@ class WebCrawlerService {
       markdownContent = crawlRes.markdown;
     }
 
-    // Token-safe truncation for prompt context (up to ~35, 000 characters)
+    // Token-safe truncation for prompt context (up to ~35,000 characters)
     const contextContent = markdownContent.slice(0, 35000);
 
     const prompt = `You are Friday, DK's elite AI Web Intelligence Specialist & Research Assistant.
@@ -514,7 +621,10 @@ Respond in clean, friendly Hinglish/English with crisp markdown formatting.`;
     }
 
     return {
-      answer: text, sources: [{ title: "Target Website", url: sourceUrl }], keyTakeaways: takeaways.length > 0 ? takeaways : ["Direct insights synthesized from target webpage."], };
+      answer: text,
+      sources: [{ title: "Target Website", url: sourceUrl }],
+      keyTakeaways: takeaways.length > 0 ? takeaways : ["Direct insights synthesized from target webpage."],
+    };
   }
 
   /**
@@ -528,12 +638,20 @@ Respond in clean, friendly Hinglish/English with crisp markdown formatting.`;
     markdown: string;
   }> {
     const queryRes = await this.queryCrawledContent(
-      urlOrMarkdown, "Summarize this website in detail: give an executive summary, core offerings/topics, key specs or pricing if any, and actionable insights."
+      urlOrMarkdown,
+      "Summarize this website in detail: give an executive summary, core offerings/topics, key specs or pricing if any, and actionable insights."
     );
 
     return {
-      title: "Webpage Executive Summary", executiveSummary: queryRes.answer, keyPoints: queryRes.keyTakeaways, actionableInsights: [
-        "Website content successfully indexed and parsed into structured LLM context.", "Full markdown ready for downstream RAG vector search or voice extraction.", ], markdown: queryRes.answer, };
+      title: "Webpage Executive Summary",
+      executiveSummary: queryRes.answer,
+      keyPoints: queryRes.keyTakeaways,
+      actionableInsights: [
+        "Website content successfully indexed and parsed into structured LLM context.",
+        "Full markdown ready for downstream RAG vector search or voice extraction.",
+      ],
+      markdown: queryRes.answer,
+    };
   }
 
   /**
@@ -581,7 +699,9 @@ RETURN ONLY VALID JSON (no backticks, no explanatory text, just raw JSON):`;
       const model = MODEL_CHAIN[i];
       try {
         const resp = await ai.models.generateContent({
-          model, contents: prompt, });
+          model,
+          contents: prompt,
+        });
         const text = resp.text;
         if (text && text.trim()) return text;
         console.warn(`[WebCrawler] ${model} returned empty response, trying next in fallback chain...`);
@@ -601,7 +721,7 @@ RETURN ONLY VALID JSON (no backticks, no explanatory text, just raw JSON):`;
 
   /**
    * Google Search Grounding with Live Citations & Facts
-   * Chain: gemini-3.6-flash -> gemini-2.0-flash
+   * Chain: gemini-3.5-flash -> gemini-3.5-flash-lite
    */
   public async executeSearchGrounding(query: string): Promise<{
     answer: string;
@@ -616,7 +736,9 @@ RETURN ONLY VALID JSON (no backticks, no explanatory text, just raw JSON):`;
     for (const model of SEARCH_GROUNDING_CHAIN) {
       try {
         const resp = await ai.models.generateContent({
-          model, contents: query, config: {
+          model,
+          contents: query,
+          config: {
             tools: [{ googleSearch: {} }],
           },
         });
@@ -628,7 +750,9 @@ RETURN ONLY VALID JSON (no backticks, no explanatory text, just raw JSON):`;
             for (const chunk of groundingMetadata.groundingChunks) {
               if (chunk.web?.uri) {
                 sources.push({
-                  title: chunk.web.title || "Web Source", url: chunk.web.uri, });
+                  title: chunk.web.title || "Web Source",
+                  url: chunk.web.uri,
+                });
               }
             }
           }
@@ -643,7 +767,7 @@ RETURN ONLY VALID JSON (no backticks, no explanatory text, just raw JSON):`;
 
   /**
    * Google Map & Location Grounding (Places, Directions & Geo-Intelligence)
-   * Chain: gemini-3.1-flash-lite -> gemini-3.6-flash -> gemini-3.1-flash-lite -> gemini-2.0-flash
+   * Chain: gemini-3.1-flash-lite -> gemini-3.5-flash -> gemini-3.1-flash-lite -> gemini-3.5-flash-lite
    */
   public async executeMapGrounding(locationQuery: string): Promise<{
     answer: string;
@@ -666,7 +790,9 @@ Provide a detailed, precise location guide including:
     for (const model of MAP_GROUNDING_CHAIN) {
       try {
         const resp = await ai.models.generateContent({
-          model, contents: prompt, });
+          model,
+          contents: prompt,
+        });
         const text = resp.text;
         if (text && text.trim()) {
           return { answer: text, modelUsed: model };
