@@ -155,6 +155,14 @@ async function startServer() {
     }
   });
 
+  // ── Real-time App Security Killswitch & Force Logout Broadcaster ──────────
+  appSecurityService.setBroadcastCallback((event) => {
+    const payload = JSON.stringify(event);
+    for (const client of connectedClients) {
+      if (client.readyState === client.OPEN) client.send(payload);
+    }
+  });
+
   // ── Background Schedulers & Real-time Event Broadcasters ──────────────────
   reminderScheduler.start((reminder) => {
     const payload = JSON.stringify({ type: "reminder_alert", task: reminder.title, time: reminder.timeString });

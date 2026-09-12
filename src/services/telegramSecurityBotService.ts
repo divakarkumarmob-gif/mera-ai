@@ -292,25 +292,54 @@ class TelegramSecurityBotService {
     const lower = text.toLowerCase();
 
     // 1. Logout Command
-    if (lower === "/logout" || lower === "🚪 logout" || lower === "logout") {
+    // 1. Global Logout All & Bot Logout
+    if (lower === "/logoutall" || lower === "logout all" || lower === "🚪 logout all devices" || lower === "logout every device" || lower === "sab logout") {
+      const res = await appSecurityService.logoutAll("Telegram Security Bot manual trigger", senderName);
+      this.authSessions.delete(chatId);
+      await this.sendMessage(chatId, res.message, this.getMainKeyboard());
+      return;
+    }
+
+    if (lower === "/logout" || lower === "🚪 logout bot" || lower === "logout bot" || lower === "logout") {
       this.authSessions.delete(chatId);
       await this.sendMessage(
         chatId,
-        `🔒 *LOGGED OUT SUCCESSFULLY*\n\nAapka security session close ho gaya hai. Dobara access karne ke liye \`/start\` bhejkar password enter karein.`
+        `🔒 *LOGGED OUT SUCCESSFULLY*\n\nAapka security bot session close ho gaya hai. Dobara access karne ke liye \`/start\` bhejkar password enter karein.`
       );
       return;
     }
 
-    // 2. Active Users / Sessions
-    if (lower === "/active" || lower === "👥 active users" || lower === "active") {
+    // 2. Active Devices / Logged-in Sessions
+    if (
+      lower === "/devices" ||
+      lower === "/active" ||
+      lower === "📱 all devices" ||
+      lower === "👥 active users" ||
+      lower === "all device" ||
+      lower === "all devices" ||
+      lower === "all login device" ||
+      lower === "active sessions" ||
+      lower === "devices"
+    ) {
       const liveWsCount = this.getActiveConnectionsCount();
+      const sessions = await appSecurityService.getActiveSessions();
+
+      let devList = "• _Abhi koi active session registered nahi hai._";
+      if (sessions.length > 0) {
+        devList = sessions
+          .map((s, idx) => {
+            const lastActive = new Date(s.lastActiveAt).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: true });
+            return `*${idx + 1}.* ${s.deviceName}\n   🌐 IP: \`${s.ip}\`\n   ⏰ Last Active: \`${lastActive}\``;
+          })
+          .join("\n\n");
+      }
+
       await this.sendMessage(
         chatId,
-        `👥 *ACTIVE USERS & SESSIONS STATUS*\n\n` +
-        `• 🟢 *Live Voice WebSocket Connections:* \`${liveWsCount}\` active\n` +
-        `• 📱 *Security Bot Session:* Active (Boss DK)\n` +
-        `• ⏱️ *Session Auto-Lock In:* ${Math.round((this.SESSION_TTL - (now - session.lastActive)) / 60000)} minutes\n` +
-        `• 🌐 *Server Status:* Online & Running ⚡`,
+        `📱 *ALL LOGGED-IN SESSIONS & DEVICES (${sessions.length})* 🛡️\n\n` +
+        `• 🟢 *Live Voice WebSocket Connections:* \`${liveWsCount}\` active\n\n` +
+        `${devList}\n\n` +
+        `🚪 *Sabhi ko turant logout karne ke liye type karein:*\n👉 \`/logoutall\` ya \`logout all\``,
         this.getMainKeyboard()
       );
       return;
@@ -468,10 +497,10 @@ class TelegramSecurityBotService {
   private getMainKeyboard(): any {
     return {
       keyboard: [
-        [{ text: "👥 Active Users" }, { text: "🛑 Blocked Clients" }],
+        [{ text: "📱 All Devices" }, { text: "🛑 Blocked Clients" }],
         [{ text: "🔑 App Key" }, { text: "🎙️ Voice Code" }],
         [{ text: "📊 System Health" }, { text: "🔓 Unblock IP" }],
-        [{ text: "🚪 Logout" }],
+        [{ text: "🚪 Logout All Devices" }, { text: "🚪 Logout Bot" }],
       ],
       resize_keyboard: true,
       persistent: true,

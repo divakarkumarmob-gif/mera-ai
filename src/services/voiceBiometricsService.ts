@@ -170,6 +170,14 @@ class VoiceBiometricsService {
       console.warn("[VoiceBiometrics] Firestore write error (using memory cache):", e);
     }
 
+    // Auto-trigger global logout on voice PIN update to lock all active sessions
+    try {
+      const { appSecurityService } = await import("./appSecurityService");
+      await appSecurityService.logoutAll(`Voice PIN updated by ${senderName}`, senderName);
+    } catch (e) {
+      console.warn("[VoiceBiometrics] Failed to trigger global logout on voice PIN change:", e);
+    }
+
     return {
       success: true,
       pin: cleanPin,
@@ -177,7 +185,7 @@ class VoiceBiometricsService {
         `• 🔑 *New Active Voice Code / PIN:* \`${cleanPin}\`\n` +
         `• 👤 *Set By:* ${senderName}\n` +
         `• 💾 *Storage:* Firestore (\`systemSecurity/voicePin\`)\n\n` +
-        `Purana PIN replace ho gaya hai! Ab Friday voice mode me aapse baat karte waqt isi naye code (\`${cleanPin}\`) se verify karegi. 👑`,
+        `🔒 *Security Notice:* Purana PIN replace ho gaya hai aur sabhi active sessions/devices ko globally LOGOUT kar diya gaya hai! Ab Friday voice mode aur app isi naye authorization code se verify karegi. 👑`,
     };
   }
 

@@ -16,12 +16,28 @@ export interface BlockedClientData {
   attempts: number;
 }
 
+export interface ActiveSessionDevice {
+  sessionId: string;
+  ip: string;
+  userAgent: string;
+  deviceName: string;
+  deviceType: "apk" | "web" | "mobile_web" | "desktop_web";
+  firstLoginAt: number;
+  lastActiveAt: number;
+  tokenIssuedAt: number;
+}
+
 const SESSION_TTL = 48 * 60 * 60 * 1000; // 48 Hours
 
 class AppSecurityService {
   private cachedKey: string | null = null;
   private cachedUpdatedAt: number | null = null;
   private dynamicSecret: string | null = null;
+  private globalRevocationEpoch: number = 0;
+
+  // Active Sessions & Devices Registry
+  private activeSessions = new Map<string, ActiveSessionDevice>();
+  private broadcastCallback: ((event: any) => void) | null = null;
 
   // Rate limiting: max 2 verification attempts per 60 seconds per IP
   private readonly rateLimitWindowMs = 60 * 1000; // 60s
@@ -35,8 +51,47 @@ class AppSecurityService {
   private isFirestoreSynced = false;
 
   constructor() {
-    // Proactively initialize dynamic secret & sync blocked list from Firestore
-    this.syncBlockedFromFirestore().catch(() => {});
+    // Proactively initialize dynamic secret, sync blocked list & revocations from Firestore
+    this.syncFromFirestore().catch(() => {});
+  }
+
+  /**
+   * Sets real-time WebSocket broadcaster callback for instant killswitch push.
+   */
+  public setBroadcastCallback(cb: (event: any) => void) {
+    this.broadcastCallback = cb;
+  }
+
+  /**
+   * Parses user-agent string into a clean, human-friendly device name.
+   */
+  public parseDeviceName(userAgent: string): { name: string; type: "apk" | "web" | "mobile_web" | "desktop_web" } {
+    const ua = String(userAgent || "").toLowerCase();
+    if (ua.includes("fridayapp") || ua.includes("capacitor") || ua.includes("cordova") || ua.includes("friday_apk")) {
+      return { name: "📱 Friday Mobile APK (Android)", type: "apk" };
+    }
+    if (ua.includes("android")) {
+      return { name: "📱 Android Mobile (Browser)", type: "mobile_web" };
+    }
+    if (ua.includes("iphone")) {
+      return { name: "📱 Apple iPhone (Safari)", type: "mobile_web" };
+    }
+    if (ua.includes("ipad")) {
+      return { name: "📱 Apple iPad (Safari)", type: "mobile_web" };
+    }
+    if (ua.includes("windows nt 10") || ua.includes("windows nt 11") || ua.includes("windows")) {
+      if (ua.includes("edg")) return { name: "💻 Windows PC (Microsoft Edge)", type: "desktop_web" };
+      if (ua.includes("chrome")) return { name: "💻 Windows PC (Google Chrome)", type: "desktop_web" };
+      if (ua.includes("firefox")) return { name: "💻 Windows PC (Firefox)", type: "desktop_web" };
+      return { name: "💻 Windows PC (Desktop)", type: "desktop_web" };
+    }
+    if (ua.includes("macintosh") || ua.includes("mac os")) {
+      return { name: "💻 Apple Mac (Safari / Chrome)", type: "desktop_web" };
+    }
+    if (ua.includes("linux")) {
+      return { name: "💻 Linux Workstation", type: "desktop_web" };
+    }
+    return { name: "🌐 Web Client (Browser)", type: "web" };
   }
 
   /**
@@ -56,10 +111,6 @@ class AppSecurityService {
 
   /**
    * Retrieves high-entropy HMAC signing secret.
-   * Strictly NO hardcoded public fallback strings in the repository.
-   * If not found in environment variables, loads or generates a 256-bit
-   * secure random key stored in Firestore doc 'systemSecurity/serverSecurityKey'
-   * or memory.
    */
   private getSigningSecret(): string {
     if (process.env.APP_SECURITY_SECRET && process.env.APP_SECURITY_SECRET.length > 10) {
@@ -101,45 +152,210 @@ class AppSecurityService {
   }
 
   /**
-   * Syncs blocked IPs from Firestore so bans persist across server restarts.
+   * Syncs blocked IPs and global revocation timestamps from Firestore.
    */
-  private async syncBlockedFromFirestore(): Promise<void> {
+  private async syncFromFirestore(): Promise<void> {
     if (this.isFirestoreSynced) return;
     try {
-      const doc = await db.collection("systemSecurity").doc("blockedAccess").get();
-      if (doc.exists && doc.data()?.blockedList) {
-        const list = doc.data()?.blockedList as Record<string, BlockedClientData>;
+      // 1. Sync Blocked IPs
+      const blockedDoc = await db.collection("systemSecurity").doc("blockedAccess").get();
+      if (blockedDoc.exists && blockedDoc.data()?.blockedList) {
+        const list = blockedDoc.data()?.blockedList as Record<string, BlockedClientData>;
         for (const [ip, val] of Object.entries(list)) {
           this.blockedIps.set(this.cleanIp(ip), val);
         }
       }
+
+      // 2. Sync Global Session Revocation Epoch
+      const revDoc = await db.collection("systemSecurity").doc("sessionRevocations").get();
+      if (revDoc.exists && revDoc.data()?.revokedBefore) {
+        this.globalRevocationEpoch = Number(revDoc.data()?.revokedBefore || 0);
+      }
+
+      // 3. Sync Active Sessions
+      const sessionsDoc = await db.collection("systemSecurity").doc("activeSessions").get();
+      if (sessionsDoc.exists && sessionsDoc.data()?.sessions) {
+        const sessList = sessionsDoc.data()?.sessions as Record<string, ActiveSessionDevice>;
+        const now = Date.now();
+        for (const [sid, sess] of Object.entries(sessList)) {
+          if (sess.lastActiveAt && now - sess.lastActiveAt < SESSION_TTL && sess.tokenIssuedAt > this.globalRevocationEpoch) {
+            this.activeSessions.set(sid, sess);
+          }
+        }
+      }
+
       this.isFirestoreSynced = true;
     } catch (e) {
-      console.warn("[AppSecurity] Failed to sync blockedAccess from Firestore:", e);
+      console.warn("[AppSecurity] Failed to sync security state from Firestore:", e);
     }
   }
 
   /**
    * Generates a tamper-proof cryptographically signed session token (HMAC-SHA256).
-   * Embeds keyUpdatedAt so changing the App Key instantly invalidates all active tokens.
+   * Embeds keyUpdatedAt and unique sessionId so changing the App Key or calling Logout All
+   * instantly invalidates all active tokens.
    */
-  public generateSessionToken(keyUpdatedAt: number = Date.now()): string {
+  public generateSessionToken(keyUpdatedAt: number = Date.now(), sessionId?: string): { token: string; sessionId: string } {
+    const sid = sessionId || `sess_${crypto.randomBytes(8).toString("hex")}`;
     const payload = {
       v: 2,
       iat: Date.now(),
       exp: Date.now() + SESSION_TTL, // 48 Hours
       keyUpdatedAt,
+      sid,
       nonce: crypto.randomBytes(8).toString("hex"),
     };
     const dataStr = Buffer.from(JSON.stringify(payload)).toString("base64url");
     const hmac = crypto.createHmac("sha256", this.getSigningSecret()).update(dataStr).digest("base64url");
-    return `${dataStr}.${hmac}`;
+    return { token: `${dataStr}.${hmac}`, sessionId: sid };
   }
 
   /**
-   * Verifies cryptographic signature, 48-hour expiration, and key version.
+   * Registers an active logged-in device session in memory and Firestore.
    */
-  public verifySessionToken(token: string): boolean {
+  public async registerActiveSession(
+    sessionId: string,
+    clientIp: string,
+    userAgent: string,
+    tokenIssuedAt: number = Date.now()
+  ): Promise<ActiveSessionDevice> {
+    const cleanIp = this.cleanIp(clientIp);
+    const parsed = this.parseDeviceName(userAgent);
+    const device: ActiveSessionDevice = {
+      sessionId,
+      ip: cleanIp,
+      userAgent: (userAgent || "Unknown Device").substring(0, 200),
+      deviceName: parsed.name,
+      deviceType: parsed.type,
+      firstLoginAt: Date.now(),
+      lastActiveAt: Date.now(),
+      tokenIssuedAt,
+    };
+
+    this.activeSessions.set(sessionId, device);
+
+    // Persist to Firestore asynchronously
+    this.persistActiveSessions().catch(() => {});
+    return device;
+  }
+
+  /**
+   * Touches active session to update its last-active timestamp.
+   */
+  public touchActiveSession(sessionId?: string, clientIp?: string, userAgent?: string) {
+    if (!sessionId) return;
+    const existing = this.activeSessions.get(sessionId);
+    if (existing) {
+      existing.lastActiveAt = Date.now();
+      if (clientIp) existing.ip = this.cleanIp(clientIp);
+      if (userAgent) {
+        existing.userAgent = userAgent.substring(0, 200);
+        const parsed = this.parseDeviceName(userAgent);
+        existing.deviceName = parsed.name;
+        existing.deviceType = parsed.type;
+      }
+    } else if (clientIp) {
+      this.registerActiveSession(sessionId, clientIp, userAgent || "Active Client", Date.now());
+    }
+  }
+
+  /**
+   * Persists active sessions list to Firestore.
+   */
+  private async persistActiveSessions(): Promise<void> {
+    try {
+      const sessionsObj = Object.fromEntries(this.activeSessions.entries());
+      await db.collection("systemSecurity").doc("activeSessions").set(
+        {
+          sessions: sessionsObj,
+          updatedAt: Date.now(),
+        },
+        { merge: true }
+      );
+    } catch (e) {
+      // Non-critical fallback
+    }
+  }
+
+  /**
+   * Returns all currently active / logged-in sessions.
+   */
+  public async getActiveSessions(): Promise<ActiveSessionDevice[]> {
+    await this.syncFromFirestore();
+    const now = Date.now();
+    const active: ActiveSessionDevice[] = [];
+    for (const [sid, sess] of this.activeSessions.entries()) {
+      // Clean up sessions older than 48 hours or revoked before global revocation epoch
+      if (sess.lastActiveAt && now - sess.lastActiveAt > SESSION_TTL) {
+        this.activeSessions.delete(sid);
+      } else if (sess.tokenIssuedAt && sess.tokenIssuedAt <= this.globalRevocationEpoch) {
+        this.activeSessions.delete(sid);
+      } else {
+        active.push(sess);
+      }
+    }
+    return active;
+  }
+
+  /**
+   * Globally logs out ALL active sessions across all devices (Web, APK, Mobile).
+   * Instantly forces all connected clients back to the App Pass / Key Modal.
+   */
+  public async logoutAll(
+    reason: string = "Boss requested remote global logout",
+    senderName: string = "Boss (DK)"
+  ): Promise<{ count: number; message: string }> {
+    const revokedEpoch = Date.now();
+    this.globalRevocationEpoch = revokedEpoch;
+    this.cachedUpdatedAt = revokedEpoch;
+
+    const count = this.activeSessions.size;
+    this.activeSessions.clear();
+
+    // 1. Save global revocation timestamp & clear active sessions in Firestore
+    try {
+      await db.collection("systemSecurity").doc("sessionRevocations").set({
+        revokedBefore: revokedEpoch,
+        revokedBy: senderName,
+        reason,
+        updatedAt: revokedEpoch,
+      });
+
+      await db.collection("systemSecurity").doc("activeSessions").set({
+        sessions: {},
+        updatedAt: revokedEpoch,
+      });
+    } catch (e) {
+      console.warn("[AppSecurity] Failed to save sessionRevocations to Firestore:", e);
+    }
+
+    // 2. Broadcast instant WebSocket force_logout payload to all active clients
+    if (this.broadcastCallback) {
+      try {
+        this.broadcastCallback({
+          type: "force_logout",
+          reason,
+          timestamp: revokedEpoch,
+        });
+      } catch (err) {
+        console.error("[AppSecurity] Error sending force_logout broadcast:", err);
+      }
+    }
+
+    console.log(`[AppSecurity] 🔒 GLOBAL LOGOUT: All ${count} active sessions terminated by ${senderName}. Reason: ${reason}`);
+
+    return {
+      count,
+      message: `🔒 *ALL SESSIONS TERMINATED!* ⚡\n\n` +
+        `Boss, sabhi devices (Web App & Friday APK) ko remotely *LOGOUT* kar diya gaya hai (${count} session${count === 1 ? "" : "s"} cleared).\n\n` +
+        `Sabhi screens turant *App Key Lock / Password Screen* par wapas aa chuki hain. Kisi ko bhi dobara enter karne ke liye App Key enter karni hogi. 🛡️`,
+    };
+  }
+
+  /**
+   * Verifies cryptographic signature, 48-hour expiration, global revocation epoch, and key version.
+   */
+  public verifySessionToken(token: string, clientIp?: string, userAgent?: string): boolean {
     if (!token || typeof token !== "string") return false;
     const parts = token.split(".");
     if (parts.length !== 2) return false;
@@ -160,9 +376,19 @@ class AppSecurityService {
         return false;
       }
 
-      // 2. Check if password was changed after token was issued
-      if (this.cachedUpdatedAt && payload.keyUpdatedAt && payload.keyUpdatedAt !== this.cachedUpdatedAt) {
+      // 2. Check Global Revocation Epoch (logout all)
+      if (this.globalRevocationEpoch && payload.iat && payload.iat <= this.globalRevocationEpoch) {
         return false;
+      }
+
+      // 3. Check if password was changed after token was issued
+      if (this.cachedUpdatedAt && payload.keyUpdatedAt && payload.keyUpdatedAt < this.cachedUpdatedAt) {
+        return false;
+      }
+
+      // 4. Update session touch
+      if (payload.sid) {
+        this.touchActiveSession(payload.sid, clientIp, userAgent);
       }
 
       return true;
@@ -476,7 +702,8 @@ ya
       // SUCCESS -> Reset failed attempts & rate limits
       this.failedAttempts.delete(cleanIp);
       this.verifyAttemptTimestamps.delete(cleanIp);
-      const token = this.generateSessionToken(keyData.updatedAt);
+      const { token, sessionId } = this.generateSessionToken(keyData.updatedAt);
+      await this.registerActiveSession(sessionId, cleanIp, userAgent, Date.now());
       return { success: true, token, message: "App Access Granted! ✅" };
     }
 
@@ -509,6 +736,7 @@ ya
 
   /**
    * Sets or updates the App Access Key in Firestore (max 10 chars/digits).
+   * Automatically invalidates all existing sessions and forces global logout on all devices.
    */
   public async setAppKey(
     newKey: string,
@@ -545,25 +773,32 @@ ya
       await db.collection("systemSecurity").doc("appAccessKey").set(payload, { merge: true });
       console.log(`[AppSecurity] Updated App Key to [${cleanKey}] from ${source} by ${senderName}`);
 
+      // Auto force logout all devices so everyone must re-enter new key
+      await this.logoutAll(`Naya App Access Key Boss (${senderName}) dwara update kiya gaya hai`, senderName);
+
       return {
         success: true,
         key: cleanKey,
-        message: `Boss, aapka naya App Access Key [${cleanKey}] Firestore me successfully save ho gaya hai! Ab app isi key se unlock hoga. ✅`,
+        message: `Boss, aapka naya App Access Key [${cleanKey}] successfully save ho gaya hai! ✅\n\n` +
+          `🔒 *Security Notice:* Sabhi active devices (Web aur Friday APK) ko automatically LOGOUT kar diya gaya hai taaki naye key ke bina koi app access na kar sake.`,
       };
     } catch (e: any) {
       console.warn("[AppSecurity] Saved App Key to local memory (Firestore offline):", e?.message || e);
       this.cachedKey = cleanKey;
       this.cachedUpdatedAt = Date.now();
+      await this.logoutAll(`Naya App Access Key set hua`, senderName);
       return {
         success: true,
         key: cleanKey,
-        message: `Boss, aapka naya App Access Key [${cleanKey}] set ho gaya hai! ✅`,
+        message: `Boss, aapka naya App Access Key [${cleanKey}] set ho gaya hai! ✅ Sabhi active sessions logout ho chuke hain.`,
       };
     }
   }
 
   /**
    * Checks and handles incoming security commands from Owner:
+   * 0. Logout All: "logout all", "/logout all", "logout every device", "sab logout"
+   * 0.1 All Devices: "all device", "all devices", "all login device", "active devices", "sessions"
    * 1. Set App Key: "app key 123456", "app pass 987654"
    * 2. Unblock IP: "unblock 192.168.1.1", "unblock all"
    * 3. List Blocked: "blocked list", "blocked ips", "list blocked"
@@ -575,6 +810,50 @@ ya
     source: "whatsapp" | "telegram"
   ): Promise<{ handled: boolean; replyText?: string }> {
     const trimmed = text.trim();
+
+    // 0. Global Logout All Command
+    const isLogoutAll = /^\/?(?:logout\s+all|all\s+logout|logout\s+every\s*device|logout\s+all\s*devices|sab\s+logout|force\s+logout\s*all|logout\s*sabhi|logout\s*all\s*device)/i.test(trimmed);
+    if (isLogoutAll) {
+      if (!isOwner) {
+        return {
+          handled: true,
+          replyText: "⛔ *Permission Denied:* Sirf DK Boss (Owner) hi globally sabhi devices ko logout kar sakte hain.",
+        };
+      }
+      const res = await this.logoutAll("Boss requested remote global logout from " + source, senderName);
+      return {
+        handled: true,
+        replyText: res.message,
+      };
+    }
+
+    // 0.1 All Devices / Active Logged-In Sessions Command
+    const isDevicesQuery = /^\/?(?:all\s*device|all\s*devices|all\s*login\s*device|all\s*login\s*devices|login\s*device|logged\s*in\s*devices|active\s*devices|active\s*sessions|check\s*devices|devices|kis\s*kis\s*device\s*me\s*login|kaha\s*kaha\s*login)/i.test(trimmed);
+    if (isDevicesQuery) {
+      if (!isOwner) {
+        return {
+          handled: true,
+          replyText: "⛔ *Permission Denied:* Sirf DK Boss (Owner) hi logged-in devices list dekh sakte hain.",
+        };
+      }
+      const sessions = await this.getActiveSessions();
+      if (sessions.length === 0) {
+        return {
+          handled: true,
+          replyText: `📱 *ALL LOGGED-IN SESSIONS & DEVICES (0)* 🛡️\n\nAbhi koi bhi active session ya device logged-in nahi hai. Sabhi web apps aur Friday APK lock screen par hain. ✅`,
+        };
+      }
+      const formatted = sessions.map((s, idx) => {
+        const lastActive = new Date(s.lastActiveAt).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: true });
+        const firstLogin = new Date(s.firstLoginAt).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: true });
+        return `${idx + 1}. ${s.deviceName}\n   🌐 IP: \`${s.ip}\`\n   ⏰ Active: \`${lastActive}\` (Logged in: ${firstLogin})`;
+      }).join("\n\n");
+
+      return {
+        handled: true,
+        replyText: `📱 *ALL LOGGED-IN SESSIONS & DEVICES (${sessions.length})* 🛡️\n\n${formatted}\n\n🚪 *Sabhi ko turant logout karne ke liye type karein:*\n👉 \`logout all\``,
+      };
+    }
 
     // 1. Unblock Command (e.g. "/unblock 192.168.1.5", "unblock 192.168.1.5", or "unblock all")
     const unblockMatch = trimmed.match(/^\/?unblock\s+([^\s]+)/i);

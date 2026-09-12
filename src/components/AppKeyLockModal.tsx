@@ -303,26 +303,13 @@ export default function AppKeyLockModal({ onUnlocked }: AppKeyLockModalProps) {
                     </button>
                 </form>
 
-                {/* Owner Key & Unblock Guide (WhatsApp / Telegram) */}
-                <div className="w-full p-2.5 rounded-2xl bg-slate-900/60 border border-white/5 flex flex-col gap-1 text-[11px] text-slate-400">
-                    <div className="flex items-center gap-1.5 text-cyan-400 font-semibold">
-                        <MessageSquare className="w-3.5 h-3.5" />
-                        <span>Owner Security Commands (WhatsApp / Telegram):</span>
+                {/* Clean, minimalist security badge */}
+                <div className="w-full pt-1.5 flex items-center justify-between text-[11px] text-slate-400 border-t border-white/5">
+                    <div className="flex items-center gap-1.5 text-slate-400 text-[10px]">
+                        <span className="w-1.5 h-1.5 rounded-full bg-cyan-400/80 animate-pulse" />
+                        <span className="tracking-wide">Protected by Friday Security Shield</span>
                     </div>
-                    <p className="leading-relaxed text-[10px]">
-                        Owner WhatsApp ya Telegram se key change aur block hone par IP unblock kar sakte hain:
-                    </p>
-                    <div className="flex flex-wrap gap-1.5 mt-0.5">
-                        <code className="px-2 py-0.5 rounded bg-slate-800 text-cyan-300 font-mono text-[10px] border border-cyan-500/20">
-                            app key 123456
-                        </code>
-                        <code className="px-2 py-0.5 rounded bg-slate-800 text-emerald-300 font-mono text-[10px] border border-emerald-500/20">
-                            unblock all
-                        </code>
-                        <code className="px-2 py-0.5 rounded bg-slate-800 text-emerald-300 font-mono text-[10px] border border-emerald-500/20">
-                            unblock &lt;IP&gt;
-                        </code>
-                    </div>
+                    <span className="font-mono text-[10px] text-cyan-400/80 font-medium">HMAC-SHA256</span>
                 </div>
             </motion.div>
         </div>

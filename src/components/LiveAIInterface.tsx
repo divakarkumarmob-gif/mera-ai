@@ -2757,6 +2757,17 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                         pendingImagePayloadsRef.current = [];
                         queued.forEach(img => sendImageToWebSocket(img));
                     }
+                } else if (msg.type === 'force_logout' || msg.type === 'security_locked') {
+                    console.warn('[Friday Live] 🚨 Received force_logout from server. Terminating session.');
+                    try {
+                        stopRecording();
+                        stopMusicPlayback();
+                        if (ws.current) {
+                            ws.current.close();
+                        }
+                    } catch {}
+                    clearAppSession();
+                    return;
                 } else if (msg.type === 'session_reconnecting') {
                     setStatus(`Reconnecting AI (attempt ${msg.attempt || 1})...`);
                 } else if (msg.type === 'session_reconnected') {

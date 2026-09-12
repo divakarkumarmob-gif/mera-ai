@@ -86,13 +86,18 @@ export function initGlobalFetchInterceptor() {
 
             const response = await originalFetch(resolvedUrl, modifiedInit);
 
-            // If server returns 401 ACCESS_LOCKED, force lock immediately
-            if (response.status === 401) {
+            // If server returns 401 or 403 with lockout/revocation error, force lock immediately
+            if (response.status === 401 || response.status === 403) {
                 try {
                     const cloned = response.clone();
                     const data = await cloned.json();
-                    if (data?.error === 'ACCESS_LOCKED') {
-                        console.warn('[AppSecurityClient] 🚨 ACCESS_LOCKED received from server. Locking app.');
+                    if (
+                        data?.error === 'ACCESS_LOCKED' ||
+                        data?.error === 'SESSION_REVOKED' ||
+                        data?.error === 'ACCESS_BLOCKED' ||
+                        data?.error === 'ACCESS_BLOCKED_IMMEDIATE'
+                    ) {
+                        console.warn('[AppSecurityClient] 🚨 Access revoked/locked by server. Triggering local logout.');
                         clearAppSession();
                     }
                 } catch {}
@@ -108,4 +113,28 @@ export function initGlobalFetchInterceptor() {
 
         return originalFetch(input, init);
     };
+
+    // Background Heartbeat: Check session validity every 25 seconds
+    if (typeof window !== 'undefined' && !(window as any).__sessionHeartbeatStarted) {
+        (window as any).__sessionHeartbeatStarted = true;
+        setInterval(async () => {
+            const token = getAppToken();
+            if (!token) return;
+
+            const backendBase = getBackendBaseUrl();
+            const checkUrl = backendBase ? `${backendBase}/api/app-key/session-check` : '/api/app-key/session-check';
+
+            try {
+                const res = await originalFetch(checkUrl, {
+                    headers: { 'x-app-key-token': token },
+                });
+                if (res.status === 401 || res.status === 403) {
+                    console.warn('[AppSecurityClient] Heartbeat session invalid/revoked. Locking.');
+                    clearAppSession();
+                }
+            } catch {
+                // Ignore transient network errors
+            }
+        }, 25000);
+    }
 }

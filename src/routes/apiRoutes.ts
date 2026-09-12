@@ -1373,6 +1373,45 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
+  app.get("/api/app-key/session-check", (req, res) => {
+    const token =
+      (req.headers["x-app-key-token"] as string) ||
+      (req.headers["authorization"] ? req.headers["authorization"].replace(/^Bearer\s+/i, "") : null) ||
+      (req.query["token"] as string);
+
+    const clientIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0].trim() || req.socket.remoteAddress || "127.0.0.1";
+    const userAgent = (req.headers["user-agent"] as string) || "Unknown Device";
+
+    if (!token || !appSecurityService.verifySessionToken(token, clientIp, userAgent)) {
+      return res.status(401).json({ ok: false, valid: false, error: "SESSION_REVOKED", message: "Session expired or revoked by Boss." });
+    }
+
+    res.json({ ok: true, valid: true });
+  });
+
+  app.get("/api/security/active-devices", async (_req, res) => {
+    try {
+      const devices = await appSecurityService.getActiveSessions();
+      res.json({ ok: true, devices, count: devices.length });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || e });
+    }
+  });
+
+  app.post("/api/security/logout-all", async (req, res) => {
+    try {
+      const { senderName, masterKey } = req.body || {};
+      const activeKey = await appSecurityService.getAppKey();
+      if (activeKey && masterKey !== activeKey) {
+        return res.status(403).json({ ok: false, error: "UNAUTHORIZED", message: "Master App Key required to trigger remote logout." });
+      }
+      const result = await appSecurityService.logoutAll("Remote logout initiated from Dashboard", senderName || "Dashboard User");
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || e });
+    }
+  });
+
   // ── Instagram Direct Bot Endpoints (Direct ID & Password Automation) ─────────
   app.get("/api/instagram/status", (_req, res) => {
     res.json({ ok: true, ...instagramBotService.getStatus() });
