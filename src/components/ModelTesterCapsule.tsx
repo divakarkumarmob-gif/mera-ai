@@ -401,6 +401,12 @@ export const ModelTesterCapsule: React.FC<ModelTesterCapsuleProps> = ({ isOpen, 
         text: m.text,
       }));
 
+      const localKey =
+        localStorage.getItem("gemini_api_key") ||
+        localStorage.getItem("GEMINI_API_KEY") ||
+        localStorage.getItem("apiKey") ||
+        "";
+
       const res = await fetch(getApiUrl('/api/model-tester/chat'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -408,6 +414,7 @@ export const ModelTesterCapsule: React.FC<ModelTesterCapsuleProps> = ({ isOpen, 
           model: selectedModel,
           prompt: userText,
           history,
+          apiKey: localKey || undefined,
           media: mediaToSend ? {
             name: mediaToSend.name,
             mimeType: mediaToSend.mimeType,
@@ -418,15 +425,16 @@ export const ModelTesterCapsule: React.FC<ModelTesterCapsuleProps> = ({ isOpen, 
 
       const data = await res.json();
       const latency = Date.now() - startTime;
+      const replyContent = data?.reply || data?.text;
 
-      if (data?.ok && data?.reply) {
+      if (data?.ok && replyContent) {
         const modelReply: ChatMessage = {
           id: `model_${Date.now()}`,
           sender: 'model',
-          text: data.reply,
+          text: replyContent,
           timestamp: Date.now(),
-          modelUsed: data.modelUsed || selectedModel,
-          latencyMs: data.latencyMs || latency,
+          modelUsed: data.modelUsed || data.model || selectedModel,
+          latencyMs: data.latencyMs || data.durationMs || latency,
           tokensUsed: data.tokensUsed,
         };
         setMessages(prev => [...prev, modelReply]);
@@ -434,7 +442,7 @@ export const ModelTesterCapsule: React.FC<ModelTesterCapsuleProps> = ({ isOpen, 
         const errorReply: ChatMessage = {
           id: `error_${Date.now()}`,
           sender: 'model',
-          text: `⚠️ **Model Error:** ${data?.error || 'Failed to get response from model.'}\n\n_Tip: Ensure GEMINI_API_KEY is active in settings or try selecting a different model from the dropdown._`,
+          text: `⚠️ **Model Error:** ${data?.error || 'Failed to get response from model.'}\n\n_Tip: Ensure GEMINI_API_KEY is active in Render environment variables or settings._`,
           timestamp: Date.now(),
           modelUsed: selectedModel,
           latencyMs: latency,

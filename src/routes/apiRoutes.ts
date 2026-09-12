@@ -3384,10 +3384,29 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   app.post("/api/model-tester/chat", async (req, res) => {
     const startTime = Date.now();
     try {
-      const { model = "gemini-3.5-flash", prompt, history = [], attachments = [] } = req.body || {};
-      const apiKey = process.env.GEMINI_API_KEY;
+      const {
+        model = "gemini-3.5-flash",
+        prompt,
+        history = [],
+        attachments = [],
+        media,
+        apiKey: clientApiKey,
+      } = req.body || {};
+
+      const apiKey = (
+        process.env.GEMINI_API_KEY ||
+        process.env.GOOGLE_API_KEY ||
+        process.env.GEMINI_KEY ||
+        process.env.API_KEY ||
+        clientApiKey ||
+        ""
+      ).trim();
+
       if (!apiKey) {
-        return res.status(400).json({ ok: false, error: "GEMINI_API_KEY is not configured on server." });
+        return res.status(400).json({
+          ok: false,
+          error: "GEMINI_API_KEY is not configured on server. Please add GEMINI_API_KEY in Render Environment Variables or settings.",
+        });
       }
 
       const ai = new GoogleGenAI({ apiKey });
@@ -3407,17 +3426,19 @@ export function createApiRouter(context: ApiRoutesContext): Router {
 
       // Construct current turn parts (attachments + prompt text)
       const currentParts: any[] = [];
-      if (Array.isArray(attachments) && attachments.length > 0) {
-        for (const att of attachments) {
-          if (att.base64) {
-            const rawBase64 = att.base64.includes(",") ? att.base64.split(",")[1] : att.base64;
-            currentParts.push({
-              inlineData: {
-                mimeType: att.type || "image/jpeg",
-                data: rawBase64,
-              },
-            });
-          }
+      const mediaList = Array.isArray(attachments) && attachments.length > 0
+        ? attachments
+        : media ? [media] : [];
+
+      for (const att of mediaList) {
+        if (att.base64) {
+          const rawBase64 = att.base64.includes(",") ? att.base64.split(",")[1] : att.base64;
+          currentParts.push({
+            inlineData: {
+              mimeType: att.mimeType || att.type || "image/jpeg",
+              data: rawBase64,
+            },
+          });
         }
       }
 
@@ -3442,8 +3463,11 @@ export function createApiRouter(context: ApiRoutesContext): Router {
 
       res.json({
         ok: true,
+        reply: replyText,
         text: replyText,
+        modelUsed: model,
         model,
+        latencyMs: durationMs,
         durationMs,
       });
     } catch (err: any) {
