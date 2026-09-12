@@ -379,16 +379,31 @@ ${waTranscript || "No recent cross-platform messages."}
 
     const matchedResults: Array<{ source: string; text: string; dateStr: string; sender: string; timestamp: number }> = [];
 
-    // 1. Match in Atomic Facts Vault
-    const matchedFacts = this.factsCache.filter((f) => !qLower || f.fact.toLowerCase().includes(qLower));
-    matchedFacts.forEach((f) => {
-      matchedResults.push({
-        source: `Memory Vault (${f.category})`,
-        text: f.fact,
-        dateStr: f.dateStr,
-        sender: "Memory",
-        timestamp: f.timestamp,
+    const tokens = qLower.split(/\s+/).filter((t) => t.length >= 2);
+
+    const calculateScore = (text: string): number => {
+      if (!qLower) return 1;
+      const lower = text.toLowerCase();
+      if (lower.includes(qLower)) return 100; // Exact full phrase match
+      let score = 0;
+      tokens.forEach((token) => {
+        if (lower.includes(token)) score += 20;
       });
+      return score;
+    };
+
+    // 1. Match in Atomic Facts Vault
+    this.factsCache.forEach((f) => {
+      const score = calculateScore(f.fact);
+      if (score > 0) {
+        matchedResults.push({
+          source: `Memory Vault (${f.category})`,
+          text: f.fact,
+          dateStr: f.dateStr,
+          sender: "Memory",
+          timestamp: f.timestamp + score * 1000,
+        });
+      }
     });
 
     // 2. Match in WhatsApp Inbox
@@ -403,13 +418,14 @@ ${waTranscript || "No recent cross-platform messages."}
         waSnap.docs.forEach((doc) => {
           const data = doc.data();
           const txt = String(data.text || "");
-          if (!qLower || txt.toLowerCase().includes(qLower)) {
+          const score = calculateScore(txt);
+          if (score > 0) {
             matchedResults.push({
               source: "WhatsApp Chat",
               text: txt,
               dateStr: data.dateStr || new Date(data.timestamp).toLocaleDateString(),
               sender: data.senderName || "Unknown",
-              timestamp: data.timestamp || 0,
+              timestamp: (data.timestamp || 0) + score * 1000,
             });
           }
         });
@@ -429,13 +445,14 @@ ${waTranscript || "No recent cross-platform messages."}
           const data = doc.data();
           const txt = String(data.text || "");
           const bReply = String(data.botReply || "");
-          if (!qLower || txt.toLowerCase().includes(qLower) || bReply.toLowerCase().includes(qLower)) {
+          const score = Math.max(calculateScore(txt), calculateScore(bReply));
+          if (score > 0) {
             matchedResults.push({
               source: "Telegram Chat",
               text: txt + (bReply ? ` -> Friday: "${bReply}"` : ""),
               dateStr: data.timeStr || new Date(data.timestamp).toLocaleDateString(),
               sender: data.senderName || "User",
-              timestamp: data.timestamp || 0,
+              timestamp: (data.timestamp || 0) + score * 1000,
             });
           }
         });

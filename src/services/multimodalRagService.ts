@@ -68,9 +68,39 @@ class MultimodalRagService {
           }
         });
       }
+
+      // 2. Search in WhatsApp Inbox (Photos, Documents, Receipts)
+      const waSnap = await db.collection("whatsapp_inbox")
+        .where("timestamp", ">=", startTs)
+        .orderBy("timestamp", "desc")
+        .limit(100)
+        .get();
+
+      if (!waSnap.empty) {
+        waSnap.docs.forEach((doc) => {
+          const d = doc.data();
+          const isMedia = d.mediaType && d.mediaType !== "text";
+          const fullText = `${d.text || ""} ${d.caption || ""} ${d.mediaDescription || ""}`.toLowerCase();
+          if (isMedia && (!qLower || fullText.includes(qLower))) {
+            matched.push({
+              id: doc.id,
+              mediaType: (d.mediaType as any) || "photo",
+              source: "whatsapp",
+              senderName: d.senderName || "Boss",
+              caption: d.caption || d.text,
+              ocrText: d.ocrText,
+              analysisSummary: d.mediaDescription || d.text || "WhatsApp Media record",
+              timestamp: d.timestamp || 0,
+              dateStr: d.dateStr || new Date(d.timestamp).toLocaleDateString(),
+            });
+          }
+        });
+      }
     } catch (e) {
       console.warn("[MultimodalRAG] Media records search warning:", e);
     }
+
+    matched.sort((a, b) => b.timestamp - a.timestamp);
 
     if (matched.length === 0) {
       return {
