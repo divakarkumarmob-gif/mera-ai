@@ -3494,8 +3494,42 @@ export function createApiRouter(context: ApiRoutesContext): Router {
 
       let responseText = "";
       let actualModelUsed = String(model).trim();
+      let generatedImageUrl: string | undefined;
+      let generatedAudioUrl: string | undefined;
 
-      // 1. Primary Model Generation Attempt
+      // 1. Check if model is an Image Generation Model (Nano Banana / Veo)
+      const isImageModel = actualModelUsed.startsWith("nano-banana") || actualModelUsed.startsWith("veo-3") || /^\/(?:imagine|image|draw|photo)\b/i.test(prompt || "");
+      if (isImageModel) {
+        try {
+          const { imageGenerationService } = await import("../services/imageGenerationService");
+          const imgPrompt = String(prompt || "").replace(/^\/(?:imagine|image|draw|photo)\s*/i, "").trim() || "Futuristic Cyberpunk Neon AI Assistant in Dark Studio";
+          const imgRes = await imageGenerationService.generateImage(imgPrompt, { aspectRatio: "1:1" });
+
+          if (imgRes && imgRes.success && imgRes.buffer) {
+            const b64 = imgRes.buffer.toString("base64");
+            const mime = imgRes.mimeType || "image/jpeg";
+            generatedImageUrl = `data:${mime};base64,${b64}`;
+            responseText = `🎨 **${actualModelUsed} Output Generated!**\n\n**Prompt:** _"${imgPrompt}"_\n\n![Generated Image](${generatedImageUrl})`;
+
+            const durationMs = Date.now() - startTime;
+            return res.json({
+              ok: true,
+              reply: responseText,
+              text: responseText,
+              isImage: true,
+              imageUrl: generatedImageUrl,
+              modelUsed: actualModelUsed,
+              model,
+              latencyMs: durationMs,
+              durationMs,
+            });
+          }
+        } catch (imgErr) {
+          console.warn("[ModelTester] Image model direct render error, falling back to text:", imgErr);
+        }
+      }
+
+      // 2. Text / Multimodal Generation
       try {
         const genOptions: any = {
           model: actualModelUsed,
@@ -3511,7 +3545,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
       } catch (primaryErr: any) {
         console.warn(`[ModelTester] Direct call failed for '${actualModelUsed}':`, primaryErr?.message || primaryErr);
         
-        // 2. Intelligent Fallback to Flagship Model (gemini-3.6-flash / gemini-3.5-flash)
+        // Intelligent Fallback to Flagship Model (gemini-3.6-flash / gemini-3.5-flash)
         const fallbackModel = "gemini-3.6-flash";
         const fallbackOptions: any = {
           model: fallbackModel,
@@ -3527,12 +3561,30 @@ export function createApiRouter(context: ApiRoutesContext): Router {
         actualModelUsed = `${model} (via ${fallbackModel})`;
       }
 
+      // 3. Audio / Speech Synthesis for TTS & Audio Models
+      const isAudioModel = actualModelUsed.includes("tts") || actualModelUsed.includes("lyria") || actualModelUsed.includes("native-audio");
+      if (isAudioModel && responseText) {
+        try {
+          const { voiceBridgeService } = await import("../services/voiceBridgeService");
+          const audioBuffer = await voiceBridgeService.synthesizeSpeech(responseText.substring(0, 300));
+          if (audioBuffer && audioBuffer.length > 0) {
+            generatedAudioUrl = `data:audio/mp3;base64,${audioBuffer.toString("base64")}`;
+          }
+        } catch (audioErr) {
+          console.warn("[ModelTester] TTS audio generation notice:", audioErr);
+        }
+      }
+
       const durationMs = Date.now() - startTime;
 
       res.json({
         ok: true,
         reply: responseText,
         text: responseText,
+        isImage: !!generatedImageUrl,
+        imageUrl: generatedImageUrl,
+        isAudio: !!generatedAudioUrl,
+        audioUrl: generatedAudioUrl,
         modelUsed: actualModelUsed,
         model,
         latencyMs: durationMs,

@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
-  X, Send, Plus, Sparkles, Image, FileText, Music, Video, 
+  X, Send, Plus, Sparkles, Image as ImageIcon, FileText, Music, Video, 
   Trash2, Copy, Check, RefreshCw, Cpu, Layers, AlertCircle, 
-  ChevronDown, Search, Paperclip, Clock, Gauge, Zap
+  ChevronDown, Search, Paperclip, Clock, Gauge, Zap,
+  Mic, MicOff, Play, Pause, Download, Maximize2, Volume2, Radio
 } from 'lucide-react';
 import { getApiUrl } from '@/utils/api';
 
@@ -419,6 +420,10 @@ interface ChatMessage {
   modelUsed?: string;
   latencyMs?: number;
   tokensUsed?: number;
+  isImage?: boolean;
+  imageUrl?: string;
+  isAudio?: boolean;
+  audioUrl?: string;
   media?: {
     name: string;
     type: 'image' | 'pdf' | 'audio' | 'video' | 'file';
@@ -450,7 +455,7 @@ export const ModelTesterCapsule: React.FC<ModelTesterCapsuleProps> = ({ isOpen, 
     {
       id: "welcome_msg",
       sender: "model",
-      text: "नमस्ते Boss! मैं **FRIDAY Model Test** हूँ। आप ऊपर दिए गए Dropdown से कोई भी Model सेलेक्ट कर सकते हैं और यहाँ Live Prompt, PDF, Audio, Video, Photo या Code टेस्ट कर सकते हैं।",
+      text: "नमस्ते Boss! मैं **FRIDAY Model Test Environment** हूँ।\n\n• ⚡ **44 Models Live**: Text, Reasoning, Coding, Image (Nano Banana), Video (Veo 3), Voice (TTS/Live API).\n• 🎙️ **Voice Input Active**: आप नीचे दिए गए **Mic Button** को टैप करके सीधे बोल सकते हैं (Type करने की ज़रूरत नहीं)!\n• 🎨 **Real Image & Audio Generation**: इमेज मॉडल्स से असली फोटो और ऑडियो मॉडल्स से आवाज़ सुन सकते हैं।",
       timestamp: Date.now(),
       modelUsed: "gemini-3.5-flash",
     }
@@ -459,6 +464,18 @@ export const ModelTesterCapsule: React.FC<ModelTesterCapsuleProps> = ({ isOpen, 
   const [attachedMedia, setAttachedMedia] = useState<AttachedMedia | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
+  // 🎙️ Voice Recording & Speech Recognition State
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  const [speechInterimText, setSpeechInterimText] = useState("");
+  const recognitionRef = useRef<any>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
+  // 🖼️ Image Lightbox Modal & Audio Player State
+  const [previewImageModal, setPreviewImageModal] = useState<string | null>(null);
+  const [activeAudioPlayingId, setActiveAudioPlayingId] = useState<string | null>(null);
+  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -466,7 +483,20 @@ export const ModelTesterCapsule: React.FC<ModelTesterCapsuleProps> = ({ isOpen, 
   // Auto-scroll chat to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isLoading]);
+  }, [messages, isLoading, speechInterimText]);
+
+  // Cleanup speech recognition and audio on unmount
+  useEffect(() => {
+    return () => {
+      try {
+        if (recognitionRef.current) recognitionRef.current.stop();
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+          mediaRecorderRef.current.stop();
+        }
+        if (audioPlayerRef.current) audioPlayerRef.current.pause();
+      } catch {}
+    };
+  }, []);
 
   // Find currently selected model object
   const currentModelObj = AI_STUDIO_MODELS.flatMap(c => c.models).find(m => m.id === selectedModel) || AI_STUDIO_MODELS[0].models[0];
@@ -480,6 +510,134 @@ export const ModelTesterCapsule: React.FC<ModelTesterCapsuleProps> = ({ isOpen, 
       m.description.toLowerCase().includes(searchQuery.toLowerCase())
     )
   })).filter(cat => cat.models.length > 0);
+
+  // 🎙️ Real-time Voice Recognition & Audio Recording
+  const startVoiceRecording = async () => {
+    setIsRecordingVoice(true);
+    setSpeechInterimText("");
+
+    // 1. Web Speech API (Live real-time Speech-to-Text)
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      try {
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'hi-IN'; // Hindi + Hinglish + English auto
+        
+        recognition.onresult = (event: any) => {
+          let interim = '';
+          let final = '';
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            if (event.results[i].isFinal) {
+              final += event.results[i][0].transcript + ' ';
+            } else {
+              interim += event.results[i][0].transcript;
+            }
+          }
+          if (final) {
+            setInputPrompt(prev => (prev ? `${prev.trim()} ${final.trim()}` : final.trim()));
+            setSpeechInterimText('');
+          } else if (interim) {
+            setSpeechInterimText(interim);
+          }
+        };
+
+        recognition.onerror = (e: any) => {
+          console.warn('[ModelTester] Speech recognition notice:', e?.error);
+        };
+
+        recognition.onend = () => {
+          // Handled via state toggle
+        };
+
+        recognition.start();
+        recognitionRef.current = recognition;
+      } catch (err) {
+        console.warn('[ModelTester] Speech recognition start error:', err);
+      }
+    }
+
+    // 2. MediaRecorder for attaching clean audio file
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mediaRecorder = new MediaRecorder(stream);
+        audioChunksRef.current = [];
+
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) audioChunksRef.current.push(event.data);
+        };
+
+        mediaRecorder.onstop = () => {
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          const audioFile = new File([audioBlob], `voice_${Date.now()}.webm`, { type: 'audio/webm' });
+          const reader = new FileReader();
+          reader.onload = () => {
+            const base64Data = reader.result as string;
+            setAttachedMedia({
+              file: audioFile,
+              name: `🎙️ Voice Note (${Math.round(audioFile.size / 1024)} KB)`,
+              type: 'audio',
+              previewUrl: URL.createObjectURL(audioBlob),
+              base64: base64Data,
+              mimeType: 'audio/webm',
+            });
+          };
+          reader.readAsDataURL(audioFile);
+          stream.getTracks().forEach(t => t.stop());
+        };
+
+        mediaRecorder.start();
+        mediaRecorderRef.current = mediaRecorder;
+      }
+    } catch (micErr) {
+      console.warn('[ModelTester] MediaRecorder error:', micErr);
+    }
+  };
+
+  const stopVoiceRecording = () => {
+    setIsRecordingVoice(false);
+    setSpeechInterimText("");
+    try {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+        recognitionRef.current = null;
+      }
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        mediaRecorderRef.current.stop();
+        mediaRecorderRef.current = null;
+      }
+    } catch {}
+    setTimeout(() => textareaRef.current?.focus(), 100);
+  };
+
+  const toggleVoiceRecording = () => {
+    if (isRecordingVoice) {
+      stopVoiceRecording();
+    } else {
+      startVoiceRecording();
+    }
+  };
+
+  // 🎵 Play / Pause Synthesized Audio Response
+  const togglePlayAudio = (id: string, audioUrl: string) => {
+    if (activeAudioPlayingId === id) {
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.pause();
+      }
+      setActiveAudioPlayingId(null);
+    } else {
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.pause();
+      }
+      const audio = new Audio(audioUrl);
+      audioPlayerRef.current = audio;
+      audio.play().catch(() => {});
+      setActiveAudioPlayingId(id);
+      audio.onended = () => setActiveAudioPlayingId(null);
+    }
+  };
 
   // Handle Media File Selection via (+) Button
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -510,6 +668,10 @@ export const ModelTesterCapsule: React.FC<ModelTesterCapsuleProps> = ({ isOpen, 
 
   // Submit Prompt to Model
   const handleSendMessage = async () => {
+    if (isRecordingVoice) {
+      stopVoiceRecording();
+    }
+
     if ((!inputPrompt.trim() && !attachedMedia) || isLoading) return;
 
     const userText = inputPrompt.trim();
@@ -570,6 +732,13 @@ export const ModelTesterCapsule: React.FC<ModelTesterCapsuleProps> = ({ isOpen, 
       const replyContent = data?.reply || data?.text;
 
       if (data?.ok && replyContent) {
+        // Extract embedded markdown image if present
+        let parsedImageUrl = data.imageUrl;
+        if (!parsedImageUrl && typeof replyContent === 'string') {
+          const imgMatch = replyContent.match(/!\[.*?\]\((data:image\/[^)]+|https?:\/\/[^)]+)\)/);
+          if (imgMatch) parsedImageUrl = imgMatch[1];
+        }
+
         const modelReply: ChatMessage = {
           id: `model_${Date.now()}`,
           sender: 'model',
@@ -578,8 +747,17 @@ export const ModelTesterCapsule: React.FC<ModelTesterCapsuleProps> = ({ isOpen, 
           modelUsed: data.modelUsed || data.model || selectedModel,
           latencyMs: data.latencyMs || data.durationMs || latency,
           tokensUsed: data.tokensUsed,
+          isImage: !!parsedImageUrl || data.isImage,
+          imageUrl: parsedImageUrl,
+          isAudio: data.isAudio || !!data.audioUrl,
+          audioUrl: data.audioUrl,
         };
         setMessages(prev => [...prev, modelReply]);
+
+        // Auto-play audio if generated by a TTS model
+        if (data.audioUrl) {
+          togglePlayAudio(modelReply.id, data.audioUrl);
+        }
       } else {
         const errorReply: ChatMessage = {
           id: `error_${Date.now()}`,
@@ -619,7 +797,7 @@ export const ModelTesterCapsule: React.FC<ModelTesterCapsuleProps> = ({ isOpen, 
       {
         id: "cleared_welcome",
         sender: "model",
-        text: `✨ Chat reset. Active model: **${currentModelObj.name}** (${currentModelObj.id}). Ready for testing!`,
+        text: `✨ Chat reset. Active model: **${currentModelObj.name}** (${currentModelObj.id}). Ready for live voice, image, video or text testing!`,
         timestamp: Date.now(),
         modelUsed: selectedModel,
       }
@@ -634,7 +812,7 @@ export const ModelTesterCapsule: React.FC<ModelTesterCapsuleProps> = ({ isOpen, 
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 z-[120] flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-md"
+        className="fixed inset-0 z-[120] flex items-center justify-center p-2 sm:p-6 bg-black/85 backdrop-blur-md"
         onClick={() => setIsDropdownOpen(false)}
       >
         <motion.div
@@ -642,14 +820,14 @@ export const ModelTesterCapsule: React.FC<ModelTesterCapsuleProps> = ({ isOpen, 
           animate={{ scale: 1, opacity: 1, y: 0 }}
           exit={{ scale: 0.94, opacity: 0, y: 20 }}
           transition={{ type: "spring", damping: 25, stiffness: 300 }}
-          className="relative w-full max-w-5xl h-[92vh] max-h-[900px] flex flex-col rounded-3xl bg-slate-950/95 border border-cyan-500/30 shadow-[0_0_80px_rgba(6,182,212,0.25)] overflow-hidden text-slate-100"
+          className="relative w-full max-w-5xl h-[94vh] max-h-[920px] flex flex-col rounded-3xl bg-slate-950/95 border border-cyan-500/30 shadow-[0_0_80px_rgba(6,182,212,0.25)] overflow-hidden text-slate-100"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Top Decorative Neon Glow Header */}
           <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-cyan-500 via-blue-500 to-indigo-500 shadow-[0_0_15px_rgba(6,182,212,0.8)]" />
 
           {/* ── HEADER & MODEL SELECTOR BAR ── */}
-          <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-cyan-500/20 bg-slate-900/90 backdrop-blur-lg">
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 sm:px-6 py-3.5 border-b border-cyan-500/20 bg-slate-900/90 backdrop-blur-lg">
             {/* Left: Capsule Title & Badge */}
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-cyan-500/20 to-blue-600/30 border border-cyan-400/40 flex items-center justify-center text-xl shadow-[0_0_20px_rgba(6,182,212,0.4)]">
@@ -663,6 +841,15 @@ export const ModelTesterCapsule: React.FC<ModelTesterCapsuleProps> = ({ isOpen, 
                   <span className="px-2 py-0.5 text-[10px] font-semibold tracking-wider uppercase rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
                     Live Testing
                   </span>
+                  {selectedModel.includes('tts') || selectedModel.includes('audio') || selectedModel.includes('live') ? (
+                    <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                      <Volume2 className="w-3 h-3" /> Voice
+                    </span>
+                  ) : selectedModel.includes('nano-banana') || selectedModel.includes('veo') ? (
+                    <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 flex items-center gap-1">
+                      <ImageIcon className="w-3 h-3" /> Image Gen
+                    </span>
+                  ) : null}
                 </div>
                 <p className="text-xs text-slate-400 flex items-center gap-1.5 font-mono">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
@@ -674,7 +861,7 @@ export const ModelTesterCapsule: React.FC<ModelTesterCapsuleProps> = ({ isOpen, 
             </div>
 
             {/* Right: Actions & Model Selector Dropdown */}
-            <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-2">
               {/* Clear Chat Button */}
               <button
                 onClick={clearChat}
@@ -689,10 +876,10 @@ export const ModelTesterCapsule: React.FC<ModelTesterCapsuleProps> = ({ isOpen, 
               <div className="relative">
                 <button
                   onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                  className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-cyan-950/60 hover:bg-cyan-900/60 text-cyan-200 border border-cyan-500/40 shadow-[0_0_20px_rgba(6,182,212,0.15)] transition-all text-xs sm:text-sm font-medium"
+                  className="flex items-center gap-2 px-3 py-2 rounded-xl bg-cyan-950/60 hover:bg-cyan-900/60 text-cyan-200 border border-cyan-500/40 shadow-[0_0_20px_rgba(6,182,212,0.15)] transition-all text-xs sm:text-sm font-medium"
                 >
                   <span className="text-base">{currentModelObj.icon || "⚡"}</span>
-                  <span className="max-w-[140px] sm:max-w-[200px] truncate">{currentModelObj.name}</span>
+                  <span className="max-w-[120px] sm:max-w-[200px] truncate">{currentModelObj.name}</span>
                   <ChevronDown className={`w-4 h-4 text-cyan-400 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180' : ''}`} />
                 </button>
 
@@ -704,7 +891,7 @@ export const ModelTesterCapsule: React.FC<ModelTesterCapsuleProps> = ({ isOpen, 
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: 10, scale: 0.96 }}
                       transition={{ duration: 0.15 }}
-                      className="absolute right-0 mt-2 w-[340px] sm:w-[420px] max-h-[520px] rounded-2xl bg-slate-900/98 border border-cyan-500/40 shadow-[0_15px_60px_rgba(0,0,0,0.8)] backdrop-blur-2xl z-50 flex flex-col overflow-hidden"
+                      className="absolute right-0 mt-2 w-[340px] sm:w-[440px] max-h-[520px] rounded-2xl bg-slate-900/98 border border-cyan-500/40 shadow-[0_15px_60px_rgba(0,0,0,0.8)] backdrop-blur-2xl z-50 flex flex-col overflow-hidden"
                     >
                       {/* Search Bar Inside Dropdown */}
                       <div className="p-3 border-b border-white/10 bg-slate-950/70">
@@ -714,7 +901,7 @@ export const ModelTesterCapsule: React.FC<ModelTesterCapsuleProps> = ({ isOpen, 
                             type="text"
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            placeholder="Search models..."
+                            placeholder="Search across 44 AI Studio models..."
                             className="bg-transparent text-slate-100 placeholder-slate-500 focus:outline-none w-full text-xs"
                             onClick={(e) => e.stopPropagation()}
                           />
@@ -808,7 +995,7 @@ export const ModelTesterCapsule: React.FC<ModelTesterCapsuleProps> = ({ isOpen, 
                   className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} space-y-1.5`}
                 >
                   <div className="flex items-center gap-2 text-[10px] text-slate-400 px-1 font-mono">
-                    <span>{isUser ? '👤 You' : `🤖 ${msg.modelUsed || selectedModel}`}</span>
+                    <span>{isUser ? '👤 Boss' : `🤖 ${msg.modelUsed || selectedModel}`}</span>
                     <span>•</span>
                     <span>{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
                     {msg.latencyMs && (
@@ -824,7 +1011,7 @@ export const ModelTesterCapsule: React.FC<ModelTesterCapsuleProps> = ({ isOpen, 
 
                   {/* Message Bubble Container */}
                   <div
-                    className={`max-w-[85%] sm:max-w-[75%] rounded-2xl p-4 text-sm leading-relaxed border ${
+                    className={`max-w-[90%] sm:max-w-[80%] rounded-2xl p-4 text-sm leading-relaxed border ${
                       isUser
                         ? 'bg-gradient-to-r from-cyan-600/90 to-blue-600/90 text-white border-cyan-400/30 rounded-tr-sm shadow-[0_0_25px_rgba(6,182,212,0.2)]'
                         : 'bg-slate-900/90 text-slate-200 border-cyan-500/20 rounded-tl-sm shadow-[0_0_20px_rgba(0,0,0,0.5)]'
@@ -844,6 +1031,68 @@ export const ModelTesterCapsule: React.FC<ModelTesterCapsuleProps> = ({ isOpen, 
                           <p className="text-xs font-semibold truncate text-slate-200">{msg.media.name}</p>
                           <p className="text-[10px] text-slate-400 uppercase tracking-wider">{msg.media.type} {msg.media.size ? `• ${msg.media.size}` : ''}</p>
                         </div>
+                      </div>
+                    )}
+
+                    {/* 🖼️ Generated AI Image Output (Nano Banana / Veo) */}
+                    {msg.imageUrl && (
+                      <div className="mb-3 rounded-2xl overflow-hidden border border-cyan-400/40 bg-slate-950 relative group">
+                        <img
+                          src={msg.imageUrl}
+                          alt="AI Generated"
+                          className="w-full max-h-[380px] object-contain cursor-pointer hover:opacity-95 transition-opacity"
+                          onClick={() => setPreviewImageModal(msg.imageUrl || null)}
+                        />
+                        <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => setPreviewImageModal(msg.imageUrl || null)}
+                            className="p-1.5 rounded-lg bg-black/70 text-cyan-300 hover:bg-black border border-cyan-500/40"
+                            title="Fullscreen Zoom"
+                          >
+                            <Maximize2 className="w-3.5 h-3.5" />
+                          </button>
+                          <a
+                            href={msg.imageUrl}
+                            download={`generated_${msg.modelUsed || 'image'}.png`}
+                            className="p-1.5 rounded-lg bg-black/70 text-emerald-300 hover:bg-black border border-emerald-500/40"
+                            title="Download Image"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                          </a>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 🎵 Synthesized Audio Player (TTS / Lyria) */}
+                    {msg.audioUrl && (
+                      <div className="mb-3 p-3 rounded-xl bg-gradient-to-r from-amber-500/15 to-purple-600/15 border border-amber-500/30 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <button
+                            onClick={() => togglePlayAudio(msg.id, msg.audioUrl!)}
+                            className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
+                              activeAudioPlayingId === msg.id
+                                ? 'bg-amber-500 text-black animate-pulse shadow-[0_0_15px_rgba(245,158,11,0.5)]'
+                                : 'bg-slate-800 text-amber-400 hover:bg-slate-700 border border-amber-500/30'
+                            }`}
+                          >
+                            {activeAudioPlayingId === msg.id ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 ml-0.5" />}
+                          </button>
+                          <div>
+                            <p className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                              <Radio className="w-3.5 h-3.5 text-amber-400" />
+                              <span>Audio Synthesis Playback</span>
+                            </p>
+                            <p className="text-[10px] text-slate-400">Tap to listen to speech/audio output</p>
+                          </div>
+                        </div>
+                        <a
+                          href={msg.audioUrl}
+                          download={`audio_${msg.modelUsed || 'speech'}.mp3`}
+                          className="p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-amber-300 hover:bg-slate-700 transition-colors"
+                          title="Download Audio"
+                        >
+                          <Download className="w-4 h-4" />
+                        </a>
                       </div>
                     )}
 
@@ -887,13 +1136,29 @@ export const ModelTesterCapsule: React.FC<ModelTesterCapsuleProps> = ({ isOpen, 
                 className="flex items-center gap-3 p-3 rounded-2xl bg-slate-900/80 border border-cyan-500/20 max-w-sm text-cyan-300 text-xs font-mono"
               >
                 <div className="w-4 h-4 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
-                <span>Running <b>{currentModelObj.name}</b> inference...</span>
+                <span>Running <b>{currentModelObj.name}</b> live inference...</span>
               </motion.div>
             )}
+
+            {/* 🎙️ Live Voice Recording Indicator */}
+            {isRecordingVoice && (
+              <motion.div
+                initial={{ opacity: 0, y: 5 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex items-center gap-3 p-3 rounded-2xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs font-mono animate-pulse"
+              >
+                <span className="w-3 h-3 rounded-full bg-rose-500" />
+                <span className="font-bold">Listening to Boss...</span>
+                {speechInterimText && (
+                  <span className="italic text-slate-300">"{speechInterimText}"</span>
+                )}
+              </motion.div>
+            )}
+
             <div ref={messagesEndRef} />
           </div>
 
-          {/* ── BOTTOM INPUT BOX WITH (+) MEDIA PICKER ── */}
+          {/* ── BOTTOM INPUT BOX WITH (+) MEDIA PICKER & (🎙️) VOICE INPUT ── */}
           <div className="p-3 sm:p-4 border-t border-cyan-500/20 bg-slate-900/95 backdrop-blur-xl">
             {/* Attachment Staging Chip */}
             <AnimatePresence>
@@ -937,7 +1202,11 @@ export const ModelTesterCapsule: React.FC<ModelTesterCapsuleProps> = ({ isOpen, 
             />
 
             {/* Input Row */}
-            <div className="flex items-end gap-2 sm:gap-3 bg-slate-950/80 rounded-2xl border border-cyan-500/30 p-2 shadow-[0_0_20px_rgba(6,182,212,0.1)] focus-within:border-cyan-400 focus-within:shadow-[0_0_30px_rgba(6,182,212,0.25)] transition-all">
+            <div className={`flex items-end gap-2 sm:gap-3 bg-slate-950/80 rounded-2xl border p-2 transition-all ${
+              isRecordingVoice
+                ? 'border-rose-500/80 shadow-[0_0_30px_rgba(244,63,94,0.3)]'
+                : 'border-cyan-500/30 shadow-[0_0_20px_rgba(6,182,212,0.1)] focus-within:border-cyan-400 focus-within:shadow-[0_0_30px_rgba(6,182,212,0.25)]'
+            }`}>
               {/* Left (+) Button for Media/Files */}
               <button
                 type="button"
@@ -959,17 +1228,31 @@ export const ModelTesterCapsule: React.FC<ModelTesterCapsuleProps> = ({ isOpen, 
                     handleSendMessage();
                   }
                 }}
-                placeholder={`Test ${currentModelObj.name} (Type prompt or attach PDF, photo, audio...)...`}
+                placeholder={isRecordingVoice ? "Listening to Boss... (Boliye, yahan type ho raha hai)" : `Test ${currentModelObj.name} (Type or tap 🎙️ to speak)...`}
                 rows={1}
                 className="flex-1 bg-transparent text-slate-100 placeholder-slate-500 text-sm focus:outline-none resize-none max-h-32 py-2 px-1 custom-scrollbar leading-relaxed"
               />
+
+              {/* 🎙️ Voice Input (Microphone Button) */}
+              <button
+                type="button"
+                onClick={toggleVoiceRecording}
+                title={isRecordingVoice ? "Stop Recording" : "Voice Input (Boliye, auto type hoga)"}
+                className={`p-2.5 rounded-xl flex items-center justify-center shrink-0 transition-all cursor-pointer ${
+                  isRecordingVoice
+                    ? 'bg-rose-500 text-white animate-pulse shadow-[0_0_20px_rgba(244,63,94,0.6)] border border-rose-400'
+                    : 'bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-500/30 shadow-[0_0_10px_rgba(6,182,212,0.15)]'
+                }`}
+              >
+                {isRecordingVoice ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+              </button>
 
               {/* Send Button */}
               <button
                 type="button"
                 onClick={handleSendMessage}
                 disabled={isLoading || (!inputPrompt.trim() && !attachedMedia)}
-                className={`p-2.5 rounded-xl flex items-center justify-center shrink-0 transition-all ${
+                className={`p-2.5 rounded-xl flex items-center justify-center shrink-0 transition-all cursor-pointer ${
                   isLoading || (!inputPrompt.trim() && !attachedMedia)
                     ? 'bg-slate-800/80 text-slate-500 cursor-not-allowed border border-white/5'
                     : 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white border border-cyan-400/50 shadow-[0_0_20px_rgba(6,182,212,0.4)]'
@@ -982,10 +1265,47 @@ export const ModelTesterCapsule: React.FC<ModelTesterCapsuleProps> = ({ isOpen, 
             {/* Footer Model Specs Info */}
             <div className="flex items-center justify-between px-2 pt-2 text-[10px] text-slate-500 font-mono">
               <span className="truncate">Active: <b>{currentModelObj.name}</b> ({currentModelObj.id})</span>
-              <span className="hidden sm:inline text-cyan-400/80">Press Enter to Send • Shift+Enter for new line</span>
+              <span className="hidden sm:inline text-cyan-400/80">Tap 🎙️ Mic to speak • Enter to Send</span>
             </div>
           </div>
         </motion.div>
+
+        {/* 🖼️ Fullscreen Image Lightbox Modal */}
+        <AnimatePresence>
+          {previewImageModal && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[150] bg-black/90 backdrop-blur-xl flex items-center justify-center p-4"
+              onClick={() => setPreviewImageModal(null)}
+            >
+              <div className="relative max-w-4xl max-h-[90vh] flex flex-col items-center">
+                <button
+                  onClick={() => setPreviewImageModal(null)}
+                  className="absolute -top-12 right-0 p-2 rounded-full bg-slate-800 text-white hover:bg-slate-700 border border-white/10"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+                <img
+                  src={previewImageModal}
+                  alt="Full preview"
+                  className="max-w-full max-h-[80vh] object-contain rounded-2xl border border-cyan-500/40 shadow-[0_0_60px_rgba(6,182,212,0.4)]"
+                  onClick={(e) => e.stopPropagation()}
+                />
+                <a
+                  href={previewImageModal}
+                  download="ai_generated_image.png"
+                  onClick={(e) => e.stopPropagation()}
+                  className="mt-4 px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs flex items-center gap-2 shadow-lg"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Download Full Resolution</span>
+                </a>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </motion.div>
     </AnimatePresence>
   );
