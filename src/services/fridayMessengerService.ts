@@ -36,46 +36,10 @@ const messengerMessagesCol = (chatId: string) => db.collection("messenger_chats"
 class FridayMessengerService {
   private defaultContacts: MessengerContact[] = [
     {
-      id: "boss_dk",
-      name: "DK (Boss 👑)",
-      role: "boss",
-      avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-      bio: "Creator & Master of FRIDAY",
-      unreadCount: 0,
-      lastMessage: "Friday, system ready hai?",
-      lastTimestamp: Date.now() - 60000,
-    },
-    {
-      id: "special_gf",
-      name: "Special Someone 💖",
-      role: "girlfriend",
-      avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80",
-      bio: "VIP Priority Contact",
-      unreadCount: 0,
-      lastMessage: "DK kahan hai Friday?",
-      lastTimestamp: Date.now() - 300000,
-    },
-    {
-      id: "best_friend_aman",
-      name: "Aman (Bhai 🤝)",
-      role: "friend",
-      avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
-      bio: "College Bro & Gamer",
-      unreadCount: 0,
-      lastMessage: "Bhai weekend par gaming session?",
-      lastTimestamp: Date.now() - 900000,
-    },
-    {
-      id: "unknown_client",
-      name: "Alex (New Inquirer 🤖)",
-      role: "unknown",
-      avatar: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80",
-      bio: "External Contact",
-      unreadCount: 0,
-      lastMessage: "Hi, I have a project inquiry for DK.",
-      lastTimestamp: Date.now() - 1800000,
-    },
-  ];
+      id: "boss_dk", name: "DK (Boss 👑)", role: "boss", avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80", bio: "Creator & Master of FRIDAY", unreadCount: 0, lastMessage: "Friday, system ready hai?", lastTimestamp: Date.now() - 60000, }, {
+      id: "special_gf", name: "Special Someone 💖", role: "girlfriend", avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80", bio: "VIP Priority Contact", lastMessage: "DK kahan hai Friday?", lastTimestamp: Date.now() - 300000, {
+      id: "best_friend_aman", name: "Aman (Bhai 🤝)", role: "friend", avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80", bio: "College Bro & Gamer", lastMessage: "Bhai weekend par gaming session?", lastTimestamp: Date.now() - 900000, {
+      id: "unknown_client", name: "Alex (New Inquirer 🤖)", role: "unknown", avatar: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80", bio: "External Contact", lastMessage: "Hi, I have a project inquiry for DK.", lastTimestamp: Date.now() - 1800000, ];
 
   private inMemoryMessages = new Map<string, MessengerMessage[]>();
 
@@ -113,9 +77,7 @@ class FridayMessengerService {
   public async setContactRole(contactId: string, role: MessengerRole): Promise<{ success: boolean; message: string }> {
     await messengerContactsCol().doc(contactId).set({ role }, { merge: true });
     return {
-      success: true,
-      message: `Contact "${contactId}" ka role update ho gaya: ${role.toUpperCase()}`,
-    };
+      success: true, message: `Contact "${contactId}" ka role update ho gaya: ${role.toUpperCase()}`, };
   }
 
   /**
@@ -160,39 +122,16 @@ TONE & PERSONALITY:
    * Post a message into Friday Messenger and generate AI response if appropriate
    */
   public async handleIncomingMessage(
-    chatId: string,
-    senderId: string,
-    senderName: string,
-    text: string,
-    mediaType: MediaType = "text",
-    mediaUrl?: string,
-    mediaTitle?: string
+    chatId: string, senderId: string, senderName: string, text: string, mediaType: MediaType = "text", mediaUrl?: string, mediaTitle?: string
   ): Promise<{ userMessage: MessengerMessage; aiReply?: MessengerMessage }> {
     const now = Date.now();
     const contacts = await this.getContacts();
     const contact = contacts.find((c) => c.id === chatId) || {
-      id: chatId,
-      name: senderName,
-      role: "unknown" as MessengerRole,
-      avatar: "",
-      unreadCount: 0,
-      lastTimestamp: now,
-    };
+      id: chatId, name: senderName, role: "unknown" as MessengerRole, avatar: "", lastTimestamp: now, };
 
     const userMsgId = Math.random().toString(36).substring(2, 9);
     const userMessage: MessengerMessage = {
-      id: userMsgId,
-      chatId,
-      senderId,
-      senderName,
-      senderRole: contact.role,
-      text,
-      mediaType,
-      mediaUrl,
-      mediaTitle,
-      timestamp: now,
-      aiGenerated: false,
-    };
+      id: userMsgId, chatId, senderId, senderName, senderRole: contact.role, text, mediaType, mediaUrl, mediaTitle, timestamp: now, aiGenerated: false, };
 
     // Cache user message locally
     const existingList = this.inMemoryMessages.get(chatId) || [];
@@ -204,10 +143,7 @@ TONE & PERSONALITY:
       await messengerMessagesCol(chatId).doc(userMsgId).set(userMessage);
       await messengerContactsCol().doc(chatId).set(
         {
-          lastMessage: text || `[${mediaType.toUpperCase()}]`,
-          lastTimestamp: now,
-        },
-        { merge: true }
+          lastMessage: text || `[${mediaType.toUpperCase()}]`, { merge: true }
       );
     } catch {}
 
@@ -220,11 +156,9 @@ TONE & PERSONALITY:
         const systemPrompt = this.generateSystemPromptForRole(contact);
 
         const response = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
-          contents: [
+          model: "gemini-3.6-flash", contents: [
             {
-              role: "user",
-              parts: [{ text: `System Instructions:\n${systemPrompt}\n\nIncoming Message from ${contact.name} (${contact.role.toUpperCase()}):\n"${text}"` }],
+              role: "user", parts: [{ text: `System Instructions:\n${systemPrompt}\n\nIncoming Message from ${contact.name} (${contact.role.toUpperCase()}):\n"${text}"` }],
             },
           ],
         });

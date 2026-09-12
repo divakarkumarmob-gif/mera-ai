@@ -39,12 +39,7 @@ export interface ConversationSession {
 }
 
 const DEFAULT_VAULT_ENTRY: PersonalVaultEntry = {
-  id: "boss_identity_core",
-  category: "boss_identity",
-  exactFact: "DK is my creator, absolute master, and Boss. I am Friday, his dedicated, loyal personal AI companion.",
-  date: "Core Identity",
-  timestamp: Date.now(),
-};
+  id: "boss_identity_core", category: "boss_identity", exactFact: "DK is my creator, absolute master, and Boss. I am Friday, his dedicated, loyal personal AI companion.", date: "Core Identity", timestamp: Date.now(), };
 
 // ---------------------------------------------------------------------------
 // Firestore layout:
@@ -91,13 +86,7 @@ class MemoryEngine {
     }
 
     const session: ConversationSession = {
-      id: sessionId,
-      startTime: now,
-      dateStr: new Date(now).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
-      messages: [],
-      lastExtractedIndex: 0,
-      isExtracting: false,
-    };
+      id: sessionId, startTime: now, dateStr: new Date(now).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }), messages: [], lastExtractedIndex: 0, isExtracting: false, };
     this.activeSessions.set(sessionId, session);
     return session;
   }
@@ -110,11 +99,7 @@ class MemoryEngine {
     const id = "pin_" + Math.random().toString(36).substring(2, 9);
     const now = Date.now();
     const entry = {
-      id,
-      fact: encryptData(fact.trim()),
-      date: new Date(now).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" }),
-      timestamp: now,
-    };
+      id, fact: encryptData(fact.trim()), date: new Date(now).toLocaleDateString("en-IN", timestamp: now, };
     try {
       await pinnedCol().doc(id).set(entry);
     } catch (e) {
@@ -127,18 +112,11 @@ class MemoryEngine {
     const id = "vlt_" + Math.random().toString(36).substring(2, 9);
     const now = Date.now();
     const entry: PersonalVaultEntry = {
-      id,
-      category: category.trim() || "general",
-      exactFact: encryptData(fact.trim()),
-      date: new Date(now).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" }),
-      timestamp: now,
-    };
+      id, category: category.trim() || "general", exactFact: encryptData(fact.trim()), };
     try {
       await vaultCol().doc(id).set(entry);
     } catch (e) {
-      console.warn("[MemoryEngine] Failed to save vault fact:", e);
-    }
-    return { success: true, id, fact: fact.trim() };
+      console.warn("[MemoryEngine] Failed to save vault fact:", fact: fact.trim() };
   }
 
   public recordMessage(sessionId: string, sender: "user" | "ai", text: string) {
@@ -149,17 +127,9 @@ class MemoryEngine {
     }
     const now = Date.now();
     const timeStr = new Date(now).toLocaleTimeString("en-IN", {
-      timeZone: "Asia/Kolkata",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: true,
-    });
+      timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true, });
     session.messages.push({
-      sender,
-      text: text.trim(),
-      timestamp: now,
-      timeStr,
-    });
+      sender, text: text.trim(), timeStr, });
 
     // Real-time live crash-proof Firestore stream
     liveScratchService.recordLiveTurn(sessionId, sender, text.trim());
@@ -177,13 +147,8 @@ class MemoryEngine {
 
     try {
       const toPersist = {
-        ...session,
-        summary: session.summary ? encryptData(session.summary) : undefined,
-        messages: (session.messages || []).map((m) => ({
-          ...m,
-          text: encryptData(m.text),
-        })),
-      };
+        ...session, summary: session.summary ? encryptData(session.summary) : undefined, messages: (session.messages || []).map((m) => ({
+          ...m, text: encryptData(m.text), })), };
       await sessionsCol().doc(session.id).set(toPersist);
       this.processVectorArchivalLifecycle().catch(() => {});
     } catch (e) {
@@ -200,8 +165,7 @@ class MemoryEngine {
 
   /**
    * Sessions older than 60 days:
-   * Phase 1 (Stage & Buffer): Converts to Vector Embeddings, saves to Firestore vectorStore,
-   * marks status: "archived_pending_delete" with a 24-Hour Safety Buffer, and dispatches
+   * Phase 1 (Stage & Buffer): Converts to Vector Embeddings, saves to Firestore vectorStore, * marks status: "archived_pending_delete" with a 24-Hour Safety Buffer, and dispatches
    * verified alerts to Telegram and WhatsApp.
    * Phase 2 (Prune): Deletes raw document ONLY after 24 hours have elapsed.
    */
@@ -240,39 +204,20 @@ class MemoryEngine {
         const summary = session.summary || `Comprehensive conversation session on ${session.dateStr}`;
 
         const archiveRes = await vectorMemoryService.archiveToVectorStore({
-          originalText: dialogueText,
-          summary,
-          sourceType: "session_dialogue",
-          dateRangeStr: session.dateStr,
-          startTimestamp: session.startTime,
-          endTimestamp: session.endTime || session.startTime,
-          metadata: {
-            session_id: session.id,
-            exact_date: session.dateStr,
-            pinnedFacts: session.pinnedFacts || [],
-          },
-        });
+          originalText: dialogueText, summary, sourceType: "session_dialogue", dateRangeStr: session.dateStr, startTimestamp: session.startTime, endTimestamp: session.endTime || session.startTime, metadata: {
+            session_id: session.id, exact_date: session.dateStr, pinnedFacts: session.pinnedFacts || [], }, });
 
         if (archiveRes.success && archiveRes.entryId) {
           const safeDeleteAfter = now + 24 * 60 * 60 * 1000; // 24-hour buffer
           await doc.ref.set(
             {
-              status: "archived_pending_delete",
-              safeDeleteAfter,
-              summaryId: archiveRes.entryId,
-            },
-            { merge: true }
+              status: "archived_pending_delete", safeDeleteAfter, summaryId: archiveRes.entryId, { merge: true }
           );
 
           // Real-time verified confirmation to Telegram and WhatsApp
           memoryNotificationService
             .notifySummaryVerifiedAndStaged({
-              dateRangeStr: session.dateStr,
-              summaryType: "session_digest",
-              summaryId: archiveRes.entryId,
-              summaryText: summary,
-              targetCollection: "vectorStore",
-            })
+              dateRangeStr: session.dateStr, summaryType: "session_digest", summaryText: summary, targetCollection: "vectorStore", })
             .catch(() => {});
 
           console.log(`[MemoryEngine] 🛡️ Staged session ${session.id} (${session.dateStr}) under 24h buffer.`);
@@ -295,13 +240,7 @@ class MemoryEngine {
    * session's memory — only gives up if EVERY model fails.
    */
   private static readonly EXTRACTION_MODEL_CHAIN = [
-    "gemini-3.5-flash-lite",
-    "gemini-3.1-flash-lite",
-    "gemini-3.6-flash",
-    "gemini-3.5-flash",
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
-  ];
+    "gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.6-flash", "gemini-3.5-flash"];
 
   private async runExtraction(
     messages: SessionMessage[],

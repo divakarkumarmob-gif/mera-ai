@@ -48,7 +48,7 @@ Return ONLY valid JSON matching this schema:
   "spokenBriefing": "Natural spoken sentence Friday will say out loud to DK summarizing what sender wants"
 }`;
 
-        const models = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash"];
+        const models = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.6-flash"];
         for (const model of models) {
           try {
             const res = await ai.models.generateContent({

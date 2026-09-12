@@ -98,9 +98,7 @@ export class VoiceBridgeService {
     if (!db || !process.env.FIREBASE_PROJECT_ID) return;
     try {
       const snap = await Promise.race([
-        db.collection("voiceBridgeSessions").where("isActive", "==", true).get(),
-        new Promise<any>((_, reject) => setTimeout(() => reject(new Error("Firestore timeout")), 2500)),
-      ]);
+        db.collection("voiceBridgeSessions").where("isActive", "==", true).get(), new Promise<any>((_, reject) => setTimeout(() => reject(new Error("Firestore timeout")), 2500)), ]);
       snap.forEach((doc: any) => {
         const session = doc.data() as BridgeSession;
         this.activeSessions.set(session.userA_chatId, session);
@@ -117,31 +115,17 @@ export class VoiceBridgeService {
    * Env: ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID (optional)
    */
   public async elevenLabsTTS(
-    text: string,
-    voiceId: string = process.env.ELEVENLABS_VOICE_ID || "cgSgspJ2msm6clMCkdW9" // Jessica (Free Premade Voice)
+    text: string, voiceId: string = process.env.ELEVENLABS_VOICE_ID || "cgSgspJ2msm6clMCkdW9" // Jessica (Free Premade Voice)
   ): Promise<{ buffer: Buffer; mimeType: string } | null> {
     const apiKey = process.env.ELEVENLABS_API_KEY?.trim();
     if (!apiKey) return null;
 
     try {
       const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
-        method: "POST",
-        headers: {
-          "xi-api-key": apiKey,
-          "Content-Type": "application/json",
-          Accept: "audio/mpeg",
-        },
-        body: JSON.stringify({
-          text: text.trim(),
-          model_id: "eleven_multilingual_v2",
-          voice_settings: {
-            stability: 0.5,
-            similarity_boost: 0.75,
-            style: 0.0,
-            use_speaker_boost: true,
-          },
-        }),
-      });
+        method: "POST", headers: {
+          "xi-api-key": apiKey, "Content-Type": "application/json", Accept: "audio/mpeg", }, body: JSON.stringify({
+          text: text.trim(), model_id: "eleven_multilingual_v2", voice_settings: {
+            stability: 0.5, similarity_boost: 0.75, style: 0.0, use_speaker_boost: true, }), });
 
       if (!res.ok) {
         const errText = await res.text();
@@ -165,33 +149,15 @@ export class VoiceBridgeService {
    * Env: SARVAM_API_KEY (or SARVAM_AI_API_KEY)
    */
   public async sarvamTTS(
-    text: string,
-    targetLanguageCode: string = "hi-IN",
-    speaker: string = "simran",
-    prosodyOverride?: { pitch?: number; pace?: number; loudness?: number }
+    text: string, targetLanguageCode: string = "hi-IN", speaker: string = "simran", prosodyOverride?: { pitch?: number; pace?: number; loudness?: number }
   ): Promise<{ buffer: Buffer; mimeType: string } | null> {
     const apiKey = (process.env.SARVAM_API_KEY || process.env.SARVAM_AI_API_KEY)?.trim();
     if (!apiKey) return null;
 
     try {
-      const res = await fetch("https://api.sarvam.ai/text-to-speech", {
-        method: "POST",
-        headers: {
-          "api-subscription-key": apiKey,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          inputs: [text.trim()],
-          target_language_code: targetLanguageCode,
-          speaker: speaker || "simran",
-          pitch: prosodyOverride?.pitch ?? 0,
-          pace: prosodyOverride?.pace ?? 1.0,
-          loudness: prosodyOverride?.loudness ?? 1.5,
-          speech_sample_rate: 22050,
-          enable_preprocessing: true,
-          model: "bulbul:v3",
-        }),
-      });
+      const res = await fetch("https://api.sarvam.ai/text-to-speech", headers: {
+          "api-subscription-key": apiKey, body: JSON.stringify({
+          inputs: [text.trim()], target_language_code: targetLanguageCode, speaker: speaker || "simran", pitch: prosodyOverride?.pitch ?? 0, pace: prosodyOverride?.pace ?? 1.0, loudness: prosodyOverride?.loudness ?? 1.5, speech_sample_rate: 22050, enable_preprocessing: true, model: "bulbul:v3", });
 
       if (!res.ok) {
         const errText = await res.text();
@@ -217,9 +183,7 @@ export class VoiceBridgeService {
    * 3. Microsoft Edge Neural Engine (Fallback - 100% Free & Unlimited)
    */
   public async generateSpeech(
-    text: string,
-    voice?: string,
-    context?: { isBoss?: boolean; userPrompt?: string; emotionOverride?: any }
+    text: string, voice?: string, context?: { isBoss?: boolean; userPrompt?: string; emotionOverride?: any }
   ): Promise<{ buffer: Buffer; mimeType: string }> {
     const cleanText = text.trim();
     if (!cleanText) throw new Error("Text is empty for TTS");
@@ -267,9 +231,7 @@ export class VoiceBridgeService {
    * Text-to-Speech (TTS) using Microsoft Edge Neural Engine (100% Free, High Quality)
    */
   public async textToSpeechBuffer(
-    text: string,
-    voice: string = VoiceBridgeService.DEFAULT_VOICE,
-    prosodyOptions?: { pitch?: string; rate?: string | number; volume?: string }
+    text: string, voice: string = VoiceBridgeService.DEFAULT_VOICE, prosodyOptions?: { pitch?: string; rate?: string | number; volume?: string }
   ): Promise<Buffer> {
     const cleanText = text.trim();
     if (!cleanText) throw new Error("Text is empty for TTS");
@@ -304,9 +266,7 @@ export class VoiceBridgeService {
    * Fallback to Gemini Multimodal Audio if Groq API key is not configured.
    */
   public async transcribeAudio(
-    audioBuffer: Buffer,
-    mimeType: string = "audio/ogg",
-    filename: string = "voice.ogg"
+    audioBuffer: Buffer, mimeType: string = "audio/ogg", filename: string = "voice.ogg"
   ): Promise<string> {
     const groqApiKey = process.env.GROQ_API_KEY?.trim();
 
@@ -321,12 +281,8 @@ export class VoiceBridgeService {
         formData.append("language", "hi"); // Hindi / Hinglish primary
 
         const res = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${groqApiKey}`,
-          },
-          body: formData,
-        });
+          method: "POST", headers: {
+            Authorization: `Bearer ${groqApiKey}`, body: formData, });
 
         if (!res.ok) {
           const errText = await res.text();
@@ -349,21 +305,13 @@ export class VoiceBridgeService {
         const ai = new GoogleGenAI({ apiKey: geminiKey });
         const base64Audio = audioBuffer.toString("base64");
         const response = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
-          contents: [
+          model: "gemini-3.6-flash", contents: [
             {
-              role: "user",
-              parts: [
+              role: "user", parts: [
                 {
                   inlineData: {
-                    mimeType: mimeType || "audio/ogg",
-                    data: base64Audio,
-                  },
-                },
-                {
-                  text: "You are a fast speech-to-text transcriber. Transcribe the audio exactly as spoken in Hindi / Hinglish / English without any extra commentary. Output ONLY the transcribed text.",
-                },
-              ],
+                    mimeType: mimeType || "audio/ogg", data: base64Audio, {
+                  text: "You are a fast speech-to-text transcriber. Transcribe the audio exactly as spoken in Hindi / Hinglish / English without any extra commentary. Output ONLY the transcribed text."],
             },
           ],
         });

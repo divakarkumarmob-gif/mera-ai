@@ -20,11 +20,7 @@ class DailyPodcastService {
   public async generateDailyPodcast(topic: string = "technology"): Promise<DailyPodcastEpisode> {
     const now = new Date();
     const dateStr = now.toLocaleDateString("en-IN", {
-      day: "numeric",
-      month: "long",
-      year: "numeric",
-      timeZone: "Asia/Kolkata",
-    });
+      day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Kolkata", });
 
     const cleanTopic = (topic || "technology").trim().toLowerCase();
     let newsArticles: Array<{ title: string; description?: string; source?: string }> = [];
@@ -34,10 +30,7 @@ class DailyPodcastService {
       const liveNews = await newsService.getLatestNews(cleanTopic, cleanTopic, "in", "en", 5);
       if (liveNews.success && Array.isArray(liveNews.articles) && liveNews.articles.length > 0) {
         newsArticles = liveNews.articles.slice(0, 3).map((a) => ({
-          title: a.title,
-          description: a.description || a.content,
-          source: a.source,
-        }));
+          title: a.title, description: a.description || a.content, source: a.source, }));
       }
     } catch (e) {
       console.warn("[DailyPodcast] newsService fetch warning, falling back to publicApis:", e);
@@ -45,13 +38,10 @@ class DailyPodcastService {
 
     if (newsArticles.length === 0) {
       try {
-        const fallbackNews = await publicApisService.getNews(cleanTopic, "in", 5);
+        const fallbackNews = await publicApisService.getNews(cleanTopic, 5);
         if (fallbackNews.success && Array.isArray(fallbackNews.articles) && fallbackNews.articles.length > 0) {
           newsArticles = fallbackNews.articles.slice(0, 3).map((a: any) => ({
-            title: a.title,
-            description: a.description || a.summary,
-            source: a.source,
-          }));
+            title: a.title, description: a.description || a.summary, }));
         }
       } catch {}
     }
@@ -60,21 +50,9 @@ class DailyPodcastService {
     if (newsArticles.length === 0) {
       newsArticles = [
         {
-          title: "AI Autonomous Multi-Agent Frameworks accelerate global software engineering",
-          description: "Developers are leveraging agentic reasoning for full-stack bug repair and automated pipelines.",
-          source: "TechCrunch",
-        },
-        {
-          title: "Next-Gen Quantum and Edge Computing clusters expand deployment in India",
-          description: "Major deep-tech initiatives establish domestic high-throughput computing centers.",
-          source: "LiveMint",
-        },
-        {
-          title: "Lightweight on-device Multimodal models achieve real-time speech parity",
-          description: "Sub-100ms audio-to-audio latency enables truly conversational smart assistants.",
-          source: "VentureBeat",
-        },
-      ];
+          title: "AI Autonomous Multi-Agent Frameworks accelerate global software engineering", description: "Developers are leveraging agentic reasoning for full-stack bug repair and automated pipelines.", source: "TechCrunch", }, {
+          title: "Next-Gen Quantum and Edge Computing clusters expand deployment in India", description: "Major deep-tech initiatives establish domestic high-throughput computing centers.", source: "LiveMint", {
+          title: "Lightweight on-device Multimodal models achieve real-time speech parity", description: "Sub-100ms audio-to-audio latency enables truly conversational smart assistants.", source: "VentureBeat", ];
     }
 
     const highlights = newsArticles.map((a) => a.title);
@@ -102,9 +80,7 @@ Format rules:
 6. Keep script ready to be spoken by TTS with zero markdown clutter.`;
 
         const res = await ai.models.generateContent({
-          model: "gemini-3.6-flash",
-          contents: prompt,
-        });
+          model: "gemini-3.6-flash", contents: prompt, });
 
         if (res.text && res.text.trim().length > 100) {
           script = res.text.trim();

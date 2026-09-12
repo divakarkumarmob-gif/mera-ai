@@ -64,12 +64,7 @@ class GroupCollectiveLearningService {
    * Observes and learns from an incoming group message across WhatsApp or Telegram
    */
   public async learnFromGroupMessage(
-    platform: "whatsapp" | "telegram",
-    groupId: string,
-    groupTitle: string,
-    senderId: string,
-    senderName: string,
-    text: string
+    platform: "whatsapp" | "telegram", groupId: string, groupTitle: string, senderId: string, senderName: string, text: string
   ): Promise<void> {
     if (!text || text.length < 2 || text.startsWith("/")) return;
     const isSingleReactionEmoji = /^(👍|👎|❤️|🔥|👏|🙏|😂|😍|🎉|👌|💯|⚡|😎|✨|💪|🙌|🤝|💖|😊|🥺|😢|😭|🕊️|💀|🗿|👀)$/u.test(text.trim());
@@ -81,29 +76,14 @@ class GroupCollectiveLearningService {
 
     if (!profile) {
       profile = {
-        groupId: cleanGroupId,
-        groupTitle: groupTitle || "Group Chat",
-        platform,
-        slangTokens: [],
-        activeTopics: [],
-        insideJokes: [],
-        members: {},
-        recentConversations: [],
-        totalMessagesAnalyzed: 0,
-        updatedAt: Date.now(),
-      };
+        groupId: cleanGroupId, groupTitle: groupTitle || "Group Chat", platform, slangTokens: [], activeTopics: [], insideJokes: [], members: {}, recentConversations: [], totalMessagesAnalyzed: 0, updatedAt: Date.now(), };
     }
 
     // 1. Update member profile
     const memberKey = String(senderId || senderName).replace(/[^a-zA-Z0-9_-]/g, "_");
     if (!profile.members[memberKey]) {
       profile.members[memberKey] = {
-        id: String(senderId),
-        name: senderName,
-        messageCount: 1,
-        lastSpokeAt: Date.now(),
-        observedKeywords: [],
-      };
+        id: String(senderId), name: senderName, messageCount: 1, lastSpokeAt: Date.now(), observedKeywords: [], };
     } else {
       profile.members[memberKey].messageCount += 1;
       profile.members[memberKey].lastSpokeAt = Date.now();
@@ -112,10 +92,7 @@ class GroupCollectiveLearningService {
 
     // 2. Add to rolling conversation window
     profile.recentConversations.push({
-      sender: senderName,
-      text: text.slice(0, 300),
-      timestamp: Date.now(),
-    });
+      sender: senderName, text: text.slice(0, 300), timestamp: Date.now(), });
     if (profile.recentConversations.length > 40) {
       profile.recentConversations.shift();
     }
@@ -202,16 +179,14 @@ FORMAT YOUR TELEGRAM/WHATSAPP RESPONSE AS:
 📊 *Group Catch-Up Digest:* **${profile.groupTitle}**
 • 📌 *Main Topic (Kya baat chal rahi thi):* (1-2 crisp lines)
 • 🗣️ *Key Highlights & Member Points:* (Bullet points of key things said by members)
-• 💡 *Decisions / Plans (if any):* (Any dinner, trip, meeting, game, or agreement mentioned)
+• 💡 *Decisions / Plans (if any):* (Any dinner, meeting, game, or agreement mentioned)
 • 🌟 *Active Contributors:* (Names of key active members)
 
 Keep it warm, executive, clean, and engaging!`;
 
     try {
       const resp = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: prompt,
-      });
+        model: "gemini-3.6-flash", contents: prompt, });
       const summary = resp.text?.trim() || "Summary could not be generated.";
       profile.lastSummary = summary;
       return summary;

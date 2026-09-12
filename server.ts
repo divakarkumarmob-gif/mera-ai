@@ -78,10 +78,7 @@ async function startServer() {
     // Immediate block for IPs with 3 failed password attempts
     if (appSecurityService.isIpBlocked(clientIp)) {
       return res.status(403).json({
-        ok: false,
-        error: "ACCESS_BLOCKED",
-        message: "Access Blocked: 3 failed attempts ke baad aapka device/IP block kar diya gaya hai. Boss ko unblock karne ke liye kahein.",
-      });
+        ok: false, error: "ACCESS_BLOCKED", message: "Access Blocked: 3 failed attempts ke baad aapka device/IP block kar diya gaya hai. Boss ko unblock karne ke liye kahein.", });
     }
 
     if (
@@ -113,22 +110,14 @@ async function startServer() {
     if (!authHeader || !appSecurityService.verifySessionToken(authHeader)) {
       if (isUltraSensitive) {
         await appSecurityService.blockClient(
-          clientIp,
-          userAgent,
-          `Direct unauthorized attack/probe on sensitive endpoint: ${reqPath}`
+          clientIp, userAgent, `Direct unauthorized attack/probe on sensitive endpoint: ${reqPath}`
         );
         return res.status(403).json({
-          ok: false,
-          error: "ACCESS_BLOCKED_IMMEDIATE",
-          message: "Critical Intrusion: Direct unauthorized probe on protected endpoint. Your IP & Device have been permanently blocked.",
-        });
+          ok: false, error: "ACCESS_BLOCKED_IMMEDIATE", message: "Critical Intrusion: Direct unauthorized probe on protected endpoint. Your IP & Device have been permanently blocked.", });
       }
 
       return res.status(401).json({
-        ok: false,
-        error: "ACCESS_LOCKED",
-        message: "Unauthorized: Valid cryptographically signed App Access Key required. Client code bypass is strictly blocked.",
-      });
+        ok: false, error: "ACCESS_LOCKED", message: "Unauthorized: Valid cryptographically signed App Access Key required. Client code bypass is strictly blocked.", });
     }
 
     next();
@@ -136,19 +125,14 @@ async function startServer() {
 
   // ── Register Modularized REST API Router ──────────────────────────────────
   app.use(createApiRouter({
-    getBaileysEnabled: () => baileysEnabled,
-    setBaileysEnabled: (v) => { baileysEnabled = v; },
-    getActiveConnectionsCount: () => connectedClients.size,
-  }));
+    getBaileysEnabled: () => baileysEnabled, setBaileysEnabled: (v) => { baileysEnabled = v; }, getActiveConnectionsCount: () => connectedClients.size, }));
 
   // ── Vite Dev Server / Production Static Serving ───────────────────────────
   const distPath = path.resolve("dist");
   let vite: any;
   if (!isProduction) {
     vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
+      server: { middlewareMode: true }, appType: "spa", });
     app.use(vite.middlewares);
   } else {
     app.use(express.static(distPath, { index: false }));
@@ -191,13 +175,7 @@ async function startServer() {
 
   whatsappBotService.setMessageCallback((msg) => {
     const payload = JSON.stringify({
-      type: "whatsapp_incoming",
-      sender: msg.senderName,
-      text: msg.text,
-      time: msg.dateStr,
-      isGroup: msg.isGroup,
-      groupName: msg.groupName,
-    });
+      type: "whatsapp_incoming", sender: msg.senderName, text: msg.text, time: msg.dateStr, isGroup: msg.isGroup, groupName: msg.groupName, });
     for (const client of connectedClients) {
       if (client.readyState === client.OPEN) client.send(payload);
     }
@@ -213,11 +191,7 @@ async function startServer() {
 
   whatsappBotService.setCallTriggerCallback((callData) => {
     const payload = JSON.stringify({
-      type: "trigger_incoming_call",
-      callerName: callData.callerName,
-      isOwner: callData.isOwner,
-      callId: callData.callId,
-    });
+      type: "trigger_incoming_call", callerName: callData.callerName, isOwner: callData.isOwner, callId: callData.callId, });
     for (const client of connectedClients) {
       if (client.readyState === client.OPEN) client.send(payload);
     }
@@ -225,17 +199,7 @@ async function startServer() {
 
   whatsappCloudService.setMessageCallback((msg) => {
     const payload = JSON.stringify({
-      type: "whatsapp_incoming",
-      sender: msg.name,
-      text: msg.text,
-      time: new Date(msg.timestamp).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" }),
-      isGroup: false,
-    });
-    for (const client of connectedClients) {
-      if (client.readyState === client.OPEN) client.send(payload);
-    }
-
-    const ownerPhone = (process.env.OWNER_WHATSAPP_NUMBER || "").replace(/\D/g, "");
+      type: "whatsapp_incoming", sender: msg.name, time: new Date(msg.timestamp).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" }), isGroup: false, "");
     const senderDigits = (msg.from || "").replace(/\D/g, "");
     if (ownerPhone && senderDigits === ownerPhone) {
       voiceBiometricsService.handleWhatsAppVoicePinMessage(msg.text, msg.name, "whatsapp_cloud")
@@ -262,12 +226,7 @@ async function startServer() {
 
   telegramBotService.setMessageCallback((msg) => {
     const payload = JSON.stringify({
-      type: "telegram_incoming",
-      sender: msg.sender,
-      text: msg.text,
-      time: msg.time,
-      chatId: msg.chatId,
-    });
+      type: "telegram_incoming", sender: msg.sender, time: msg.time, chatId: msg.chatId, });
     for (const client of connectedClients) {
       if (client.readyState === client.OPEN) client.send(payload);
     }
@@ -325,20 +284,11 @@ async function startServer() {
     let lastGoogleSearchMode = false;
 
     const createSession = async (
-      voice: string,
-      thinkingLevel: string,
-      accurateMode: boolean,
-      answerLength: string,
-      googleSearchMode: boolean
+      voice: string, thinkingLevel: string, accurateMode: boolean, answerLength: string, googleSearchMode: boolean
     ) => {
       const effectiveThinking = accurateMode || googleSearchMode ? "high" : (thinkingLevel || "high");
       const systemInstruction = await buildLiveSystemInstruction({
-        thinkingLevel: effectiveThinking,
-        accurateMode,
-        answerLength,
-        googleSearchMode,
-        voiceName: voice || "Aoede",
-      });
+        thinkingLevel: effectiveThinking, accurateMode, answerLength, googleSearchMode, voiceName: voice || "Aoede", });
 
 
       let inputTranscriptBuffer = "";
@@ -346,10 +296,7 @@ async function startServer() {
       let thisSessionRef: any;
 
       const liveModelsToTry = [
-        "gemini-3.1-flash-live-preview",
-        "gemini-2.5-flash-native-audio-dialog",
-        "gemini-2.0-flash-exp",
-      ];
+        "gemini-3.1-flash-live-preview", "gemini-3.6-flash-native-audio-dialog", "gemini-2.0-flash-exp"];
 
       let newSession: any = null;
       let lastLiveError: any = null;
