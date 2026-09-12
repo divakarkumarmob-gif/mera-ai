@@ -3210,6 +3210,13 @@ export function createApiRouter(context: ApiRoutesContext): Router {
 
   // 1. Inbound Call Webhook (Exotel Passthru Applet Entrypoint)
   app.all(["/api/exotel/incoming-call", "/api/exotel/passthru"], async (req, res) => {
+    const traceId = `trace_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const clientIp = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "Unknown";
+    console.log(`[ExotelDiagnostic:${traceId}] 📥 INCOMING_CALL Webhook Hit: Method=${req.method} IP=${clientIp}`);
+    console.log(`[ExotelDiagnostic:${traceId}] Query:`, JSON.stringify(req.query));
+    console.log(`[ExotelDiagnostic:${traceId}] Body:`, JSON.stringify(req.body));
+    console.log(`[ExotelDiagnostic:${traceId}] User-Agent:`, req.headers["user-agent"]);
+
     try {
       const callSid = String(req.query.CallSid || req.body.CallSid || `call_${Date.now()}`);
       const from = String(req.query.From || req.body.From || req.query.CallFrom || req.body.CallFrom || "Unknown");
@@ -3219,17 +3226,25 @@ export function createApiRouter(context: ApiRoutesContext): Router {
       const baseUrl = `${protocol}://${host}`;
 
       const { exml } = await exotelService.handleIncomingCall({ callSid, from, to, baseUrl });
-      res.set("Content-Type", "text/xml");
-      res.send(exml);
+      console.log(`[ExotelDiagnostic:${traceId}] 📤 Returning ExML (Length: ${exml.length} chars):\n${exml}`);
+      res.set("Content-Type", "text/xml; charset=utf-8");
+      res.status(200).send(exml);
     } catch (e: any) {
-      console.error("[ExotelRoute] Incoming call webhook error:", e);
-      res.set("Content-Type", "text/xml");
-      res.send(`<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="female">नमस्ते! मैं Friday हूँ, कुछ ही समय में आपसे संपर्क करूँगी।</Say><Hangup/></Response>`);
+      console.error(`[ExotelDiagnostic:${traceId}] ❌ Incoming call webhook error:`, e);
+      res.set("Content-Type", "text/xml; charset=utf-8");
+      res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="female">नमस्ते! मैं Friday हूँ, कुछ ही समय में आपसे संपर्क करूँगी।</Say><Hangup/></Response>`);
     }
   });
 
   // 2. Process Caller's Voice Speech (Multi-Turn Voice Dialogue Loop)
   app.all("/api/exotel/process-speech", async (req, res) => {
+    const traceId = `trace_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const clientIp = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "Unknown";
+    console.log(`[ExotelDiagnostic:${traceId}] 🎙️ PROCESS_SPEECH Webhook Hit: Method=${req.method} IP=${clientIp}`);
+    console.log(`[ExotelDiagnostic:${traceId}] Query:`, JSON.stringify(req.query));
+    console.log(`[ExotelDiagnostic:${traceId}] Body:`, JSON.stringify(req.body));
+    console.log(`[ExotelDiagnostic:${traceId}] User-Agent:`, req.headers["user-agent"]);
+
     try {
       const callSid = String(req.query.callSid || req.query.CallSid || req.body.CallSid || "");
       const recordingUrl = String(req.query.RecordingUrl || req.body.RecordingUrl || req.body.RecordingURL || req.query.RecordingURL || "");
@@ -3239,17 +3254,23 @@ export function createApiRouter(context: ApiRoutesContext): Router {
       const baseUrl = `${protocol}://${host}`;
 
       const { exml } = await exotelService.handleSpeechInput({ callSid, recordingUrl, digits, baseUrl });
-      res.set("Content-Type", "text/xml");
-      res.send(exml);
+      console.log(`[ExotelDiagnostic:${traceId}] 📤 Returning Next ExML Turn (Length: ${exml.length} chars):\n${exml}`);
+      res.set("Content-Type", "text/xml; charset=utf-8");
+      res.status(200).send(exml);
     } catch (e: any) {
-      console.error("[ExotelRoute] Process speech webhook error:", e);
-      res.set("Content-Type", "text/xml");
-      res.send(`<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="female">धन्यवाद, मैंने आपकी बात नोट कर ली है।</Say><Hangup/></Response>`);
+      console.error(`[ExotelDiagnostic:${traceId}] ❌ Process speech webhook error:`, e);
+      res.set("Content-Type", "text/xml; charset=utf-8");
+      res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="female">धन्यवाद, मैंने आपकी बात नोट कर ली है।</Say><Hangup/></Response>`);
     }
   });
 
   // 3. Status Callback (Call Ended, Duration, and Recording Delivered)
   app.all("/api/exotel/call-status", async (req, res) => {
+    const traceId = `trace_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    console.log(`[ExotelDiagnostic:${traceId}] 📊 CALL_STATUS Webhook Hit: Method=${req.method}`);
+    console.log(`[ExotelDiagnostic:${traceId}] Query:`, JSON.stringify(req.query));
+    console.log(`[ExotelDiagnostic:${traceId}] Body:`, JSON.stringify(req.body));
+
     try {
       const callSid = String(req.query.CallSid || req.body.CallSid || "");
       const status = String(req.query.Status || req.body.Status || req.query.CallStatus || req.body.CallStatus || "completed");
@@ -3265,7 +3286,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
 
       res.json({ ok: true, session });
     } catch (e: any) {
-      console.error("[ExotelRoute] Call status callback error:", e);
+      console.error(`[ExotelDiagnostic:${traceId}] ❌ Call status callback error:`, e);
       res.status(500).json({ ok: false, error: e?.message });
     }
   });
@@ -3273,6 +3294,7 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   // 4. Serve Dynamic Friday Voice MP3 Audio to Exotel (Full HTTP 206 Range & Telephony HEAD Support)
   app.all("/api/exotel/audio/:audioId", (req, res) => {
     const audioId = req.params.audioId;
+    console.log(`[ExotelDiagnostic] 🔊 AUDIO_FETCH Request: Method=${req.method} AudioId=${audioId} Range=${req.headers.range || "none"}`);
     const audio = exotelService.getAudio(audioId);
     if (!audio) {
       return res.status(404).send("Audio expired or not found");
