@@ -154,13 +154,14 @@ class AppSecurityService {
   /**
    * Syncs blocked IPs and global revocation timestamps from Firestore.
    */
-  private async syncFromFirestore(): Promise<void> {
-    if (this.isFirestoreSynced) return;
+  public async syncFromFirestore(force = false): Promise<void> {
+    if (this.isFirestoreSynced && !force) return;
     try {
       // 1. Sync Blocked IPs
       const blockedDoc = await db.collection("systemSecurity").doc("blockedAccess").get();
       if (blockedDoc.exists && blockedDoc.data()?.blockedList) {
         const list = blockedDoc.data()?.blockedList as Record<string, BlockedClientData>;
+        this.blockedIps.clear();
         for (const [ip, val] of Object.entries(list)) {
           this.blockedIps.set(this.cleanIp(ip), val);
         }
@@ -188,6 +189,13 @@ class AppSecurityService {
     } catch (e) {
       console.warn("[AppSecurity] Failed to sync security state from Firestore:", e);
     }
+  }
+
+  /**
+   * Syncs blocked IPs specifically from Firestore.
+   */
+  public async syncBlockedFromFirestore(): Promise<void> {
+    await this.syncFromFirestore(true);
   }
 
   /**
