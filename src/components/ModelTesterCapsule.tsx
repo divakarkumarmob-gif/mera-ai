@@ -308,7 +308,7 @@ export const ModelTesterCapsule: React.FC<ModelTesterCapsuleProps> = ({ isOpen, 
     {
       id: "welcome_msg",
       sender: "model",
-      text: "नमस्ते Boss! मैं **FRIDAY Model Testing Sandbox** हूँ। आप ऊपर दाईं ओर दिए गए Dropdown से **Google AI Studio** का कोई भी Model सेलेक्ट कर सकते हैं और यहाँ Live Prompt, PDF, Audio, Video, या Code टेस्ट कर सकते हैं।",
+      text: "नमस्ते Boss! मैं **FRIDAY Model Test** हूँ। आप ऊपर दिए गए Dropdown से कोई भी Model सेलेक्ट कर सकते हैं और यहाँ Live Prompt, PDF, Audio, Video, Photo या Code टेस्ट कर सकते हैं।",
       timestamp: Date.now(),
       modelUsed: "gemini-3.5-flash",
     }
@@ -508,7 +508,7 @@ export const ModelTesterCapsule: React.FC<ModelTesterCapsuleProps> = ({ isOpen, 
               <div>
                 <div className="flex items-center gap-2">
                   <h2 className="text-base sm:text-lg font-bold bg-gradient-to-r from-cyan-300 via-sky-200 to-indigo-200 bg-clip-text text-transparent">
-                    Google AI Studio Sandbox
+                    Model Test
                   </h2>
                   <span className="px-2 py-0.5 text-[10px] font-semibold tracking-wider uppercase rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
                     Live Testing
@@ -564,7 +564,7 @@ export const ModelTesterCapsule: React.FC<ModelTesterCapsuleProps> = ({ isOpen, 
                             type="text"
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            placeholder="Search Google AI Studio models..."
+                            placeholder="Search models..."
                             className="bg-transparent text-slate-100 placeholder-slate-500 focus:outline-none w-full text-xs"
                             onClick={(e) => e.stopPropagation()}
                           />
