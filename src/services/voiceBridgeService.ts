@@ -167,7 +167,7 @@ export class VoiceBridgeService {
   public async sarvamTTS(
     text: string,
     targetLanguageCode: string = "hi-IN",
-    speaker: string = "anushka",
+    speaker: string = "simran",
     prosodyOverride?: { pitch?: number; pace?: number; loudness?: number }
   ): Promise<{ buffer: Buffer; mimeType: string } | null> {
     const apiKey = (process.env.SARVAM_API_KEY || process.env.SARVAM_AI_API_KEY)?.trim();
@@ -183,7 +183,7 @@ export class VoiceBridgeService {
         body: JSON.stringify({
           inputs: [text.trim()],
           target_language_code: targetLanguageCode,
-          speaker: speaker === "simran_hindi_ai_assistant" ? "anushka" : speaker,
+          speaker: speaker || "simran",
           pitch: prosodyOverride?.pitch ?? 0,
           pace: prosodyOverride?.pace ?? 1.0,
           loudness: prosodyOverride?.loudness ?? 1.5,

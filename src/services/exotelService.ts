@@ -278,7 +278,7 @@ class ExotelService {
     let audioUrl = "";
     try {
       const speechPromise = voiceBridgeService.generateSpeech(fridayReply);
-      const timeoutPromise = new Promise<null>((_, reject) => setTimeout(() => reject(new Error("TTS Timeout")), 1200));
+      const timeoutPromise = new Promise<null>((_, reject) => setTimeout(() => reject(new Error("TTS Timeout")), 2500));
       const speech: any = await Promise.race([speechPromise, timeoutPromise]);
       if (speech && speech.buffer) {
         const audioId = this.storeAudio(speech.buffer, speech.mimeType);
