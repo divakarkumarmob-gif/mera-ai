@@ -456,6 +456,7 @@ export class WhatsAppAutoReplyEngine {
       : "";
 
     const { humanComprehensionEngine } = await import("../humanComprehensionEngine");
+    const { bossDirectivesService } = await import("../bossDirectivesService");
     const subtextAnalysis = humanComprehensionEngine.analyzeMessageSubtext(messageText, {
       speakerName: senderName,
       relation,
@@ -464,6 +465,7 @@ export class WhatsAppAutoReplyEngine {
       quotedPhone: quotedMessage?.senderPhone,
     });
     const comprehensionContext = await humanComprehensionEngine.compileHumanComprehensionPrompt(senderPhone, senderName, relation);
+    const directivesContext = await bossDirectivesService.compileDirectivesPrompt();
 
     const isGirlfriend =
       /girlfriend|gf|crush|wife|partner|jaan|special|lover|love|sweetheart|babe|darling/i.test(relation || "") ||

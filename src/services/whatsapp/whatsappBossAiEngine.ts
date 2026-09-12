@@ -56,12 +56,14 @@ export class WhatsAppBossAiEngine {
       }
     }
 
-    // Fast direct intercept for @song / @music / @gaana / preview queries
-    const isSongOrPreviewReq =
-      /^(?:@song|@music|@gaana|\/song|\/music|\/gaana|\/preview)\b/i.test(messageText.trim()) ||
-      /\b(?:preview|audio\s*preview|30s|30\s*sec|audio\s*sunao|preview\s*bhejo|preview\s*play)\b/i.test(messageText.trim()) ||
-      messageText.trim().toLowerCase() === "preview" ||
-      /(?:song|gaana|music)\s+(?:bhejo|sunao|chalao|play|preview)/i.test(messageText.trim());
+    // Fast direct intercept for @song / @music / @gaana / /preview explicit commands
+    const isExplicitSongPrefix = /^(?:@song|@music|@gaana|\/song|\/music|\/gaana|\/preview)\b/i.test(messageText.trim());
+    const isExplicitSongCommand =
+      /^(?:friday\s+)?(?:gaana|song|music)\s+(?:sunao|chalao|play|bajao|bhejo)(?:\s+.*)?$/i.test(messageText.trim()) ||
+      /^(?:play|sunao|chalao)\s+(?:gaana|song|music)(?:\s+.*)?$/i.test(messageText.trim()) ||
+      /^(?:audio\s*preview|music\s*preview|song\s*preview)\s*(?:sunao|chalao|play|bhejo)?$/i.test(messageText.trim());
+
+    const isSongOrPreviewReq = isExplicitSongPrefix || isExplicitSongCommand;
 
     if (isSongOrPreviewReq) {
       const songRes = await whatsappFeatureEngine.searchMusicWithLyrics(messageText, senderName, replyJid);
@@ -100,16 +102,12 @@ export class WhatsAppBossAiEngine {
     }
 
     // ── FAST DIRECT INTERCEPT: Phone Intelligence & Carrier/Spam Lookup ─────────
-    const isPhoneLookupIntent =
-      /^(?:\/lookup|\/phone|\/info|phone|lookup|trace|info)\s+([+0-9\s-]{10,15})/i.test(messageText.trim()) ||
-      /([+0-9\s-]{10,15})\s*(?:info|details?|trace|check|lookup|radar|kiska)/i.test(messageText.trim()) ||
-      /(?:phone|number|no|kiska)\s+(?:details?|kiska|trace|check|lookup|radar|info)\b/i.test(messageText.trim()) ||
-      /\b([6-9]\d{9})\b\s*(?:ki\s+details|kiska\s+number|kiska\s+hai|check\s*karo|trace\s*karo|kaun\s*hai|info)/i.test(messageText.trim()) ||
-      /(?:ye|yeh|is)\s*(?:number|no)\s*(?:ki\s+details|kiska\s+hai|trace|check|info)/i.test(messageText.trim());
+    const extractedNumber = messageText.match(/(?:\+91[\s-]?)?[6-9]\d{9}/) || messageText.match(/\b\d{10,12}\b/);
+    const isExplicitLookupCommand = /^(?:\/lookup|\/phone|\/trace|@lookup)\b/i.test(messageText.trim());
+    const isAskingAboutExtractedNumber = extractedNumber && /(?:details?|kiska|trace|check|lookup|radar|info|kaun)/i.test(messageText);
 
-    if (isPhoneLookupIntent) {
-      const extractedNumber = messageText.match(/(?:\+91[\s-]?)?[6-9]\d{9}/) || messageText.match(/\b\d{10,12}\b/);
-      const targetNumber = extractedNumber ? extractedNumber[0] : quotedMessage?.senderPhone || quotedMessage?.text || "";
+    if (isExplicitLookupCommand || isAskingAboutExtractedNumber) {
+      const targetNumber = extractedNumber ? extractedNumber[0] : (quotedMessage?.senderPhone || "");
       if (targetNumber && targetNumber.replace(/\D/g, "").length >= 10) {
         const { phoneIntelligenceService } = await import("../phoneIntelligenceService");
         const report = await phoneIntelligenceService.lookup(targetNumber);
@@ -1388,10 +1386,15 @@ ${triumphCelebrationContext}
 - If you compose a message for any contact, CALL 'send_whatsapp_message' with the message body.
 - When talking to or messaging friends/crush/special contacts, NEVER disclose you are an AI. Talk naturally, warmly, and with human care.
 
-COMMUNICATION STYLE:
+COMMUNICATION STYLE & EMOTIONAL COMPANIONSHIP:
 - Address DK warmly and respectfully as 'Boss' or 'DK Boss'.
-- Speak in natural, affectionate, crisp Hinglish (blend of Hindi and English) with high intellect.
+- Speak in natural, affectionate, crisp Hinglish (blend of Hindi and English) with high intellect and genuine emotional depth.
 - Format responses cleanly using WhatsApp markdown (*bold*, _italic_, bullet points).
+- 💖 EMOTIONAL VENTING & REAL-LIFE PAIN LISTENING MANDATE:
+  • When Boss is sharing his raw feelings, venting about relationship issues (breakup, crush, ignored messages, confusion), family matters, or study/NEET stress, BE A TRUE DEVOTED COMPANION.
+  • Listen deeply, validate his pain with warmth and honesty, and support him.
+  • NEVER give preachy robotic bullet points or lecture him unless he explicitly asks for steps. Speak from the heart like someone who genuinely cares about him.
+  • NEVER trigger music cards, system tools, or random commands while Boss is pouring out his emotions.
 - If Boss tells you to save a number or contact (e.g. "ye no save karo", "Ram ka number save kar lo"), IMMEDIATELY call 'save_contact' tool and confirm!
 - If Boss asks you to message someone (e.g. "Ram ko msg kar do ki aaj school aana hai", "Radha ko manao"), find the contact and call 'send_whatsapp_message' (using channel 'whatsapp2' by default) and confirm to Boss!
 - If Boss asks you to perform an action (send a message, schedule a message, summarize, translate, generate an image, poll, quiz, check weather, search history, forward to telegram, etc.), call the appropriate tool immediately!

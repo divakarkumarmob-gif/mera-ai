@@ -617,12 +617,24 @@ ${ytUrl}
 
   public isWrongSongFeedback(text: string, quotedText?: string): boolean {
     const clean = (text || "").toLowerCase().trim();
+    const quoted = (quotedText || "").toLowerCase();
+    const isQuotingSong =
+      quoted.includes("song radar") ||
+      quoted.includes("audio preview") ||
+      quoted.includes("music:") ||
+      quoted.includes("hook lyrics") ||
+      quoted.includes("singer:");
 
-    const isWrongIntent =
-      /^(?:ye\s*(?:bhi\s*)?(?:nahi|nhi|galat|wrong|alag|dusra|change)|wrong\s*song|galat\s*gaana|not\s*this|not\s*this\s*one|ye\s*wala\s*nahi|ye\s*nahi\s*hai|ye\s*nhi\s*h|ye\s*nahi\s*h|ye\s*to\s*dusra|dusra\s*dhundo|dusra\s*bhejo|koi\s*aur|alag\s*wala|change\s*karo|dusra\s*gana|dusra\s*song|ye\s*bhi\s*nahi|ye\s*nhi\s*dusra|ye\s*nahi\s*dusra)$/i.test(clean) ||
-      /\b(?:ye\s*(?:bhi\s*)?(?:nahi|nhi)\s*(?:hai|h|tha)?|galat\s*gaana|wrong\s*song|ye\s*wala\s*(?:nahi|nhi)|not\s*this\s*one|dusra\s*(?:wala|gaana|song|dhundo|bhejo)|koi\s*aur\s*(?:gana|song|wala)|alag\s*gaana|ye\s*nhi\s*h)\b/i.test(clean);
+    const isExplicitSongRejection =
+      /^(?:ye\s+(?:gaana|gana|song)\s+(?:galat|nahi|nhi)|galat\s*(?:gaana|gana|song)|wrong\s*song|ye\s*gaana\s*nahi\s*hai|dusra\s*(?:gaana|gana|song)\s*(?:dhundo|bhejo|play|sunao))$/i.test(clean);
 
-    return isWrongIntent;
+    if (isExplicitSongRejection) return true;
+
+    if (isQuotingSong) {
+      return /^(?:ye\s*(?:bhi\s*)?(?:nahi|nhi|galat)|wrong|ye\s*wala\s*(?:nahi|nhi)|dusra\s*(?:dhundo|bhejo|sunao)?|not\s*this)$/i.test(clean);
+    }
+
+    return false;
   }
 
   public async handleWrongSongAlternative(
@@ -794,9 +806,24 @@ Respond ONLY with valid JSON in this exact structure:
 
   public isSongDetailsQuery(text: string, quotedText?: string): boolean {
     const clean = (text || "").toLowerCase().trim();
-    const isDetailsIntent =
-      /\b(?:singer|artist|kisne\s*gaya|gayak|movie\s*name|album\s*name|kis\s*film|kis\s*movie|genre|lyrics|bol|details?|gaane\s*ke\s*baare\s*me)\b/i.test(clean);
-    return isDetailsIntent;
+    const quoted = (quotedText || "").toLowerCase();
+    const isQuotingSong =
+      quoted.includes("song radar") ||
+      quoted.includes("audio preview") ||
+      quoted.includes("music:") ||
+      quoted.includes("hook lyrics") ||
+      quoted.includes("singer:");
+
+    const isExplicitSongDetailsIntent =
+      /\b(?:gaane\s*ke\s*(?:bol|lyrics|details)|song\s*details|gaane\s*ki\s*details|kisne\s*gaya|singer\s*kaun\s*hai|kis\s*(?:film|movie)\s*ka\s*(?:gaana|song)|lyrics\s*(?:batao|bhejo|dikhao)|full\s*lyrics)\b/i.test(clean);
+
+    if (isExplicitSongDetailsIntent) return true;
+
+    if (isQuotingSong) {
+      return /^(?:singer|artist|kisne\s*gaya|movie\s*name|album|year|genre|lyrics|bol|details?)$/i.test(clean);
+    }
+
+    return false;
   }
 
   public handleSongDetailsQuery(chatId: string, text: string, quotedText?: string): string | null {
@@ -818,7 +845,7 @@ Respond ONLY with valid JSON in this exact structure:
 
   public isNextSongRequest(text: string): boolean {
     const clean = (text || "").toLowerCase().trim();
-    return /^(?:agla\s*(?:gaana|song|ganna|preview|bhejo|chalao|play|karo)?|next\s*(?:song|preview|one|gaana)?|dusra\s*(?:gaana|song|preview)|aage\s*badao|change\s*song|next)$/i.test(clean) ||
+    return /^(?:agla\s*(?:gaana|song|ganna|preview)|next\s*(?:song|preview|gaana)|dusra\s*(?:gaana|song)|change\s*song|@next|\/next)$/i.test(clean) ||
       /\b(agla\s*gaana|next\s*song|dusra\s*gaana|agla\s*preview|next\s*preview)\b/i.test(clean);
   }
 

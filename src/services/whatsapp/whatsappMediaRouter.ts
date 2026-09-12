@@ -492,9 +492,9 @@ CRITICAL INSTRUCTIONS:
         }
       }
 
-      const isVoiceRequested = /\b(voice|audio|speak|bolo|sunao|bol\s*kar|bol\s*ke|padh\s*ke|voice\s*me)\b/i.test(cleanText);
-      const isExplicitAnalysisRequested = /\b(summary\s*voice|analysis\s*voice|voice\s*summary|voice\s*analysis|summary|analysis|kya\s*likha\s*hai|kya\s*likha\s*h|kya\s*hai|samjhao|explain|batao|tarjuma|meaning|matlab)\b/i.test(cleanText);
-      const targetLangMatch = cleanText.match(/\b(?:in|to|me|mein|language)?\s*(hindi|english|bengali|bangla|marathi|gujarati|punjabi|urdu|tamil|telugu|kannada|malayalam|french|spanish|german|japanese|russian|arabic|chinese|italian|portuguese|korean)\b/i);
+      const isVoiceRequested = /^(?:voice\s*me\s*padho|speak|padh\s*ke\s*sunao|voice\s*me\s*bolo|isko\s*bolo)$/i.test(cleanText);
+      const isExplicitAnalysisRequested = /\b(?:summary\s*voice|analysis\s*voice|voice\s*summary|voice\s*analysis|summarize|tarjuma|kya\s*likha\s*hai|kya\s*likha\s*h|isko\s*explain\s*karo|isko\s*samjhao|iska\s*matlab\s*samjhao)\b/i.test(cleanText);
+      const targetLangMatch = cleanText.match(/\b(?:in|to|me|mein|language)\s+(hindi|english|bengali|bangla|marathi|gujarati|punjabi|urdu|tamil|telugu|kannada|malayalam|french|spanish|german|japanese|russian|arabic|chinese|italian|portuguese|korean)\b/i);
       const targetLanguage = targetLangMatch ? targetLangMatch[1].trim() : null;
 
       if (isVoiceRequested && !isExplicitAnalysisRequested) {

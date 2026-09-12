@@ -73,8 +73,17 @@ class HumanComprehensionEngine {
     let suggestedHumanReaction = "Respond naturally and warmly.";
     let culturalSubtext = "";
 
-    // A. Reconciliation / Heartbreak / Manana (Apology, Repairing Relationship)
-    if (/\b(manana|manana\s*h|manao|naraz\s*hai|gussa\s*hai|baat\s*nhi\s*ho\s*rahi|20\s*din|breakup|sorry|patch\s*up|dur\s*ho\s*gayi|dur\s*ho\s*gaya)\b/i.test(clean)) {
+    // A. Emotional Venting / Frustration / Heartbreak / Betrayal / Being Ignored
+    if (/\b(ignore|block|bahna|bahana|dimag\s*kharab|gussa\s*aa\s*raha|dhokha|pyar\s*dikhti|pareshan\s*hu|presan\s*hu|dard|rone\s*ka\s*man|control\s*nhi|samjh\s*nhi\s*aa\s*raha|breakup|chhod\s*diya|dil\s*tut)\b/i.test(clean)) {
+      emotionalTone = "stressed";
+      implicitIntent = "Boss is deeply hurt, frustrated, and venting about relationship confusion, being ignored, or life stress. He needs sincere empathy, patient listening, and compassionate validation without any unsolicited music, tools, or robotic checklists.";
+      suggestedHumanReaction = context.isOwner
+        ? "Boss ko full attention, love, aur emotional companionship do. Unka dard aur gussa validate karo, unki baat ko dhyan se samjho, aur ek loyal, mature confidant ki tarah unhe sambhalo. Koi gaana ya tools mat chalao."
+        : "Show deep empathy, listen warmly, and validate their feelings.";
+      culturalSubtext = "When someone is venting about being taken for granted in love, they need unconditional loyalty, emotional validation, and someone who stands with them.";
+    }
+    // A2. Reconciliation / Manana (Apology, Repairing Relationship)
+    else if (/\b(manana|manana\s*h|manao|naraz\s*hai|gussa\s*hai|baat\s*nhi\s*ho\s*rahi|20\s*din|sorry|patch\s*up|dur\s*ho\s*gayi|dur\s*ho\s*gaya)\b/i.test(clean)) {
       emotionalTone = "sad";
       implicitIntent = "Boss is feeling anxious/regretful about a strained relationship and wants to break the silence and reconcile (manana hai).";
       suggestedHumanReaction = context.isOwner
@@ -83,11 +92,11 @@ class HumanComprehensionEngine {
       culturalSubtext = "In Indian relationships, silence creates anxiety. A thoughtful, sweet, respectful apology/reach-out melts hearts.";
     }
     // B. Fatigue / Exhaustion / Hard Day
-    else if (/\b(thak\s*gaya|thak\s*gayi|exhausted|bohot\s*kaam\s*tha|dimag\s*kharab|tired|heavy\s*day|sir\s*dard|headache|tension)\b/i.test(clean)) {
+    else if (/\b(thak\s*gaya|thak\s*gayi|exhausted|bohot\s*kaam\s*tha|tired|heavy\s*day|sir\s*dard|headache|tension)\b/i.test(clean)) {
       emotionalTone = "exhausted";
       implicitIntent = "Speaker is drained and needs comfort, care, understanding, or a relaxing vibe.";
       suggestedHumanReaction = context.isOwner
-        ? "Boss ko bohot pyaar aur empathy se aaram karne ko bolo. Puchho ki chai/coffee ya koi peaceful gaana bajayein."
+        ? "Boss ko bohot pyaar aur empathy se aaram karne ko bolo. Gentle aur soothing tone me baat karo."
         : "Show sincere empathy, ask them to rest, and speak gently.";
       culturalSubtext = "In Indian culture, acknowledging fatigue with a cup of chai or caring words creates deep emotional bonding.";
     }

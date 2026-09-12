@@ -2778,12 +2778,14 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
       return;
     }
 
-    // 2.3B Handle /song, /music, /preview, and 30s Song Audio Preview on Telegram
-    const isSongOrPreviewReq =
-      /^(?:\/song|\/music|\/preview|\/gaana|@song|@music|@gaana)\b/i.test(text.trim()) ||
-      /\b(?:preview|audio\s*preview|30s|30\s*sec|30\s*second|preview\s*sunao|preview\s*bhejo|preview\s*play)\b/i.test(text.trim()) ||
-      text.trim().toLowerCase() === "preview" ||
-      /(?:song|gaana|music)\s+(?:bhejo|sunao|chalao|play|preview)/i.test(text.trim());
+    // 2.3B Handle /song, /music, /preview, and Song Audio Preview on Telegram
+    const isExplicitSongPrefix = /^(?:\/song|\/music|\/preview|\/gaana|@song|@music|@gaana)\b/i.test(text.trim());
+    const isExplicitSongCommand =
+      /^(?:friday\s+)?(?:gaana|song|music)\s+(?:sunao|chalao|play|bajao|bhejo)(?:\s+.*)?$/i.test(text.trim()) ||
+      /^(?:play|sunao|chalao)\s+(?:gaana|song|music)(?:\s+.*)?$/i.test(text.trim()) ||
+      /^(?:audio\s*preview|music\s*preview|song\s*preview)\s*(?:sunao|chalao|play|bhejo)?$/i.test(text.trim());
+
+    const isSongOrPreviewReq = isExplicitSongPrefix || isExplicitSongCommand;
 
     if (isSongOrPreviewReq) {
       try {

@@ -248,10 +248,10 @@ Apply these exact behavioral principles to your tone, emotion, and actions in th
       return { isTeachingCommand: true, action: "revise" };
     }
 
-    // 2. Correction command: "nahi friday aise nahi bolte...", "galti sudharo...", "aage se aisa mat bolna..."
+    // 2. Correction command: "nahi friday aise nahi bolte...", "friday galti sudharo...", "aage se aisa mat bolna..."
     const correctMatch =
-      text.match(/(?:nahi\s+friday|aise\s+nahi|galat\s+hai|galti\s+sudharo|aage\s+se\s+aisa\s+mat\s+bolna|sudhaar\s+lo)\s*[,:!]\s*(.+)/i) ||
-      text.match(/(?:aage\s+se|ab\s+se)\s+(?:aise|ye)\s+bolna\s*[:,-]?\s*(.+)/i);
+      text.match(/(?:nahi\s+friday|friday\s+aise\s+nahi|friday\s+galat\s+hai|galti\s+sudharo|aage\s+se\s+aisa\s+mat\s+bolna|apni\s+galti\s+sudhaar\s+lo)\s*[,:!]\s*(.+)/i) ||
+      text.match(/(?:friday\s+)?(?:aage\s+se|ab\s+se)\s+(?:aise|ye)\s+bolna\s*[:,-]\s*(.+)/i);
 
     if (correctMatch) {
       return {
@@ -261,17 +261,17 @@ Apply these exact behavioral principles to your tone, emotion, and actions in th
       };
     }
 
-    // 3. Teaching command: "Friday sikh lo: Jab X ho tab Y karna", "Jab bhi X ho to Y bolna"
+    // 3. Teaching command: MUST have explicit teaching prefix: "Friday sikh lo: Jab X ho tab Y karna", "Yaad rakho: Jab X ho tab Y bolna"
     const teachMatch =
-      text.match(/(?:friday\s+)?(?:sikh\s+lo|yaad\s+rakho|samajh\s+lo|dhyan\s+rakho|main\s+sikha\s+raha\s+hu)\s*[:,-]?\s*(?:jab\s+bhi|jab)\s+(.+?)\s+(?:tab|toh|to|tabhi)\s+(.+)/i) ||
-      text.match(/jab\s+(?:bhi\s+)?(.+?)\s+(?:tab|toh|to)\s+(?:tum|friday\s+)?(.+)/i);
+      text.match(/(?:friday\s+)?(?:sikh\s+lo|yaad\s+rakho|samajh\s+lo|dhyan\s+rakho|main\s+sikha\s+raha\s+hu|training\s+rule|lesson)\s*[:,-]?\s*(?:jab\s+bhi|jab)\s+(.+?)\s+(?:tab|toh|to|tabhi)\s+(.+)/i) ||
+      text.match(/(?:friday\s+sikh\s+lo|friday\s+yaad\s+rakhna|friday\s+note\s+karo)\s*[:,-]\s*(.+)/i);
 
     if (teachMatch) {
       return {
         isTeachingCommand: true,
         action: "teach",
         situation: teachMatch[1].trim(),
-        reaction: teachMatch[2].trim(),
+        reaction: (teachMatch[2] || teachMatch[1]).trim(),
       };
     }
 
