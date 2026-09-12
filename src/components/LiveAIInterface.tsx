@@ -14,7 +14,8 @@ import { HolographicLabModal } from './HolographicLabModal';
 import { FreeFireCoachModal } from './FreeFireCoachModal';
 import PhoneIntelligenceModal from './PhoneIntelligenceModal';
 import { ExotelTelephonyModal } from './ExotelTelephonyModal';
-import { Gamepad2, PhoneCall } from 'lucide-react';
+import { ModelTesterCapsule } from './ModelTesterCapsule';
+import { Gamepad2, PhoneCall, FlaskConical } from 'lucide-react';
 import { getWsUrl, getApiUrl } from '@/utils/api';
 import { wakeWordManager } from '@/utils/wakeWord';
 import { getAppToken, clearAppSession } from '@/utils/appSecurityClient';
@@ -1235,6 +1236,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
     const [showLearningCapsule, setShowLearningCapsule] = useState(false);
     const [showPhoneIntelligence, setShowPhoneIntelligence] = useState(false);
     const [showExotelModal, setShowExotelModal] = useState(false);
+    const [showModelTester, setShowModelTester] = useState(false);
     const [showFreeFireCoach, setShowFreeFireCoach] = useState(false);
     const [showSongPreviewModal, setShowSongPreviewModal] = useState(false);
     const [previewQuery, setPreviewQuery] = useState('');
@@ -3161,6 +3163,19 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                                 }}
                             >
                                 <div className="inline-flex items-start justify-center min-w-full w-max gap-3.5 px-6 pt-0 pb-1.5 mx-auto" style={{ overflow: 'visible' }}>
+                                    {/* 0. 🧪 Google AI Studio Model Sandbox Testing Capsule */}
+                                    <HangingRopeCapsule ropeHeight={40} swayIndex={0} ropeColor="from-cyan-400/90 via-sky-300 to-indigo-500/90" glowColor="rgba(6,182,212,0.6)">
+                                        <button
+                                            onClick={() => setShowModelTester(true)}
+                                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-gradient-to-r from-cyan-500/30 via-sky-500/30 to-indigo-500/30 hover:from-cyan-500/45 hover:to-indigo-500/45 border border-cyan-400/70 text-cyan-200 text-xs font-bold shadow-[0_0_25px_rgba(6,182,212,0.45)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95 animate-pulse"
+                                            title="🧪 Google AI Studio Model Sandbox Capsule (Test all 30+ Models with + PDF/Media)"
+                                        >
+                                            <span className="text-sm">🧪</span>
+                                            <span>AI Studio Sandbox</span>
+                                            <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-cyan-400/30 text-cyan-200 font-extrabold uppercase">30+ Models</span>
+                                        </button>
+                                    </HangingRopeCapsule>
+
                                     {/* 1. Wi-Fi Radar */}
                                     <HangingRopeCapsule ropeHeight={34} swayIndex={1} ropeColor="from-cyan-400/90 via-cyan-300 to-cyan-500/90" glowColor="rgba(6,182,212,0.4)">
                                         <button
@@ -4335,6 +4350,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
             <FreeFireCoachModal isOpen={showFreeFireCoach} onClose={() => setShowFreeFireCoach(false)} />
             <PhoneIntelligenceModal isOpen={showPhoneIntelligence} onClose={() => setShowPhoneIntelligence(false)} />
             <ExotelTelephonyModal isOpen={showExotelModal} onClose={() => setShowExotelModal(false)} />
+            <ModelTesterCapsule isOpen={showModelTester} onClose={() => setShowModelTester(false)} />
             {showLearningCapsule && <LearningCapsule onClose={() => setShowLearningCapsule(false)} />}
             {!showLearningCapsule && (
                 <LearningCapsule

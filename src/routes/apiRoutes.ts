@@ -3369,14 +3369,132 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
-  // 7. Call Logs Management
-  app.get("/api/exotel/call-logs", (req, res) => {
-    const limit = Number(req.query.limit) || 50;
-    res.json({ ok: true, logs: exotelService.getCallLogs(limit) });
-  });
+  // 8. Google AI Studio Model Sandbox Testing API
+  app.post("/api/model-tester/chat", async (req, res) => {
+    const startTime = Date.now();
+    try {
+      const { model, prompt, history, media } = req.body || {};
+      const targetModel = (model || "gemini-3.5-flash").trim();
+      const apiKey = process.env.GEMINI_API_KEY?.trim();
 
-  app.post("/api/exotel/call-logs/clear", (_req, res) => {
-    res.json({ ok: exotelService.clearCallLogs() });
+      if (!apiKey) {
+        return res.status(400).json({ ok: false, error: "GEMINI_API_KEY is not configured in server environment." });
+      }
+
+      const { GoogleGenAI } = await import("@google/genai");
+      const ai = new GoogleGenAI({ apiKey });
+
+      // Build parts array (text + multimodal inlineData)
+      const parts: any[] = [];
+
+      if (media && media.base64 && media.mimeType) {
+        // Strip data:mime/type;base64, prefix if present
+        const cleanBase64 = media.base64.replace(/^data:[^;]+;base64,/, "");
+        parts.push({
+          inlineData: {
+            mimeType: media.mimeType,
+            data: cleanBase64,
+          },
+        });
+      }
+
+      if (prompt && prompt.trim()) {
+        parts.push({ text: prompt.trim() });
+      } else if (parts.length > 0) {
+        parts.push({ text: "Please analyze this attached media and describe its contents thoroughly." });
+      } else {
+        parts.push({ text: "Hello! Testing connection." });
+      }
+
+      // Build conversation contents with history if available
+      const contents: any[] = [];
+      if (Array.isArray(history) && history.length > 0) {
+        for (const h of history.slice(-6)) {
+          contents.push({
+            role: h.role === "user" ? "user" : "model",
+            parts: [{ text: h.text }],
+          });
+        }
+      }
+      contents.push({ role: "user", parts });
+
+      // Special handling for Nano Banana / Image generation models
+      if (targetModel.includes("nano-banana") || targetModel.includes("imagen")) {
+        const { imageGenerationService } = await import("../services/imageGenerationService");
+        const imgRes = await imageGenerationService.generateImage({
+          prompt: prompt || "Futuristic AI Studio neural network holographic visualization",
+        });
+        const latencyMs = Date.now() - startTime;
+        if (imgRes.success && imgRes.imageUrl) {
+          return res.json({
+            ok: true,
+            reply: `🎨 **Image Generated Successfully via ${targetModel}**\n\n![Generated Image](${imgRes.imageUrl})\n\n_Prompt: ${prompt}_`,
+            modelUsed: targetModel,
+            latencyMs,
+          });
+        }
+      }
+
+      // Standard Gemini Multimodal / Text Generation with Fallback
+      let resultText = "";
+      let actualModelUsed = targetModel;
+
+      const fallbackList = [
+        targetModel,
+        "gemini-3.5-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-3.6-flash",
+        "gemini-3.1-flash-lite",
+      ];
+
+      for (const m of Array.from(new Set(fallbackList))) {
+        try {
+          const response = await ai.models.generateContent({
+            model: m,
+            contents: contents,
+            config: {
+              temperature: 0.7,
+            },
+          });
+          const text = response.text?.trim();
+          if (text) {
+            resultText = text;
+            actualModelUsed = m;
+            break;
+          }
+        } catch (err: any) {
+          console.warn(`[ModelTester] Model ${m} test attempt notice:`, err?.message || err);
+          if (m === targetModel && fallbackList.length === 1) {
+            throw err;
+          }
+        }
+      }
+
+      const latencyMs = Date.now() - startTime;
+
+      if (!resultText) {
+        return res.status(500).json({
+          ok: false,
+          error: `Model ${targetModel} did not return a response.`,
+          latencyMs,
+        });
+      }
+
+      res.json({
+        ok: true,
+        reply: resultText,
+        modelUsed: actualModelUsed,
+        latencyMs,
+      });
+    } catch (e: any) {
+      const latencyMs = Date.now() - startTime;
+      console.error("[ModelTester] Error running inference:", e);
+      res.status(500).json({
+        ok: false,
+        error: e?.message || "Failed to execute model inference",
+        latencyMs,
+      });
+    }
   });
 
   return router;
