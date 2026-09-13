@@ -340,6 +340,63 @@ export class SemanticIntentEngine {
           required: ["prompt"],
         },
       },
+      {
+        name: "lookup_contact_dp",
+        description: "Safely fetch the Profile Picture (DP) photo URL of any WhatsApp contact or phone number.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            contactNameOrPhone: { type: "STRING", description: "Name of the contact or 10-digit mobile number" }
+          },
+          required: ["contactNameOrPhone"]
+        }
+      },
+      {
+        name: "lookup_contact_about_status",
+        description: "Fetch the text About / Bio status of a contact or phone number.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            contactNameOrPhone: { type: "STRING", description: "Name of the contact or mobile number" }
+          },
+          required: ["contactNameOrPhone"]
+        }
+      },
+      {
+        name: "get_recent_whatsapp_statuses",
+        description: "View recent 24-hour WhatsApp status stories (photos, videos, captions) posted by contacts.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            filterContactOrPhone: { type: "STRING", description: "Optional name or phone number to filter status stories by" },
+            limit: { type: "NUMBER", description: "Max number of status stories to retrieve (default: 10)" }
+          },
+          required: []
+        }
+      },
+      {
+        name: "check_contact_online_status",
+        description: "Check if a contact is currently online, typing, or get their last known presence timestamp.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            contactNameOrPhone: { type: "STRING", description: "Name of contact or phone number" }
+          },
+          required: ["contactNameOrPhone"]
+        }
+      },
+      {
+        name: "forward_contact_media_or_messages",
+        description: "Forward a contact's received photo, video, PDF document, voice note, DP, status story, or recent chat messages directly to Boss's WhatsApp and/or Telegram.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            contactNameOrPhone: { type: "STRING", description: "Name of the contact or phone number" },
+            mediaType: { type: "STRING", enum: ["any", "photo", "video", "document", "voice", "status", "dp"], description: "Type of media to forward" }
+          },
+          required: ["contactNameOrPhone"]
+        }
+      },
     ];
   }
 
@@ -518,6 +575,51 @@ export class SemanticIntentEngine {
         return updated
           ? { success: true, message: `Relationship for ${updated.name} updated to "${args.relation}".` }
           : { success: false, message: `Contact "${args.contactNameOrPhone}" not found.` };
+      }
+
+      if (toolName === "lookup_contact_dp") {
+        const { contactsService } = await import("./contactsService");
+        const { whatsappIntelligenceService } = await import("./whatsapp/whatsappIntelligenceService");
+        const contact = await contactsService.findContact(args.contactNameOrPhone);
+        const target = contact ? contact.phone : args.contactNameOrPhone;
+        const dpRes = await whatsappIntelligenceService.fetchProfilePictureUrl(target, true);
+        return { contactName: contact?.name || target, ...dpRes };
+      }
+
+      if (toolName === "lookup_contact_about_status") {
+        const { contactsService } = await import("./contactsService");
+        const { whatsappIntelligenceService } = await import("./whatsapp/whatsappIntelligenceService");
+        const contact = await contactsService.findContact(args.contactNameOrPhone);
+        const target = contact ? contact.phone : args.contactNameOrPhone;
+        const bioRes = await whatsappIntelligenceService.fetchAboutStatus(target);
+        return { contactName: contact?.name || target, ...bioRes };
+      }
+
+      if (toolName === "get_recent_whatsapp_statuses") {
+        const { whatsappIntelligenceService } = await import("./whatsapp/whatsappIntelligenceService");
+        const list = whatsappIntelligenceService.getRecentStatusStories(args.limit || 10, args.filterContactOrPhone);
+        return { totalStatusStoriesCount: list.length, stories: list };
+      }
+
+      if (toolName === "check_contact_online_status") {
+        const { contactsService } = await import("./contactsService");
+        const { whatsappIntelligenceService } = await import("./whatsapp/whatsappIntelligenceService");
+        const contact = await contactsService.findContact(args.contactNameOrPhone);
+        const target = contact ? contact.phone : args.contactNameOrPhone;
+        await whatsappIntelligenceService.subscribePresence(target);
+        const presence = whatsappIntelligenceService.getContactPresence(target);
+        return { contactName: contact?.name || target, ...presence };
+      }
+
+      if (toolName === "forward_contact_media_or_messages") {
+        const { whatsappIntelligenceService } = await import("./whatsapp/whatsappIntelligenceService");
+        const fwdRes = await whatsappIntelligenceService.forwardMediaToBoss({
+          contactNameOrPhone: args.contactNameOrPhone,
+          mediaType: args.mediaType || "any",
+          targetChannel: "auto",
+          targetChatId: String(ctx.chatId),
+        });
+        return fwdRes;
       }
 
       if (toolName === "send_whatsapp_message") {

@@ -317,6 +317,63 @@ export class WhatsAppBossAiEngine {
         }
       },
       {
+        name: "lookup_contact_dp",
+        description: "Safely fetch the Profile Picture (DP) photo URL of any WhatsApp contact or phone number. Use when Boss says 'iski DP dikhao', 'Ram ki profile pic nikalo', 'check DP of 98xxxx'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            contactNameOrPhone: { type: "STRING", description: "Name of the contact or 10-digit mobile number" }
+          },
+          required: ["contactNameOrPhone"]
+        }
+      },
+      {
+        name: "lookup_contact_about_status",
+        description: "Fetch the text About / Bio status of a contact or phone number (e.g. 'Busy', 'Available', custom quote).",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            contactNameOrPhone: { type: "STRING", description: "Name of the contact or mobile number" }
+          },
+          required: ["contactNameOrPhone"]
+        }
+      },
+      {
+        name: "get_recent_whatsapp_statuses",
+        description: "View recent 24-hour WhatsApp status stories (photos, videos, captions) posted by contacts.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            filterContactOrPhone: { type: "STRING", description: "Optional name or phone number to filter status stories by" },
+            limit: { type: "NUMBER", description: "Max number of status stories to retrieve (default: 10)" }
+          },
+          required: []
+        }
+      },
+      {
+        name: "check_contact_online_status",
+        description: "Check if a contact is currently online, typing, or get their last known presence timestamp.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            contactNameOrPhone: { type: "STRING", description: "Name of contact or phone number" }
+          },
+          required: ["contactNameOrPhone"]
+        }
+      },
+      {
+        name: "forward_contact_media_or_messages",
+        description: "Forward a contact's received photo, video, PDF document, voice note, DP, status story, or recent chat messages directly to Boss's WhatsApp and/or Telegram. Use when Boss says 'Ram ne jo photo bheji thi wo mujhe forward karo', 'Ram ka video/pdf bhejo', 'Ram ki DP send karo', 'Ram ka status video bhejo', 'Ram ne kya msg bheja hai wo mujhe do'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            contactNameOrPhone: { type: "STRING", description: "Name of the contact (e.g. 'Ram', 'Rahul') or phone number" },
+            mediaType: { type: "STRING", enum: ["any", "photo", "video", "document", "voice", "status", "dp"], description: "Type of media to forward: 'photo', 'video', 'document', 'voice', 'status', 'dp', or 'any'" }
+          },
+          required: ["contactNameOrPhone"]
+        }
+      },
+      {
         name: "set_friday_voice_tone",
         description: "Change or switch Friday's spoken voice note recording tone across WhatsApp and Telegram (e.g. 'female / ladki ki aawaz (Swara)', 'male / ladke ki aawaz (Madhur)', 'english / Indian English (Prabhat)').",
         parameters: {
@@ -1642,6 +1699,55 @@ COMMUNICATION STYLE & EMOTIONAL COMPANIONSHIP:
           const { bossRoutineService } = await import("../bossRoutineService");
           const res = await bossRoutineService.clearAllRoutineSlots();
           return res;
+        }
+
+        if (toolName === "lookup_contact_dp") {
+          const { contactsService } = await import("../contactsService");
+          const { whatsappIntelligenceService } = await import("./whatsappIntelligenceService");
+          const contact = await contactsService.findContact(args.contactNameOrPhone);
+          const target = contact ? contact.phone : args.contactNameOrPhone;
+          const dpRes = await whatsappIntelligenceService.fetchProfilePictureUrl(target, true);
+          if (dpRes.success && dpRes.dpUrl && sendPhotoFn) {
+            try {
+              await sendPhotoFn(replyJid, dpRes.dpUrl, `🖼️ Profile Picture for *${contact?.name || target}*`, messageKey);
+            } catch {}
+          }
+          return dpRes;
+        }
+
+        if (toolName === "lookup_contact_about_status") {
+          const { contactsService } = await import("../contactsService");
+          const { whatsappIntelligenceService } = await import("./whatsappIntelligenceService");
+          const contact = await contactsService.findContact(args.contactNameOrPhone);
+          const target = contact ? contact.phone : args.contactNameOrPhone;
+          const bioRes = await whatsappIntelligenceService.fetchAboutStatus(target);
+          return { contactName: contact?.name || target, ...bioRes };
+        }
+
+        if (toolName === "get_recent_whatsapp_statuses") {
+          const { whatsappIntelligenceService } = await import("./whatsappIntelligenceService");
+          const list = whatsappIntelligenceService.getRecentStatusStories(args.limit || 10, args.filterContactOrPhone);
+          return { totalStatusStoriesCount: list.length, stories: list };
+        }
+
+        if (toolName === "check_contact_online_status") {
+          const { contactsService } = await import("../contactsService");
+          const { whatsappIntelligenceService } = await import("./whatsappIntelligenceService");
+          const contact = await contactsService.findContact(args.contactNameOrPhone);
+          const target = contact ? contact.phone : args.contactNameOrPhone;
+          await whatsappIntelligenceService.subscribePresence(target);
+          const presence = whatsappIntelligenceService.getContactPresence(target);
+          return { contactName: contact?.name || target, ...presence };
+        }
+
+        if (toolName === "forward_contact_media_or_messages") {
+          const { whatsappIntelligenceService } = await import("./whatsappIntelligenceService");
+          const fwdRes = await whatsappIntelligenceService.forwardMediaToBoss({
+            contactNameOrPhone: args.contactNameOrPhone,
+            mediaType: args.mediaType || "any",
+            targetChannel: "whatsapp",
+          });
+          return fwdRes;
         }
 
         if (toolName === "send_whatsapp_message") {

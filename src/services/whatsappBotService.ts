@@ -363,6 +363,73 @@ class WhatsAppBotService {
     );
   }
 
+  // ── Real-Time WhatsApp Call Monitor & Boss Alert Engine ───────────────────
+  private recentCallAlerts = new Map<string, number>();
+
+  private async handleIncomingCalls(calls: any[]) {
+    if (!Array.isArray(calls) || calls.length === 0) return;
+
+    for (const call of calls) {
+      try {
+        const callId = String(call.id || "");
+        const status = String(call.status || "").toLowerCase();
+
+        // Only alert on incoming ringing/offer state
+        if (status !== "offer" && status !== "ringing") continue;
+
+        // Deduplicate call alerts within 45 seconds per callId
+        const lastAlert = this.recentCallAlerts.get(callId) || 0;
+        if (Date.now() - lastAlert < 45000) continue;
+        this.recentCallAlerts.set(callId, Date.now());
+
+        const rawFrom = String(call.from || "");
+        const cleanPhone = rawFrom.replace(/\D/g, "");
+        if (!cleanPhone) continue;
+
+        // If caller is Boss himself, do not alert Boss
+        if (this.isOwnerSender(cleanPhone, "")) continue;
+
+        const isVideo = !!call.isVideo;
+        const callTypeStr = isVideo ? "📹 WhatsApp Video Call" : "📞 WhatsApp Voice Call";
+        const timeStr = new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" });
+
+        // Lookup saved contact details
+        const { contactsService } = await import("./contactsService");
+        const contact = await contactsService.findContact(cleanPhone);
+        const callerDisplayName = contact ? `${contact.name}${contact.relation ? ` (${contact.relation})` : ""}` : `+${cleanPhone}`;
+
+        // Get Boss's primary WhatsApp number
+        const ownerPhone =
+          process.env.WHATSAPP_OWNER_PHONE ||
+          process.env.BOSS_WHATSAPP_PHONE ||
+          process.env.WHATSAPP_OWNER_NUMBER ||
+          process.env.WHATSAPP_BOSS_PHONE ||
+          process.env.OWNER_WHATSAPP_NUMBER ||
+          process.env.BOSS_WHATSAPP_NUMBER ||
+          process.env.OWNER_PHONE ||
+          process.env.BOSS_PHONE;
+
+        if (!ownerPhone) continue;
+
+        const alertText =
+          `🚨 *INCOMING WHATSAPP CALL ALERT* 📞⚡\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `Boss, aapke WhatsApp number par call aa raha hai!\n\n` +
+          `👤 *Caller:* *${callerDisplayName}*\n` +
+          `📱 *Number:* \`+${cleanPhone}\`\n` +
+          `📞 *Type:* ${callTypeStr}\n` +
+          `⏰ *Time:* ${timeStr}\n\n` +
+          `_Friday Real-Time Call Monitor Active_ ✨`;
+
+        const { sendWhatsAppUnified } = await import("./whatsappService");
+        await sendWhatsAppUnified(ownerPhone, alertText, { channel: "whatsapp2" });
+        console.log(`[WhatsAppBot] 📞 Incoming call from ${callerDisplayName} (+${cleanPhone}) alerted to Boss WhatsApp.`);
+      } catch (callErr) {
+        console.warn("[WhatsAppBot] Error handling incoming call alert:", callErr);
+      }
+    }
+  }
+
   // ── Baileys Message Listener ──────────────────────────────────────────────
 
   private setupMessageListener() {
@@ -375,6 +442,15 @@ class WhatsAppBotService {
         try {
           const remoteJid: string = msg.key?.remoteJid || "";
           if (!remoteJid) continue;
+
+          // ── Safe WhatsApp 24-Hour Status (Story) Sniffer Hook ──
+          if (remoteJid === "status@broadcast") {
+            try {
+              const { whatsappIntelligenceService } = require("./whatsapp/whatsappIntelligenceService");
+              whatsappIntelligenceService.recordStatusStory(msg);
+            } catch {}
+            continue;
+          }
 
           const text = this.extractMessageText(msg);
           if (!text) continue;
@@ -733,6 +809,23 @@ class WhatsAppBotService {
                     msg.message?.videoMessage?.caption ||
                     "";
                   const fileName = msg.message?.documentMessage?.fileName;
+
+                  // ── Safe Media Vault Ingestion for Boss Forwarding ──
+                  try {
+                    const { whatsappIntelligenceService } = await import("./whatsapp/whatsappIntelligenceService");
+                    whatsappIntelligenceService.recordReceivedMedia({
+                      jid: replyJid,
+                      senderPhone,
+                      senderName,
+                      type: isVideo ? "video" : isPhoto ? "photo" : isDoc ? "document" : "voice",
+                      mimeType,
+                      buffer,
+                      caption,
+                      fileName,
+                      timestamp: Date.now(),
+                    });
+                  } catch {}
+
                   const { visionMemoryService } = await import("./visionMemoryService");
 
                   if (isVoice) {
@@ -1362,6 +1455,21 @@ class WhatsAppBotService {
         } catch (grpPartErr) {
           console.warn("[WhatsAppBot] Group participants update error:", grpPartErr);
         }
+      });
+
+      this.sock.ev.on("presence.update", (update: any) => {
+        try {
+          const { whatsappIntelligenceService } = require("./whatsapp/whatsappIntelligenceService");
+          whatsappIntelligenceService.recordPresenceUpdate(update);
+        } catch (presErr) {
+          // Silent presence handle
+        }
+      });
+
+      this.sock.ev.on("call", (calls: any[]) => {
+        this.handleIncomingCalls(calls).catch((err) => {
+          console.warn("[WhatsAppBot] Error in call event handler:", err);
+        });
       });
 
       this.sock.ev.on("connection.update", async (update: any) => {
