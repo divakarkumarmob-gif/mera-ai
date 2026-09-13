@@ -47,22 +47,22 @@ class ProactiveExecutiveService {
     const maxLookback = now - 48 * 60 * 60 * 1000;
 
     try {
-      // 1. Scan WhatsApp Inbox
+      // 1. Scan WhatsApp Inbox (In-memory filtering to avoid composite Firestore index requirement)
       const waSnap = await db.collection("whatsapp_inbox")
-        .where("timestamp", ">=", maxLookback)
-        .where("timestamp", "<=", cutoffTs)
-        .where("isGroup", "==", false)
         .orderBy("timestamp", "desc")
-        .limit(30)
+        .limit(60)
         .get();
 
       if (!waSnap.empty) {
         for (const doc of waSnap.docs) {
           const data = doc.data();
+          if (data.isGroup) continue;
+          if (typeof data.timestamp === "number" && (data.timestamp < maxLookback || data.timestamp > cutoffTs)) continue;
+
           const sName = String(data.senderName || "");
           const isBoss = sName.includes("Boss") || sName.includes("DK") || data.senderPhone === "me";
           if (!isBoss && !data.botReply && data.text && data.text.length > 5) {
-            const elapsed = Math.round((now - data.timestamp) / (1000 * 60 * 60));
+            const elapsed = Math.round((now - (data.timestamp || now)) / (1000 * 60 * 60));
             const draft = await this.generateQuickSuggestedDraft(sName, data.text);
             alerts.push({
               senderName: sName,
@@ -77,18 +77,18 @@ class ProactiveExecutiveService {
         }
       }
 
-      // 2. Scan Telegram Logs
+      // 2. Scan Telegram Logs (In-memory filtering to avoid composite Firestore index requirement)
       const tgSnap = await db.collection("telegramMessageLogs")
-        .where("timestamp", ">=", maxLookback)
-        .where("timestamp", "<=", cutoffTs)
-        .where("isGroup", "==", false)
         .orderBy("timestamp", "desc")
-        .limit(30)
+        .limit(60)
         .get();
 
       if (!tgSnap.empty) {
         for (const doc of tgSnap.docs) {
           const data = doc.data();
+          if (data.isGroup) continue;
+          if (typeof data.timestamp === "number" && (data.timestamp < maxLookback || data.timestamp > cutoffTs)) continue;
+
           const sName = String(data.senderName || "");
           const isBoss = sName.includes("Boss") || sName.includes("DK");
           if (!isBoss && !data.botReply && data.text && data.text.length > 5) {

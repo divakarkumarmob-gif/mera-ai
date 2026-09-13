@@ -10,7 +10,6 @@
  */
 
 import * as _TelegramBot from "node-telegram-bot-api";
-const TelegramBot: any = (_TelegramBot as any).default || _TelegramBot;
 import { unifiedMemoryService, AtomicFactEntry } from "./unifiedMemoryService";
 
 class TelegramMemoryBotService {
@@ -42,7 +41,16 @@ class TelegramMemoryBotService {
     }
 
     try {
-      this.bot = new (TelegramBot as any)(this.memoryBotToken, {
+      const BotClass: any =
+        typeof _TelegramBot === "function"
+          ? _TelegramBot
+          : typeof (_TelegramBot as any)?.default === "function"
+          ? (_TelegramBot as any).default
+          : typeof (_TelegramBot as any)?.TelegramBot === "function"
+          ? (_TelegramBot as any).TelegramBot
+          : (_TelegramBot as any).default || _TelegramBot;
+
+      this.bot = new BotClass(this.memoryBotToken, {
         polling: {
           interval: 1000,
           autoStart: true,

@@ -607,8 +607,10 @@ export class WhatsAppHistoryEngine {
 
     let docs: IncomingMessage[] = [];
     try {
-      const snap = await inboxCol().where("timestamp", ">=", startTs).where("isGroup", "==", true).orderBy("timestamp", "desc").limit(200).get();
-      docs = snap.docs.map((d) => d.data() as IncomingMessage);
+      const snap = await inboxCol().orderBy("timestamp", "desc").limit(200).get();
+      docs = snap.docs
+        .map((d) => d.data() as IncomingMessage)
+        .filter((m) => m.isGroup && m.timestamp >= startTs);
     } catch {
       docs = this.messageCache.filter((m) => m.isGroup && m.timestamp >= startTs);
     }
