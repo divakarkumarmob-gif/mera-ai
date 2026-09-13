@@ -304,6 +304,31 @@ export class SemanticIntentEngine {
         },
       },
       {
+        name: "set_reminder_or_alarm",
+        description: "Set a reminder, notification, or alarm for Boss DK at a specific time or relative duration (e.g. '12 bje khane ko yaad dila dena', '9 bje call karna hai yaad dilana', 'kal subah 7 baje reminder do', 'remind me in 20 mins to take medicine').",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            title: { type: "STRING", description: "What to remind Boss about (e.g. 'Khana khana hai', 'Meeting join karni hai', 'Medicine lena')" },
+            timeString: { type: "STRING", description: "Target time (e.g. '12:00 PM', '09:00 AM', 'kal subah 7:00 AM', 'in 30 mins')" },
+            durationMinutes: { type: "NUMBER", description: "Optional minutes from now" },
+          },
+          required: ["title", "timeString"],
+        },
+      },
+      {
+        name: "trigger_or_schedule_voice_call",
+        description: "Trigger an immediate voice call or schedule a wake-up / reminder call to Boss DK's phone (e.g. 'kal subah call karna', '9 bje call karna', 'abhi call karo', 'call me in 10 mins').",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            timeString: { type: "STRING", description: "When to call Boss (e.g. 'now', 'kal subah 7:00 AM', '09:00 AM', 'in 15 mins')" },
+            reason: { type: "STRING", description: "Reason or topic for the call (e.g. 'Morning wake-up call', 'Study reminder')" },
+          },
+          required: ["timeString"],
+        },
+      },
+      {
         name: "generate_ai_photo",
         description: "Generate and send an AI generated 4K photo or artwork based on Boss's prompt.",
         parameters: {
@@ -572,6 +597,42 @@ export class SemanticIntentEngine {
         const { newsService } = await import("./newsService");
         const news = await newsService.getLatestNews(args.query);
         return { success: news.success, news, message: news.message };
+      }
+
+      if (toolName === "set_reminder_or_alarm") {
+        const { toolsEngine } = await import("./toolsEngine");
+        const { scheduledAutomationService } = await import("./scheduledAutomationService");
+        
+        await toolsEngine.addReminder(args.title, args.timeString || "soon", args.durationMinutes || 0);
+        const schedRes = await scheduledAutomationService.createCronTask({
+          title: `Reminder: ${args.title}`,
+          timeString: args.timeString,
+          frequency: "once",
+          actionType: "custom_prompt",
+          messageBody: `Boss! Aapka reminder time ho gaya hai: *${args.title}* ⏰`,
+        });
+
+        const timeDisplay = schedRes.task ? schedRes.task.timeString : (args.timeString || "set time");
+        return { success: true, message: `Boss, maine aapke liye reminder set kar diya hai: "${args.title}" for ${timeDisplay}! Us samay notification bhej dungi. ⏰` };
+      }
+
+      if (toolName === "trigger_or_schedule_voice_call") {
+        const timeStr = String(args.timeString || "").trim().toLowerCase();
+        if (timeStr === "now" || timeStr === "abhi" || timeStr === "right now") {
+          const { whatsappFeatureEngine } = await import("./whatsappFeatureEngine");
+          const card = whatsappFeatureEngine.generateLiveVoiceCallCard(ctx.senderName, true);
+          return { success: true, message: "Boss, incoming voice call initiate ho gaya hai! 📞 Ring baj rahi hai.", card };
+        } else {
+          const { scheduledAutomationService } = await import("./scheduledAutomationService");
+          const schedRes = await scheduledAutomationService.createCronTask({
+            title: `Voice Call / Check-in: ${args.reason || "Scheduled Call"}`,
+            timeString: args.timeString,
+            frequency: "once",
+            actionType: "custom_prompt",
+            messageBody: `📞 *Voice Call Time, Boss!* ${args.reason ? `Topic: ${args.reason}` : "Aapne is samay call karne ko bola tha."}`,
+          });
+          return { success: schedRes.success, message: `Boss, aapka voice call schedule ho gaya hai: ${args.timeString}! Main us samay aapse connect karungi. 🫡📞` };
+        }
       }
 
       if (toolName === "generate_ai_photo") {
