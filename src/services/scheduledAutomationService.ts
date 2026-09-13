@@ -158,6 +158,21 @@ class ScheduledAutomationService {
       return { success: false, message: `Time format samajh nahi aaya: "${opts.timeString}". Kripya '6:00 PM', 'shaam 6 bje' ya '6:10 AM' specify karein.` };
     }
 
+    // Replace any existing active task at the exact same hour & minute if it was a one-time reminder or custom prompt
+    for (const [existingId, existingTask] of this.inMemoryTasks.entries()) {
+      if (
+        existingTask.status === "active" &&
+        existingTask.targetHour === parsedTime.hour &&
+        existingTask.targetMinute === parsedTime.minute &&
+        (opts.frequency === "once" || existingTask.frequency === "once" || existingTask.actionType === "custom_prompt")
+      ) {
+        existingTask.status = "cancelled";
+        await automationsCol().doc(existingId).update({ status: "cancelled", updatedAt: Date.now() }).catch(() => {});
+        this.inMemoryTasks.delete(existingId);
+        console.log(`[ScheduledAutomationService] Auto-resolved schedule conflict at ${parsedTime.formatted} ("${existingTask.title}" replaced by "${opts.title}")`);
+      }
+    }
+
     const id = `cron_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const task: ScheduledTask = {
       id,

@@ -19,6 +19,7 @@ export interface ConversationalAnalysis {
   anaphoraResolution?: string;
   suggestedHumanReaction: string;
   culturalSubtext?: string;
+  continuityType?: "follow_up" | "topic_shift" | "plan_modification" | "fresh_command";
 }
 
 const eventsCol = () => db.collection("memory").doc("lifeStories").collection("events");
@@ -140,12 +141,31 @@ class HumanComprehensionEngine {
       suggestedHumanReaction = "Use fun, relaxed buddy slangs, high camaraderie, zero robotic formality.";
     }
 
-    // 2. Anaphora (Pronoun) Resolution
+    // 2. Anaphora & Context Continuity Analysis
     let anaphoraResolution: string | undefined;
+    let continuityType: "follow_up" | "topic_shift" | "plan_modification" | "fresh_command" = "fresh_command";
+
+    const lastMsg = context.recentMessages && context.recentMessages.length > 0
+      ? context.recentMessages[context.recentMessages.length - 1].toLowerCase()
+      : "";
+
+    // Check for Plan Modification / Conflict
+    const hasTimeKeyword = /\b(\d{1,2}\s*(?:baje|bje|am|pm)|subah|dopahar|shaam|raat)\b/i.test(clean);
+    const lastHadTimeKeyword = /\b(\d{1,2}\s*(?:baje|bje|am|pm)|subah|dopahar|shaam|raat)\b/i.test(lastMsg);
+    const isCorrection = /\b(nahi|nhi|badal\s*do|change|cancel|postpone|waha\s*nahi|uski\s*jagah|instead)\b/i.test(clean);
+
+    if ((hasTimeKeyword && lastHadTimeKeyword) || isCorrection) {
+      continuityType = "plan_modification";
+    } else if (context.quotedText || /\b(isko|inhe|ise|unko|usko|use|unhe|wo|wahi|uski|uska|pehle\s*wala|waisa\s*hi|kyun|kab|kaise)\b/i.test(clean)) {
+      continuityType = "follow_up";
+    } else {
+      continuityType = "topic_shift";
+    }
+
     if (context.quotedPhone) {
-      anaphoraResolution = `Pronouns like 'isko', 'inhe', 'use', 'unhe' refer directly to quoted phone number +${context.quotedPhone}.`;
-    } else if (/\b(isko|inhe|ise|unko|usko|use|unhe|wo|uski|uska)\b/i.test(clean) && context.recentMessages && context.recentMessages.length > 0) {
-      anaphoraResolution = `Context references the topic/person from recent chat: "${context.recentMessages.slice(-2).join(" | ")}"`;
+      anaphoraResolution = `Pronouns refer directly to quoted contact (+${context.quotedPhone}).`;
+    } else if (context.recentMessages && context.recentMessages.length > 0 && continuityType === "follow_up") {
+      anaphoraResolution = `Context references ongoing discussion from recent chat: "${context.recentMessages.slice(-2).join(" | ")}"`;
     }
 
     return {
@@ -154,12 +174,13 @@ class HumanComprehensionEngine {
       anaphoraResolution,
       suggestedHumanReaction,
       culturalSubtext,
+      continuityType,
     };
   }
 
   /**
    * High-level cognitive pre-pass that simulates human subconscious reasoning
-   * before Friday generates any response.
+   * and runs the 3-Step Context Continuity Checkpoint before Friday generates any response.
    */
   public performCognitivePrePass(
     userText: string,
@@ -173,6 +194,7 @@ class HumanComprehensionEngine {
     subconsciousIntent: string;
     actionableGoal: string;
     humanInsightPrompt: string;
+    continuityType: string;
   } {
     const analysis = this.analyzeMessageSubtext(userText, {
       speakerName: context.isOwner ? "DK (Boss)" : "User",
@@ -190,22 +212,31 @@ class HumanComprehensionEngine {
     } else if (/\b(save|number\s*save|ye\s*no|contact\s*save)\b/i.test(clean)) {
       actionableGoal = "Invoke 'save_contact' tool immediately to store this person in DK's phonebook.";
     } else if (/\b(schedule|remind|yaad\s*dilana|alarm|baje\s*bhejna)\b/i.test(clean)) {
-      actionableGoal = "Invoke 'schedule_contact_message' or 'set_reminder' tool.";
+      actionableGoal = "Invoke 'set_reminder_or_alarm' or 'create_automated_cron_task' tool.";
     }
 
+    const checkpointGuidance = analysis.continuityType === "plan_modification"
+      ? "🚨 PLAN MODIFICATION / CONFLICT DETECTED: Boss is updating or replacing an earlier stated plan for the same time slot! PRIORITY-OVERWRITE with this new command and naturally acknowledge the change (e.g. 'Theek hai Boss! Purana plan update karke naya task schedule kar diya hai!')."
+      : analysis.continuityType === "follow_up"
+      ? "🔗 THREAD CONTINUITY (FOLLOW-UP): Connect seamlessly with the previous turn and resolved context. Do not treat this as a blank slate."
+      : "✨ FRESH TOPIC / COMMAND: Switch focus completely to this new topic. Zero topic bleeding from unrelated past tasks.";
+
     const humanInsightPrompt = `
-🧠 SUBCONSCIOUS MIND & INTENT BLUEPRINT (Human Common Sense):
-- Detected Emotion: ${analysis.emotionalTone.toUpperCase()}
-- Deep Psychological Context: "${analysis.implicitIntent}"
-- Actionable Mandate: "${actionableGoal}"
-- Human Reaction Guidance: "${analysis.suggestedHumanReaction}"
-${analysis.anaphoraResolution ? `- Anaphora Note: ${analysis.anaphoraResolution}` : ""}
+🛡️ CONTEXT CONTINUITY & INTENT CHECKPOINT (Mandatory Reasoning Pre-Pass):
+• Continuity Classification: ${analysis.continuityType.toUpperCase()}
+• Checkpoint Execution Guidance: ${checkpointGuidance}
+• Detected Emotional Tone: ${analysis.emotionalTone.toUpperCase()}
+• Deep Subtext & Intent: "${analysis.implicitIntent}"
+• Actionable Mandate: "${actionableGoal}"
+• Human Reaction Guidance: "${analysis.suggestedHumanReaction}"
+${analysis.anaphoraResolution ? `• Anaphora / Reference Resolution: ${analysis.anaphoraResolution}` : ""}
 `;
 
     return {
       subconsciousIntent: analysis.implicitIntent,
       actionableGoal,
       humanInsightPrompt,
+      continuityType: analysis.continuityType,
     };
   }
 
