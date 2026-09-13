@@ -1568,81 +1568,24 @@ Provide a 2-4 sentence executive digest of main topics, project updates, member 
     // Record incoming user turn in chat cache for this chat
     TelegramBotService.recordChatTurn(chatId, senderName, messageText);
 
-    // ── Fast Direct Intercept: Boss Directives & Word Rules (for Owner) ─────
-    if (isOwner) {
+    // Strict slash command fast-paths (only when Boss explicitly types a leading slash)
+    if (isOwner && messageText.trim().startsWith("/")) {
       const { bossDirectivesService } = await import("./bossDirectivesService");
       const directiveCheck = bossDirectivesService.parseDirectiveCommand(messageText);
-      if (directiveCheck.isDirectiveCommand) {
-        if (directiveCheck.action === "add") {
-          const added = await bossDirectivesService.addDirective(directiveCheck.ruleText || messageText, {
-            targetWord: directiveCheck.targetWord,
-            replacementWord: directiveCheck.replacementWord,
-          });
-          if (added.targetWord && added.replacementWord) {
-            return `Haan Boss! Maine ye rule strictly lock kar liya hai: aage se "${added.targetWord}" ko hamesha "${added.replacementWord}" hi bolungi aur samjhungi (Telegram + WhatsApp)! 🫡`;
-          }
-          return `Ji Boss! Aapka strict order save ho gaya hai: "${added.rule}". Aage se ye strictly follow hoga! 🫡`;
-        } else if (directiveCheck.action === "remove") {
-          const remRes = await bossDirectivesService.removeDirective(directiveCheck.targetWord || messageText);
-          return remRes.message;
-        } else if (directiveCheck.action === "list") {
-          const active = await bossDirectivesService.getActiveDirectives();
-          if (active.length === 0) {
-            return "Boss, abhi koi custom directive ya word rule active nahi hai. Sab standard normal state me chal raha hai! ✨";
-          }
-          const listStr = active.map((d, i) => d.targetWord && d.replacementWord ? `*${i+1}.* "${d.targetWord}" ➔ "${d.replacementWord}"` : `*${i+1}.* ${d.rule}`).join("\n");
-          return `📋 *Active Boss Directives & Strict Rules:*\n\n${listStr}\n\n_Aap kisi bhi rule ko "[Naam] wala rule hata do" bolkar cancel kar sakte hain._`;
+      if (directiveCheck.isDirectiveCommand && directiveCheck.action === "list") {
+        const active = await bossDirectivesService.getActiveDirectives();
+        if (active.length === 0) {
+          return "Boss, abhi koi custom directive ya word rule active nahi hai. Sab standard normal state me chal raha hai! ✨";
         }
+        const listStr = active.map((d, i) => d.targetWord && d.replacementWord ? `*${i+1}.* "${d.targetWord}" ➔ "${d.replacementWord}"` : `*${i+1}.* ${d.rule}`).join("\n");
+        return `📋 *Active Boss Directives & Strict Rules:*\n\n${listStr}\n\n_Aap kisi bhi rule ko "[Naam] wala rule hata do" bolkar cancel kar sakte hain._`;
       }
 
-      // ── Fast Direct Intercept: Child Training & Mentorship (Gurukul) ──────
-      const { fridayChildTrainingService } = await import("./fridayChildTrainingService");
-      const teachCheck = fridayChildTrainingService.parseTeachingCommand(messageText);
-      if (teachCheck.isTeachingCommand) {
-        if (teachCheck.action === "teach" && teachCheck.situation && teachCheck.reaction) {
-          const lesson = await fridayChildTrainingService.teachLesson(teachCheck.situation, teachCheck.reaction);
-          return `Haan Boss! Maine ye dil se sikh liya hai! 👶✨\n\n📌 *Jab:* "${lesson.situationTrigger}"\n👉 *Main karungi:* "${lesson.taughtReaction}"\n\nAage se main bilkul waise hi react karungi jaise aapne sikhaya hai! 🫡❤️`;
-        } else if (teachCheck.action === "correct" && teachCheck.correctionText) {
-          const res = await fridayChildTrainingService.correctPreviousMistake(teachCheck.correctionText);
-          return res.message;
-        } else if (teachCheck.action === "revise") {
-          const all = await fridayChildTrainingService.getAllLessons();
-          if (all.length === 0) {
-            return "Boss, abhi tak maine koi custom behavioral lesson nahi seekha hai. Aap mujhe sikhaiye ki kis situation me kaise react karna hai! 👶✨";
-          }
-          const listStr = all.map((l, i) => `*${i+1}. Jab:* "${l.situationTrigger}"\n   👉 *Taught:* "${l.taughtReaction}"`).join("\n\n");
-          return `🎓 *Friday's Learned Lessons from Boss DK:*\n\n${listStr}\n\n_Aap naye lessons sikhane ke liye 'Friday sikh lo: Jab [Situation] ho tab [Reaction] karna' bol sakte hain!_`;
-        } else if (teachCheck.action === "delete") {
-          const res = await fridayChildTrainingService.deleteLesson(teachCheck.situation || "all");
-          return res.message;
-        }
-      }
-
-      // ── Fast Direct Intercept: Enterprise Memory Suite (/memory, /remember, /forget) ──
       const { unifiedMemoryService } = await import("./unifiedMemoryService");
       const memoryCmdCheck = unifiedMemoryService.parseMemoryCommand(messageText);
-      if (memoryCmdCheck.isMemoryCommand) {
-        if (memoryCmdCheck.action === "list") {
-          const facts = await unifiedMemoryService.listAllFacts();
-          return unifiedMemoryService.formatFactsListMarkdown(facts);
-        } else if (memoryCmdCheck.action === "remember" && memoryCmdCheck.targetText) {
-          const saveRes = await unifiedMemoryService.addAtomicFact(memoryCmdCheck.targetText, "personal_detail", "telegram");
-          return saveRes.confirmationMessage;
-        } else if (memoryCmdCheck.action === "forget" && memoryCmdCheck.targetText) {
-          const res = await unifiedMemoryService.removeAtomicFact(memoryCmdCheck.targetText);
-          return res.message;
-        }
-      }
-
-      // ── Fast Direct Intercept: Proactive Morning Briefing & Sentinel ───────
-      if (/^(?:\/briefing|morning\s*briefing|briefing|chief\s*of\s*staff|aaj\s*ka\s*briefing)$/i.test(messageText.trim())) {
-        const { proactiveExecutiveService } = await import("./proactiveExecutiveService");
-        return await proactiveExecutiveService.generateChiefOfStaffMorningBriefing();
-      }
-      if (/^(?:\/unanswered|unanswered|pending\s*messages|kiska\s*message\s*pending\s*hai)$/i.test(messageText.trim())) {
-        const { proactiveExecutiveService } = await import("./proactiveExecutiveService");
-        const res = await proactiveExecutiveService.checkPendingUnansweredMessages(3);
-        return res.formattedSummary;
+      if (memoryCmdCheck.isMemoryCommand && memoryCmdCheck.action === "list") {
+        const facts = await unifiedMemoryService.listAllFacts();
+        return unifiedMemoryService.formatFactsListMarkdown(facts);
       }
     }
 
@@ -2028,17 +1971,75 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
         new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms)),
       ]);
 
+    const { semanticIntentEngine } = await import("./semanticIntentEngine");
+    const functionDeclarations = isOwner ? semanticIntentEngine.getBossFunctionDeclarations() : [];
+
     for (const model of TelegramBotService.MODEL_FALLBACK_CHAIN) {
       try {
-        const response = await withTimeout(
-          ai.models.generateContent({
+        let reply: string | undefined;
+
+        if (isOwner && functionDeclarations.length > 0) {
+          const chat = ai.chats.create({
             model,
-            contents: prompt,
-            config: currentMode === "mode_b" ? { safetySettings: UNCENSORED_SAFETY_SETTINGS as any } : undefined,
-          }),
-          7000
-        );
-        const reply = response.text?.trim();
+            config: {
+              systemInstruction: prompt,
+              tools: [{ functionDeclarations }],
+              ...(currentMode === "mode_b" ? { safetySettings: UNCENSORED_SAFETY_SETTINGS as any } : {}),
+            },
+          });
+
+          let response = await withTimeout(chat.sendMessage({ message: messageText }), 9000);
+          let turns = 0;
+          let lastToolResult: any = null;
+
+          while (response.functionCalls && response.functionCalls.length > 0 && turns < 4) {
+            turns++;
+            const call = response.functionCalls[0];
+            console.log(`[TelegramBot] Boss Tool Call: ${call.name} with args:`, call.args);
+            const toolResult = await semanticIntentEngine.executeTool(call.name, call.args, {
+              channel: "telegram",
+              senderName,
+              chatId,
+              sendVoiceFn: async (_t, audio) => {
+                await this.sendVoice(Number(chatId), audio);
+              },
+              sendPhotoFn: async (_t, img, cap) => {
+                await this.sendPhoto(Number(chatId), img, cap);
+              },
+            });
+            lastToolResult = toolResult;
+
+            response = await withTimeout(
+              chat.sendMessage({
+                message: [
+                  {
+                    functionResponse: {
+                      name: call.name,
+                      response: toolResult,
+                    },
+                  },
+                ],
+              }),
+              9000
+            );
+          }
+
+          reply = response.text?.trim();
+          if (!reply && lastToolResult) {
+            reply = lastToolResult.message || lastToolResult.formattedCard || lastToolResult.summary || "";
+          }
+        } else {
+          const response = await withTimeout(
+            ai.models.generateContent({
+              model,
+              contents: prompt,
+              config: currentMode === "mode_b" ? { safetySettings: UNCENSORED_SAFETY_SETTINGS as any } : undefined,
+            }),
+            7000
+          );
+          reply = response.text?.trim();
+        }
+
         if (reply) {
           console.log(`[TelegramBot] Reply generated using ${model}`);
           const replaced = bossDirectivesService.applyWordReplacements(reply);

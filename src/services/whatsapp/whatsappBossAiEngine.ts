@@ -37,96 +37,41 @@ export class WhatsAppBossAiEngine {
 
     const { whatsappFeatureEngine } = await import("../whatsappFeatureEngine");
 
-    // Explicit command: /link or @link
-    if (/^(?:\/link|@link)\b/i.test(messageText.trim())) {
-      const followUp = whatsappFeatureEngine.handleSongLinkFollowUp(replyJid, messageText, quotedMessage?.text);
-      if (followUp) return followUp;
-    }
-
-    // Explicit command: /next or @next
-    if (/^(?:\/next|@next)$/i.test(messageText.trim())) {
-      const nextRes = await whatsappFeatureEngine.handleNextSongInPlaylist(replyJid, senderName);
-      if (nextRes.handled && nextRes.replyText) {
-        if (nextRes.audioBuffer && sendVoiceFn) {
-          try {
-            await sendVoiceFn(replyJid, nextRes.audioBuffer, messageKey, "audio/mp4");
-          } catch {}
-        }
-        return nextRes.replyText;
+    // Strict slash command fast-paths (only when Boss explicitly types a leading slash)
+    if (/^\/(?:link|next|voice|lookup)\b/i.test(messageText.trim())) {
+      if (/^\/link\b/i.test(messageText.trim())) {
+        const followUp = whatsappFeatureEngine.handleSongLinkFollowUp(replyJid, messageText, quotedMessage?.text);
+        if (followUp) return followUp;
       }
-    }
-
-    // Explicit command: /song or @song
-    if (/^(?:@song|@music|@gaana|\/song|\/music|\/gaana|\/preview)\b/i.test(messageText.trim())) {
-      const songRes = await whatsappFeatureEngine.searchMusicWithLyrics(messageText, senderName, replyJid);
-      if (songRes.audioBuffer && sendVoiceFn) {
-        try {
-          await sendVoiceFn(replyJid, songRes.audioBuffer, messageKey, "audio/mp4");
-        } catch (vErr) {
-          console.warn("[WhatsAppBossAI] Failed to send preview voice/audio:", vErr);
+      if (/^\/next$/i.test(messageText.trim())) {
+        const nextRes = await whatsappFeatureEngine.handleNextSongInPlaylist(replyJid, senderName);
+        if (nextRes.handled && nextRes.replyText) {
+          if (nextRes.audioBuffer && sendVoiceFn) {
+            try {
+              await sendVoiceFn(replyJid, nextRes.audioBuffer, messageKey, "audio/mp4");
+            } catch {}
+          }
+          return nextRes.replyText;
         }
       }
-      return songRes.replyText;
-    }
-
-    // Explicit command: Mode switch (/mode b, /mode a)
-    if (/^(?:\/mode\s*b|mode\s*b)$/i.test(messageText.trim())) {
-      const { fridayModeService } = await import("../fridayModeService");
-      const res = await fridayModeService.setMode("mode_b");
-      return res.message;
-    }
-    if (/^(?:\/mode\s*a|mode\s*a|normal\s*mode)$/i.test(messageText.trim())) {
-      const { fridayModeService } = await import("../fridayModeService");
-      const res = await fridayModeService.setMode("mode_a");
-      return res.message;
-    }
-
-    // Explicit command: Voice change (/voice <tone>)
-    if (messageText.trim().startsWith("/voice")) {
-      const { voiceBridgeService } = await import("../voiceBridgeService");
-      const choice = messageText.replace(/^\/voice\s*/i, "").trim().toLowerCase();
-      const res = await voiceBridgeService.setBossGlobalVoice(choice || messageText);
-      return `🎙️ *Voice Recording Tone Updated!* ⚡\n\n• New Voice: *${res.voiceName}* (\`${res.voice}\`)\n\nBoss, ab WhatsApp aur Telegram par aane wale sabhi voice note replies is nayi aawaz me deliver honge! ✨\n\n💡 *Quick Commands:* \`/voice female\` (Swara), \`/voice male\` (Madhur), \`/voice english\` (Prabhat)`;
-    }
-
-    // Explicit command: /lookup <number>
-    if (/^(?:\/lookup|\/phone|\/trace)\s+([+0-9\s-]{10,15})/i.test(messageText.trim())) {
-      const extractedNumber = messageText.match(/(?:\+91[\s-]?)?[6-9]\d{9}/) || messageText.match(/\b\d{10,12}\b/);
-      if (extractedNumber && extractedNumber[0].replace(/\D/g, "").length >= 10) {
-        const { phoneIntelligenceService } = await import("../phoneIntelligenceService");
-        const report = await phoneIntelligenceService.lookup(extractedNumber[0]);
-        return phoneIntelligenceService.formatReportMarkdown(report, "whatsapp");
+      if (/^\/voice\b/i.test(messageText.trim())) {
+        const { voiceBridgeService } = await import("../voiceBridgeService");
+        const choice = messageText.replace(/^\/voice\s*/i, "").trim().toLowerCase();
+        const res = await voiceBridgeService.setBossGlobalVoice(choice || messageText);
+        return `🎙️ *Voice Recording Tone Updated!* ⚡\n\n• New Voice: *${res.voiceName}* (\`${res.voice}\`)\n\nBoss, ab WhatsApp aur Telegram par aane wale sabhi voice note replies is nayi aawaz me deliver honge! ✨`;
       }
-    }
-
-    // ── Fast Direct Intercept: Enterprise Memory Suite (/memory, /remember, /forget) ──
-    const { unifiedMemoryService } = await import("../unifiedMemoryService");
-    const memoryCmdCheck = unifiedMemoryService.parseMemoryCommand(messageText);
-    if (memoryCmdCheck.isMemoryCommand) {
-      if (memoryCmdCheck.action === "list") {
-        const facts = await unifiedMemoryService.listAllFacts();
-        return unifiedMemoryService.formatFactsListMarkdown(facts);
-      } else if (memoryCmdCheck.action === "remember" && memoryCmdCheck.targetText) {
-        const saveRes = await unifiedMemoryService.addAtomicFact(memoryCmdCheck.targetText, "personal_detail", "whatsapp");
-        return saveRes.confirmationMessage;
-      } else if (memoryCmdCheck.action === "forget" && memoryCmdCheck.targetText) {
-        const res = await unifiedMemoryService.removeAtomicFact(memoryCmdCheck.targetText);
-        return res.message;
+      if (/^\/lookup\s+([+0-9\s-]{10,15})/i.test(messageText.trim())) {
+        const extractedNumber = messageText.match(/(?:\+91[\s-]?)?[6-9]\d{9}/) || messageText.match(/\b\d{10,12}\b/);
+        if (extractedNumber && extractedNumber[0].replace(/\D/g, "").length >= 10) {
+          const { phoneIntelligenceService } = await import("../phoneIntelligenceService");
+          const report = await phoneIntelligenceService.lookup(extractedNumber[0]);
+          return phoneIntelligenceService.formatReportMarkdown(report, "whatsapp");
+        }
       }
-    }
-
-    // ── Fast Direct Intercept: Proactive Morning Briefing & Sentinel ───────
-    if (/^(?:\/briefing|morning\s*briefing|briefing|chief\s*of\s*staff|aaj\s*ka\s*briefing)$/i.test(messageText.trim())) {
-      const { proactiveExecutiveService } = await import("../proactiveExecutiveService");
-      return await proactiveExecutiveService.generateChiefOfStaffMorningBriefing();
-    }
-    if (/^(?:\/unanswered|unanswered|pending\s*messages|kiska\s*message\s*pending\s*hai)$/i.test(messageText.trim())) {
-      const { proactiveExecutiveService } = await import("../proactiveExecutiveService");
-      const res = await proactiveExecutiveService.checkPendingUnansweredMessages(3);
-      return res.formattedSummary;
     }
 
     // Background Auto-Fact Observation (Mem0 / ChatGPT style)
+    const { unifiedMemoryService } = await import("../unifiedMemoryService");
     unifiedMemoryService.observeAndExtractFacts("Boss DK", messageText, "whatsapp", true);
 
     const recentBossMsgs = await whatsappHistoryEngine.getRecentBossContext(replyJid, 15);
