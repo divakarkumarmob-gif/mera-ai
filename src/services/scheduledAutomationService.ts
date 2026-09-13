@@ -83,16 +83,29 @@ class ScheduledAutomationService {
 
   /**
    * Helper: Parses natural time string to IST hour & minute.
-   * Examples: "6:00 AM", "6:10 am", "6 baje", "subah 6 bje", "5 bje", "17:00", "5:00 PM"
+   * Examples: "6:00 AM", "6:10 am", "6 baje", "subah 6 bje", "shaam 6 bje", "5 bje", "17:00", "5:00 PM", "raat 9 baje"
    */
   public parseTimeString(timeStr: string): { hour: number; minute: number; formatted: string } | null {
     const raw = (timeStr || "").toLowerCase().trim();
     if (!raw) return null;
 
-    let isPM = raw.includes("pm") || raw.includes("shaam") || raw.includes("raat") || raw.includes("dopahar");
-    const isAM = raw.includes("am") || raw.includes("subah") || raw.includes("pratah");
+    let isPM =
+      raw.includes("pm") ||
+      raw.includes("shaam") ||
+      raw.includes("sham") ||
+      raw.includes("evening") ||
+      raw.includes("raat") ||
+      raw.includes("night") ||
+      raw.includes("dopahar") ||
+      raw.includes("afternoon");
+    const isAM =
+      raw.includes("am") ||
+      raw.includes("subah") ||
+      raw.includes("pratah") ||
+      raw.includes("morning") ||
+      raw.includes("bhor");
 
-    // Match HH:MM
+    // Match HH:MM (e.g., "6:00", "18:00", "06:10")
     const colonMatch = raw.match(/(\d{1,2})[:.](\d{2})/);
     if (colonMatch) {
       let h = parseInt(colonMatch[1], 10);
@@ -103,13 +116,18 @@ class ScheduledAutomationService {
       return { hour: h, minute: m, formatted };
     }
 
-    // Match single hour: "6 baje", "6 bje", "5 pm", "5pm", "6 am"
+    // Match single hour (e.g., "6 baje", "6 bje", "shaam 6", "6pm", "6 am", "18 baje")
     const singleHourMatch = raw.match(/(\d{1,2})\s*(?:baje|bje|am|pm|o'clock|hr|hrs)?/);
     if (singleHourMatch) {
       let h = parseInt(singleHourMatch[1], 10);
-      // Heuristic: if no AM/PM specified, numbers 1-7 in context of "chlo ghumne" or "msg" usually mean PM (13-19)
+      // If 24-hour format provided (e.g. 18, 19, 20)
+      if (h >= 13 && h <= 23) {
+        const formatted = `${h % 12 === 0 ? 12 : h % 12}:00 PM`;
+        return { hour: h, minute: 0, formatted };
+      }
+      // Heuristic: if no AM/PM specified, numbers 1-7 in context of "shaam", "ghumne", or "msg" usually mean PM
       if (!isAM && !isPM) {
-        if (h >= 1 && h <= 7 && (raw.includes("ghumne") || raw.includes("shaam") || raw.includes("milte"))) {
+        if (h >= 1 && h <= 7 && (raw.includes("ghumne") || raw.includes("shaam") || raw.includes("milte") || raw.includes("kaha ho"))) {
           isPM = true;
         } else if (h >= 1 && h <= 5 && !raw.includes("subah")) {
           isPM = true;
@@ -125,7 +143,7 @@ class ScheduledAutomationService {
   }
 
   /**
-   * Creates a recurring automated cron task for Boss (e.g. 6 AM weather, 6:10 AM top news).
+   * Creates a recurring automated cron task for Boss (e.g. 6 AM weather, 6:10 AM top news, 6 PM 'kahan ho boss').
    */
   public async createCronTask(opts: {
     title: string;
@@ -137,7 +155,7 @@ class ScheduledAutomationService {
   }): Promise<{ success: boolean; message: string; task?: ScheduledTask }> {
     const parsedTime = this.parseTimeString(opts.timeString);
     if (!parsedTime) {
-      return { success: false, message: `Time format samajh nahi aaya: "${opts.timeString}". Kripya '6:00 AM' ya '6:10 AM' specify karein.` };
+      return { success: false, message: `Time format samajh nahi aaya: "${opts.timeString}". Kripya '6:00 PM', 'shaam 6 bje' ya '6:10 AM' specify karein.` };
     }
 
     const id = `cron_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
@@ -162,7 +180,7 @@ class ScheduledAutomationService {
       this.inMemoryTasks.set(id, task);
       return {
         success: true,
-        message: `✅ Scheduled! Har ${task.frequency === "daily" ? "roz" : task.frequency} subah/shaam *${task.timeString} IST* par Friday aapko *${task.title}* WhatsApp par send kar degi!`,
+        message: `✅ Scheduled! Har ${task.frequency === "daily" ? "roz" : task.frequency} *${task.timeString} IST* par Friday aapko automatically *${task.title}* WhatsApp par send kar degi! ⚡`,
         task,
       };
     } catch (e: any) {
@@ -308,8 +326,8 @@ class ScheduledAutomationService {
       if (task.actionType === "weather_update") {
         const city = task.city || "Patna";
         const weatherRes = await weatherService.getCurrentWeather(city);
-        const header = `🌤️ *Morning Weather Update (${city})* — _${task.timeString}_`;
-        const weatherText = `${header}\n\n${weatherRes.message || "Weather update fetched successfully."}\n\n_Have a productive day, Boss!_ ⚡`;
+        const header = `🌤️ *Daily Weather Update (${city})* — _${task.timeString}_`;
+        const weatherText = `${header}\n\n${weatherRes.message || "Weather update fetched successfully."}\n\n_Have a great time, Boss!_ ⚡`;
 
         if (ownerPhone) {
           await sendWhatsAppUnified(ownerPhone, weatherText);
@@ -317,19 +335,39 @@ class ScheduledAutomationService {
       } else if (task.actionType === "news_briefing") {
         const newsRes = await newsService.getLatestNews("India top news breaking");
         const articles = (newsRes.articles || []).slice(0, 10);
-        let newsText = `📰 *Top 10 Morning News Headlines* — _${task.timeString}_\n\n`;
+        let newsText = `📰 *Top 10 News Headlines* — _${task.timeString}_\n\n`;
         if (articles.length > 0) {
           articles.forEach((a: any, idx: number) => {
             newsText += `*${idx + 1}.* ${a.title || a.headline}\n`;
             if (a.source) newsText += `   _${a.source}_\n`;
           });
         } else {
-          newsText += newsRes.message || "Daily morning news briefing.";
+          newsText += newsRes.message || "Daily news briefing.";
         }
-        newsText += `\n_Friday AI Morning Intelligence Brief_ ⚡`;
+        newsText += `\n_Friday AI Intelligence Brief_ ⚡`;
 
         if (ownerPhone) {
           await sendWhatsAppUnified(ownerPhone, newsText);
+        }
+      } else if (task.actionType === "custom_prompt") {
+        // Dynamic custom message, check-in greeting (e.g. "Kahan ho boss?", custom weather combo, etc.)
+        let dispatchText = task.messageBody || "Boss, aapka daily scheduled check-in time ho gaya hai! Kahan ho Boss? 😊⚡";
+        
+        // If message asks for weather as well, augment with weather
+        const bodyLower = (task.messageBody || "").toLowerCase();
+        if (bodyLower.includes("weather") || bodyLower.includes("mausam")) {
+          try {
+            const city = task.city || "Patna";
+            const weatherRes = await weatherService.getCurrentWeather(city);
+            dispatchText = `🌤️ *Daily Weather & Check-In (${city})* — _${task.timeString}_\n\n${weatherRes.message || ""}\n\n💬 _"${task.messageBody}"_\n\n_Kahan ho Boss? Sab theek chal raha hai na?_ ✨`;
+          } catch {}
+        } else {
+          const header = `⏰ *Scheduled Check-In / Reminder* — _${task.timeString}_`;
+          dispatchText = `${header}\n\n💬 ${task.messageBody}\n\n_Friday AI Always by your side, Boss!_ ⚡`;
+        }
+
+        if (ownerPhone) {
+          await sendWhatsAppUnified(ownerPhone, dispatchText);
         }
       } else if (task.actionType === "whatsapp_contact_message") {
         if (task.targetPhone && task.messageBody) {

@@ -3936,16 +3936,16 @@ const rawFunctionDeclarations: any[] = [
   },
   {
     "name": "create_automated_cron_task",
-    "description": "Create or schedule a recurring daily or custom-day task for Boss (e.g. 'subah 6 bje weather update', '6:10 me top 10 news bhejna', 'har monday 8 AM briefing'). Friday will automatically execute and send to Boss on WhatsApp at the exact time.",
+    "description": "Schedule or create a recurring automated daily or timed cron task for Boss DK (e.g. 'har roz shaam 6 bje weather news bhej dena', 'daily shaam 6 baje kahan ho boss msg karna', 'subah 6 bje weather update', '6:10 me top 10 news bhejna', 'har Monday 8 AM briefing'). You MUST invoke this tool immediately whenever Boss asks you to send or do anything recurring, daily, or at a specific time every day.",
     "parameters": {
       "type": "OBJECT",
       "properties": {
-        "title": { "type": "STRING", "description": "Title of task, e.g. 'Morning Weather Update', 'Top 10 News Briefing'" },
-        "timeString": { "type": "STRING", "description": "Target time, e.g. '06:00 AM', '6:10 am', '6:00', '18:00'" },
+        "title": { "type": "STRING", "description": "Title of task, e.g. 'Daily 6 PM Weather & Check-In', 'Morning Weather Update', 'Top 10 News Briefing'" },
+        "timeString": { "type": "STRING", "description": "Target time, e.g. '06:00 PM', '06:00 AM', '6:10 am', '6:00 PM', '18:00'" },
         "frequency": { "type": "STRING", "description": "Frequency, e.g. 'daily' (default), 'weekdays', 'weekends', 'monday', 'tuesday,friday'" },
         "actionType": { "type": "STRING", "description": "Type of action: 'weather_update', 'news_briefing', or 'custom_prompt'" },
         "city": { "type": "STRING", "description": "Optional city for weather update (default: 'Patna')" },
-        "messageBody": { "type": "STRING", "description": "Optional custom prompt or text to deliver" }
+        "messageBody": { "type": "STRING", "description": "The message body, check-in greeting, or custom prompt to deliver to Boss" }
       },
       "required": ["title", "timeString", "actionType"]
     }

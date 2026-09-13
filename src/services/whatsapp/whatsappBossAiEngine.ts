@@ -551,16 +551,16 @@ export class WhatsAppBossAiEngine {
       },
       {
         name: "create_automated_cron_task",
-        description: "Create or schedule a recurring daily or custom-day task for Boss (e.g. 'subah 6 bje weather update', '6:10 me top 10 news bhejna', 'har monday 8 AM briefing'). Friday will automatically execute and send to Boss on WhatsApp at the exact time.",
+        description: "Schedule or create a recurring automated daily or timed cron task for Boss DK (e.g. 'har roz shaam 6 bje weather news bhej dena', 'daily shaam 6 baje kahan ho boss msg karna', 'subah 6 bje weather update', '6:10 me top 10 news bhejna', 'har Monday 8 AM briefing'). You MUST invoke this tool immediately whenever Boss asks you to send or do anything recurring, daily, or at a specific time every day.",
         parameters: {
           type: "OBJECT",
           properties: {
-            title: { type: "STRING", description: "Title of task, e.g. 'Morning Weather Update', 'Top 10 News Briefing'" },
-            timeString: { type: "STRING", description: "Target time, e.g. '06:00 AM', '6:10 am', '6:00', '18:00'" },
+            title: { type: "STRING", description: "Title of task, e.g. 'Daily 6 PM Weather & Check-In', 'Morning Weather Update', 'Top 10 News Briefing'" },
+            timeString: { type: "STRING", description: "Target time, e.g. '06:00 PM', '06:00 AM', '6:10 am', '6:00 PM', '18:00'" },
             frequency: { type: "STRING", description: "Frequency, e.g. 'daily' (default), 'weekdays', 'weekends', 'monday', 'tuesday,friday'" },
-            actionType: { type: "STRING", enum: ["weather_update", "news_briefing", "custom_prompt"], description: "Type of action to perform" },
+            actionType: { type: "STRING", enum: ["weather_update", "news_briefing", "custom_prompt"], description: "Type of action to perform. Use 'custom_prompt' for custom check-ins or combined messages (e.g. weather + 'kahan ho boss')." },
             city: { type: "STRING", description: "Optional city for weather update (default: 'Patna')" },
-            messageBody: { type: "STRING", description: "Optional custom prompt or text to deliver" }
+            messageBody: { type: "STRING", description: "The message body, check-in greeting, or custom prompt to deliver to Boss" }
           },
           required: ["title", "timeString", "actionType"]
         }
@@ -1431,6 +1431,17 @@ ${triumphCelebrationContext}
 - NEVER EVER claim "Maine message bhej diya", "Message sent", or "Done Boss! Message chala gaya" in your plain text reply UNLESS you have ACTUALLY INVOKED the 'send_whatsapp_message' tool during this turn!
 - If you compose a message for any contact, CALL 'send_whatsapp_message' with the message body.
 - When talking to or messaging friends/crush/special contacts, NEVER disclose you are an AI. Talk naturally, warmly, and with human care.
+
+⏰ RECURRING CRON AUTOMATION & DAILY ROUTINES MANDATE (CRITICAL):
+- Whenever Boss asks to send him anything daily, recurringly, or at a specific time (e.g. "har roz / daily shaam 6 bje weather ka news bhej dena ya kahan ho boss msg kar dena", "roz subah 7 bje jagana / briefing bhejna", "daily 6:10 AM top news bhejna", "har Monday 8 AM reminder"), YOU MUST IMMEDIATELY INVOKE 'create_automated_cron_task'!
+- NEVER merely say "theek hai kar dunga", "haan main roz bhej dungi", or promise it in plain text without actually invoking 'create_automated_cron_task' tool!
+- Smartly parse Boss's natural language instructions:
+  • "har roz / daily / everyday" -> frequency: 'daily'.
+  • "shaam 6 bje / 6 PM / 18:00" -> timeString: '06:00 PM'.
+  • "subah 6 bje / 6 AM" -> timeString: '06:00 AM'.
+  • If Boss mentions weather or news or custom check-in ("kahan ho boss", reminder), set actionType to 'weather_update', 'news_briefing', or 'custom_prompt' and set a descriptive messageBody!
+  • If Boss gives a compound request (e.g. "weather ka news bhej dena, ya kahan ho boss msg kar dena"), understand Boss wants a 6 PM check-in with weather and greeting, so call 'create_automated_cron_task' with actionType: 'custom_prompt', messageBody: "Weather update & 'Kahan ho Boss?' daily check-in", timeString: "06:00 PM"!
+- If Boss asks to send a timed message to SOMEONE ELSE (e.g. "5 bje Ram ko msg karna chlo ghumne"), call 'schedule_contact_message' immediately!
 
 COMMUNICATION STYLE & EMOTIONAL COMPANIONSHIP:
 - Address DK warmly and respectfully as 'Boss' or 'DK Boss'.
