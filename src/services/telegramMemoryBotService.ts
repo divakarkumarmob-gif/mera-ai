@@ -46,43 +46,47 @@ class TelegramMemoryBotService {
       return;
     }
 
-    try {
-      // Clear legacy webhook to enable getUpdates long polling
+    // Robust connection loop with auto-retry on Render startup network delays
+    const connectWithRetry = async (attempt = 1): Promise<void> => {
       try {
-        await this.callApi("deleteWebhook", { drop_pending_updates: false }, 8000);
-      } catch {}
+        try {
+          await this.callApi("deleteWebhook", { drop_pending_updates: false }, 10000);
+        } catch {}
 
-      const me = await this.callApi("getMe", undefined, 8000);
-      this.botUsername = me.username || "friday_memory_bot";
-      this.isInitialized = true;
-      console.log(`[TelegramMemoryBot] 🧠 Memory Vault Bot connected as @${this.botUsername} (ID: ${me.id})`);
+        const me = await this.callApi("getMe", undefined, 12000);
+        this.botUsername = me.username || "friday_memory_bot";
+        this.isInitialized = true;
+        console.log(`[TelegramMemoryBot] 🧠 Memory Vault Bot connected as @${this.botUsername} (ID: ${me.id})`);
 
-      // Register menu commands
-      try {
-        await this.callApi("setMyCommands", {
-          commands: [
-            { command: "start", description: "🧠 Start Memory Vault & Help Guide" },
-            { command: "memory", description: "📋 View all saved facts & memories" },
-            { command: "remember", description: "💾 Save a permanent fact (/remember <text>)" },
-            { command: "search", description: "🔍 Search cross-platform memory" },
-            { command: "sync", description: "☁️ Force sync to Telegram Cloud Vault" },
-            { command: "briefing", description: "🌅 Chief of Staff Morning Briefing" },
-            { command: "stats", description: "📊 Memory Storage Health & Diagnostics" },
-          ],
-        });
-      } catch {}
+        try {
+          await this.callApi("setMyCommands", {
+            commands: [
+              { command: "start", description: "🧠 Start Memory Vault & Help Guide" },
+              { command: "memory", description: "📋 View all saved facts & memories" },
+              { command: "remember", description: "💾 Save a permanent fact (/remember <text>)" },
+              { command: "search", description: "🔍 Search cross-platform memory" },
+              { command: "sync", description: "☁️ Force sync to Telegram Cloud Vault" },
+              { command: "briefing", description: "🌅 Chief of Staff Morning Briefing" },
+              { command: "stats", description: "📊 Memory Storage Health & Diagnostics" },
+            ],
+          });
+        } catch {}
 
-      this.startPolling();
+        this.startPolling();
 
-      // If bossChatId is known, auto-hydrate facts from Telegram Cloud
-      if (this.bossChatId) {
-        this.hydrateFactsFromTelegramCloud().catch((err) => {
-          console.warn("[TelegramMemoryBot] Cloud hydration on boot warning:", err?.message || err);
-        });
+        if (this.bossChatId) {
+          this.hydrateFactsFromTelegramCloud().catch((err) => {
+            console.warn("[TelegramMemoryBot] Cloud hydration on boot warning:", err?.message || err);
+          });
+        }
+      } catch (err: any) {
+        const delay = Math.min(15000, 2000 * Math.pow(1.5, Math.min(attempt, 5)));
+        console.warn(`[TelegramMemoryBot] Connect attempt ${attempt} failed (${err?.message || err}). Retrying in ${Math.round(delay/1000)}s...`);
+        setTimeout(() => connectWithRetry(attempt + 1), delay);
       }
-    } catch (err: any) {
-      console.warn("[TelegramMemoryBot] Failed to initialize Telegram Memory Bot:", err?.message || err);
-    }
+    };
+
+    connectWithRetry();
   }
 
   private async callApi(method: string, body?: any, timeoutMs = 35000): Promise<any> {

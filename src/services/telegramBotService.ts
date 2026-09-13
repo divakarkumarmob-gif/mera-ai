@@ -268,20 +268,26 @@ class TelegramBotService {
       return;
     }
 
-    try {
-      // Clear any legacy webhooks to avoid 409 Conflict with getUpdates
+    const connectWithRetry = async (attempt = 1): Promise<void> => {
       try {
-        await this.callApi("deleteWebhook", { drop_pending_updates: false }, 10000);
-      } catch {}
+        // Clear any legacy webhooks to avoid 409 Conflict with getUpdates
+        try {
+          await this.callApi("deleteWebhook", { drop_pending_updates: false }, 10000);
+        } catch {}
 
-      const me = await this.callApi("getMe", undefined, 10000);
-      this.botUsername = me.username;
-      console.log(`[TelegramBot] Connected as @${this.botUsername} (ID: ${me.id})`);
-      await this.registerBotCommands();
-      this.startPolling();
-    } catch (e: any) {
-      console.error("[TelegramBot] Failed to connect to Telegram API:", e?.message || e);
-    }
+        const me = await this.callApi("getMe", undefined, 12000);
+        this.botUsername = me.username;
+        console.log(`[TelegramBot] Connected as @${this.botUsername} (ID: ${me.id})`);
+        await this.registerBotCommands();
+        this.startPolling();
+      } catch (e: any) {
+        const delay = Math.min(15000, 2000 * Math.pow(1.5, Math.min(attempt, 5)));
+        console.warn(`[TelegramBot] Connect attempt ${attempt} failed (${e?.message || e}). Retrying in ${Math.round(delay/1000)}s...`);
+        setTimeout(() => connectWithRetry(attempt + 1), delay);
+      }
+    };
+
+    connectWithRetry();
   }
 
   /**
