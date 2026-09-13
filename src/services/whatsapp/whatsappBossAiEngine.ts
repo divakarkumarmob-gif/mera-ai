@@ -82,6 +82,17 @@ export class WhatsAppBossAiEngine {
     unifiedMemoryService.observeAndExtractFacts("Boss DK", messageText, "whatsapp", true);
 
     const recentBossMsgs = await whatsappHistoryEngine.getRecentBossContext(replyJid, 15);
+
+    // ── Truth Verification & Fact-Checker Engine Fast-Path ──
+    const { truthVerificationCheckerEngine } = await import("../truthVerificationCheckerEngine");
+    if (truthVerificationCheckerEngine.isTruthChallenge(messageText)) {
+      const recentContextStr = recentBossMsgs.slice(-6).map((m) => `${m.senderName}: "${m.text}"`).join("\n");
+      const lastReply = recentBossMsgs.find((m) => m.senderPhone === "bot")?.text || quotedMessage?.text || "";
+      const auditRes = await truthVerificationCheckerEngine.performTruthAudit(messageText, recentContextStr, lastReply);
+      if (auditRes.auditCard) {
+        return auditRes.auditCard;
+      }
+    }
     const crossPlatformMemoryContext = await unifiedMemoryService.getCrossPlatformWorkingMemoryPrompt();
 
     const { memoryEngine } = await import("../memoryEngine");
@@ -1251,6 +1262,52 @@ export class WhatsAppBossAiEngine {
           required: ["mode"],
         },
       },
+      {
+        name: "set_contact_message_quota",
+        description: "Set a custom daily auto-reply limit or unlimited messages for a specific contact or phone number. Use when Boss says 'iss number/contact ke liye unlimited kar do', 'Rahul ke liye limit 20 kar do', 'iss no ka 10 msg limit hata do', etc. Set dailyLimit to '-1' or 'unlimited' to remove limits.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            contactNameOrPhone: { type: "STRING", description: "Name of the contact or phone number" },
+            dailyLimit: { type: "STRING", description: "Daily limit number (e.g. '20', '50') or '-1' / 'unlimited'" }
+          },
+          required: ["contactNameOrPhone", "dailyLimit"]
+        }
+      },
+      {
+        name: "set_global_message_quota",
+        description: "Set a global daily message quota for all contacts, saved/known contacts, or unsaved/unknown senders. Use when Boss says 'unknown logo ke liye limit 5 kar do', 'saved contacts ke liye limit 50 kar do', 'sabke liye limit unlimited kar do', etc.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            scope: { type: "STRING", enum: ["all", "known_contacts", "unknown_contacts"], description: "Scope: 'all', 'known_contacts', or 'unknown_contacts'" },
+            dailyLimit: { type: "STRING", description: "Daily limit number (e.g. '10', '30') or '-1' / 'unlimited'" }
+          },
+          required: ["scope", "dailyLimit"]
+        }
+      },
+      {
+        name: "get_message_quotas_status",
+        description: "Check active daily message quotas, today's usage counters, remaining messages, and custom contact overrides. Resets daily at 12:00 AM IST.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            contactNameOrPhone: { type: "STRING", description: "Optional contact name or phone number to check specific status, or omit for full report" }
+          },
+          required: []
+        }
+      },
+      {
+        name: "reset_daily_message_counters",
+        description: "Manually reset today's message counter back to 0 for a specific contact or for everyone.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            contactNameOrPhone: { type: "STRING", description: "Contact name, phone number, or 'all' to reset everyone's count today" }
+          },
+          required: []
+        }
+      },
     ];
 
     const { fridayModeService } = await import("../fridayModeService");
@@ -1271,6 +1328,15 @@ You will receive:
 - '📩 PREVIOUS QUOTED MESSAGE' (The original message, photo/image description, video clip, PDF/document, YouTube link, or question that was swiped on).
 - '💬 BOSS'S SWIPE-REPLY & QUESTION/INSTRUCTION' (What Boss wrote in response).
 RULE: You MUST FIRST read and understand the PREVIOUS QUOTED MESSAGE, and THEN answer or execute Boss's reply instruction in that exact context! (For example, if Boss quotes a photo and writes "analysis", analyze that photo. If Boss quotes a document or text and asks "iska kya matlab hai?", explain the quoted content).
+
+DAILY MESSAGE QUOTA INTENT REASONING:
+When Boss issues instructions regarding message limits, quotas, or rate limiting:
+- "iss no/contact par unlimited msg kar do" / "saved contacts ke liye unlimited kar do" -> Call 'set_contact_message_quota' or 'set_global_message_quota' with dailyLimit: '-1' or 'unlimited'.
+- "Rahul ka limit 20 kar do" / "iss no par limit 15 lga do" -> Call 'set_contact_message_quota'.
+- "unknown logo ke liye limit 5 kar do" / "saved logo ke liye limit 50 kar do" / "sabke liye limit 15 kar do" -> Call 'set_global_message_quota'.
+- "quota status check karo" / "kiska kitna limit bacha hai" -> Call 'get_message_quotas_status'.
+- "limit / count reset kar do" -> Call 'reset_daily_message_counters'.
+When someone's limit is reached, Friday automatically notifies them gracefully ("Aaj ka limit pura ho gaya hai, kal baat karte hain 🙏") and resets at 12:00 AM IST.
 
 BOSS IDENTITY & MEMORY:
 ${directivesContext}
@@ -2227,6 +2293,26 @@ COMMUNICATION STYLE & EMOTIONAL COMPANIONSHIP:
             return { success: true, message: `Image generated using ${genRes.model} and delivered to Boss on WhatsApp!` };
           }
           return { success: false, message: `Image generation failed: ${genRes.error || "Unknown error"}` };
+        }
+        if (toolName === "set_contact_message_quota") {
+          const { whatsappDailyQuotaEngine } = await import("./whatsappDailyQuotaEngine");
+          const res = await whatsappDailyQuotaEngine.setContactQuota(args.contactNameOrPhone, args.dailyLimit, "Boss DK");
+          return { success: res.success, message: res.message, limit: res.limit };
+        }
+        if (toolName === "set_global_message_quota") {
+          const { whatsappDailyQuotaEngine } = await import("./whatsappDailyQuotaEngine");
+          const res = await whatsappDailyQuotaEngine.setGlobalQuota(args.scope, args.dailyLimit, "Boss DK");
+          return { success: res.success, message: res.message, scope: res.scope, limit: res.limit };
+        }
+        if (toolName === "get_message_quotas_status") {
+          const { whatsappDailyQuotaEngine } = await import("./whatsappDailyQuotaEngine");
+          const res = await whatsappDailyQuotaEngine.getQuotaStatus(args.contactNameOrPhone);
+          return { success: res.success, message: res.report, report: res.report };
+        }
+        if (toolName === "reset_daily_message_counters") {
+          const { whatsappDailyQuotaEngine } = await import("./whatsappDailyQuotaEngine");
+          const res = await whatsappDailyQuotaEngine.resetDailyCounters(args.contactNameOrPhone);
+          return { success: res.success, message: res.message };
         }
       } catch (err: any) {
         return { error: err?.message || String(err) };

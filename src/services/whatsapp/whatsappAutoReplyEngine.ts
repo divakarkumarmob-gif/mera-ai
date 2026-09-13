@@ -4,6 +4,7 @@ import { contactsService } from "../contactsService";
 import { dailyUpdateService } from "../dailyUpdateService";
 import { whatsappHistoryEngine } from "./whatsappHistoryEngine";
 import { QuotedMessageContext } from "./whatsappTypes";
+import { whatsappDailyQuotaEngine } from "./whatsappDailyQuotaEngine";
 
 const replyLimitsCol = () => db.collection("whatsapp_reply_limits");
 const replyCountsCol = () => db.collection("whatsapp_reply_counts");
@@ -11,7 +12,7 @@ const replyCountsCol = () => db.collection("whatsapp_reply_counts");
 const DEFAULT_DAILY_REPLY_LIMIT = 10;
 
 function todayISTLocal(): string {
-  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  return whatsappDailyQuotaEngine.getTodayIST();
 }
 
 function LIMIT_REACHED_GENERIC_REPLY(senderName: string, isUnknownContact: boolean): string {
@@ -112,71 +113,17 @@ export class WhatsAppAutoReplyEngine {
     }, 3500);
   }
 
-  public async tryConsumeDailyReply(phone: string): Promise<boolean> {
-    const today = todayISTLocal();
-
-    let countEntry = this.replyCountCache.get(phone);
-    if (!countEntry || countEntry.dateStr !== today) {
-      try {
-        const snap = await replyCountsCol().doc(phone).get();
-        const data = snap.exists ? snap.data() : null;
-        countEntry = data && data.dateStr === today ? { count: data.count, dateStr: data.dateStr } : { count: 0, dateStr: today };
-      } catch (e) {
-        console.error(`[WhatsAppAutoReply] Failed to read reply count for ${phone}, defaulting to 0:`, e);
-        countEntry = { count: 0, dateStr: today };
-      }
-      this.replyCountCache.set(phone, countEntry);
-    }
-
-    const limit = await this.getContactReplyLimit(phone);
-    if (countEntry.count >= limit) return false;
-
-    countEntry.count++;
-    this.replyCountCache.set(phone, countEntry);
-    try {
-      await replyCountsCol().doc(phone).set({ count: countEntry.count, dateStr: today }, { merge: true });
-    } catch (e) {
-      console.error(`[WhatsAppAutoReply] Failed to persist reply count for ${phone}:`, e);
-    }
-    return true;
+  public async tryConsumeDailyReply(phone: string, isKnownContact = false, contactName?: string): Promise<boolean> {
+    const res = await whatsappDailyQuotaEngine.checkAndConsumeQuota(phone, isKnownContact, contactName);
+    return res.allowed;
   }
 
-  public async getContactReplyLimit(phone: string): Promise<number> {
-    if (this.replyLimitCache.has(phone)) return this.replyLimitCache.get(phone)!;
-    try {
-      const snap = await replyLimitsCol().doc(phone).get();
-      const limit = snap.exists ? (snap.data()?.dailyLimit as number) : DEFAULT_DAILY_REPLY_LIMIT;
-      const resolved = typeof limit === "number" && limit >= 0 ? limit : DEFAULT_DAILY_REPLY_LIMIT;
-      this.replyLimitCache.set(phone, resolved);
-      return resolved;
-    } catch (e) {
-      console.error(`[WhatsAppAutoReply] Failed to read reply limit for ${phone}, using default:`, e);
-      return DEFAULT_DAILY_REPLY_LIMIT;
-    }
+  public async getContactReplyLimit(phone: string, isKnownContact = false): Promise<number> {
+    return whatsappDailyQuotaEngine.getEffectiveLimit(phone, isKnownContact);
   }
 
-  public async setContactReplyLimit(contactNameOrPhone: string, newLimit: number): Promise<{ success: boolean; message: string; resolvedPhone?: string }> {
-    if (!Number.isFinite(newLimit) || newLimit < 0) {
-      return { success: false, message: "Limit must be a non-negative number." };
-    }
-    let phone = contactNameOrPhone.replace(/\D/g, "");
-    try {
-      const contact = await contactsService.findContact(contactNameOrPhone);
-      if (contact && contact.id !== "temp" && contact.phone) {
-        phone = contact.phone.replace(/\D/g, "");
-      }
-    } catch {}
-    if (!phone) {
-      return { success: false, message: `Could not resolve a phone number for "${contactNameOrPhone}".` };
-    }
-    try {
-      await replyLimitsCol().doc(phone).set({ dailyLimit: newLimit }, { merge: true });
-      this.replyLimitCache.set(phone, newLimit);
-      return { success: true, message: `Daily auto-reply limit for +${phone} set to ${newLimit}.`, resolvedPhone: phone };
-    } catch (e: any) {
-      console.error(`[WhatsAppAutoReply] Failed to set reply limit for ${phone}:`, e);
-      return { success: false, message: `Failed to save the new limit: ${e?.message || e}` };
-    }
+  public async setContactReplyLimit(contactNameOrPhone: string, newLimit: number | string): Promise<{ success: boolean; message: string; resolvedPhone?: string }> {
+    return whatsappDailyQuotaEngine.setContactQuota(contactNameOrPhone, newLimit, "Boss DK");
   }
 
   public isBotMentionedInGroup(
@@ -607,27 +554,22 @@ TONE & STYLE:
     const lastAt = this.lastReplyAt.get(senderKey) || 0;
     if (now - lastAt <= 3500) return;
 
-    if (isUnknownContact) {
-      const allowed = await this.tryConsumeDailyReply(senderKey);
-      if (!allowed) {
-        const today = todayISTLocal();
-        const alreadyNotified = this.limitNoticeSentToday.get(senderKey);
-        if (alreadyNotified === today) return;
+    const quotaRes = await whatsappDailyQuotaEngine.checkAndConsumeQuota(
+      senderKey,
+      !isUnknownContact,
+      senderName
+    );
 
-        console.log(`[WhatsAppAutoReply] Daily limit reached for unknown sender ${senderName} (+${senderPhone})`);
-        this.limitNoticeSentToday.set(senderKey, today);
+    if (!quotaRes.allowed) {
+      if (quotaRes.quotaExhaustedNotice) {
+        console.log(`[WhatsAppAutoReply] Quota exhausted notice sent to ${senderName} (+${senderPhone})`);
         try {
-          await sendMsgFn(
-            replyJid,
-            LIMIT_REACHED_GENERIC_REPLY(senderName, isUnknownContact),
-            text,
-            messageKey
-          );
+          await sendMsgFn(replyJid, quotaRes.quotaExhaustedNotice, text, messageKey);
         } catch (e) {
-          console.error(`[WhatsAppAutoReply] Failed to send limit notice to ${senderPhone}:`, e);
+          console.error(`[WhatsAppAutoReply] Failed to send quota notice to ${senderPhone}:`, e);
         }
-        return;
       }
+      return;
     }
 
     this.lastReplyAt.set(senderKey, now);
@@ -641,7 +583,10 @@ TONE & STYLE:
       if (whatsappFeatureEngine.isSongLinkFollowUp(text, quotedMessage?.text)) {
         const linkReply = whatsappFeatureEngine.handleSongLinkFollowUp(replyJid, text, quotedMessage?.text);
         if (linkReply) {
-          await sendMsgFn(replyJid, linkReply, text, messageKey);
+          const finalReply = quotaRes.isQuotaExhaustedNow && quotaRes.quotaExhaustedNotice
+            ? `${linkReply}\n\n${quotaRes.quotaExhaustedNotice}`
+            : linkReply;
+          await sendMsgFn(replyJid, finalReply, text, messageKey);
           return;
         }
       }
@@ -650,7 +595,10 @@ TONE & STYLE:
       if (whatsappFeatureEngine.isNextSongRequest(text)) {
         const nextRes = await whatsappFeatureEngine.handleNextSongInPlaylist(replyJid, senderName);
         if (nextRes.handled && nextRes.replyText) {
-          await sendMsgFn(replyJid, nextRes.replyText, text, messageKey);
+          const finalReply = quotaRes.isQuotaExhaustedNow && quotaRes.quotaExhaustedNotice
+            ? `${nextRes.replyText}\n\n${quotaRes.quotaExhaustedNotice}`
+            : nextRes.replyText;
+          await sendMsgFn(replyJid, finalReply, text, messageKey);
           return;
         }
       }
@@ -658,7 +606,10 @@ TONE & STYLE:
       // 1v1 Instant Song Radar (@song / @music / @gaana)
       if (/^(?:@song|@music|@gaana|\/song|\/music|\/gaana)\b/i.test(text.trim())) {
         const songRes = await whatsappFeatureEngine.searchMusicWithLyrics(text, senderName, replyJid);
-        await sendMsgFn(replyJid, songRes.replyText, text, messageKey);
+        const finalReply = quotaRes.isQuotaExhaustedNow && quotaRes.quotaExhaustedNotice
+          ? `${songRes.replyText}\n\n${quotaRes.quotaExhaustedNotice}`
+          : songRes.replyText;
+        await sendMsgFn(replyJid, finalReply, text, messageKey);
         return;
       }
 
@@ -668,7 +619,11 @@ TONE & STYLE:
         if (contact && contact.relation) contactRelation = contact.relation;
       } catch {}
 
-      const aiReply = await this.generateSmartAutoReply(senderName, senderPhone, text, isUnknownContact, contactRelation, quotedMessage);
+      let aiReply = await this.generateSmartAutoReply(senderName, senderPhone, text, isUnknownContact, contactRelation, quotedMessage);
+      if (quotaRes.isQuotaExhaustedNow && quotaRes.quotaExhaustedNotice) {
+        aiReply = `${aiReply}\n\n${quotaRes.quotaExhaustedNotice}`;
+      }
+
       await sendMsgFn(replyJid, aiReply, text, messageKey);
       console.log(`[WhatsAppAutoReply] Smart AI Reply sent to ${senderName} (+${senderPhone}): "${aiReply}"`);
 

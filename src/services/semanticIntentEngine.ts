@@ -397,6 +397,52 @@ export class SemanticIntentEngine {
           required: ["contactNameOrPhone"]
         }
       },
+      {
+        name: "set_contact_message_quota",
+        description: "Set a custom daily message limit or unlimited messages for a specific contact or phone number. Use when Boss says 'iss number/contact ke liye unlimited kar do', 'Rahul ke liye limit 20 kar do', 'iss no ka 10 msg limit hata do', etc. Limits auto-reset daily at 12:00 AM IST midnight.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            contactNameOrPhone: { type: "STRING", description: "Name of the contact or phone number" },
+            dailyLimit: { type: "STRING", description: "Daily limit number (e.g. '20', '50') or '-1' / 'unlimited' to remove limits entirely" }
+          },
+          required: ["contactNameOrPhone", "dailyLimit"]
+        }
+      },
+      {
+        name: "set_global_message_quota",
+        description: "Set a global daily message quota for all contacts, saved/known contacts, or unsaved/unknown senders. Use when Boss says 'unknown logo ke liye limit 5 kar do', 'saved contacts ke liye limit 50 kar do', 'sabke liye limit unlimited kar do', etc.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            scope: { type: "STRING", enum: ["all", "known_contacts", "unknown_contacts"], description: "Scope of policy: 'all', 'known_contacts', or 'unknown_contacts'" },
+            dailyLimit: { type: "STRING", description: "Daily limit number (e.g. '10', '30') or '-1' / 'unlimited'" }
+          },
+          required: ["scope", "dailyLimit"]
+        }
+      },
+      {
+        name: "get_message_quotas_status",
+        description: "Check active daily message quotas, today's usage counters, remaining allowed messages, and custom contact overrides. Resets automatically at 12:00 AM IST.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            contactNameOrPhone: { type: "STRING", description: "Optional contact name or phone number to check specific status, or omit for overall system report" }
+          },
+          required: []
+        }
+      },
+      {
+        name: "reset_daily_message_counters",
+        description: "Manually reset today's message counter back to 0 for a specific contact or for everyone.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            contactNameOrPhone: { type: "STRING", description: "Contact name, phone number, or 'all' to reset everyone's count today" }
+          },
+          required: []
+        }
+      },
     ];
   }
 
@@ -750,6 +796,30 @@ export class SemanticIntentEngine {
           return { success: true, message: `Image generated using ${genRes.model} and delivered!` };
         }
         return { success: false, message: `Image generation failed: ${genRes.error || "Unknown error"}` };
+      }
+
+      if (toolName === "set_contact_message_quota") {
+        const { whatsappDailyQuotaEngine } = await import("./whatsapp/whatsappDailyQuotaEngine");
+        const res = await whatsappDailyQuotaEngine.setContactQuota(args.contactNameOrPhone, args.dailyLimit, ctx.senderName || "Boss DK");
+        return { success: res.success, message: res.message, limit: res.limit };
+      }
+
+      if (toolName === "set_global_message_quota") {
+        const { whatsappDailyQuotaEngine } = await import("./whatsapp/whatsappDailyQuotaEngine");
+        const res = await whatsappDailyQuotaEngine.setGlobalQuota(args.scope, args.dailyLimit, ctx.senderName || "Boss DK");
+        return { success: res.success, message: res.message, scope: res.scope, limit: res.limit };
+      }
+
+      if (toolName === "get_message_quotas_status") {
+        const { whatsappDailyQuotaEngine } = await import("./whatsapp/whatsappDailyQuotaEngine");
+        const res = await whatsappDailyQuotaEngine.getQuotaStatus(args.contactNameOrPhone);
+        return { success: res.success, message: res.report, report: res.report };
+      }
+
+      if (toolName === "reset_daily_message_counters") {
+        const { whatsappDailyQuotaEngine } = await import("./whatsapp/whatsappDailyQuotaEngine");
+        const res = await whatsappDailyQuotaEngine.resetDailyCounters(args.contactNameOrPhone);
+        return { success: res.success, message: res.message };
       }
     } catch (err: any) {
       console.warn(`[SemanticIntentEngine] Tool execution error for ${toolName}:`, err);

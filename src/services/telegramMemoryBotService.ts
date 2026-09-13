@@ -484,6 +484,19 @@ Even agar Firebase configured nahi hai, ye bot Telegram ke Cloud Servers ko **da
       return;
     }
 
+    // Step 2.5: Truth Verification & Fact-Checking Audit
+    const { truthVerificationCheckerEngine } = await import("./truthVerificationCheckerEngine");
+    if (truthVerificationCheckerEngine.isTruthChallenge(text)) {
+      const recentTurns = TelegramMemoryBotService.conversationTurns.get(firstName) || [];
+      const recentContextStr = recentTurns.slice(-6).map((m) => `${m.sender}: "${m.text}"`).join("\n");
+      const lastReply = recentTurns.slice().reverse().find((m) => m.sender === "Friday")?.text || "";
+      const auditRes = await truthVerificationCheckerEngine.performTruthAudit(text, recentContextStr, lastReply);
+      if (auditRes.auditCard) {
+        await this.safeSendMessage(chatId, auditRes.auditCard);
+        return;
+      }
+    }
+
     // Step 3: Check Child-Like Teaching Lesson Intent ("jab mai aisa bolu to aisa karna", etc.)
     const trainingCheck = fridayChildTrainingService.parseTeachingCommand(text);
     if (trainingCheck.isTeachingCommand && trainingCheck.situation && trainingCheck.reaction) {
