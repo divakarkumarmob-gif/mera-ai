@@ -35,6 +35,13 @@ export class WhatsAppBossAiEngine {
       return "";
     }
 
+    // Boss Deletion 2FA Approval Check
+    const { sensitiveActionGatekeeper } = await import("../sensitiveActionGatekeeper");
+    const bossApproval = await sensitiveActionGatekeeper.handleWhatsAppBossApproval(replyJid, messageText);
+    if (bossApproval.handled && bossApproval.replyText) {
+      return bossApproval.replyText;
+    }
+
     const { whatsappFeatureEngine } = await import("../whatsappFeatureEngine");
 
     // Strict slash command fast-paths (only when Boss explicitly types a leading slash)

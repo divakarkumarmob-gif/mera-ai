@@ -9,6 +9,7 @@ import { publicApisService } from "./publicApisService";
 import { voiceBridgeService, VoiceBridgeService } from "./voiceBridgeService";
 import { railRadarService } from "./railRadarService";
 import { fridayModeService, UNCENSORED_SAFETY_SETTINGS } from "./fridayModeService";
+import { sensitiveActionGatekeeper } from "./sensitiveActionGatekeeper";
 
 export interface TelegramStatus {
   isConfigured: boolean;
@@ -2378,6 +2379,36 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
     if (isStartCmd) {
       const welcomeCard = `👋 *Namaste ${senderName}! Main Friday AI hoon — DK Boss (Divakar Kumar) ka Assistant.* 🚀⚡\n\nMain is chat / group me live tasks, voice translation, media cataloging aur autonomous AI execution sambhalti hoon.\n\n👇 *Neeche se apna mode ya workspace action choose karein:*`;
       await this.sendMessage(chatId, welcomeCard, getMasterMenuMarkup(chatId));
+      return;
+    }
+
+    // ── Command: /auth <password> (Zero-Trust Master App Password Unlock) ───
+    const authMatch = text.match(/^\/(?:auth|login|unlock|passkey|key)\s*(.*)/i);
+    if (authMatch) {
+      const inputPass = authMatch[1].trim();
+      const authRes = await sensitiveActionGatekeeper.verifyPassword(String(chatId), inputPass);
+      await this.sendMessage(chatId, authRes.message);
+      if (authRes.success && authRes.resumedPrompt) {
+        await this.sendMessage(chatId, `⚡ *Executing Pending Action:* _"${authRes.resumedPrompt}"_...`);
+        const resumedReply = await this.generateSmartAiReply(chatId, senderName, authRes.resumedPrompt, isOwner, isGroup ? { id: chatId, title: msg.chat?.title } : undefined);
+        if (resumedReply) {
+          await this.sendHumanLikeMessage(chatId, resumedReply);
+        }
+      }
+      return;
+    }
+
+    // ── Command: /lock (Lock Session & Revoke Access) ──────────────────────
+    if (/^\/(?:lock|logout|exit)/i.test(text)) {
+      const lockRes = sensitiveActionGatekeeper.lockSession(String(chatId));
+      await this.sendMessage(chatId, lockRes.message);
+      return;
+    }
+
+    // ── ZERO-TRUST SENSITIVE READ/WRITE GATEKEEPER ────────────────────────
+    const gateCheck = sensitiveActionGatekeeper.checkGate(String(chatId), text);
+    if (gateCheck.requiresAuth) {
+      await this.sendMessage(chatId, gateCheck.message!);
       return;
     }
 

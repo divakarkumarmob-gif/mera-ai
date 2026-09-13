@@ -8,11 +8,18 @@
  * 4. 📌 Immutable Cloud Vault Manifest & Sync
  * 5. 🔍 Deep Cross-Platform Search
  * 6. 🚀 100% Native Fetch Polling (Zero external dependency, esbuild/bundle proof)
- * 7. 🤖 Conversational Memory Intelligence & Boss Recognition
+ * 7. 🎓 Intent-First Cognitive Brain (Child Training, Directives, Gemini Tool Calling & Self-Check)
  */
 
 import { GoogleGenAI } from "@google/genai";
 import { unifiedMemoryService, AtomicFactEntry } from "./unifiedMemoryService";
+import { semanticIntentEngine } from "./semanticIntentEngine";
+import { bossDirectivesService } from "./bossDirectivesService";
+import { fridayChildTrainingService } from "./fridayChildTrainingService";
+import { humanComprehensionEngine } from "./humanComprehensionEngine";
+import { aiAdvancedLearningService } from "./aiAdvancedLearningService";
+import { frontierCognitionService } from "./frontierCognitionService";
+import { sensitiveActionGatekeeper } from "./sensitiveActionGatekeeper";
 
 class TelegramMemoryBotService {
   private isInitialized = false;
@@ -23,6 +30,22 @@ class TelegramMemoryBotService {
   private manifestMessageId: number | null = null;
   private botUsername: string = "";
   private pollingOffset: number = 0;
+
+  // Multi-day persistent dialogue turns cache
+  private static chatHistory: Array<{ senderName: string; text: string; timeStr: string; timestamp: number }> = [];
+
+  public static recordTurn(senderName: string, text: string) {
+    if (!text || text.startsWith("[Reaction:") || !text.trim()) return;
+    this.chatHistory.push({
+      senderName,
+      text: text.trim(),
+      timeStr: new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" }),
+      timestamp: Date.now(),
+    });
+    if (this.chatHistory.length > 25) {
+      this.chatHistory = this.chatHistory.slice(-25);
+    }
+  }
 
   public async init(): Promise<void> {
     if (this.isInitialized) return;
@@ -61,10 +84,17 @@ class TelegramMemoryBotService {
         try {
           await this.callApi("setMyCommands", {
             commands: [
-              { command: "start", description: "🧠 Start Memory Vault & Help Guide" },
+              { command: "start", description: "⚡ Start Memory Vault & Control Hub" },
               { command: "memory", description: "📋 View all saved facts & memories" },
+              { command: "json", description: "📄 View raw JSON memory data" },
               { command: "remember", description: "💾 Save a permanent fact (/remember <text>)" },
+              { command: "forget", description: "🗑️ Delete a memory fact (2FA Protected)" },
+              { command: "verify", description: "🔑 Verify WhatsApp 2FA Deletion OTP (/verify <otp>)" },
+              { command: "auth", description: "🔐 Master Password Login (/auth <pass>)" },
+              { command: "lock", description: "🔒 Lock session & revoke active access" },
               { command: "search", description: "🔍 Search cross-platform memory" },
+              { command: "rules", description: "📋 View active boss directives & strict rules" },
+              { command: "lessons", description: "🎓 View learned behavioral lessons" },
               { command: "sync", description: "☁️ Force sync to Telegram Cloud Vault" },
               { command: "briefing", description: "🌅 Chief of Staff Morning Briefing" },
               { command: "stats", description: "📊 Memory Storage Health & Diagnostics" },
@@ -216,29 +246,92 @@ class TelegramMemoryBotService {
 
     this.bossChatId = chatId;
     const firstName = msg.from?.first_name || "Boss";
+    TelegramMemoryBotService.recordTurn(firstName, text);
 
     // ── Command: /start or /help ───────────────────────────────────────────
     if (/^\/(?:start|help)/i.test(text)) {
       const helpMsg = `🧠 *Namaste Boss! Friday Memory Vault Active* ⚡
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Hi *${firstName}*! Main aapki dedicated **True Cloud Storage Memory Vault** hoon.
+Hi *${firstName}*! Main aapki dedicated **True Cloud Storage Memory Vault & Learning Brain** hoon.
 
 📌 *Key Advantage:*
 Even agar Firebase configured nahi hai, ye bot Telegram ke Cloud Servers ko **database** ki tarah use karke Render restart ke baad bhi aapki memory **100% zinda** rakhega!
 
-📌 *Quick Commands:*
-• \`yaad rakhna mujhe black coffee pasand hai\` -> Direct fact save
+📌 *Quick Commands Menu:*
+• \`/memory\` -> Saari saved yaadein list karo
+• \`/json\` -> Raw JSON data export aur view karo
 • \`/remember <fact>\` -> Explicit fact memory save
-• \`/memory\` ya \`/memories\` -> Saari saved yaadein list karo
-• \`/sync\` -> Telegram Cloud Vault se instant sync & backup update
-• \`/search <keyword>\` -> Memory me search karo
 • \`/forget <keyword>\` -> Specific memory delete karo
+• \`/search <keyword>\` -> Cross-platform memory search
+• \`/rules\` -> Boss Directives & Strict Word Rules
+• \`/lessons\` -> Friday ke Learned Behavioral Lessons
+• \`/sync\` -> Telegram Cloud Vault se instant sync & backup update
 • \`/briefing\` -> Aaj ka morning Chief-of-Staff briefing
-• \`/stats\` -> Memory engine storage health status
+• \`/stats\` -> Memory storage health & diagnostics
 
-💡 _Aap mujhse normal baat ("hello", "kaise ho", "kya yaad hai?") bhi kar sakte hain!_`;
+💡 _Aap mujhe kuch bhi sikha sakte hain ("jab mai thaka hu to comfort dena") ya normal chat ("hello", "9 baje alarm laga do") kar sakte hain!_`;
 
       await this.safeSendMessage(chatId, helpMsg);
+      return;
+    }
+
+    // ── Command: /verify <otp> (2FA WhatsApp Deletion OTP Verification) ────
+    const verifyMatch = text.match(/^\/(?:verify|otp|code)\s*(.*)/i);
+    const isPureDigitsOtp = /^\d{6,14}$/.test(text.trim()) && sensitiveActionGatekeeper.isAwaitingOtp(String(chatId));
+
+    if (verifyMatch || isPureDigitsOtp) {
+      const inputOtp = verifyMatch ? verifyMatch[1].trim() : text.trim();
+      const otpRes = await sensitiveActionGatekeeper.verifyDeletionOtp(String(chatId), inputOtp);
+      await this.safeSendMessage(chatId, otpRes.message);
+
+      if (otpRes.success && otpRes.resumedPrompt) {
+        await this.safeSendMessage(chatId, `⚡ *Executing Authorized Action:* _"${otpRes.resumedPrompt}"_...`);
+        // If it was an explicit /forget command
+        const forgetMatch = otpRes.resumedPrompt.match(/^\/forget\s*(.+)/i);
+        if (forgetMatch) {
+          const target = forgetMatch[1].trim();
+          const res = await unifiedMemoryService.removeAtomicFact(target);
+          await this.safeSendMessage(chatId, res.message);
+          const updatedFacts = await unifiedMemoryService.listAllFacts();
+          await this.saveManifestToTelegramCloud(chatId, updatedFacts);
+          return;
+        }
+
+        const resumedReply = await this.generateCognitiveMemoryAiReply(otpRes.resumedPrompt, firstName, chatId);
+        if (resumedReply) {
+          await this.safeSendMessage(chatId, resumedReply);
+        }
+      }
+      return;
+    }
+
+    // ── Command: /auth <password> (Zero-Trust Master App Password Unlock) ───
+    const authMatch = text.match(/^\/(?:auth|login|unlock|passkey|key)\s*(.*)/i);
+    if (authMatch) {
+      const inputPass = authMatch[1].trim();
+      const authRes = await sensitiveActionGatekeeper.verifyPassword(String(chatId), inputPass);
+      await this.safeSendMessage(chatId, authRes.message);
+      if (authRes.success && authRes.resumedPrompt) {
+        await this.safeSendMessage(chatId, `⚡ *Executing Pending Action:* _"${authRes.resumedPrompt}"_...`);
+        const resumedReply = await this.generateCognitiveMemoryAiReply(authRes.resumedPrompt, firstName, chatId);
+        if (resumedReply) {
+          await this.safeSendMessage(chatId, resumedReply);
+        }
+      }
+      return;
+    }
+
+    // ── Command: /lock (Lock Session & Revoke Access) ──────────────────────
+    if (/^\/(?:lock|logout|exit)/i.test(text)) {
+      const lockRes = sensitiveActionGatekeeper.lockSession(String(chatId));
+      await this.safeSendMessage(chatId, lockRes.message);
+      return;
+    }
+
+    // ── ZERO-TRUST SENSITIVE READ/WRITE & DELETION 2FA GATEKEEPER ──────────
+    const gateCheck = await sensitiveActionGatekeeper.checkGateAsync(String(chatId), text);
+    if (gateCheck.requiresAuth) {
+      await this.safeSendMessage(chatId, gateCheck.message!);
       return;
     }
 
@@ -262,6 +355,47 @@ Even agar Firebase configured nahi hai, ye bot Telegram ke Cloud Servers ko **da
       const facts = await unifiedMemoryService.listAllFacts();
       const formatted = unifiedMemoryService.formatFactsListMarkdown(facts);
       await this.safeSendMessage(chatId, formatted);
+      return;
+    }
+
+    // ── Command: /json (View Raw Memory JSON Object) ───────────────────────
+    if (/^\/(?:json|raw_json|export_json)/i.test(text) || /^(json dikhao|show json|view json|memory json|json format)/i.test(text)) {
+      const facts = await unifiedMemoryService.listAllFacts();
+      if (facts.length === 0) {
+        await this.safeSendMessage(chatId, "📁 *Memory Vault Empty:*\n\nAbhi tak koi memory save nahi hui hai. Fact save karne ke liye likhein: `/remember <fact>`");
+        return;
+      }
+      const prettyJson = JSON.stringify(facts, null, 2);
+      if (prettyJson.length > 3500) {
+        const shortJson = JSON.stringify(facts.slice(0, 10), null, 2);
+        await this.safeSendMessage(chatId, `📄 *Friday Raw Memory JSON (${facts.length} facts total):*\n\n\`\`\`json\n${shortJson}\n\`\`\`\n\n_(Showing latest 10 facts)_`);
+      } else {
+        await this.safeSendMessage(chatId, `📄 *Friday Raw Memory JSON Snapshot (${facts.length} facts):*\n\n\`\`\`json\n${prettyJson}\n\`\`\``);
+      }
+      return;
+    }
+
+    // ── Command: /rules (View Boss Directives) ──────────────────────────────
+    if (/^\/(?:rules|directives)/i.test(text)) {
+      const active = await bossDirectivesService.getActiveDirectives();
+      if (active.length === 0) {
+        await this.safeSendMessage(chatId, "📋 *Boss Directives:* Abhi koi custom directive ya strict rule active nahi hai. Sab standard normal mode me hai! ✨");
+        return;
+      }
+      const listStr = active.map((d, i) => d.targetWord && d.replacementWord ? `*${i+1}.* "${d.targetWord}" ➔ "${d.replacementWord}"` : `*${i+1}.* ${d.rule}`).join("\n");
+      await this.safeSendMessage(chatId, `📋 *Active Boss Directives & Strict Rules:*\n\n${listStr}`);
+      return;
+    }
+
+    // ── Command: /lessons (View Learned Behavioral Lessons) ─────────────────
+    if (/^\/(?:lessons|training|playbook)/i.test(text)) {
+      const lessons = await fridayChildTrainingService.getAllLessons();
+      if (lessons.length === 0) {
+        await this.safeSendMessage(chatId, "🎓 *Learned Lessons:* Abhi tak koi behavioral lesson save nahi hua hai. Aap mujhe kabhi bhi sikha sakte hain!");
+        return;
+      }
+      const listStr = lessons.map((l, i) => `*${i+1}. Jab:* "${l.situationTrigger}"\n   👉 *Taught Reaction:* "${l.taughtReaction}"`).join("\n\n");
+      await this.safeSendMessage(chatId, `🎓 *Friday's Learned Behavioral Lessons:*\n\n${listStr}`);
       return;
     }
 
@@ -336,95 +470,193 @@ Even agar Firebase configured nahi hai, ye bot Telegram ke Cloud Servers ko **da
       return;
     }
 
-    // ── General Natural Language Conversation & Greetings ──────────────────
-    if (!text.startsWith("/")) {
-      const parsedCmd = unifiedMemoryService.parseMemoryCommand(text);
-      if (parsedCmd.isMemoryCommand) {
-        if (parsedCmd.action === "list") {
-          const facts = await unifiedMemoryService.listAllFacts();
-          await this.safeSendMessage(chatId, unifiedMemoryService.formatFactsListMarkdown(facts));
-          return;
-        } else if (parsedCmd.action === "remember" && parsedCmd.targetText) {
-          const saveRes = await unifiedMemoryService.addAtomicFact(parsedCmd.targetText, "personal_detail", "telegram");
-          await this.safeSendMessage(chatId, saveRes.confirmationMessage);
-          return;
-        } else if (parsedCmd.action === "forget" && parsedCmd.targetText) {
-          const res = await unifiedMemoryService.removeAtomicFact(parsedCmd.targetText);
-          await this.safeSendMessage(chatId, res.message);
-          const updatedFacts = await unifiedMemoryService.listAllFacts();
-          await this.saveManifestToTelegramCloud(chatId, updatedFacts);
-          return;
-        }
-      }
+    // ── 3-STEP INTENT & COGNITIVE BRAIN PROCESSING (NATURAL DIALOGUE) ────────
+    // Step 1: Automatic Fact Observation & Learning
+    unifiedMemoryService.observeAndExtractFacts(firstName, text, "telegram", true);
 
-      // 1. Observe and extract facts automatically
-      unifiedMemoryService.observeAndExtractFacts(firstName, text, "telegram", true);
+    // Step 2: Direct Greetings Fast-Path
+    const isGreeting = /^(?:hi|hello|hey|namaste|hlo|helo|hy|suno|oye|kese ho|kaise ho|good morning|good evening|kya haal)[!?.]*$/i.test(text);
+    if (isGreeting) {
+      await this.safeSendMessage(
+        chatId,
+        `👋 *Namaste Boss!* 🫡\n\nMain aapki dedicated Memory Vault & Executive Brain assistant hoon. Sab badhiya chal raha hai! Aaj kya yaad rakhna hai, ya koi task execute karna hai? ✨\n\n_Commands: \`/memory\`, \`/json\`, \`/rules\`, \`/lessons\`, \`/remember <fact>\`_`
+      );
+      return;
+    }
 
-      // 2. Direct Greetings ("hello", "hi", "kaise ho", etc.)
-      const isGreeting = /^(?:hi|hello|hey|namaste|hlo|helo|hy|suno|oye|kese ho|kaise ho|good morning|good evening|kya haal)\b/i.test(text);
-      if (isGreeting) {
-        await this.safeSendMessage(
-          chatId,
-          `👋 *Hello Boss!* 🫡\n\nMain aapki dedicated Memory Vault assistant hoon. Sab badhiya chal raha hai! Aaj kya yaad rakhna hai, ya koi purani baat check karni hai? ✨\n\n_Commands: \`/memory\`, \`/remember <fact>\`, \`/search <topic>\`_`
-        );
-        return;
-      }
+    // Step 3: Check Child-Like Teaching Lesson Intent ("jab mai aisa bolu to aisa karna", etc.)
+    const trainingCheck = fridayChildTrainingService.parseTeachingCommand(text);
+    if (trainingCheck.isTeachingCommand && trainingCheck.situation && trainingCheck.reaction) {
+      await fridayChildTrainingService.teachLesson(trainingCheck.situation, trainingCheck.reaction);
+      await this.safeSendMessage(
+        chatId,
+        `🎓 *Ji Boss! Maine yeh lesson seekh liya hai:* 🫡✨\n\n• *Jab:* "${trainingCheck.situation}"\n• *Reaction:* "${trainingCheck.reaction}"\n\nMain aage se hamesha is rule aur behavior ka dhyan rakhungi!`
+      );
+      return;
+    }
 
-      // 3. Natural Language Memory & Conversational AI Reply
-      const aiReply = await this.generateMemoryAiReply(text, firstName);
-      if (aiReply) {
-        await this.safeSendMessage(chatId, aiReply);
-        return;
-      }
+    // Step 4: Check Boss Strict Directives Intent ("'X' ko 'Y' bolo", rule banao, etc.)
+    const directiveCheck = bossDirectivesService.parseDirectiveCommand(text);
+    if (directiveCheck.isDirectiveCommand && directiveCheck.action === "add" && (directiveCheck.ruleText || directiveCheck.targetWord)) {
+      await bossDirectivesService.addDirective(directiveCheck.ruleText || text, {
+        targetWord: directiveCheck.targetWord,
+        replacementWord: directiveCheck.replacementWord,
+      });
+      await this.safeSendMessage(
+        chatId,
+        directiveCheck.targetWord && directiveCheck.replacementWord
+          ? `✅ *Boss Directive Saved!* Ab se "${directiveCheck.targetWord}" ki jagah hamesha "${directiveCheck.replacementWord}" use karungi.`
+          : `✅ *Boss Directive Saved:* "${directiveCheck.ruleText || text}"`
+      );
+      return;
+    }
 
-      if (/mera|meri|mujhe|hum|mai|hamesha|pasand|date|exam|birthday|kaam|meeting/i.test(text)) {
-        await this.safeSendMessage(
-          chatId,
-          `🧠 *Noted Boss!* Maine is baat ko aapke permanent memory vault me process kar liya hai. ✨\n\n_Check karne ke liye \`/memory\` likhein._`
-        );
-      }
+    // Step 5: Cognitive Semantic Intent & Tool Execution (Same as WhatsApp Engine)
+    const replyText = await this.generateCognitiveMemoryAiReply(text, firstName, chatId);
+    if (replyText && replyText.trim().length > 0) {
+      await this.safeSendMessage(chatId, replyText);
+      TelegramMemoryBotService.recordTurn("Friday (You)", replyText);
     }
   }
 
   /**
-   * Generates smart context-aware conversational AI reply using Gemini and Boss memory facts.
+   * Generates smart context-aware conversational AI reply using Gemini, Function Calling, and Boss Memory.
    */
-  private async generateMemoryAiReply(promptText: string, senderName: string): Promise<string> {
+  private async generateCognitiveMemoryAiReply(promptText: string, senderName: string, chatId: number | string): Promise<string> {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) return "";
 
     try {
+      // 1. Compile all brain context
       const facts = await unifiedMemoryService.listAllFacts();
       const factsContext = facts.length > 0
         ? facts.map((f, i) => `${i + 1}. [${f.category}] ${f.fact}`).join("\n")
         : "No saved facts yet.";
 
-      const ai = new GoogleGenAI({ apiKey });
-      const prompt = `You are Friday, the ultra-intelligent personal AI Chief-of-Staff and Memory Vault Assistant for Divakar Kumar (Boss DK).
-Sender Name: ${senderName} (Boss).
+      const directivesContext = await bossDirectivesService.compileDirectivesPrompt();
+      const trainingLessonsContext = await fridayChildTrainingService.compileTrainingPrompt(promptText);
+      const rlhfContext = await aiAdvancedLearningService.compileRlhfPrompt();
+      const goldenStandardsContext = await aiAdvancedLearningService.compileGoldenStandardsPrompt();
+      const bossStyleContext = await aiAdvancedLearningService.compileBossStylePrompt();
+      const affinityContext = await frontierCognitionService.compileAffinityPrompt("boss_dk", "Boss DK");
+      const cognitivePass = humanComprehensionEngine.performCognitivePrePass(promptText, { isOwner: true });
 
-Stored Memory Vault Facts:
+      const recentDialogue = TelegramMemoryBotService.chatHistory.slice(-10);
+      const dialogueContext = recentDialogue.length > 0
+        ? recentDialogue.map((m) => `• [${m.timeStr}] ${m.senderName}: "${m.text}"`).join("\n")
+        : `• Boss DK: "${promptText}"`;
+
+      const systemInstruction = `You are Friday, the ultra-intelligent, loyal personal AI Chief-of-Staff and Autonomous Memory Vault for Divakar Kumar (Boss DK).
+
+[BOSS IDENTIFIERS & RELATIONSHIP]
+- The user talking to you is Boss DK (Divakar Kumar) — your creator and Commander.
+- Always address him with utmost respect, warmth, and dedication (Boss, Boss DK).
+- Respond in natural, expressive, crisp Hinglish.
+
+[COGNITIVE CHECKPOINT & CONVERSATIONAL CONTINUITY]
+- Subconscious Intent: ${cognitivePass.subconsciousIntent} (Continuity: ${cognitivePass.continuityType})
+- Actionable Goal: ${cognitivePass.actionableGoal}
+- Thread Continuity Rule: If Boss is modifying a previous schedule or asking about a prior topic, seamlessly connect with recent context without topic bleeding.
+
+[STORED MEMORY VAULT FACTS]
 ${factsContext}
 
-User Message: "${promptText}"
+[BOSS DIRECTIVES & WORD RULES]
+${directivesContext}
 
-Instructions:
-1. Address the user respectfully as Boss or Boss DK.
-2. Reply in natural, crisp, loyal Hinglish.
-3. If they are asking about something in their memory (dates, habits, preferences, projects), use the stored facts accurately.
-4. If they shared a new fact or note, acknowledge warmly that it's noted in their permanent memory vault.
-5. Keep the response concise, helpful, and under 3-4 sentences.
+[BEHAVIORAL TRAINING LESSONS]
+${trainingLessonsContext}
 
-Response:`;
+[LEARNING & GOLDEN STANDARDS]
+${rlhfContext}
+${goldenStandardsContext}
+${bossStyleContext}
+${affinityContext}
 
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: prompt,
-      });
+[RECENT DIALOGUE TRANSCRIPT]
+${dialogueContext}
 
-      return response.text?.trim() || "";
+[HUMAN TIME INTUITION RULES]
+- When Boss gives natural time commands ("kal subah call karna", "shaam ko check karna", "9 bje alarm"):
+  • Subah / Morning -> 8:00 AM default
+  • Dopahar / Afternoon -> 1:30 PM default
+  • Shaam / Evening -> 6:30 PM default
+  • Raat / Night -> 9:30 PM default
+- If scheduling a task, trigger the appropriate tool function.
+
+[RESPONSE POLICIES]
+1. If Boss is asking to remember or store something, acknowledge warmly that it is permanently cataloged in his Memory Vault.
+2. If Boss is asking what you remember or querying past data, answer accurately using the Stored Memory Vault Facts.
+3. If Boss teaches you a behavior or gives feedback, acknowledge like an eager, loyal learner.
+4. Keep the reply concise, energetic, crisp, and under 3-4 sentences.`;
+
+      const ai = new GoogleGenAI({ apiKey });
+      const tools = semanticIntentEngine.getBossFunctionDeclarations();
+
+      const modelFallbackChain = [
+        "gemini-2.5-flash",
+        "gemini-3.1-flash-lite",
+        "gemini-3.5-flash-lite",
+        "gemini-3.5-flash",
+      ];
+
+      for (const model of modelFallbackChain) {
+        try {
+          const response = await ai.models.generateContent({
+            model,
+            contents: [
+              { role: "user", parts: [{ text: promptText }] },
+            ],
+            config: {
+              systemInstruction,
+              tools: tools.length > 0 ? [{ functionDeclarations: tools }] : undefined,
+              temperature: 0.7,
+            },
+          });
+
+          // Check if tool was invoked
+          const candidate = response.candidates?.[0];
+          const parts = candidate?.content?.parts || [];
+          const functionCalls = parts.filter((p: any) => p.functionCall);
+
+          if (functionCalls.length > 0) {
+            let toolOutputs: string[] = [];
+            for (const callPart of functionCalls) {
+              const toolCall = callPart.functionCall!;
+              const toolRes = await semanticIntentEngine.executeTool(
+                toolCall.name,
+                toolCall.args || {},
+                {
+                  channel: "telegram",
+                  chatId: String(chatId),
+                  senderName: "Boss DK",
+                }
+              );
+
+              if (toolRes.message) {
+                toolOutputs.push(toolRes.message);
+              }
+            }
+
+            if (toolOutputs.length > 0) {
+              return toolOutputs.join("\n\n");
+            }
+          }
+
+          let replyText = response.text?.trim() || "";
+          if (replyText) {
+            // Apply strict Boss Directive word replacements
+            replyText = bossDirectivesService.applyWordReplacements(replyText);
+            return replyText;
+          }
+        } catch (err: any) {
+          console.warn(`[TelegramMemoryBot] Model ${model} failed (${err?.message || err}). Trying next in chain...`);
+        }
+      }
+
+      return "";
     } catch (e: any) {
-      console.warn("[TelegramMemoryBot] AI reply generation error:", e?.message || e);
+      console.warn("[TelegramMemoryBot] AI cognitive reply error:", e?.message || e);
       return "";
     }
   }
