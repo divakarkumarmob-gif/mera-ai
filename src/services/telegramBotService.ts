@@ -2321,9 +2321,15 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
     const isPureGreeting =
       /^(?:hi|hello|hey|namaste|hlo|helo|hy|suno|oye|listen|gm|good\s*morning|good\s*evening)?\s*(?:@?friday|fridaay|fraiday|fryday)[!?.]*$/i.test(cleanText) ||
       /^(?:@?friday|fridaay|fraiday|fryday)\s*(?:hi|hello|hey|namaste|hlo|helo|hy)[!?.]*$/i.test(cleanText) ||
-      /^(?:hi|hello|hey|namaste|hlo|helo|hy)\s+@?friday\b[!?.]*$/i.test(cleanText);
+      /^(?:hi|hello|hey|namaste|hlo|helo|hy)\s+@?friday\b[!?.]*$/i.test(cleanText) ||
+      /^(?:hi|hello|hey|namaste|hlo|helo|hy|good\s*morning|good\s*evening|kese\s*ho|kaise\s*ho)[!?.]*$/i.test(cleanText);
 
     if (isPureGreeting) {
+      if (isOwner) {
+        await this.sendMessage(chatId, `Namaste Boss! 🫡 Kaise hain aap? Aaj kya task execute karna hai ya koi help chahiye? ✨`);
+        return;
+      }
+
       const isKnownName =
         senderName &&
         senderName.trim().length > 0 &&

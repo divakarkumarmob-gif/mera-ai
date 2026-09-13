@@ -8,8 +8,10 @@
  * 4. 📌 Immutable Cloud Vault Manifest & Sync
  * 5. 🔍 Deep Cross-Platform Search
  * 6. 🚀 100% Native Fetch Polling (Zero external dependency, esbuild/bundle proof)
+ * 7. 🤖 Conversational Memory Intelligence & Boss Recognition
  */
 
+import { GoogleGenAI } from "@google/genai";
 import { unifiedMemoryService, AtomicFactEntry } from "./unifiedMemoryService";
 
 class TelegramMemoryBotService {
@@ -106,19 +108,40 @@ class TelegramMemoryBotService {
     }
   }
 
-  private isAuthorized(chatId: number | string, fromId?: number | string): boolean {
+  private isAuthorized(chatId: number | string, from?: any): boolean {
     const configuredBoss =
       process.env.TELEGRAM_OWNER_CHAT_ID ||
       process.env.TELEGRAM_BOSS_CHAT_ID ||
       process.env.BOSS_TELEGRAM_CHAT_ID ||
-      process.env.TELEGRAM_OWNER_ID;
+      process.env.TELEGRAM_OWNER_ID ||
+      process.env.TELEGRAM_CHAT_ID;
+
+    const fromId = from?.id;
+    const username = String(from?.username || "").toLowerCase();
+    const name = String(`${from?.first_name || ""} ${from?.last_name || ""}`).toLowerCase();
+
+    // 1. Strict Env match
     if (configuredBoss) {
-      return String(chatId) === String(configuredBoss) || (!!fromId && String(fromId) === String(configuredBoss));
+      const isMatch = String(chatId) === String(configuredBoss) || (!!fromId && String(fromId) === String(configuredBoss));
+      if (isMatch) {
+        this.bossChatId = chatId;
+        return true;
+      }
+      return false;
     }
+
+    // 2. Known Boss identifiers
+    if (username.includes("divakar") || username.includes("dk") || name.includes("divakar") || name.includes("boss")) {
+      this.bossChatId = chatId;
+      return true;
+    }
+
+    // 3. Dynamic first-user binding if no env is set
     if (!this.bossChatId) {
       this.bossChatId = chatId;
       return true;
     }
+
     return String(chatId) === String(this.bossChatId) || (!!fromId && String(fromId) === String(this.bossChatId));
   }
 
@@ -176,14 +199,13 @@ class TelegramMemoryBotService {
 
   private async handleIncomingMessage(msg: any): Promise<void> {
     const chatId = msg.chat?.id;
-    const fromId = msg.from?.id;
     const text = String(msg.text || "").trim();
     if (!chatId || !text) return;
 
-    if (!this.isAuthorized(chatId, fromId)) {
+    if (!this.isAuthorized(chatId, msg.from)) {
       await this.safeSendMessage(
         chatId,
-        "🔒 *Access Denied:* Ye Friday ka private Memory Vault hai. Only DK Boss is authorized."
+        "🔒 *Access Denied:* Ye Friday ka private Memory Vault hai. Only Boss DK is authorized."
       );
       return;
     }
@@ -193,9 +215,9 @@ class TelegramMemoryBotService {
 
     // ── Command: /start or /help ───────────────────────────────────────────
     if (/^\/(?:start|help)/i.test(text)) {
-      const helpMsg = `🧠 *Welcome to Friday Memory Vault Bot!* ⚡
+      const helpMsg = `🧠 *Namaste Boss! Friday Memory Vault Active* ⚡
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Hi *${firstName}*! Main Friday ki dedicated **True Cloud Storage Memory Vault** hoon.
+Hi *${firstName}*! Main aapki dedicated **True Cloud Storage Memory Vault** hoon.
 
 📌 *Key Advantage:*
 Even agar Firebase configured nahi hai, ye bot Telegram ke Cloud Servers ko **database** ki tarah use karke Render restart ke baad bhi aapki memory **100% zinda** rakhega!
@@ -210,7 +232,7 @@ Even agar Firebase configured nahi hai, ye bot Telegram ke Cloud Servers ko **da
 • \`/briefing\` -> Aaj ka morning Chief-of-Staff briefing
 • \`/stats\` -> Memory engine storage health status
 
-💡 _Aap koi bhi personal note, goal ya habit yahan direct bhej sakte hain!_`;
+💡 _Aap mujhse normal baat ("hello", "kaise ho", "kya yaad hai?") bhi kar sakte hain!_`;
 
       await this.safeSendMessage(chatId, helpMsg);
       return;
@@ -310,7 +332,7 @@ Even agar Firebase configured nahi hai, ye bot Telegram ke Cloud Servers ko **da
       return;
     }
 
-    // ── General Natural Language Memory Commands ───────────────────────────
+    // ── General Natural Language Conversation & Greetings ──────────────────
     if (!text.startsWith("/")) {
       const parsedCmd = unifiedMemoryService.parseMemoryCommand(text);
       if (parsedCmd.isMemoryCommand) {
@@ -331,8 +353,25 @@ Even agar Firebase configured nahi hai, ye bot Telegram ke Cloud Servers ko **da
         }
       }
 
-      // Observe and extract facts automatically
-      unifiedMemoryService.observeAndExtractFacts(msg.from?.first_name || "Boss", text, "telegram", true);
+      // 1. Observe and extract facts automatically
+      unifiedMemoryService.observeAndExtractFacts(firstName, text, "telegram", true);
+
+      // 2. Direct Greetings ("hello", "hi", "kaise ho", etc.)
+      const isGreeting = /^(?:hi|hello|hey|namaste|hlo|helo|hy|suno|oye|kese ho|kaise ho|good morning|good evening|kya haal)\b/i.test(text);
+      if (isGreeting) {
+        await this.safeSendMessage(
+          chatId,
+          `👋 *Hello Boss!* 🫡\n\nMain aapki dedicated Memory Vault assistant hoon. Sab badhiya chal raha hai! Aaj kya yaad rakhna hai, ya koi purani baat check karni hai? ✨\n\n_Commands: \`/memory\`, \`/remember <fact>\`, \`/search <topic>\`_`
+        );
+        return;
+      }
+
+      // 3. Natural Language Memory & Conversational AI Reply
+      const aiReply = await this.generateMemoryAiReply(text, firstName);
+      if (aiReply) {
+        await this.safeSendMessage(chatId, aiReply);
+        return;
+      }
 
       if (/mera|meri|mujhe|hum|mai|hamesha|pasand|date|exam|birthday|kaam|meeting/i.test(text)) {
         await this.safeSendMessage(
@@ -340,6 +379,49 @@ Even agar Firebase configured nahi hai, ye bot Telegram ke Cloud Servers ko **da
           `🧠 *Noted Boss!* Maine is baat ko aapke permanent memory vault me process kar liya hai. ✨\n\n_Check karne ke liye \`/memory\` likhein._`
         );
       }
+    }
+  }
+
+  /**
+   * Generates smart context-aware conversational AI reply using Gemini and Boss memory facts.
+   */
+  private async generateMemoryAiReply(promptText: string, senderName: string): Promise<string> {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) return "";
+
+    try {
+      const facts = await unifiedMemoryService.listAllFacts();
+      const factsContext = facts.length > 0
+        ? facts.map((f, i) => `${i + 1}. [${f.category}] ${f.fact}`).join("\n")
+        : "No saved facts yet.";
+
+      const ai = new GoogleGenAI({ apiKey });
+      const prompt = `You are Friday, the ultra-intelligent personal AI Chief-of-Staff and Memory Vault Assistant for Divakar Kumar (Boss DK).
+Sender Name: ${senderName} (Boss).
+
+Stored Memory Vault Facts:
+${factsContext}
+
+User Message: "${promptText}"
+
+Instructions:
+1. Address the user respectfully as Boss or Boss DK.
+2. Reply in natural, crisp, loyal Hinglish.
+3. If they are asking about something in their memory (dates, habits, preferences, projects), use the stored facts accurately.
+4. If they shared a new fact or note, acknowledge warmly that it's noted in their permanent memory vault.
+5. Keep the response concise, helpful, and under 3-4 sentences.
+
+Response:`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
+      });
+
+      return response.text?.trim() || "";
+    } catch (e: any) {
+      console.warn("[TelegramMemoryBot] AI reply generation error:", e?.message || e);
+      return "";
     }
   }
 

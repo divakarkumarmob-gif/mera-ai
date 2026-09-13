@@ -259,7 +259,7 @@ Format with crisp emoji bullet points, action items, and a powerful punchy daily
   // ── 4. 24/7 AUTOMATED BACKGROUND CRON DAEMON (RENDER READY) ───────────────
   private cronIntervalTimer: any = null;
   private lastBriefingDateStr: string = "";
-  private lastUnansweredAlertTs: number = 0;
+  private lastUnansweredAlertTs: number = Date.now();
 
   public startBackgroundExecutiveCronDaemon(): void {
     if (this.cronIntervalTimer) return;
