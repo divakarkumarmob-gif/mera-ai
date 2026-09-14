@@ -72,7 +72,14 @@ class AIMediaAnimationEngine {
 
     // Tier 2: CogVideoX / HuggingFace Video Fallback
     try {
-      const hfToken = process.env.HF_TOKEN || process.env.HUGGINGFACE_TOKEN;
+      const hfToken = (
+        process.env.HUGGINGFACE_API_KEY ||
+        process.env.HF_TOKEN ||
+        process.env.HUGGINGFACE_TOKEN ||
+        process.env.HF_API_KEY ||
+        process.env.HUGGINGFACE_ACCESS_TOKEN ||
+        ""
+      ).trim();
       if (hfToken) {
         const hfRes = await fetch("https://api-inference.huggingface.co/models/THUDM/CogVideoX-2b", {
           method: "POST",

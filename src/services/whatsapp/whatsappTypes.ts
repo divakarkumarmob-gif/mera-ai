@@ -36,7 +36,8 @@ export interface GirlfriendSession {
   lastUserMsgTime?: number;
   idleNudgeTimer?: NodeJS.Timeout | null;
   idleNudgeCount?: number;
-  mood?: "romantic" | "sassy" | "caring" | "naughty" | "cute" | "mix";
+  mood?: "romantic" | "sassy" | "caring" | "naughty" | "cute" | "mix" | "mode_b";
+  isModeB?: boolean;
   coupleMemory?: Record<string, string>;
   isAngry?: boolean;
   healthTracker?: { issue: string; timestamp: number } | null;

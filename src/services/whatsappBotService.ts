@@ -2144,6 +2144,7 @@ class WhatsAppBotService {
 
 💖 *7. VIRTUAL GIRLFRIEND & PERSONA:*
 • \`@girlfriend <time>\` (e.g. \`@girlfriend 30 mins\`) ➔ 100% Private RAM-only girlfriend chat mode activate karein.
+• \`@girlfriend mode b <time>\` (e.g. \`@gf mode b 30m\`) ➔ 100% Uncensored Open-Talk Roleplay (Pollinations Zero-Filter Engine).
 • \`@normal\` ➔ Wapas normal Friday AI Assistant mode me switch karein.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
