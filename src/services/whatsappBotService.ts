@@ -1256,7 +1256,7 @@ class WhatsAppBotService {
 
     // ── VIRTUAL GIRLFRIEND MODE ROUTING ──
     const isGfActivationIntent =
-      /^(?:@girlfriend|\/girlfriend|@gf|\/gf|girlfriend\s*mode|gf\s*mode|virtual\s*girlfriend|girlfriend)\b/i.test(rawText);
+      /^(?:@girlfriend|\/girlfriend|@gf|\/gf|girlfriend\s*mode|gf\s*mode|virtual\s*girlfriend|girlfriend|mode\s*b|mode_b)\b/i.test(rawText);
 
     const isGfStopIntent =
       /^(?:@normal|\/normal|normal\s*mode|normal|@stop\s*gf|@stop\s*girlfriend|stop\s*girlfriend|stop\s*gf|exit\s*girlfriend|exit\s*gf)$/i.test(rawText);
