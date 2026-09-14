@@ -56,6 +56,7 @@ import { whatsappFeatureEngine } from "../services/whatsappFeatureEngine";
 import { freeFireGamingService } from "../services/freeFireGamingService";
 import { phoneIntelligenceService } from "../services/phoneIntelligenceService";
 import { exotelService } from "../services/exotelService";
+import { whatsappSessionHealthEngine } from "../services/whatsapp/whatsappSessionHealthEngine";
 import { createZipFromDirectory } from "../utils/miniZip";
 
 export interface ApiRoutesContext {
@@ -1463,6 +1464,35 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   // ── Social Anti-Bot & Human Simulation Firewall Status ───────────────────
   app.get("/api/firewall/social-status", (_req, res) => {
     res.json({ ok: true, ...humanBotFirewallService.getStats() });
+  });
+
+  // ── WhatsApp Session Health & Dynamic Ban Risk Telemetry ─────────────────
+  app.get("/api/whatsapp/health", (_req, res) => {
+    try {
+      const report = whatsappSessionHealthEngine.calculateBanRisk();
+      res.json({ ok: true, ...report });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || e });
+    }
+  });
+
+  app.post("/api/whatsapp/circuit-breaker/unpause", (_req, res) => {
+    try {
+      const result = whatsappSessionHealthEngine.manualUnpause();
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || e });
+    }
+  });
+
+  app.post("/api/whatsapp/circuit-breaker/pause", (req, res) => {
+    try {
+      const { hours = 24, reason = "Dashboard Manual Pause" } = req.body || {};
+      const result = whatsappSessionHealthEngine.manualPause(Number(hours), String(reason));
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || e });
+    }
   });
 
   // ── Voice Biometrics & Calibration REST Endpoints ─────────────────────────

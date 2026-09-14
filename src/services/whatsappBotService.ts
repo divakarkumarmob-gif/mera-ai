@@ -16,6 +16,7 @@ import { whatsappAutoReplyEngine } from "./whatsapp/whatsappAutoReplyEngine";
 import { whatsappMediaRouter } from "./whatsapp/whatsappMediaRouter";
 import { whatsappGroupSafetyEngine } from "./whatsapp/whatsappGroupSafetyEngine";
 import { whatsappGroupSuperPowersEngine } from "./whatsapp/whatsappGroupSuperPowersEngine";
+import { whatsappSessionHealthEngine } from "./whatsapp/whatsappSessionHealthEngine";
 
 export type { QuotedMessageContext, IncomingMessage, WhatsAppStatus };
 
@@ -91,14 +92,23 @@ class WhatsAppBotService {
     }
   }
 
+  public isSocketConnected(): boolean {
+    return this.isConnected;
+  }
+
   // ── Keep-Alive & Schedulers ───────────────────────────────────────────────
 
   private startKeepAlive() {
     this.stopKeepAlive();
     
-    // Natural jittered keep-alive ticker (6 to 14 minutes random variance)
+    // Natural Gaussian jittered keep-alive ticker (6 to 16 minutes with Box-Muller distribution)
     const scheduleNextKeepAlive = () => {
-      const randomIntervalMs = Math.floor(Math.random() * (14 - 6 + 1) + 6) * 60 * 1000;
+      const randomIntervalMs = humanBotFirewallService.gaussianRandom(
+        10 * 60 * 1000,
+        2 * 60 * 1000,
+        6 * 60 * 1000,
+        16 * 60 * 1000
+      );
       this.keepAliveTimer = setTimeout(async () => {
         if (this.sock && this.isConnected) {
           try {
@@ -114,7 +124,12 @@ class WhatsAppBotService {
             } else if (whatsappGirlfriendEngine.hasActiveGirlfriendOnline()) {
               await this.sock.sendPresenceUpdate("available");
             } else {
-              await this.sock.sendPresenceUpdate("unavailable");
+              // Daytime Inbound Entropy: 35% chance to simulate a natural quick human browsing session
+              if (Math.random() < 0.35) {
+                await humanBotFirewallService.simulateWhatsAppInboundEntropy(this.sock);
+              } else {
+                await this.sock.sendPresenceUpdate("unavailable");
+              }
             }
           } catch (e) {
             console.warn("[WhatsAppBot] Keep-alive ping failed, scheduling safe reconnect:", (e as any)?.message);
@@ -129,7 +144,7 @@ class WhatsAppBotService {
     };
 
     scheduleNextKeepAlive();
-    console.log("[WhatsAppBot] Realistic Human Circadian Keep-Alive active (Randomized 6-14m intervals with Night Sleep Mode).");
+    console.log("[WhatsAppBot] Realistic Human Circadian Keep-Alive active (Gaussian 6-16m intervals with Inbound Entropy & Night Sleep Mode).");
   }
 
   private stopKeepAlive() {
@@ -1453,16 +1468,39 @@ class WhatsAppBotService {
       const version = versionResult?.version;
       const logger = pino({ level: "silent" }) as any;
 
+      let proxyAgent: any = undefined;
+      const proxyUrl = process.env.WHATSAPP_PROXY_URL || process.env.RESIDENTIAL_PROXY_URL || process.env.HTTPS_PROXY;
+      if (proxyUrl) {
+        try {
+          if (proxyUrl.startsWith("socks")) {
+            const socksModule: any = await (new Function('return import("socks-proxy-agent")'))().catch(() => null);
+            if (socksModule?.SocksProxyAgent) {
+              proxyAgent = new socksModule.SocksProxyAgent(proxyUrl);
+              console.log("[WhatsAppBot] 🛡️ Residential SOCKS5 Proxy Tunnel active for WhatsApp Baileys.");
+            }
+          } else {
+            const httpsModule: any = await (new Function('return import("https-proxy-agent")'))().catch(() => null);
+            if (httpsModule?.HttpsProxyAgent) {
+              proxyAgent = new httpsModule.HttpsProxyAgent(proxyUrl);
+              console.log("[WhatsAppBot] 🛡️ Residential HTTPS Proxy Tunnel active for WhatsApp Baileys.");
+            }
+          }
+        } catch (proxyErr) {
+          console.warn("[WhatsAppBot] Notice initializing proxy, falling back to direct cloud stealth:", (proxyErr as any)?.message || proxyErr);
+        }
+      }
+
       this.sock = makeWASocket({
         version,
         auth: state,
         logger,
         printQRInTerminal: false,
-        keepAliveIntervalMs: 30_000,
-        connectTimeoutMs: 90_000,
-        defaultQueryTimeoutMs: 90_000,
-        browser: Browsers?.windows ? Browsers.windows("Chrome") : ["Windows", "Chrome", "131.0.6778.205"],
+        keepAliveIntervalMs: 25_000,
+        connectTimeoutMs: 120_000,
+        defaultQueryTimeoutMs: 120_000,
+        browser: ["Windows", "Chrome", "133.0.6943.127"],
         syncFullHistory: false,
+        ...(proxyAgent ? { agent: proxyAgent } : {}),
       });
 
       this.sock.ev.on("creds.update", saveCreds);
@@ -1515,6 +1553,7 @@ class WhatsAppBotService {
           const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
 
           console.log(`[WhatsAppBot] Connection closed (${statusCode}). Should reconnect: ${shouldReconnect}`);
+          whatsappSessionHealthEngine.recordDisconnect(statusCode, (lastDisconnect?.error as any)?.message || `Code ${statusCode}`);
 
           if (statusCode === DisconnectReason.loggedOut) {
             this.dedicatedPhone = null;
@@ -1531,6 +1570,7 @@ class WhatsAppBotService {
           this.qrCodeDataUrl = null;
           this.pairingCodeMode = false;
           if (this.dedicatedPhone) this.savePhoneToFirestore(this.dedicatedPhone).catch(() => {});
+          whatsappSessionHealthEngine.recordConnectionOpen();
           this.startKeepAlive();
           this.startScheduledMessagesTicker();
           this.sock.sendPresenceUpdate("unavailable").catch(() => {});
@@ -1607,6 +1647,19 @@ class WhatsAppBotService {
   public async sendHumanLikeMessage(jid: string, text: string, incomingText?: string, messageKey?: any): Promise<any> {
     if (!this.sock) return null;
 
+    // Safety Circuit-Breaker Check (Emergency 24-hour Auto Pause)
+    if (whatsappSessionHealthEngine.isPaused()) {
+      console.warn("[WhatsAppBot] 🛑 Outbound dispatch prevented: Emergency 24-Hour Safety Circuit-Breaker active.");
+      return null;
+    }
+
+    // 7-Day Account Warm-Up Quota Check (Prevents bans on new numbers)
+    const warmupCheck = whatsappSessionHealthEngine.canSendWarmupMessage();
+    if (!warmupCheck.allowed) {
+      console.warn(`[WhatsAppBot] 🛑 ${warmupCheck.reason}`);
+      return null;
+    }
+
     const trimmed = text.trim();
     const recipientKey = jid.replace(/@.*$/, "");
 
@@ -1619,6 +1672,11 @@ class WhatsAppBotService {
     );
 
     humanBotFirewallService.recordDispatchedMessage("whatsapp", recipientKey);
+    whatsappSessionHealthEngine.recordOutboundMessage();
+
+    // Anti-Hash Zero-Width Entropy Injection: creates a 100% unique cryptographic fingerprint
+    // for every message while remaining 100% invisible to human recipients.
+    const antiHashText = humanBotFirewallService.injectAntiHashZeroWidthEntropy(trimmed);
 
     const sendOptions: any = {};
     if (messageKey) {
@@ -1635,9 +1693,9 @@ class WhatsAppBotService {
 
     let result: any = null;
     try {
-      result = await this.sock.sendMessage(jid, { text: trimmed }, sendOptions);
+      result = await this.sock.sendMessage(jid, { text: antiHashText }, sendOptions);
     } catch (quotedErr) {
-      result = await this.sock.sendMessage(jid, { text: trimmed });
+      result = await this.sock.sendMessage(jid, { text: antiHashText });
     }
 
     if (result?.key?.id) {

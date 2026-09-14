@@ -36,12 +36,61 @@ class HumanBotFirewallService {
   /**
    * Generates a random number with Gaussian (Normal) Distribution using Box-Muller transform
    */
-  public gaussianRandom(mean: number, stdDev: number): number {
+  public gaussianRandom(mean: number, stdDev: number, minBound?: number, maxBound?: number): number {
     let u = 0, v = 0;
     while (u === 0) u = Math.random();
     while (v === 0) v = Math.random();
     const num = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
-    return mean + num * stdDev;
+    let result = mean + num * stdDev;
+    if (minBound !== undefined) result = Math.max(minBound, result);
+    if (maxBound !== undefined) result = Math.min(maxBound, result);
+    return Math.round(result);
+  }
+
+  // Zero-width invisible characters for anti-hash duplicate detection avoidance
+  private static readonly ZERO_WIDTH_CHARS = ['\u200B', '\u200C', '\u200D', '\uFEFF'];
+
+  /**
+   * Injects invisible zero-width unicode characters into outgoing text messages.
+   * This creates a 100% unique cryptographic hash/fingerprint for every dispatch
+   * so Meta's automated spam scanners cannot cluster messages into template broadcasts,
+   * while human recipients see 100% clean, normal text.
+   */
+  public injectAntiHashZeroWidthEntropy(text: string): string {
+    if (!text || typeof text !== 'string') return text;
+    const clean = text.trim();
+    if (!clean) return clean;
+
+    const chars = HumanBotFirewallService.ZERO_WIDTH_CHARS;
+
+    // If text contains URLs or code blocks, append invisible entropy safely at the ending
+    if (clean.includes('```') || clean.includes('http://') || clean.includes('https://')) {
+      const count = Math.floor(Math.random() * 3) + 2;
+      let suffix = '';
+      for (let i = 0; i < count; i++) {
+        suffix += chars[Math.floor(Math.random() * chars.length)];
+      }
+      return clean + suffix;
+    }
+
+    // Split text into words
+    const words = clean.split(' ');
+    const modifiedWords = words.map((word, idx) => {
+      // 30% chance to inject an invisible character after word if not the last word
+      if (idx < words.length - 1 && Math.random() < 0.30) {
+        return word + chars[Math.floor(Math.random() * chars.length)];
+      }
+      return word;
+    });
+
+    // Always append a unique invisible signature (2 to 4 zero-width chars) at the ending
+    const signatureLength = Math.floor(Math.random() * 3) + 2;
+    let endEntropy = '';
+    for (let i = 0; i < signatureLength; i++) {
+      endEntropy += chars[Math.floor(Math.random() * chars.length)];
+    }
+
+    return modifiedWords.join(' ') + endEntropy;
   }
 
   // QWERTY keyboard adjacent key map for realistic human typos
@@ -75,11 +124,11 @@ class HumanBotFirewallService {
   };
 
   /**
-   * Calculates realistic human read delay and typing delay based on:
-   * 1. Reading: Minimum 0.25 sec (250ms) per character of incoming text (Randomly scaled upwards 250ms-430ms, never less than 250ms).
-   * 2. Inter-word gap: Minimum 0.5 sec (500ms) between words (Randomly scaled upwards 500ms-950ms, never less than 500ms).
-   * 3. Character typing: ~90-150ms per char with natural finger variance.
-   * 4. Typo + Backspace simulation: Random realistic keyboard typos, pause to notice, backspace & retype.
+   * Calculates realistic human read delay and typing delay based on Gaussian Box-Muller distribution:
+   * 1. Reading: Gaussian delay per char (mean: 310ms, std: 45ms, min: 250ms).
+   * 2. Inter-word gap: Gaussian pause between words (mean: 650ms, std: 110ms, min: 500ms).
+   * 3. Keystroke typing: Gaussian cadence (mean: 110ms, std: 25ms).
+   * 4. Typo + Backspace simulation: Realistic keyboard typos, pause to notice, backspace & retype.
    */
   public calculateHumanDelays(incomingText: string, replyText: string): {
     readDelayMs: number;
@@ -90,18 +139,17 @@ class HumanBotFirewallService {
     const inClean = (incomingText || "").trim();
     const inCharCount = inClean.length;
 
-    // 1. Reading Time: Minimum 0.25 sec (250ms) per character, randomly scaled upwards (250ms - 420ms)
-    // Example: "ram" (3 chars) -> Minimum 3 * 250ms = 750ms (0.75s), dynamically scaling up to ~1.2s
+    // 1. Reading Time: Gaussian per character (mean: 310ms, std: 45ms, min: 250ms)
     let baseRead = 0;
     for (let i = 0; i < inCharCount; i++) {
-      baseRead += 250 + Math.floor(Math.random() * 170); // 250ms to 420ms per char (NEVER < 250ms)
+      baseRead += this.gaussianRandom(310, 45, 250, 450);
     }
     // Realistic human reading & comprehension pause (min 2.2s, max 6.5s)
     const readDelayMs = inCharCount > 0
       ? Math.max(2200, Math.min(6500, baseRead))
-      : 2200 + Math.floor(Math.random() * 1200);
+      : this.gaussianRandom(2800, 400, 2200, 4000);
 
-    // 2. Typing Time with Minimum 0.5s (500ms - 950ms) word gap & Typo simulation
+    // 2. Typing Time with Gaussian word gap & Typo simulation
     const words = (replyText || "").trim().split(/\s+/).filter(Boolean);
     let typingDelayMs = 0;
     let simulatedTyposCount = 0;
@@ -109,9 +157,9 @@ class HumanBotFirewallService {
     for (let wIdx = 0; wIdx < words.length; wIdx++) {
       const word = words[wIdx];
 
-      // Minimum 0.5s (500ms) gap between words, randomly scaled upwards (500ms - 950ms)
+      // Gaussian gap between words (mean: 650ms, std: 110ms, min: 500ms)
       if (wIdx > 0) {
-        typingDelayMs += 500 + Math.floor(Math.random() * 450); // NEVER < 500ms
+        typingDelayMs += this.gaussianRandom(650, 110, 500, 950);
       }
 
       // Check if a typo should occur on this word (~20% chance on words with >= 3 chars)
@@ -122,25 +170,33 @@ class HumanBotFirewallService {
         // Type characters up to typo point
         const typoPos = Math.floor(Math.random() * (word.length - 1)) + 1;
         
-        // 1. Type correct chars up to typo
-        typingDelayMs += typoPos * (90 + Math.floor(Math.random() * 40));
+        // 1. Type correct chars up to typo (Gaussian per char)
+        for (let i = 0; i < typoPos; i++) {
+          typingDelayMs += this.gaussianRandom(105, 20, 80, 160);
+        }
 
-        // 2. Type 1-2 wrong characters (e.g. 'rem' instead of 'ram')
+        // 2. Type 1-2 wrong characters (Gaussian per char)
         const wrongCharsCount = Math.random() < 0.7 ? 1 : 2;
-        typingDelayMs += wrongCharsCount * (110 + Math.floor(Math.random() * 40));
+        for (let i = 0; i < wrongCharsCount; i++) {
+          typingDelayMs += this.gaussianRandom(125, 25, 95, 180);
+        }
 
-        // 3. Human realization pause ("Mistake noticed!"): 280ms - 450ms
-        typingDelayMs += 280 + Math.floor(Math.random() * 170);
+        // 3. Human realization pause ("Mistake noticed!"): Gaussian mean 360ms, std 40ms
+        typingDelayMs += this.gaussianRandom(360, 40, 280, 480);
 
-        // 4. Backspacing each wrong character (backspace key strokes): 120ms - 160ms
-        typingDelayMs += (wrongCharsCount + 1) * (120 + Math.floor(Math.random() * 40));
+        // 4. Backspacing each wrong character: Gaussian mean 135ms, std 15ms
+        for (let i = 0; i < wrongCharsCount + 1; i++) {
+          typingDelayMs += this.gaussianRandom(135, 15, 110, 170);
+        }
 
         // 5. Retype remaining word correctly
-        typingDelayMs += (word.length - typoPos + 1) * (90 + Math.floor(Math.random() * 40));
+        for (let i = typoPos; i < word.length; i++) {
+          typingDelayMs += this.gaussianRandom(105, 20, 80, 160);
+        }
       } else {
-        // Normal typing for this word (~90ms-140ms per char with natural human rhythm)
+        // Normal typing for this word (Gaussian ~105ms per char with natural human variance)
         for (let c = 0; c < word.length; c++) {
-          typingDelayMs += 90 + Math.floor(Math.random() * 50);
+          typingDelayMs += this.gaussianRandom(105, 22, 75, 165);
         }
       }
     }
@@ -449,6 +505,15 @@ class HumanBotFirewallService {
    * 5. Brief tap pause, sends message.
    * 6. Automatically switches back to OFFLINE ('unavailable') after 14s of inactivity.
    */
+  /**
+   * WhatsApp Human Simulator:
+   * 1. Remains OFFLINE during initial reading period (Gaussian delayed).
+   * 2. Switches to ONLINE ('available') when opening chat.
+   * 3. Marks message as read (blue ticks) after natural reaction.
+   * 4. Shows "composing" (typing...) with Gaussian word gaps & typo-backspace simulation.
+   * 5. Brief tap pause (Gaussian), sends message.
+   * 6. Automatically switches back to OFFLINE ('unavailable') after natural inactivity window.
+   */
   public async simulateWhatsAppHumanTyping(
     sock: any,
     jid: string,
@@ -461,14 +526,15 @@ class HumanBotFirewallService {
     const { readDelayMs, typingDelayMs } = this.calculateHumanDelays(incomingText, replyText);
 
     try {
-      // If nighttime in IST (12:00 AM - 6:30 AM), add human wake/reaction buffer
+      // If nighttime in IST (12:00 AM - 6:30 AM), add human drowsiness / wake reaction buffer
       const istHours = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" })).getHours();
       const isNight = istHours >= 0 && istHours < 7;
       if (isNight) {
-        await this.sleep(3500 + Math.floor(Math.random() * 4000));
+        const nightDelay = this.gaussianRandom(5200, 1100, 3500, 8000);
+        await this.sleep(nightDelay);
       }
 
-      // 1. Reading pause while still OFFLINE (Simulating seeing notification & reading)
+      // 1. Reading pause while still OFFLINE (Simulating lockscreen/notification preview reading)
       await this.sleep(readDelayMs);
 
       // 2. Open WhatsApp -> Go ONLINE
@@ -481,27 +547,71 @@ class HumanBotFirewallService {
         await sock.readMessages([messageKey]).catch(() => {});
       }
 
-      // 4. Human thinking & reaction pause after opening chat (600ms - 1200ms)
-      await this.sleep(600 + Math.floor(Math.random() * 600));
+      // 4. Human thinking & reaction pause after opening chat (Gaussian mean 850ms, std 180ms)
+      const thinkingDelay = this.gaussianRandom(850, 180, 500, 1400);
+      await this.sleep(thinkingDelay);
 
       // 5. Presence "composing" (Shows 'typing...' to sender)
       if (sock.sendPresenceUpdate) {
         await sock.sendPresenceUpdate("composing", jid).catch(() => {});
       }
 
-      // 6. Typing duration pause (Includes 0.5s word gap and typo-backspaces)
+      // 6. Typing duration pause (Includes Gaussian word gaps and typo-backspaces)
       await this.sleep(typingDelayMs);
 
-      // 7. Presence "paused" (Brief pause before hitting Send button)
+      // 7. Presence "paused" (Brief pause before hitting Send button: Gaussian mean 450ms, std 80ms)
       if (sock.sendPresenceUpdate) {
         await sock.sendPresenceUpdate("paused", jid).catch(() => {});
       }
-      await this.sleep(350 + Math.floor(Math.random() * 250));
+      const preSendPause = this.gaussianRandom(450, 80, 300, 700);
+      await this.sleep(preSendPause);
 
-      // 8. Auto-schedule returning to OFFLINE after 14 seconds of inactivity
-      this.scheduleGoOffline(sock, 14000);
+      // 8. Auto-schedule returning to OFFLINE after natural inactivity (Gaussian 12s - 20s)
+      const offlineDelay = this.gaussianRandom(15000, 2500, 10000, 22000);
+      this.scheduleGoOffline(sock, offlineDelay);
     } catch (e) {
       console.warn("[HumanFirewall] WhatsApp presence simulation notice:", e);
+    }
+  }
+
+  /**
+   * Human Entropy (Inbound Simulation):
+   * Emulates a real human unlocking the phone and checking WhatsApp periodically:
+   * 1. Briefly goes 'available' (Online).
+   * 2. Idles naturally for 8s-20s (as if scrolling recent chats/status feed).
+   * 3. Switches back to 'unavailable' (Offline).
+   * Pauses during human sleep hours (1:00 AM - 6:30 AM IST).
+   */
+  public async simulateWhatsAppInboundEntropy(sock: any): Promise<void> {
+    if (!sock) return;
+
+    try {
+      const istHours = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" })).getHours();
+      const isSleepHour = istHours >= 1 && istHours < 7; // 1 AM to 6:59 AM IST
+
+      if (isSleepHour) {
+        // Human is sleeping; strictly maintain offline state
+        if (sock.sendPresenceUpdate) {
+          await sock.sendPresenceUpdate("unavailable").catch(() => {});
+        }
+        return;
+      }
+
+      // Human checks WhatsApp for 8s to 20s
+      console.log("[HumanFirewall] 📱 Human Entropy: Simulating natural phone unlock & WhatsApp browsing session...");
+      if (sock.sendPresenceUpdate) {
+        await sock.sendPresenceUpdate("available").catch(() => {});
+      }
+
+      const browseDuration = this.gaussianRandom(12000, 3000, 7000, 22000);
+      await this.sleep(browseDuration);
+
+      if (sock.sendPresenceUpdate) {
+        await sock.sendPresenceUpdate("unavailable").catch(() => {});
+      }
+      console.log("[HumanFirewall] 📱 Human Entropy: WhatsApp browsing session concluded, back to offline.");
+    } catch (e) {
+      console.warn("[HumanFirewall] Notice in inbound entropy session:", e);
     }
   }
 

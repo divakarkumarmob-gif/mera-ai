@@ -93,6 +93,53 @@ export class WhatsAppBossAiEngine {
         return auditRes.auditCard;
       }
     }
+
+    // ── WhatsApp Session Health & Dynamic Ban Risk Telemetry Fast-Path ──
+    const cleanLower = messageText.trim().toLowerCase();
+    const isBanHealthQuery =
+      /\b(?:ban\s*(?:risk|percent|percentage|score|chance|rate)|session\s*health|bot\s*(?:health|safety|risk)|safety\s*score|health\s*report)\b/i.test(cleanLower) ||
+      /(?:ban\s*(?:hone|ka|ki)\s*(?:chance|percent|percentage|risk|probability)|bot\s*safe\s*hai|whatsapp\s*health|session\s*kaisa\s*hai)/i.test(cleanLower);
+
+    if (isBanHealthQuery) {
+      const { whatsappSessionHealthEngine } = await import("./whatsappSessionHealthEngine");
+      return whatsappSessionHealthEngine.getFormattedBossReport();
+    }
+
+    // ── Emergency Circuit-Breaker Unpause & Password Verification Fast-Path ──
+    const isUnpauseCommand =
+      /^(?:\/unpause|unpause|resume(?:\s+bot)?|force\s*start|start\s*bot|bot\s*chalu\s*karo|chalu\s*karo)\b/i.test(cleanLower) ||
+      /\b(?:unpause|resume\s*bot|bot\s*unpause)\b/i.test(cleanLower);
+
+    const { whatsappSessionHealthEngine } = await import("./whatsappSessionHealthEngine");
+
+    if (isUnpauseCommand) {
+      const extractedPass = messageText.replace(/^(?:\/unpause|unpause|resume(?:\s+bot)?|force\s*start|start\s*bot|bot\s*chalu\s*karo|chalu\s*karo)\s*/i, "").trim();
+      if (extractedPass) {
+        const unpauseResult = whatsappSessionHealthEngine.manualUnpause(extractedPass);
+        return unpauseResult.message;
+      }
+
+      if (whatsappSessionHealthEngine.isPaused()) {
+        return (
+          `🔒 *[SECURITY AUTHENTICATION REQUIRED]* 🛡️\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `Boss, High Ban Risk Safety Pause active hai!\n\n` +
+          `Is safety pause ko override karke bot chalane ke liye kripya apna App Password / Security PIN enter karein:\n` +
+          `👉 *UNPAUSE <APP_PASSWORD>*\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `_Example: UNPAUSE friday2026_ ✨`
+        );
+      } else {
+        return `✅ Boss, WhatsApp Bot pehle se hi *ACTIVE* hai aur koi Emergency Pause nahi laga hua hai! ✨`;
+      }
+    }
+
+    // Direct password entry check if emergency pause is active
+    if (whatsappSessionHealthEngine.isPaused() && whatsappSessionHealthEngine.verifyAppPassword(messageText.trim())) {
+      const unpauseResult = whatsappSessionHealthEngine.manualUnpause(messageText.trim());
+      return unpauseResult.message;
+    }
+
     const crossPlatformMemoryContext = await unifiedMemoryService.getCrossPlatformWorkingMemoryPrompt();
 
     const { memoryEngine } = await import("../memoryEngine");

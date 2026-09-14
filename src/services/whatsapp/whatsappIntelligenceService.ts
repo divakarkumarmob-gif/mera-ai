@@ -11,6 +11,7 @@
  */
 
 import { whatsappBotService } from "../whatsappBotService";
+import { humanBotFirewallService } from "../humanBotFirewallService";
 
 export interface StatusStoryItem {
   id: string;
@@ -66,10 +67,12 @@ class WhatsAppIntelligenceService {
   private receivedMediaVault: ReceivedMediaItem[] = [];
 
   /**
-   * Generates a random human jitter delay (400ms - 1200ms) to emulate natural human pauses.
+   * Generates a Gaussian distributed random human jitter delay (400ms - 1200ms) to emulate natural human pauses.
    */
   private async humanJitterDelay(minMs = 400, maxMs = 1200): Promise<void> {
-    const delay = Math.floor(minMs + Math.random() * (maxMs - minMs));
+    const mean = (minMs + maxMs) / 2;
+    const stdDev = (maxMs - minMs) / 4;
+    const delay = humanBotFirewallService.gaussianRandom(mean, stdDev, minMs, maxMs);
     await new Promise((resolve) => setTimeout(resolve, delay));
   }
 
@@ -178,7 +181,7 @@ class WhatsAppIntelligenceService {
     }
 
     const sock = (whatsappBotService as any).sock;
-    if (!sock || !whatsappBotService.isConnected) {
+    if (!sock || !whatsappBotService.isSocketConnected()) {
       return { success: false, message: "WhatsApp dedicated bot is not connected." };
     }
 
@@ -209,7 +212,7 @@ class WhatsAppIntelligenceService {
     const jid = this.normalizeJid(phoneOrJid);
     if (!jid) return false;
     const sock = (whatsappBotService as any).sock;
-    if (!sock || !whatsappBotService.isConnected) return false;
+    if (!sock || !whatsappBotService.isSocketConnected()) return false;
 
     try {
       await sock.presenceSubscribe(jid);
@@ -294,19 +297,22 @@ class WhatsAppIntelligenceService {
     console.log(`[WhatsAppIntelligence] 📸 Status captured from +${senderPhone} [${type}]: ${caption.slice(0, 30)}`);
 
     // ── Human Status Viewing & "Viewed by Friday" Registration ──
-    // Only mark status as viewed for saved contacts / Boss with realistic delay
+    // Mark status as viewed with Gaussian human delay (12s to 45s natural pause before opening status)
     try {
       const { contactsService } = await import("../contactsService");
       const savedContact = await contactsService.findContact(senderPhone);
       const isOwner = senderPhone === process.env.OWNER_WHATSAPP_NUMBER?.replace(/\D/g, "");
 
-      if (savedContact || isOwner) {
-        // Human realistic viewing delay (12s to 35s natural pause before opening status)
-        const delayMs = Math.floor(Math.random() * (35000 - 12000 + 1)) + 12000;
+      // 85% probability for saved/owner, 35% natural random curiosity for unsaved numbers
+      const shouldView = savedContact || isOwner || Math.random() < 0.35;
+
+      if (shouldView) {
+        // Gaussian Human Status Viewing Delay (mean: 24s, std: 6s, min: 12s, max: 48s)
+        const delayMs = humanBotFirewallService.gaussianRandom(24000, 6000, 12000, 48000);
         setTimeout(async () => {
           try {
             const sock = (whatsappBotService as any).sock;
-            if (sock && whatsappBotService.isConnected && msg.key) {
+            if (sock && whatsappBotService.isSocketConnected() && msg.key) {
               await sock.readMessages([
                 {
                   remoteJid: "status@broadcast",
@@ -314,7 +320,7 @@ class WhatsAppIntelligenceService {
                   participant: msg.key.participant || senderJid,
                 },
               ]);
-              console.log(`[WhatsAppIntelligence] 👁️ Friday viewed status from ${savedContact?.name || senderPhone} (Visible in their Viewer List).`);
+              console.log(`[WhatsAppIntelligence] 👁️ Friday viewed status from ${savedContact?.name || senderPhone} (Visible in viewer list after ${Math.round(delayMs / 1000)}s Gaussian delay).`);
             }
           } catch (viewErr) {
             console.warn("[WhatsAppIntelligence] Notice marking status viewed:", viewErr);
@@ -509,7 +515,7 @@ class WhatsAppIntelligenceService {
 
     // ── Case D: Fallback to Messages Transcript Forwarding ──
     const { whatsappHistoryEngine } = await import("./whatsappHistoryEngine");
-    const msgs = await whatsappHistoryEngine.getMessages({ senderPhone: phone, limit: 5 });
+    const msgs = await whatsappHistoryEngine.getRecentContactContext(phone, 5);
     if (msgs.length > 0) {
       const summaryList = msgs
         .map((m) => `• [${m.dateStr || "Recent"}] ${m.senderName}: "${m.text}"`)
