@@ -1988,6 +1988,24 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
     const { semanticIntentEngine } = await import("./semanticIntentEngine");
     const functionDeclarations = isOwner ? semanticIntentEngine.getBossFunctionDeclarations() : [];
 
+    // ── IF FRIDAY MODE B: Direct 100% Uncensored Open Models (Zero Gemini) ────
+    if (isOwner && currentMode === "mode_b") {
+      const uncensoredReply = await fridayModeService.queryUncensoredEngine({
+        systemInstruction: `You are Friday AI, DK's (Divakar Kumar) personal super-intelligence on Telegram. Address him as Boss.\n${directivesContext}\n${trainingContext}\n${bossStyleContext}`,
+        userMessage: messageText,
+      });
+      if (uncensoredReply) {
+        const replaced = bossDirectivesService.applyWordReplacements(uncensoredReply);
+        const finalReply = await aiAdvancedLearningService.runConstitutionalCritique(replaced, { isToBoss: isOwner });
+        const { cleanText } = machineUnlearningSentinel.scrubRoboticArtifacts(finalReply);
+        cognitiveScaffoldingEngine.addMasteryPoints(2).catch(() => {});
+        neurotransmitterEngine.updateEmotionalMomentum(messageText, cleanText);
+        TelegramBotService.recordChatTurn(chatId, "Friday (You)", cleanText);
+        return cleanText;
+      }
+    }
+
+    // ── Standard Mode A: Gemini Multimodal & Tool Execution Loop ───────────────
     for (const model of TelegramBotService.MODEL_FALLBACK_CHAIN) {
       try {
         let reply: string | undefined;
@@ -1998,7 +2016,6 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
             config: {
               systemInstruction: prompt,
               tools: [{ functionDeclarations }],
-              ...(currentMode === "mode_b" ? { safetySettings: UNCENSORED_SAFETY_SETTINGS as any } : {}),
             },
           });
 
@@ -2047,7 +2064,6 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
             ai.models.generateContent({
               model,
               contents: prompt,
-              config: currentMode === "mode_b" ? { safetySettings: UNCENSORED_SAFETY_SETTINGS as any } : undefined,
             }),
             7000
           );
@@ -2066,22 +2082,6 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
         }
       } catch (err: any) {
         console.warn(`[TelegramBot] ${model} failed (${err?.message || err}), falling back to next model...`);
-      }
-    }
-
-    if (isOwner && currentMode === "mode_b") {
-      const uncensoredReply = await fridayModeService.queryUncensoredEngine({
-        systemInstruction: `You are Friday AI, DK's (Divakar Kumar) personal super-intelligence on Telegram. Address him as Boss.\n${directivesContext}\n${trainingContext}\n${bossStyleContext}`,
-        userMessage: messageText,
-      });
-      if (uncensoredReply) {
-        const replaced = bossDirectivesService.applyWordReplacements(uncensoredReply);
-        const finalReply = await aiAdvancedLearningService.runConstitutionalCritique(replaced, { isToBoss: isOwner });
-        const { cleanText } = machineUnlearningSentinel.scrubRoboticArtifacts(finalReply);
-        cognitiveScaffoldingEngine.addMasteryPoints(2).catch(() => {});
-        neurotransmitterEngine.updateEmotionalMomentum(messageText, cleanText);
-        TelegramBotService.recordChatTurn(chatId, "Friday (You)", cleanText);
-        return cleanText;
       }
     }
 

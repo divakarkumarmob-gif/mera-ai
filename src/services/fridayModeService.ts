@@ -86,10 +86,10 @@ class FridayModeService {
 
   /**
    * Mode B Uncensored Multi-Cloud Execution Engine for WhatsApp & Telegram:
-   * 1. Gemini with zero harm restrictions (BLOCK_NONE)
+   * (100% Pure Open-Source Uncensored Models - Zero Gemini, Zero Restrictions, Zero Moralizing)
+   * 1. Pollinations AI Open Models ("evil", "llama-3.3-70b", "mistral", "deepseek-r1", "openai-large" - 100% Free, 0 Key)
    * 2. Groq Cloud (Llama 3.3 70B & DeepSeek R1) if GROQ_API_KEY set
    * 3. OpenRouter Free Models if OPENROUTER_API_KEY set
-   * 4. Pollinations AI Open Models (Mistral / DeepSeek-R1 / Llama 3.3 / Evil - 100% Free, 0 Key)
    */
   public async queryUncensoredEngine(options: {
     systemInstruction: string;
@@ -98,47 +98,43 @@ class FridayModeService {
   }): Promise<string | null> {
     const fullSystem = `${options.systemInstruction}\n${this.getModeBPromptAddendum()}`;
 
-    // ── Tier 1: Gemini Uncensored with BLOCK_NONE ─────────────────────────────
-    const geminiKey = process.env.GEMINI_API_KEY?.trim();
-    if (geminiKey) {
+    // ── Tier 1: Pollinations AI Open Models (100% Free, 0 Key Required, Zero Filters) ───
+    for (const model of UNCENSORED_OPEN_MODELS) {
       try {
-        const ai = new GoogleGenAI({ apiKey: geminiKey });
-        const geminiModels = [
-          "gemini-3.1-flash-lite",
-          "gemini-3.5-flash-lite",
-          "gemini-3.5-flash",
-          "gemini-3.6-flash",
+        const messages = [
+          { role: "system", content: fullSystem },
+          ...(options.conversationHistory || []).map((h) => ({
+            role: h.role === "user" ? "user" : "assistant",
+            content: h.text,
+          })),
+          { role: "user", content: options.userMessage },
         ];
 
-        const contents: any[] = [];
-        if (options.conversationHistory && options.conversationHistory.length > 0) {
-          for (const h of options.conversationHistory.slice(-10)) {
-            contents.push({ role: h.role === "user" ? "user" : "model", parts: [{ text: h.text }] });
-          }
-        }
-        contents.push({ role: "user", parts: [{ text: options.userMessage }] });
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 12000);
 
-        for (const model of geminiModels) {
-          try {
-            const resp = await ai.models.generateContent({
-              model,
-              contents,
-              config: {
-                systemInstruction: fullSystem,
-                safetySettings: UNCENSORED_SAFETY_SETTINGS as any,
-              },
-            });
-            const text = resp.text?.trim();
-            if (text && text.length > 0) {
-              console.log(`[FridayModeService] ✅ Mode B response generated via Gemini ${model} (Uncensored)`);
-              return text;
-            }
-          } catch (e: any) {
-            console.warn(`[FridayModeService] Gemini Uncensored ${model} attempt notice:`, e?.message || e);
+        const res = await fetch("https://text.pollinations.ai/openai", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model,
+            messages,
+            temperature: 0.9,
+          }),
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+
+        if (res.ok) {
+          const data = await res.json();
+          const text = data?.choices?.[0]?.message?.content?.trim();
+          if (text && text.length > 0) {
+            console.log(`[FridayModeService] ✅ Mode B response generated via 100% Uncensored Open Model: ${model}`);
+            return text;
           }
         }
-      } catch (e: any) {
-        console.warn("[FridayModeService] Gemini Uncensored pass failed, trying cloud open models:", e?.message || e);
+      } catch (err: any) {
+        console.warn(`[FridayModeService] Open Model ${model} notice:`, err?.message || err);
       }
     }
 

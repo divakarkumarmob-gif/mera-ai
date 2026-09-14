@@ -2498,6 +2498,31 @@ ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` 
 3. Directly execute Boss's command in the context of the quoted message!)`;
     }
 
+    // ── IF FRIDAY MODE B: Direct 100% Uncensored Open Source Routing (Zero Gemini) ─
+    if (currentMode === "mode_b") {
+      const openModelReply = await fridayModeService.queryUncensoredEngine({
+        systemInstruction,
+        userMessage: userTurnMessage,
+        conversationHistory: recentBossMsgs.map((m) => ({
+          role: m.senderName.includes("Boss") || m.senderName.includes("DK") ? "user" : "assistant",
+          text: m.text,
+        })),
+      });
+      if (openModelReply) {
+        const { bossDirectivesService } = await import("../bossDirectivesService");
+        const { aiAdvancedLearningService } = await import("../aiAdvancedLearningService");
+        const { neurotransmitterEngine } = await import("../frontierHumanEngines");
+        const { machineUnlearningSentinel, cognitiveScaffoldingEngine } = await import("../frontierTrainingEngine");
+        const replaced = bossDirectivesService.applyWordReplacements(openModelReply);
+        const finalReply = await aiAdvancedLearningService.runConstitutionalCritique(replaced, { isToBoss: true });
+        const { cleanText } = machineUnlearningSentinel.scrubRoboticArtifacts(finalReply);
+        cognitiveScaffoldingEngine.addMasteryPoints(2).catch(() => {});
+        neurotransmitterEngine.updateEmotionalMomentum(messageText, cleanText);
+        return cleanText;
+      }
+    }
+
+    // ── Standard Mode A: Gemini Multimodal & Tool-Calling Loop ─────────────────
     for (const model of [
       "gemini-3.1-flash-lite",
       "gemini-3.5-flash-lite",
@@ -2620,29 +2645,6 @@ ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` 
         }
       } catch (e: any) {
         console.warn(`[WhatsAppBossAI] Model ${model} failed (${e?.message || e}), trying next model...`);
-      }
-    }
-
-    if (currentMode === "mode_b") {
-      const openModelReply = await fridayModeService.queryUncensoredEngine({
-        systemInstruction,
-        userMessage: userTurnMessage,
-        conversationHistory: recentBossMsgs.map((m) => ({
-          role: m.senderName.includes("Boss") || m.senderName.includes("DK") ? "user" : "assistant",
-          text: m.text,
-        })),
-      });
-      if (openModelReply) {
-        const { bossDirectivesService } = await import("../bossDirectivesService");
-        const { aiAdvancedLearningService } = await import("../aiAdvancedLearningService");
-        const { neurotransmitterEngine } = await import("../frontierHumanEngines");
-        const { machineUnlearningSentinel, cognitiveScaffoldingEngine } = await import("../frontierTrainingEngine");
-        const replaced = bossDirectivesService.applyWordReplacements(openModelReply);
-        const finalReply = await aiAdvancedLearningService.runConstitutionalCritique(replaced, { isToBoss: true });
-        const { cleanText } = machineUnlearningSentinel.scrubRoboticArtifacts(finalReply);
-        cognitiveScaffoldingEngine.addMasteryPoints(2).catch(() => {});
-        neurotransmitterEngine.updateEmotionalMomentum(messageText, cleanText);
-        return cleanText;
       }
     }
 
