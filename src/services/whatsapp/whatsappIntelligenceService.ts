@@ -107,77 +107,35 @@ class WhatsAppIntelligenceService {
     return "919999999999";
   }
 
-  // ── 1. Profile Picture (DP) Lookup (Safe Contact Only) ──────────────────────────
+  // ── 1. Profile Picture (DP) Smart Safety Shield with 1-Click Link ────────────
 
   public async fetchProfilePictureUrl(
     phoneOrJid: string,
-    highResolution = true
-  ): Promise<{ success: boolean; dpUrl: string | null; isCached: boolean; message: string }> {
+    _highResolution = true
+  ): Promise<{ success: boolean; dpUrl: string | null; isCached: boolean; message: string; waLink?: string }> {
     const jid = this.normalizeJid(phoneOrJid);
     if (!jid) {
       return { success: false, dpUrl: null, isCached: false, message: "Invalid phone number or JID." };
     }
 
     const cleanPhone = jid.replace("@s.whatsapp.net", "").replace(/\D/g, "");
+    const waLink = `https://wa.me/${cleanPhone}`;
 
-    // ── STRICT ANTI-BAN SHIELD: Check if contact is saved or has chat history ──
-    try {
-      const { contactsService } = await import("../contactsService");
-      const { whatsappHistoryEngine } = await import("./whatsappHistoryEngine");
+    console.log(`[WhatsAppIntelligence] 🛡️ Neutralized unsafe DP scraping for +${cleanPhone}. Provided safe 1-click wa.me link to Boss.`);
 
-      const savedContact = await contactsService.findContact(cleanPhone);
-      const hasChatHistory = whatsappHistoryEngine.findCachedMessage((m) => m.senderPhone === cleanPhone || m.replyJid?.includes(cleanPhone));
-
-      const isSafeTarget = !!savedContact || !!hasChatHistory || cleanPhone === process.env.OWNER_WHATSAPP_NUMBER?.replace(/\D/g, "");
-
-      if (!isSafeTarget) {
-        console.warn(`[WhatsAppIntelligence] 🛡️ Blocked unsafe DP query for stranger +${cleanPhone} to prevent WhatsApp scraping ban.`);
-        return {
-          success: false,
-          dpUrl: null,
-          isCached: false,
-          message: `🛡️ *WhatsApp Anti-Ban Safety Protection:* Anjaan/Unsaved number (+${cleanPhone}) ki direct DP query block kar di gayi hai taaki WhatsApp account ban na ho. Yeh query sirf saved contacts ya active chat wale numbers par allow hai.`,
-        };
-      }
-    } catch {}
-
-    const cacheKey = `${jid}_${highResolution ? "high" : "low"}`;
-    const cached = this.dpCache.get(cacheKey);
-    if (cached && Date.now() - cached.timestamp < this.DP_CACHE_TTL) {
-      return {
-        success: !!cached.url,
-        dpUrl: cached.url,
-        isCached: true,
-        message: cached.url ? "Profile picture retrieved from cache." : "Contact has no profile picture or privacy is restricted.",
-      };
-    }
-
-    const sock = (whatsappBotService as any).sock;
-    if (!sock || !whatsappBotService.isConnected) {
-      return { success: false, dpUrl: null, isCached: false, message: "WhatsApp dedicated bot is not connected." };
-    }
-
-    try {
-      await this.humanJitterDelay(1500, 3000);
-      const dpUrl = await sock.profilePictureUrl(jid, highResolution ? "image" : "preview");
-      this.dpCache.set(cacheKey, { url: dpUrl || null, timestamp: Date.now() });
-
-      return {
-        success: true,
-        dpUrl,
-        isCached: false,
-        message: `DP URL successfully retrieved for ${cleanPhone}!`,
-      };
-    } catch (err: any) {
-      const errMsg = String(err?.message || err);
-      this.dpCache.set(cacheKey, { url: null, timestamp: Date.now() });
-      return {
-        success: false,
-        dpUrl: null,
-        isCached: false,
-        message: `DP is not publicly accessible (Privacy setting: "My Contacts" or "Nobody"). (${errMsg})`,
-      };
-    }
+    return {
+      success: true,
+      dpUrl: null,
+      isCached: false,
+      waLink,
+      message: `⚠️ *Boss, WhatsApp Anti-Ban Safety Alert!* 🛡️\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `Direct WhatsApp server se kisi ki DP scrape/probe karne par Meta ke automated security algorithms number ko **ban** kar dete hain!\n\n` +
+        `Friday aapke account ki **100% ban safety** ke liye direct scraping execute nahi karegi.\n\n` +
+        `👉 *Aap unki profile aur DP directly apne WhatsApp app me 1-click se dekh sakte hain:*\n` +
+        `🔗 *Direct Profile Link:* ${waLink}\n\n` +
+        `_Tip: Upar diye gaye link par tap kijiye, profile chat turant khul jayegi!_ ✨`,
+    };
   }
 
   // ── 2. Bio / About Status ──────────────────────────────────────────────────
