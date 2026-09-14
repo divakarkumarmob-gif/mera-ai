@@ -107,7 +107,7 @@ class WhatsAppIntelligenceService {
     return "919999999999";
   }
 
-  // ── 1. Profile Picture (DP) Lookup ──────────────────────────────────────────
+  // ── 1. Profile Picture (DP) Lookup (Safe Contact Only) ──────────────────────────
 
   public async fetchProfilePictureUrl(
     phoneOrJid: string,
@@ -117,6 +117,29 @@ class WhatsAppIntelligenceService {
     if (!jid) {
       return { success: false, dpUrl: null, isCached: false, message: "Invalid phone number or JID." };
     }
+
+    const cleanPhone = jid.replace("@s.whatsapp.net", "").replace(/\D/g, "");
+
+    // ── STRICT ANTI-BAN SHIELD: Check if contact is saved or has chat history ──
+    try {
+      const { contactsService } = await import("../contactsService");
+      const { whatsappHistoryEngine } = await import("./whatsappHistoryEngine");
+
+      const savedContact = await contactsService.findContact(cleanPhone);
+      const hasChatHistory = whatsappHistoryEngine.findCachedMessage((m) => m.senderPhone === cleanPhone || m.replyJid?.includes(cleanPhone));
+
+      const isSafeTarget = !!savedContact || !!hasChatHistory || cleanPhone === process.env.OWNER_WHATSAPP_NUMBER?.replace(/\D/g, "");
+
+      if (!isSafeTarget) {
+        console.warn(`[WhatsAppIntelligence] 🛡️ Blocked unsafe DP query for stranger +${cleanPhone} to prevent WhatsApp scraping ban.`);
+        return {
+          success: false,
+          dpUrl: null,
+          isCached: false,
+          message: `🛡️ *WhatsApp Anti-Ban Safety Protection:* Anjaan/Unsaved number (+${cleanPhone}) ki direct DP query block kar di gayi hai taaki WhatsApp account ban na ho. Yeh query sirf saved contacts ya active chat wale numbers par allow hai.`,
+        };
+      }
+    } catch {}
 
     const cacheKey = `${jid}_${highResolution ? "high" : "low"}`;
     const cached = this.dpCache.get(cacheKey);
@@ -135,7 +158,7 @@ class WhatsAppIntelligenceService {
     }
 
     try {
-      await this.humanJitterDelay(400, 1000);
+      await this.humanJitterDelay(1500, 3000);
       const dpUrl = await sock.profilePictureUrl(jid, highResolution ? "image" : "preview");
       this.dpCache.set(cacheKey, { url: dpUrl || null, timestamp: Date.now() });
 
@@ -143,7 +166,7 @@ class WhatsAppIntelligenceService {
         success: true,
         dpUrl,
         isCached: false,
-        message: `DP URL successfully retrieved for ${jid.replace("@s.whatsapp.net", "")}!`,
+        message: `DP URL successfully retrieved for ${cleanPhone}!`,
       };
     } catch (err: any) {
       const errMsg = String(err?.message || err);
@@ -164,6 +187,27 @@ class WhatsAppIntelligenceService {
   ): Promise<{ success: boolean; aboutText?: string; setAt?: string; message: string }> {
     const jid = this.normalizeJid(phoneOrJid);
     if (!jid) return { success: false, message: "Invalid phone number." };
+
+    const cleanPhone = jid.replace("@s.whatsapp.net", "").replace(/\D/g, "");
+
+    // ── STRICT ANTI-BAN SHIELD: Check if contact is saved or has chat history ──
+    try {
+      const { contactsService } = await import("../contactsService");
+      const { whatsappHistoryEngine } = await import("./whatsappHistoryEngine");
+
+      const savedContact = await contactsService.findContact(cleanPhone);
+      const hasChatHistory = whatsappHistoryEngine.findCachedMessage((m) => m.senderPhone === cleanPhone || m.replyJid?.includes(cleanPhone));
+
+      const isSafeTarget = !!savedContact || !!hasChatHistory || cleanPhone === process.env.OWNER_WHATSAPP_NUMBER?.replace(/\D/g, "");
+
+      if (!isSafeTarget) {
+        console.warn(`[WhatsAppIntelligence] 🛡️ Blocked unsafe Bio/About query for stranger +${cleanPhone} to prevent WhatsApp scraping ban.`);
+        return {
+          success: false,
+          message: `🛡️ *WhatsApp Anti-Ban Safety Protection:* Anjaan/Unsaved number (+${cleanPhone}) ki direct Bio query block kar di gayi hai taaki WhatsApp account ban na ho.`,
+        };
+      }
+    } catch {}
 
     const cached = this.bioCache.get(jid);
     if (cached && Date.now() - cached.timestamp < this.BIO_CACHE_TTL) {
@@ -250,9 +294,9 @@ class WhatsAppIntelligenceService {
     };
   }
 
-  // ── 4. WhatsApp Status Story Ingestion ──────────────────────────────────────
+  // ── 4. WhatsApp Status Story Ingestion & Human Viewing ──────────────────────
 
-  public recordStatusStory(msg: any): void {
+  public async recordStatusStory(msg: any): Promise<void> {
     if (!msg || !msg.key) return;
     const remoteJid = msg.key.remoteJid;
     if (remoteJid !== "status@broadcast") return;
@@ -290,6 +334,36 @@ class WhatsAppIntelligenceService {
     if (this.statusStories.length > 50) this.statusStories.pop();
 
     console.log(`[WhatsAppIntelligence] 📸 Status captured from +${senderPhone} [${type}]: ${caption.slice(0, 30)}`);
+
+    // ── Human Status Viewing & "Viewed by Friday" Registration ──
+    // Only mark status as viewed for saved contacts / Boss with realistic delay
+    try {
+      const { contactsService } = await import("../contactsService");
+      const savedContact = await contactsService.findContact(senderPhone);
+      const isOwner = senderPhone === process.env.OWNER_WHATSAPP_NUMBER?.replace(/\D/g, "");
+
+      if (savedContact || isOwner) {
+        // Human realistic viewing delay (12s to 35s natural pause before opening status)
+        const delayMs = Math.floor(Math.random() * (35000 - 12000 + 1)) + 12000;
+        setTimeout(async () => {
+          try {
+            const sock = (whatsappBotService as any).sock;
+            if (sock && whatsappBotService.isConnected && msg.key) {
+              await sock.readMessages([
+                {
+                  remoteJid: "status@broadcast",
+                  id: msg.key.id,
+                  participant: msg.key.participant || senderJid,
+                },
+              ]);
+              console.log(`[WhatsAppIntelligence] 👁️ Friday viewed status from ${savedContact?.name || senderPhone} (Visible in their Viewer List).`);
+            }
+          } catch (viewErr) {
+            console.warn("[WhatsAppIntelligence] Notice marking status viewed:", viewErr);
+          }
+        }, delayMs);
+      }
+    } catch {}
   }
 
   public getRecentStatusStories(limit = 10, filterPhone?: string): StatusStoryItem[] {

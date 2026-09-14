@@ -95,21 +95,41 @@ class WhatsAppBotService {
 
   private startKeepAlive() {
     this.stopKeepAlive();
-    this.keepAliveTimer = setInterval(async () => {
-      if (!this.sock || !this.isConnected) return;
-      try {
-        if (whatsappGirlfriendEngine.hasActiveGirlfriendOnline()) {
-          await this.sock.sendPresenceUpdate("available");
-        } else {
-          await this.sock.sendPresenceUpdate("unavailable");
+    
+    // Natural jittered keep-alive ticker (6 to 14 minutes random variance)
+    const scheduleNextKeepAlive = () => {
+      const randomIntervalMs = Math.floor(Math.random() * (14 - 6 + 1) + 6) * 60 * 1000;
+      this.keepAliveTimer = setTimeout(async () => {
+        if (this.sock && this.isConnected) {
+          try {
+            // Check IST night sleep hours (1:00 AM to 6:30 AM IST)
+            const currentHourIST = new Date(
+              new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" })
+            ).getHours();
+
+            const isNightSleepTime = currentHourIST >= 1 && currentHourIST < 6;
+            if (isNightSleepTime) {
+              // During human sleep hours, stay strictly unavailable (Offline)
+              await this.sock.sendPresenceUpdate("unavailable");
+            } else if (whatsappGirlfriendEngine.hasActiveGirlfriendOnline()) {
+              await this.sock.sendPresenceUpdate("available");
+            } else {
+              await this.sock.sendPresenceUpdate("unavailable");
+            }
+          } catch (e) {
+            console.warn("[WhatsAppBot] Keep-alive ping failed, scheduling safe reconnect:", (e as any)?.message);
+            this.isConnected = false;
+            this.scheduleReconnect(5000);
+          }
         }
-      } catch (e) {
-        console.warn("[WhatsAppBot] Keep-alive ping failed, triggering reconnect:", (e as any)?.message);
-        this.isConnected = false;
-        this.scheduleReconnect(3000);
-      }
-    }, 4 * 60 * 1000);
-    console.log("[WhatsAppBot] Keep-alive timer started (Offline background / Girlfriend dynamic mode).");
+        if (this.isConnected) {
+          scheduleNextKeepAlive();
+        }
+      }, randomIntervalMs);
+    };
+
+    scheduleNextKeepAlive();
+    console.log("[WhatsAppBot] Realistic Human Circadian Keep-Alive active (Randomized 6-14m intervals with Night Sleep Mode).");
   }
 
   private stopKeepAlive() {
