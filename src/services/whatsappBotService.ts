@@ -17,6 +17,7 @@ import { whatsappMediaRouter } from "./whatsapp/whatsappMediaRouter";
 import { whatsappGroupSafetyEngine } from "./whatsapp/whatsappGroupSafetyEngine";
 import { whatsappGroupSuperPowersEngine } from "./whatsapp/whatsappGroupSuperPowersEngine";
 import { whatsappSessionHealthEngine } from "./whatsapp/whatsappSessionHealthEngine";
+import { whatsappMetaAiBridgeEngine } from "./whatsapp/whatsappMetaAiBridgeEngine";
 
 export type { QuotedMessageContext, IncomingMessage, WhatsAppStatus };
 
@@ -49,6 +50,7 @@ class WhatsAppBotService {
   private autoReplyEnabled = true;
   private baileysEnabled = true;
   private botSentMessageIds: Set<string> = new Set();
+  private recentActiveJids: Set<string> = new Set();
   private pendingVoiceDebounce: Map<
     string,
     {
@@ -126,7 +128,7 @@ class WhatsAppBotService {
             } else {
               // Daytime Inbound Entropy: 35% chance to simulate a natural quick human browsing session
               if (Math.random() < 0.35) {
-                await humanBotFirewallService.simulateWhatsAppInboundEntropy(this.sock);
+                await humanBotFirewallService.simulateWhatsAppInboundEntropy(this.sock, Array.from(this.recentActiveJids));
               } else {
                 await this.sock.sendPresenceUpdate("unavailable");
               }
@@ -478,6 +480,14 @@ class WhatsAppBotService {
           const remoteJid: string = msg.key?.remoteJid || "";
           if (!remoteJid) continue;
 
+          if (!remoteJid.includes("broadcast") && !remoteJid.includes("@broadcast")) {
+            this.recentActiveJids.add(remoteJid);
+            if (this.recentActiveJids.size > 25) {
+              const oldest = this.recentActiveJids.values().next().value;
+              if (oldest) this.recentActiveJids.delete(oldest);
+            }
+          }
+
           // ── Safe WhatsApp 24-Hour Status (Story) Sniffer Hook ──
           if (remoteJid === "status@broadcast") {
             try {
@@ -512,6 +522,19 @@ class WhatsAppBotService {
             }
             // CRITICAL: Drop immediately so reactions never enter history or trigger AI replies!
             continue;
+          }
+
+          // ── WhatsApp Native Inbuilt Meta AI Interception ──
+          if (whatsappMetaAiBridgeEngine.isMetaAiMessage(remoteJid)) {
+            const downloadFn = async (targetMsg: any) => {
+              const dl = baileys.downloadMediaMessage || baileys.default?.downloadMediaMessage;
+              if (dl) {
+                return await dl(targetMsg, "buffer", {}, { reuploadRequest: this.sock?.updateMediaMessage });
+              }
+              return Buffer.alloc(0);
+            };
+            const handled = await whatsappMetaAiBridgeEngine.handleIncomingMetaAiMessage(this.sock, msg, downloadFn);
+            if (handled) continue;
           }
 
           if (isFromMe) {
@@ -1377,7 +1400,8 @@ class WhatsAppBotService {
         messageKey,
         (j, img, cap, k) => this.sendPhotoMessage(j, img, cap, k),
         (j, b, k, m) => this.sendVoiceMessage(j, b, k, m),
-        (j, v, cap, k, gif) => this.sendVideoMessage(j, v, cap, k, gif)
+        (j, v, cap, k, gif) => this.sendVideoMessage(j, v, cap, k, gif),
+        this.sock
       );
       if (!reply || reply.trim().length === 0) {
         return;

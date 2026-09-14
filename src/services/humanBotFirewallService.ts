@@ -578,11 +578,12 @@ class HumanBotFirewallService {
    * Human Entropy (Inbound Simulation):
    * Emulates a real human unlocking the phone and checking WhatsApp periodically:
    * 1. Briefly goes 'available' (Online).
-   * 2. Idles naturally for 8s-20s (as if scrolling recent chats/status feed).
-   * 3. Switches back to 'unavailable' (Offline).
+   * 2. Scrolls through recent active chats, subscribes to contact presence, checks statuses/profile previews.
+   * 3. Idles naturally for 8s-22s (mimicking human reading/scrolling chat history & status feed).
+   * 4. Switches back to 'unavailable' (Offline).
    * Pauses during human sleep hours (1:00 AM - 6:30 AM IST).
    */
-  public async simulateWhatsAppInboundEntropy(sock: any): Promise<void> {
+  public async simulateWhatsAppInboundEntropy(sock: any, knownJids: string[] = []): Promise<void> {
     if (!sock) return;
 
     try {
@@ -597,19 +598,50 @@ class HumanBotFirewallService {
         return;
       }
 
-      // Human checks WhatsApp for 8s to 20s
-      console.log("[HumanFirewall] 📱 Human Entropy: Simulating natural phone unlock & WhatsApp browsing session...");
+      // Human checks WhatsApp
+      console.log("[HumanFirewall] 📱 Human Entropy: Simulating natural phone unlock & WhatsApp chat scrolling session...");
       if (sock.sendPresenceUpdate) {
         await sock.sendPresenceUpdate("available").catch(() => {});
       }
 
-      const browseDuration = this.gaussianRandom(12000, 3000, 7000, 22000);
+      // 1. If we have recent active contacts/chats, simulate scrolling and tapping on 1 to 3 chats
+      if (knownJids.length > 0) {
+        const shuffled = [...knownJids].sort(() => 0.5 - Math.random());
+        const chatsToBrowse = shuffled.slice(0, Math.min(3, Math.floor(Math.random() * 3) + 1));
+
+        for (const chatJid of chatsToBrowse) {
+          try {
+            // Human taps chat: presence subscription
+            if (sock.presenceSubscribe) {
+              await sock.presenceSubscribe(chatJid).catch(() => {});
+            }
+
+            // Human scrolls through chat history / reads messages (1.5s - 3.8s)
+            const chatReadTime = this.gaussianRandom(2400, 600, 1200, 4200);
+            await this.sleep(chatReadTime);
+
+            // 25% chance human checks user's status or profile
+            if (Math.random() < 0.25 && sock.fetchStatus) {
+              await sock.fetchStatus(chatJid).catch(() => {});
+            }
+            if (Math.random() < 0.15 && sock.profilePictureUrl) {
+              await sock.profilePictureUrl(chatJid, "preview").catch(() => {});
+            }
+
+            // Micro gap before returning to chat list
+            await this.sleep(400 + Math.floor(Math.random() * 500));
+          } catch {}
+        }
+      }
+
+      // General feed / status tab scroll idle
+      const browseDuration = this.gaussianRandom(6000, 1500, 3500, 10000);
       await this.sleep(browseDuration);
 
       if (sock.sendPresenceUpdate) {
         await sock.sendPresenceUpdate("unavailable").catch(() => {});
       }
-      console.log("[HumanFirewall] 📱 Human Entropy: WhatsApp browsing session concluded, back to offline.");
+      console.log("[HumanFirewall] 📱 Human Entropy: WhatsApp chat scrolling concluded, back to offline.");
     } catch (e) {
       console.warn("[HumanFirewall] Notice in inbound entropy session:", e);
     }
