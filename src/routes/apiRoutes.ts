@@ -2984,6 +2984,37 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
+  // ── AI Character Chat Automation Proxy (Perchance Tareeqa 2 Bridge) ────────
+  app.post("/api/perchance/chat", async (req, res) => {
+    try {
+      const { message, characterUrl, timeoutMs } = req.body || {};
+      if (!message || !String(message).trim()) {
+        return res.status(400).json({ ok: false, error: "Message is required" });
+      }
+
+      const { perchanceService } = await import("../services/perchanceService");
+      const result = await perchanceService.chatWithCharacter(
+        String(message).trim(),
+        characterUrl || "https://perchance.org/ai-character-chat",
+        Number(timeoutMs) || 45000
+      );
+
+      return res.json({
+        ok: result.success,
+        characterName: result.characterName,
+        reply: result.replyText,
+        avatar: result.characterAvatar,
+        durationMs: result.durationMs,
+        logs: result.logs,
+      });
+    } catch (err: any) {
+      return res.status(500).json({
+        ok: false,
+        error: err?.message || "Internal server error during character chat",
+      });
+    }
+  });
+
   // ── 4K Cloudflare AI Photo Generation & WhatsApp Delivery Endpoint ────────
   app.post("/api/generate-photo", async (req, res) => {
     try {
