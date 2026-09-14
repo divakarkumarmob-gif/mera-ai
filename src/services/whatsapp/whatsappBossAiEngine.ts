@@ -1402,41 +1402,6 @@ export class WhatsAppBossAiEngine {
           required: []
         }
       },
-      {
-        name: "generate_ai_image",
-        description: "Generate a photorealistic 4K AI image, artwork, wallpaper, or portrait from a text prompt using Cloudflare FLUX.1 / Google Imagen 3 / Pollinations multi-tier engine.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            prompt: { type: "STRING", description: "Detailed description of the image to generate" },
-            aspectRatio: { type: "STRING", enum: ["1:1", "16:9", "9:16", "4:3", "3:4"], description: "Optional aspect ratio (default 1:1)" }
-          },
-          required: ["prompt"]
-        }
-      },
-      {
-        name: "animate_ai_image",
-        description: "Animate a quoted photo into a smooth AI motion video clip using Pollinations Motion / SVD engine.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            motionPrompt: { type: "STRING", description: "Motion description (e.g. 'natural camera zoom, flowing hair, smiling')" }
-          },
-          required: []
-        }
-      },
-      {
-        name: "generate_ai_video",
-        description: "Generate a short AI video clip from a text prompt using Pollinations Video and CogVideoX.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            prompt: { type: "STRING", description: "The video prompt description" },
-            durationSeconds: { type: "NUMBER", description: "Duration in seconds (default: 4)" }
-          },
-          required: ["prompt"]
-        }
-      },
     ];
 
     const { fridayModeService } = await import("../fridayModeService");
@@ -2468,72 +2433,6 @@ COMMUNICATION STYLE & EMOTIONAL COMPANIONSHIP:
             args.daysBack || 7
           );
           return res;
-        }
-        if (toolName === "generate_ai_image") {
-          const { imageGenerationService } = await import("../imageGenerationService");
-          const genRes = await imageGenerationService.generateImage(args.prompt, { aspectRatio: args.aspectRatio });
-          if (genRes.success && (genRes.buffer || genRes.imageUrl)) {
-            const imageSrc = genRes.buffer || genRes.imageUrl!;
-            if (replyJid && sendPhotoFn) {
-              await sendPhotoFn(
-                replyJid,
-                imageSrc,
-                `✨ *AI Generated Image*\n📌 *Prompt:* _"${args.prompt}"_\n🤖 *Engine:* _${genRes.model}_`,
-                messageKey
-              );
-            }
-            return { success: true, message: `Image generated using ${genRes.model} and delivered to Boss on WhatsApp!` };
-          }
-          return { success: false, message: `Image generation failed: ${genRes.error || "Unknown error"}` };
-        }
-        if (toolName === "animate_ai_image") {
-          const { aiMediaAnimationEngine } = await import("../aiMediaAnimationEngine");
-          const { whatsappMediaRouter } = await import("./whatsappMediaRouter");
-
-          let sourceImage: string | Buffer = "";
-          // Check if chat has a recent photo to animate
-          const recentPhotos = whatsappMediaRouter.getRecentPhotos(replyJid);
-          if (recentPhotos.length > 0 && recentPhotos[0].buffer) {
-            sourceImage = recentPhotos[0].buffer;
-          }
-
-          const animRes = await aiMediaAnimationEngine.animateImage(sourceImage || args.motionPrompt, args.motionPrompt);
-          if (animRes.success && (animRes.videoBuffer || animRes.videoUrl)) {
-            const videoSrc = animRes.videoBuffer || animRes.videoUrl!;
-            if (replyJid) {
-              if (sendVideoFn) {
-                await sendVideoFn(
-                  replyJid,
-                  videoSrc,
-                  `🎬 *AI Animated Video*\n📌 *Motion:* _"${args.motionPrompt}"_\n🤖 *Engine:* _${animRes.model}_`,
-                  messageKey,
-                  false
-                );
-              } else if (sendPhotoFn) {
-                await sendPhotoFn(replyJid, videoSrc, `🎬 *AI Animated Video*\n📌 *Motion:* _"${args.motionPrompt}"_`, messageKey);
-              }
-            }
-            return { success: true, message: `Animation generated using ${animRes.model} and delivered to Boss on WhatsApp!` };
-          }
-          return { success: false, message: `Animation failed: ${animRes.error || "Could not animate image"}` };
-        }
-        if (toolName === "generate_ai_video") {
-          const { aiMediaAnimationEngine } = await import("../aiMediaAnimationEngine");
-          const vidRes = await aiMediaAnimationEngine.generateVideo(args.prompt, args.durationSeconds || 4);
-          if (vidRes.success && (vidRes.videoBuffer || vidRes.videoUrl)) {
-            const videoSrc = vidRes.videoBuffer || vidRes.videoUrl!;
-            if (replyJid && sendVideoFn) {
-              await sendVideoFn(
-                replyJid,
-                videoSrc,
-                `🎬 *AI Motion Video*\n📌 *Prompt:* _"${args.prompt}"_\n🤖 *Engine:* _${vidRes.model}_`,
-                messageKey,
-                false
-              );
-            }
-            return { success: true, message: `Video generated using ${vidRes.model} and delivered to Boss on WhatsApp!` };
-          }
-          return { success: false, message: `Video generation failed: ${vidRes.error || "Could not generate video"}` };
         }
         if (toolName === "set_contact_message_quota") {
           const { whatsappDailyQuotaEngine } = await import("./whatsappDailyQuotaEngine");
