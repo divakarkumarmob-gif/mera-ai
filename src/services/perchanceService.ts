@@ -620,8 +620,8 @@ export class PerchanceService {
           try {
             const encodedPrompt = encodeURIComponent(`${cleanPrompt}, masterpiece, highly detailed, 8k, photorealistic`);
             const fallbackUrls = [
-              `https://image.pollinations.ai/prompt/${encodedPrompt}?width=768&height=768&nologo=true&model=turbo&seed=${Date.now()}`,
-              `https://image.pollinations.ai/prompt/${encodedPrompt}?width=512&height=768&nologo=true&seed=${Date.now()}`,
+              `https://image.pollinations.ai/prompt/${encodedPrompt}?width=768&height=768&nologo=true&model=turbo&seed=${Date.now()}&safe=false&nofilter=true`,
+              `https://image.pollinations.ai/prompt/${encodedPrompt}?width=512&height=768&nologo=true&seed=${Date.now()}&safe=false&nofilter=true`,
             ];
 
             for (const fUrl of fallbackUrls) {

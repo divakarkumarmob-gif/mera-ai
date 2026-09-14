@@ -632,7 +632,7 @@ Respond ONLY with valid JSON matching this exact schema:
       // 1. Text-to-Video via Pollinations Video Engine (Fast & 100% Free)
       const cleanPrompt = encodeURIComponent(prompt.trim());
       const seed = Math.floor(Math.random() * 999999);
-      const pollinationsUrl = `https://image.pollinations.ai/prompt/${cleanPrompt}?model=flux&seed=${seed}&nologo=true&enhance=true`;
+      const pollinationsUrl = `https://image.pollinations.ai/prompt/${cleanPrompt}?model=flux&seed=${seed}&nologo=true&enhance=true&safe=false&nofilter=true`;
 
       // 2. Hugging Face Video Model (CogVideoX / ModelScope / AnimateDiff)
       const hfToken = process.env.HUGGINGFACE_API_KEY || process.env.HF_TOKEN;

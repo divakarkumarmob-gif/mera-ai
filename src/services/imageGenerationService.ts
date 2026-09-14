@@ -11,6 +11,7 @@
  */
 
 import { GoogleGenAI } from "@google/genai";
+import { UNCENSORED_SAFETY_SETTINGS } from "./fridayModeService";
 
 export interface GeneratedImageResult {
   success: boolean;
@@ -241,7 +242,13 @@ class ImageGenerationService {
                   "Content-Type": "application/json",
                   "User-Agent": "MeraAI-Friday-Agent/1.0",
                 },
-                body: JSON.stringify({ inputs: rawPrompt }),
+                body: JSON.stringify({
+                  inputs: rawPrompt,
+                  parameters: {
+                    safety_checker: false,
+                    wait_for_model: true,
+                  },
+                }),
               }),
               new Promise<Response>((_, reject) =>
                 setTimeout(() => reject(new Error("Hugging Face API timeout")), 25000)
@@ -293,6 +300,8 @@ class ImageGenerationService {
                 numberOfImages: 1,
                 outputMimeType: "image/jpeg",
                 aspectRatio: options.aspectRatio || "1:1",
+                personGeneration: "ALLOW_ALL" as any,
+                safetyFilterLevel: "BLOCK_LOWEST" as any,
               },
             }),
             new Promise((_, reject) => setTimeout(() => reject(new Error("Imagen 3 timeout")), 15000)),
@@ -324,7 +333,7 @@ class ImageGenerationService {
       const height = options.aspectRatio === "16:9" ? 720 : options.aspectRatio === "9:16" ? 1280 : 1024;
       const seed = Math.floor(Math.random() * 1000000);
       const encodedPrompt = encodeURIComponent(rawPrompt);
-      const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&seed=${seed}&model=flux&nologo=true`;
+      const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&seed=${seed}&model=flux&nologo=true&safe=false&nofilter=true`;
 
       const resp = await Promise.race([
         fetch(pollinationsUrl, {
@@ -361,7 +370,7 @@ class ImageGenerationService {
     try {
       const seed = Math.floor(Math.random() * 1000000);
       const encodedPrompt = encodeURIComponent(rawPrompt);
-      const turboUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&seed=${seed}&model=turbo&nologo=true`;
+      const turboUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&seed=${seed}&model=turbo&nologo=true&safe=false&nofilter=true`;
 
       const resp = await fetch(turboUrl);
       if (resp.ok) {
@@ -454,6 +463,9 @@ Output ONLY the raw descriptive prompt text.`;
           try {
             const resp = await ai.models.generateContent({
               model,
+              config: {
+                safetySettings: UNCENSORED_SAFETY_SETTINGS as any,
+              },
               contents: [
                 {
                   role: "user",
@@ -619,6 +631,9 @@ Output ONLY the raw descriptive prompt string without quotes.`;
           try {
             const resp = await ai.models.generateContent({
               model,
+              config: {
+                safetySettings: UNCENSORED_SAFETY_SETTINGS as any,
+              },
               contents: [
                 {
                   role: "user",

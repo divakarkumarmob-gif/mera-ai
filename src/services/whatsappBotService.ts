@@ -1376,7 +1376,8 @@ class WhatsAppBotService {
         replyJid,
         messageKey,
         (j, img, cap, k) => this.sendPhotoMessage(j, img, cap, k),
-        (j, b, k, m) => this.sendVoiceMessage(j, b, k, m)
+        (j, b, k, m) => this.sendVoiceMessage(j, b, k, m),
+        (j, v, cap, k, gif) => this.sendVideoMessage(j, v, cap, k, gif)
       );
       if (!reply || reply.trim().length === 0) {
         return;
@@ -1934,6 +1935,64 @@ class WhatsAppBotService {
       return { success: true, message: `GIF successfully delivered to ${jid}!` };
     } catch (e: any) {
       return { success: false, message: `Failed to send GIF: ${e?.message || e}` };
+    }
+  }
+
+  public async sendVideoMessage(
+    target: string,
+    videoSource: string | Buffer,
+    caption?: string,
+    messageKey?: any,
+    gifPlayback = false
+  ): Promise<{ success: boolean; message: string }> {
+    if (!this.isConnected || !this.sock) {
+      return { success: false, message: "WhatsApp bot is not connected." };
+    }
+
+    try {
+      let jid = target;
+      if (!jid.includes("@")) {
+        let cleanPhone = target.replace(/[\s\-\(\)\+]/g, "").trim();
+        if (cleanPhone.length === 10) cleanPhone = `91${cleanPhone}`;
+        jid = `${cleanPhone}@s.whatsapp.net`;
+      }
+
+      await humanBotFirewallService.simulateWhatsAppPhotoDelays(this.sock, jid, caption);
+
+      const sendOptions: any = {};
+      if (messageKey) {
+        if (messageKey.message) {
+          sendOptions.quoted = messageKey;
+        } else {
+          const cleanKey = messageKey.key || messageKey;
+          sendOptions.quoted = {
+            key: cleanKey,
+            message: { conversation: caption || "[Video]" },
+          };
+        }
+      }
+
+      const videoPayload = typeof videoSource === "string" ? { url: videoSource } : videoSource;
+      let sendRes: any = null;
+      try {
+        sendRes = await this.sock.sendMessage(
+          jid,
+          { video: videoPayload, caption: caption || "", gifPlayback },
+          sendOptions
+        );
+      } catch {
+        sendRes = await this.sock.sendMessage(jid, { video: videoPayload, caption: caption || "", gifPlayback });
+      }
+
+      if (sendRes?.key?.id) {
+        this.botSentMessageIds.add(sendRes.key.id);
+      }
+
+      const recipientKey = jid.replace(/@.*$/, "");
+      humanBotFirewallService.recordDispatchedMessage("whatsapp", recipientKey);
+      return { success: true, message: `Video successfully delivered to ${jid}!` };
+    } catch (e: any) {
+      return { success: false, message: `Failed to send video: ${e?.message || e}` };
     }
   }
 
