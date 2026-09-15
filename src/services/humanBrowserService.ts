@@ -578,27 +578,42 @@ User Search Query: "${cleanQuery}"
 Live Web Context / Snippets:
 ${combinedSnippets || "Perform live knowledge retrieval for this query."}
 
-Format Structure (Strictly Follow Real Chrome AI Mode):
+Format Structure (Strictly Follow Real Chrome AI Mode with Dividers & Store Links):
 1. [Overview Paragraph]: 1-2 introductory sentences setting the context with Indian market awareness (e.g. curated for popular trends in India, ₹ INR price range, key overview).
-2. [Structured Sections & Cards]:
+2. [Structured Sections & Cards with Dividing Lines]:
    - If ranking / products / shopping (e.g. "top 10 men shirt price", "best phones under 20k"):
-     Organize into 2-3 logical categories (e.g. *Formal & Semi-Formal Shirts*, *Casual & Everyday Wear*, *Smart-Casual Polo Shirts*).
-     Under each category, format each item like this:
-     • *[Brand & Full Model Name]* — *₹[Price in INR]* (⭐ [Rating] • [Platform/Brand])
-       - *Best For:* [Specific occasion/use-case]
-       - *Key Features:* [Fabric, fit, key specs]
+     Organize into 2-3 logical categories (e.g. *👔 Formal & Semi-Formal Shirts*, *👕 Casual & Everyday Wear*, *🎽 Smart-Casual Polo Shirts*).
+     Under each category, format each item cleanly with a clear dividing line after every item:
+
+     *1. [Brand & Full Model Name]* — *₹[Price in INR]* (⭐ [Rating] • [Platform e.g. Amazon / Myntra / Flipkart])
+     🔗 *Buy Now:* https://www.amazon.in/s?k=[URL_ENCODED_PRODUCT_NAME] (or Flipkart/Myntra link)
+     • *Best For:* [Specific occasion/use-case]
+     • *Key Features:* [Fabric, fit, key specs]
+     ──────────────────────
+
+     *2. [Next Brand & Product Name]* — *₹[Price in INR]* (⭐ [Rating] • [Platform])
+     🔗 *Buy Now:* https://www.myntra.com/...
+     • *Best For:* [Specific occasion/use-case]
+     • *Key Features:* [Fabric, fit, key specs]
+     ──────────────────────
+
    - If entity / direct fact (e.g. "prime minister of india", "capital of japan"):
      🏛️ *[Direct Answer]*: *[Entity Name]*
+     ──────────────────────
      [1-2 clean, factual paragraphs explaining background, dates, and significance].
+     🔗 *Official / Source Link:* https://en.wikipedia.org/wiki/[Entity_Name]
+     ──────────────────────
    - If how-to / procedural:
-     Clear numbered step-by-step guidance.
+     Clear numbered step-by-step guidance with dividing lines between key steps.
 3. [Closing Proactive Prompt]:
    "_Are you looking for options for a specific occasion, fabric/spec, brand, or budget?_"
 
 CRITICAL RULES:
+- ALWAYS insert a clean dividing line (──────────────────────) after every single product card so each product is visually separated and super easy to read!
+- Include genuine, working 1-click buy links (Amazon.in / Flipkart / Myntra) for every single product so users can tap and buy directly.
 - Use genuine Indian brands and realistic ₹ INR prices.
 - Never output raw HTML entities like &#x27; or &amp;. Output clean readable English/Hinglish.
-- Do NOT use markdown tables or json blocks. Use standard WhatsApp-friendly bold asterisks and bullet points.`;
+- Do NOT use markdown tables or json blocks. Use standard WhatsApp-friendly bold asterisks, bullet points, and full clickable https:// URLs.`;
 
         for (const model of ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-2.5-flash"]) {
           try {
