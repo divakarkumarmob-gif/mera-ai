@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { X, Mic, Plus, Loader2, Settings, ChevronDown, ChevronLeft, ChevronRight, Captions, MessageSquare, Square, Code2, Terminal, Shield, ShieldCheck, Trash2, Key, Check, AlertCircle, Send, Instagram, Download, Radio, Music, Sparkles, Sliders, Volume2, Bot, Layers, Cpu, Phone } from 'lucide-react';
+import { X, Mic, Plus, Loader2, Settings, ChevronDown, ChevronLeft, ChevronRight, Captions, MessageSquare, Square, Code2, Terminal, Shield, ShieldCheck, Trash2, Key, Check, AlertCircle, Send, Instagram, Download, Radio, Music, Sparkles, Sliders, Volume2, Bot, Layers, Cpu, Phone, Eye, EyeOff, Copy, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import AgentFace from './AgentFace';
 import ChatHistoryModal from './ChatHistoryModal';
@@ -527,7 +527,7 @@ function TelegramBotCard() {
     );
 }
 
-// ── Instagram Direct Bot Card (.env Configuration Based) ──────────────────────
+// ── Instagram Direct Bot Card (Direct Session ID & Automation Controls) ───────
 function InstagramBotCard() {
     const [status, setStatus] = useState<{
         isLoggedIn: boolean;
@@ -541,19 +541,19 @@ function InstagramBotCard() {
         isEnvConfigured?: boolean;
     } | null>(null);
 
+    const [sessionIdInput, setSessionIdInput] = useState('');
+    const [showPassword, setShowPassword] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [showHelp, setShowHelp] = useState(false);
+    const [showChangeSession, setShowChangeSession] = useState(false);
+    const [feedback, setFeedback] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
 
     const fetchStatus = async () => {
-        setIsLoading(true);
         try {
             const r = await fetch('/api/instagram/status');
             const d = await r.json();
             setStatus(d);
         } catch {}
-        finally {
-            setIsLoading(false);
-        }
     };
 
     useEffect(() => {
@@ -562,12 +562,66 @@ function InstagramBotCard() {
         return () => clearInterval(interval);
     }, []);
 
+    const handleConnectSessionId = async (e?: React.FormEvent) => {
+        if (e) e.preventDefault();
+        const cleanSession = sessionIdInput.trim();
+        if (!cleanSession) {
+            setFeedback({ type: 'error', message: 'Kripya valid Instagram Session ID enter karein.' });
+            return;
+        }
+
+        setIsLoading(true);
+        setFeedback({ type: 'info', message: 'Instagram session connect ho raha hai (Stealth & Proxy active)...' });
+
+        try {
+            const res = await fetch('/api/instagram/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sessionId: cleanSession }),
+            });
+            const data = await res.json();
+
+            if (data.ok || data.success) {
+                setFeedback({
+                    type: 'success',
+                    message: data.message || `Connected successfully as @${data.username || 'user'}!`,
+                });
+                setSessionIdInput('');
+                setShowChangeSession(false);
+                await fetchStatus();
+            } else {
+                setFeedback({
+                    type: 'error',
+                    message: data.error || data.message || 'Session ID login failed. Kripya check karein ki sessionid expired to nahi hai.',
+                });
+            }
+        } catch (err: any) {
+            setFeedback({ type: 'error', message: err?.message || 'Server error while connecting Instagram.' });
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handlePasteClipboard = async () => {
+        try {
+            const text = await navigator.clipboard.readText();
+            if (text) {
+                setSessionIdInput(text.trim());
+                setFeedback({ type: 'info', message: 'Clipboard se Session ID paste ho gayi!' });
+            }
+        } catch {
+            setFeedback({ type: 'error', message: 'Clipboard access permission deny hui. Manually paste karein.' });
+        }
+    };
+
     const handleLogout = async () => {
         if (!confirm('Instagram bot session clear karna chahte hain?')) return;
         setIsLoading(true);
+        setFeedback(null);
         try {
             await fetch('/api/instagram/logout', { method: 'POST' });
-            fetchStatus();
+            await fetchStatus();
+            setFeedback({ type: 'info', message: 'Instagram session disconnect ho gaya.' });
         } catch {}
         finally {
             setIsLoading(false);
@@ -590,14 +644,15 @@ function InstagramBotCard() {
 
     return (
         <div className="pt-3 border-t border-white/10 flex flex-col gap-2.5">
+            {/* Header */}
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-lg bg-gradient-to-tr from-yellow-500 via-pink-500 to-purple-600 flex items-center justify-center shadow-[0_0_10px_rgba(236,72,153,0.3)]">
-                        <Instagram className="w-3.5 h-3.5 text-white" />
+                    <div className="w-7 h-7 rounded-xl bg-gradient-to-tr from-amber-500 via-pink-500 to-purple-600 flex items-center justify-center shadow-[0_0_12px_rgba(236,72,153,0.35)]">
+                        <Instagram className="w-4 h-4 text-white" />
                     </div>
                     <div>
                         <span className="text-white font-bold text-sm block">Instagram Direct Bot</span>
-                        <span className="text-[10px] text-slate-400">.env Auto-Login & AI Auto-Reply</span>
+                        <span className="text-[10px] text-pink-300/80">AI Stealth Auto-Reply & DM Automation</span>
                     </div>
                 </div>
                 <span
@@ -608,105 +663,256 @@ function InstagramBotCard() {
                     }`}
                 >
                     <span className={`w-1.5 h-1.5 rounded-full ${status?.isLoggedIn ? 'bg-pink-400 animate-pulse' : 'bg-slate-500'}`} />
-                    {status?.isLoggedIn ? 'Active' : 'Offline'}
+                    {status?.isLoggedIn ? 'Connected' : 'Offline'}
                 </span>
             </div>
 
-            {/* Logged in view */}
+            {/* Feedback Alert */}
+            {feedback && (
+                <div
+                    className={`p-2.5 rounded-xl text-[11px] leading-relaxed flex items-start gap-2 ${
+                        feedback.type === 'success'
+                            ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-300'
+                            : feedback.type === 'error'
+                            ? 'bg-rose-500/15 border border-rose-500/30 text-rose-300'
+                            : 'bg-cyan-500/15 border border-cyan-500/30 text-cyan-300'
+                    }`}
+                >
+                    {feedback.type === 'success' ? (
+                        <Check className="w-4 h-4 shrink-0 mt-0.5 text-emerald-400" />
+                    ) : feedback.type === 'error' ? (
+                        <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
+                    ) : (
+                        <Sparkles className="w-4 h-4 shrink-0 mt-0.5 text-cyan-400" />
+                    )}
+                    <span className="flex-1">{feedback.message}</span>
+                </div>
+            )}
+
+            {/* Logged in View */}
             {status?.isLoggedIn ? (
-                <div className="p-3 rounded-2xl bg-gradient-to-r from-pink-950/40 to-purple-950/30 border border-pink-500/30 flex flex-col gap-2.5 text-xs text-pink-200">
+                <div className="p-3.5 rounded-2xl bg-gradient-to-br from-pink-950/40 via-purple-950/30 to-slate-950/60 border border-pink-500/30 flex flex-col gap-3 text-xs">
+                    {/* User Profile bar */}
                     <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2.5 min-w-0">
                             {status.profilePicUrl ? (
-                                <img src={status.profilePicUrl} alt="" className="w-7 h-7 rounded-full border border-pink-400/50 object-cover" />
+                                <img src={status.profilePicUrl} alt="" className="w-8 h-8 rounded-full border-2 border-pink-400/60 object-cover shrink-0 shadow-md" />
                             ) : (
-                                <div className="w-7 h-7 rounded-full bg-pink-500/20 text-pink-300 flex items-center justify-center font-bold text-xs">
+                                <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-pink-500 to-purple-600 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-md">
                                     IG
                                 </div>
                             )}
-                            <div>
-                                <span className="font-bold text-white block">@{status.username}</span>
-                                <span className="text-[10px] text-pink-300/80">{status.fullName || 'Logged in'}</span>
+                            <div className="min-w-0">
+                                <div className="flex items-center gap-1.5">
+                                    <span className="font-bold text-white text-xs truncate">@{status.username}</span>
+                                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-pink-500/20 text-pink-300 border border-pink-500/30 font-semibold">
+                                        Active
+                                    </span>
+                                </div>
+                                <span className="text-[10px] text-slate-400 block truncate">{status.fullName || 'Instagram Account'}</span>
                             </div>
                         </div>
-                        <button
-                            onClick={handleLogout}
-                            disabled={isLoading}
-                            className="px-2 py-1 rounded-lg bg-slate-900/80 hover:bg-red-950/80 text-slate-400 hover:text-red-300 border border-white/10 hover:border-red-500/30 text-[10px] transition-colors"
-                        >
-                            Disconnect
-                        </button>
+
+                        <div className="flex items-center gap-1.5">
+                            <button
+                                onClick={() => setShowChangeSession(!showChangeSession)}
+                                className="px-2 py-1 rounded-lg bg-pink-500/15 hover:bg-pink-500/25 text-pink-300 border border-pink-500/30 text-[10px] font-semibold transition-colors cursor-pointer"
+                            >
+                                {showChangeSession ? 'Close Input' : 'Update Session'}
+                            </button>
+                            <button
+                                onClick={handleLogout}
+                                disabled={isLoading}
+                                className="px-2 py-1 rounded-lg bg-slate-900/80 hover:bg-red-950/80 text-slate-400 hover:text-red-300 border border-white/10 hover:border-red-500/30 text-[10px] transition-colors cursor-pointer"
+                            >
+                                Disconnect
+                            </button>
+                        </div>
                     </div>
 
-                    <div className="flex items-center justify-between pt-1.5 border-t border-pink-500/20 text-[11px]">
+                    {/* Anti-Detect & AI Status Badges */}
+                    <div className="grid grid-cols-2 gap-1.5 pt-1 text-[10px]">
+                        <div className="p-2 rounded-xl bg-slate-900/80 border border-emerald-500/20 text-emerald-300 flex items-center gap-1.5">
+                            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                            <span>Stealth Proxy Active (IN)</span>
+                        </div>
+                        <div className="p-2 rounded-xl bg-slate-900/80 border border-purple-500/20 text-purple-300 flex items-center gap-1.5">
+                            <Sparkles className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                            <span>Gemini 3.5 Auto-Reply</span>
+                        </div>
+                    </div>
+
+                    {/* Auto Reply Toggle */}
+                    <div className="flex items-center justify-between pt-2 border-t border-pink-500/20 text-[11px]">
                         <span className="text-slate-300">
-                            AI Auto-Reply DMs: <b>{status.autoReplyEnabled ? '🟢 ON' : '⚪ OFF'}</b>
+                            AI DM Auto-Reply: <b>{status.autoReplyEnabled ? '🟢 ENABLED' : '⚪ DISABLED'}</b>
                         </span>
                         <button
                             onClick={handleToggleAutoReply}
-                            className="px-2 py-0.5 rounded-md bg-pink-500/20 hover:bg-pink-500/30 text-pink-300 font-medium text-[10px] border border-pink-500/40 transition-colors"
+                            className={`px-3 py-1 rounded-lg font-semibold text-[10px] border transition-all cursor-pointer ${
+                                status.autoReplyEnabled
+                                    ? 'bg-pink-500/20 hover:bg-pink-500/30 text-pink-300 border-pink-500/40'
+                                    : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-white/10'
+                            }`}
                         >
-                            {status.autoReplyEnabled ? 'Disable' : 'Enable'}
+                            {status.autoReplyEnabled ? 'Turn OFF' : 'Turn ON'}
                         </button>
                     </div>
+
+                    {/* Expandable Session ID Update Form */}
+                    {showChangeSession && (
+                        <form onSubmit={handleConnectSessionId} className="pt-2 border-t border-pink-500/20 flex flex-col gap-2">
+                            <label className="text-[11px] font-semibold text-pink-200 flex items-center gap-1.5">
+                                <Key className="w-3.5 h-3.5 text-pink-400" />
+                                <span>New Instagram Session ID Paste Karein:</span>
+                            </label>
+                            <div className="relative flex items-center">
+                                <input
+                                    type={showPassword ? 'text' : 'password'}
+                                    value={sessionIdInput}
+                                    onChange={(e) => setSessionIdInput(e.target.value)}
+                                    placeholder="23812741077%3AXc1j4bpmXzppjl%3A..."
+                                    className="w-full py-2 pl-3 pr-20 rounded-xl bg-slate-950 border border-pink-500/30 focus:border-pink-400 focus:outline-none text-white text-xs font-mono placeholder:text-slate-600 transition-colors"
+                                />
+                                <div className="absolute right-1.5 flex items-center gap-1">
+                                    <button
+                                        type="button"
+                                        onClick={handlePasteClipboard}
+                                        className="p-1 rounded-md text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 text-[10px] px-1.5 font-sans"
+                                        title="Paste from clipboard"
+                                    >
+                                        Paste
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowPassword(!showPassword)}
+                                        className="p-1 text-slate-400 hover:text-white"
+                                        title={showPassword ? 'Hide' : 'Show'}
+                                    >
+                                        {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="flex gap-2">
+                                <button
+                                    type="submit"
+                                    disabled={isLoading || !sessionIdInput.trim()}
+                                    className="flex-1 py-1.5 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                                >
+                                    {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                                    <span>{isLoading ? 'Updating...' : 'Save & Update'}</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowChangeSession(false)}
+                                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                            </div>
+                        </form>
+                    )}
                 </div>
             ) : (
-                /* Logged out / .env instruction view */
-                <div className="p-3 rounded-2xl bg-slate-950/80 border border-white/10 flex flex-col gap-2.5 text-xs">
-                    {/* Error Banner if connection failed */}
+                /* Logged out: Direct Session ID Input Form */
+                <div className="p-3.5 rounded-2xl bg-gradient-to-br from-slate-950 via-slate-900/90 to-purple-950/30 border border-white/10 flex flex-col gap-3 text-xs">
+                    {/* Error Banner if connection failed previously */}
                     {status?.lastError && (
-                        <div className="p-2.5 rounded-xl bg-red-950/50 border border-red-500/40 text-red-300 text-[11px] leading-relaxed flex flex-col gap-1">
-                            <span className="font-semibold text-red-200 flex items-center gap-1.5">
-                                ⚠️ Instagram Connection Notice:
-                            </span>
-                            <span>{status.lastError}</span>
+                        <div className="p-2.5 rounded-xl bg-rose-950/40 border border-rose-500/30 text-rose-300 text-[11px] leading-relaxed flex items-start gap-2">
+                            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
+                            <div className="flex-1">
+                                <span className="font-semibold block text-rose-200">Last Status Notice:</span>
+                                <span className="break-words">{status.lastError}</span>
+                            </div>
                         </div>
                     )}
 
-                    <div className="flex flex-col gap-1.5">
-                        <span className="font-semibold text-white text-[11px]">
-                            ⚙️ .env File Me Configure Karein:
-                        </span>
-                        <p className="text-[11px] text-slate-400 leading-relaxed">
-                            Instagram bot connect karne ke liye project ki <b>.env</b> file me <b>INSTAGRAM_SESSION_ID</b> (Recommended) ya <b>INSTAGRAM_USERNAME & INSTAGRAM_PASSWORD</b> set karein.
-                        </p>
-                    </div>
-
-                    {/* .env Syntax Snippet Box */}
-                    <div className="p-2.5 rounded-xl bg-slate-900/90 border border-purple-500/30 font-mono text-[10px] text-purple-200 space-y-1">
-                        <span className="text-slate-400 block font-sans text-[10px]"># Recommended (.env me paste karein):</span>
-                        <p className="text-emerald-300 font-bold break-all">INSTAGRAM_SESSION_ID="your_sessionid_cookie"</p>
-                        <span className="text-slate-400 block font-sans text-[10px] pt-1"># Ya direct credentials:</span>
-                        <p className="text-slate-300">INSTAGRAM_USERNAME="your_username"</p>
-                        <p className="text-slate-300">INSTAGRAM_PASSWORD="your_password"</p>
-                    </div>
-
-                    {/* Help dropdown toggle */}
-                    <button
-                        type="button"
-                        onClick={() => setShowHelp(!showHelp)}
-                        className="text-[10px] text-pink-400 hover:underline text-left self-start"
-                    >
-                        {showHelp ? '▲ Hide Help' : 'ℹ️ Session ID kaise milegi? (Click here)'}
-                    </button>
-
-                    {showHelp && (
-                        <div className="p-2 rounded-xl bg-slate-900 border border-white/5 text-[10px] text-slate-300 space-y-1">
-                            <p>1. Chrome/Edge me <b>instagram.com</b> open karke login karein.</p>
-                            <p>2. <b>F12</b> dabayein ya Right-click &rarr; <b>Inspect</b> karein.</p>
-                            <p>3. <b>Application</b> tab &rarr; <b>Cookies</b> &rarr; <b>https://www.instagram.com</b> par jaayein.</p>
-                            <p>4. <b>sessionid</b> cookie ki value copy karein aur <code>.env</code> me <code>INSTAGRAM_SESSION_ID="..."</code> set kar dein.</p>
+                    {/* Session ID Form */}
+                    <form onSubmit={handleConnectSessionId} className="flex flex-col gap-2.5">
+                        <div className="flex items-center justify-between">
+                            <label className="text-[11px] font-bold text-white flex items-center gap-1.5">
+                                <Key className="w-3.5 h-3.5 text-pink-400" />
+                                <span>Instagram Session ID:</span>
+                            </label>
+                            <button
+                                type="button"
+                                onClick={handlePasteClipboard}
+                                className="px-2 py-0.5 rounded-lg bg-pink-500/15 hover:bg-pink-500/25 text-pink-300 border border-pink-500/30 text-[10px] font-semibold transition-colors flex items-center gap-1 cursor-pointer"
+                            >
+                                <Copy className="w-3 h-3" />
+                                <span>Paste Cookie</span>
+                            </button>
                         </div>
-                    )}
 
+                        {/* Input Box with Show/Hide & Clear */}
+                        <div className="relative flex items-center">
+                            <input
+                                type={showPassword ? 'text' : 'password'}
+                                value={sessionIdInput}
+                                onChange={(e) => setSessionIdInput(e.target.value)}
+                                placeholder="e.g. 23812741077%3AXc1j4bpmXzppjl%3A2%3AAYnmp..."
+                                className="w-full py-2.5 pl-3.5 pr-10 rounded-xl bg-slate-950/90 border border-slate-700/80 focus:border-pink-500 focus:ring-1 focus:ring-pink-500/50 focus:outline-none text-white text-xs font-mono placeholder:text-slate-600 transition-all shadow-inner"
+                            />
+                            <button
+                                type="button"
+                                onClick={() => setShowPassword(!showPassword)}
+                                className="absolute right-3 p-1 text-slate-400 hover:text-white transition-colors"
+                                title={showPassword ? 'Hide Session ID' : 'Show Session ID'}
+                            >
+                                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                            </button>
+                        </div>
+
+                        {/* Connect Button */}
+                        <button
+                            type="submit"
+                            disabled={isLoading || !sessionIdInput.trim()}
+                            className="w-full py-2.5 rounded-xl bg-gradient-to-r from-pink-600 via-rose-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white font-bold text-xs shadow-lg shadow-pink-500/20 transition-all flex items-center justify-center gap-2 active:scale-98 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                        >
+                            {isLoading ? (
+                                <>
+                                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                                    <span>Connecting Instagram Session...</span>
+                                </>
+                            ) : (
+                                <>
+                                    <Instagram className="w-4 h-4 text-white" />
+                                    <span>Connect Instagram ID</span>
+                                </>
+                            )}
+                        </button>
+                    </form>
+
+                    {/* Step-by-step Help Accordion */}
+                    <div className="pt-2 border-t border-white/5 flex flex-col gap-1.5">
+                        <button
+                            type="button"
+                            onClick={() => setShowHelp(!showHelp)}
+                            className="text-[11px] text-pink-400 hover:text-pink-300 font-semibold text-left flex items-center justify-between cursor-pointer"
+                        >
+                            <span>ℹ️ Session ID kaise milegi? (Click here)</span>
+                            <span className="text-[10px]">{showHelp ? '▲ Hide' : '▼ View Steps'}</span>
+                        </button>
+
+                        {showHelp && (
+                            <div className="p-3 rounded-xl bg-slate-950/90 border border-purple-500/20 text-[11px] text-slate-300 space-y-1.5 leading-relaxed">
+                                <p>1. Computer/Phone browser me <b>instagram.com</b> open karke login karein.</p>
+                                <p>2. Keyboard par <b>F12</b> dabayein ya Right-click &rarr; <b>Inspect</b> karein.</p>
+                                <p>3. <b>Application</b> tab par jaayein &rarr; Left menu me <b>Cookies</b> &rarr; <b>https://www.instagram.com</b> select karein.</p>
+                                <p>4. <b>sessionid</b> naam ki cookie ki value copy karein aur upar wale box me paste karke <b>Connect Instagram ID</b> dabayein.</p>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Refresh Status button */}
                     <button
                         type="button"
                         onClick={fetchStatus}
                         disabled={isLoading}
-                        className="w-full py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs border border-white/10 transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                        className="w-full py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 font-medium text-[11px] border border-white/5 transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
                     >
-                        <Loader2 className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-                        <span>{isLoading ? 'Checking Connection...' : '🔄 Refresh Status'}</span>
+                        <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin' : ''}`} />
+                        <span>Check Status</span>
                     </button>
                 </div>
             )}
