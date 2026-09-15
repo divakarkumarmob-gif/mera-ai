@@ -349,11 +349,11 @@ class WhatsAppBotService {
       const rel = (contact.relation || "").toLowerCase().trim();
       const name = (contact.name || "").toLowerCase().trim();
       if (rel === "owner" || rel === "boss" || rel === "self") return true;
-      if (name === "dk" || name === "boss" || name === "dk (boss)" || name.includes("divakar")) return true;
+      if (name === "dk" || name === "boss" || name === "dk (boss)" || name.includes("divakar") || name.includes("shiva")) return true;
     }
 
     const lowerDisplay = (senderDisplayName || "").toLowerCase().trim();
-    if (lowerDisplay === "dk (boss)" || lowerDisplay === "divakar kumar (boss)" || lowerDisplay === "boss") {
+    if (lowerDisplay === "dk (boss)" || lowerDisplay === "divakar kumar (boss)" || lowerDisplay === "boss" || lowerDisplay.includes("divakar") || lowerDisplay === "shiva") {
       return true;
     }
 

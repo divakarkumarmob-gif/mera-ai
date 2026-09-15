@@ -28,7 +28,10 @@ export interface TruthAuditResult {
 
 class TruthVerificationCheckerEngine {
   private readonly TRUTH_CHALLENGE_PATTERNS = [
-    /\b(?:tum\s+(?:jhoot|jhooth|jhuth|lie|galat)\s*bol\s*rahe|jhoot\s*bol\s*rahi|jhoot\s*hai|jhooth\s*hai)\b/i,
+    /\b(?:tum\s+(?:jhoot|jhooth|jhuth|lie|galat|fake)\s*bol\s*rahe|jhoot\s*bol\s*rahi|jhoot\s*hai|jhooth\s*hai|jhuth\s*hai)\b/i,
+    /\b(?:fake\s*(?:h|hai|baat|data|msg|message|log|record|wala)?|sikha\s*fake|ye\s*fake\s*hai|bilkul\s*fake)\b/i,
+    /\b(?:kahan\s*se\s*data|kahan\s*se\s*mila|kahan\s*se\s*aaya|kahan\s*se\s*laaye|kahan\s*hai|kahan)\b/i,
+    /\b(?:proof\s*do|source\s*(?:kya|batao)|kaise\s*pata|kisne\s*kaha|kahan\s*likha\s*hai)\b/i,
     /\b(?:kya\s+ye\s+sach\s+hai|sach\s+hai\s+kya|pakka\s+sach\s+hai|sach\s+hai\s+na|really\s+true)\b/i,
     /\b(?:recheck\s*karo|dubara\s*(?:check|dekh|verify)\s*karo|phir\s*se\s*check\s*karo|cross\s*check)\b/i,
     /\b(?:chal\s*jhoothi|jhoothi|jhootha|sach\s*batao|sach\s*kaho|sach\s*sach\s*bolo)\b/i,
@@ -64,6 +67,15 @@ class TruthVerificationCheckerEngine {
     const facts = await unifiedMemoryService.listAllFacts();
     const verifiedFactsSummary = facts.slice(0, 25).map((f, i) => `${i + 1}. [${f.category}] ${f.fact}`).join("\n");
 
+    let whatsappSearchEvidence = "No relevant WhatsApp message records found.";
+    try {
+      const { whatsappHistoryEngine } = await import("./whatsapp/whatsappHistoryEngine");
+      const searchRes = await whatsappHistoryEngine.searchWhatsAppHistory(userInput, { limit: 10, daysBack: 30 });
+      if (searchRes.results && searchRes.results.length > 0) {
+        whatsappSearchEvidence = searchRes.results.map((m) => `• [${m.dateStr}] ${m.senderName} (+${m.senderPhone}): "${m.text}"`).join("\n");
+      }
+    } catch {}
+
     const auditPrompt = `You are the Independent Adversarial Truth & Fact-Checking Sentinel for Friday (AI Assistant to Boss DK).
 
 BOSS QUESTION / TRUTH CHALLENGE:
@@ -75,28 +87,31 @@ LAST FRIDAY STATEMENT / PREVIOUS REPLY:
 RECENT CONVERSATION CONTEXT:
 ${recentContext}
 
+ACTUAL WHATSAPP DATABASE INBOX SEARCH EVIDENCE:
+${whatsappSearchEvidence}
+
 VERIFIED DATABASE MEMORY VAULT FACTS:
 ${verifiedFactsSummary || "No explicit facts saved"}
 
 YOUR MANDATE:
 Perform a ruthless, objective fact-check to determine if Friday's previous statement or the disputed claim is:
-1. "confirmed_true" -> 100% verified, factually correct, supported by evidence/memory.
-2. "corrected_mistake" -> Friday made an inaccurate statement, hallucination, or wrong assumption. You MUST clearly state the exact mistake and the correct truth.
-3. "uncertain_unverified" -> Insufficient data to prove or disprove; Friday must state this honestly without pretending to know.
+1. "confirmed_true" -> 100% verified, factually correct, supported by real evidence in actual WhatsApp inbox or memory vault.
+2. "corrected_mistake" -> Friday made an inaccurate statement, hallucination, made-up message quote, invented timestamp, or wrong claim NOT found in the database. You MUST openly acknowledge the hallucination/mistake and state the real database truth.
+3. "uncertain_unverified" -> Insufficient data in database; Friday must state this honestly without pretending or faking push-bot/notification records.
 
 CRITICAL RULE FOR HINDI/HINGLISH OUTPUT:
-- Be respectful, humble, and loyal to Boss DK.
-- If wrong: Say "Boss, maine dubara cross-verify kiya — meri pehli baat me galti thi..." (No defensive excuses).
-- If true: Say "Boss, maine 3-point cross verification kiya — ye bilkul sach hai..." with evidence.
-- If uncertain: Say "Boss, mere paas iska 100% verified record nahi hai..."
+- Be respectful, humble, and completely honest with Boss DK.
+- If wrong/hallucinated: Say "Boss, maine database aur message logs me dobara check kiya — aisa koi message ya record nahi mila. Pichla statement AI hallucination / mistake tha, I apologize. Reality me database me koi naya message record nahi hai."
+- If true: Demonstrate the real message/evidence.
+- If uncertain: State honestly that no records exist in the database.
 
 Return valid JSON only:
 {
   "verdict": "confirmed_true" | "corrected_mistake" | "uncertain_unverified",
   "confidence": 0.95,
   "originalClaim": "summary of disputed claim",
-  "correctedFactOrEvidence": "the clear verified truth with proof",
-  "explanation": "Friendly, humble Hinglish explanation to Boss DK"
+  "correctedFactOrEvidence": "the clear verified truth with proof or admission of no data",
+  "explanation": "Friendly, humble, 100% honest Hinglish explanation to Boss DK"
 }`;
 
     try {
