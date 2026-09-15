@@ -50,12 +50,26 @@ class InstagramBotService {
   private lastError: string | null = null;
   private activeSessionId: string | null = null;
 
-  // Multi-tier model fallback chain
+  // ── ANTI-DETECTION: Sleep mode queue (12AM-5AM IST) ──
+  // Messages received during sleep are queued and replied after wake-up with natural delays
+  private sleepQueue: Array<{
+    threadId: string;
+    itemId: string;
+    senderName: string;
+    senderUsername: string;
+    senderPk: string;
+    text: string;
+    receivedAt: number;
+  }> = [];
+  private isProcessingWakeQueue = false;
+
+  // Multi-tier model fallback chain (Google GenAI)
   private static readonly MODEL_FALLBACK_CHAIN = [
-    "gemini-3.1-flash-lite",
-    "gemini-3.5-flash-lite",
     "gemini-3.5-flash",
     "gemini-3.6-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
   ];
 
   constructor() {
@@ -515,11 +529,46 @@ class InstagramBotService {
     }, 3500);
   }
 
+  /**
+   * Check if current IST time is in sleep hours (12AM-5AM)
+   */
+  private isSleepHoursIST(): { isSleep: boolean; istHour: number } {
+    const now = new Date();
+    const istHour = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" })).getHours();
+    return { isSleep: istHour >= 0 && istHour < 5, istHour };
+  }
+
   private scheduleNextInboxCheck() {
     if (this.pollInterval) clearTimeout(this.pollInterval);
     if (!this.isLoggedIn) return;
 
     const circadian = humanBotFirewallService.getCircadianDelayMultiplier();
+    const { isSleep, istHour } = this.isSleepHoursIST();
+
+    // ── ANTI-DETECTION: During sleep (12AM-5AM), poll slowly but still collect messages ──
+    if (isSleep) {
+      // Poll every 3-5 minutes during sleep (slow but still catching messages)
+      const sleepPollMs = 180_000 + Math.floor(Math.random() * 120_000); // 3-5 min
+      console.log(`[InstagramBot] 😴 Sleep mode (IST ${istHour}:00): Slow-polling inbox every ${Math.round(sleepPollMs / 60000)}min, replies queued`);
+      this.pollInterval = setTimeout(async () => {
+        try {
+          await this.checkInbox();
+        } catch {}
+        // Check if we just woke up (crossed 5AM)
+        const { isSleep: stillSleeping } = this.isSleepHoursIST();
+        if (!stillSleeping && this.sleepQueue.length > 0) {
+          this.processWakeUpQueue().catch(() => {});
+        }
+        this.scheduleNextInboxCheck();
+      }, sleepPollMs);
+      return;
+    }
+
+    // If we just woke up and have queued messages, process them
+    if (this.sleepQueue.length > 0 && !this.isProcessingWakeQueue) {
+      this.processWakeUpQueue().catch(() => {});
+    }
+
     const baseMs = 18000 + Math.floor(Math.random() * 14000); // 18s - 32s
     const actualDelay = Math.round(baseMs * circadian.multiplier);
 
@@ -529,6 +578,74 @@ class InstagramBotService {
       } catch {}
       this.scheduleNextInboxCheck();
     }, actualDelay);
+  }
+
+  /**
+   * Wake-Up Queue Processor:
+   * When bot wakes up at 5AM, processes queued messages one by one with
+   * natural morning reading + typing delays (like checking phone after waking up)
+   */
+  private async processWakeUpQueue(): Promise<void> {
+    if (this.isProcessingWakeQueue || this.sleepQueue.length === 0) return;
+    this.isProcessingWakeQueue = true;
+
+    console.log(`[InstagramBot] ☀️ Good morning! Processing ${this.sleepQueue.length} queued messages from sleep...`);
+
+    // Initial wake-up delay: 30s-2min (like picking up phone, unlocking, opening app)
+    const wakeUpDelay = 30_000 + Math.floor(Math.random() * 90_000);
+    console.log(`[InstagramBot] 📱 Wake-up delay: ${Math.round(wakeUpDelay / 1000)}s (opening app...)`);
+    await new Promise((r) => setTimeout(r, wakeUpDelay));
+
+    const queue = [...this.sleepQueue];
+    this.sleepQueue = [];
+
+    for (let i = 0; i < queue.length; i++) {
+      const msg = queue[i];
+      const recipientKey = msg.senderUsername || msg.senderPk;
+
+      try {
+        const firewallCheck = humanBotFirewallService.canSendAutoReply("instagram", recipientKey);
+        if (!firewallCheck.allowed) {
+          console.log(`[InstagramBot] Wake-queue: Skipping @${msg.senderUsername} (rate-limited)`);
+          continue;
+        }
+
+        // Natural gap between reading different conversations (30-60s delay rule)
+        if (i > 0) {
+          const betweenChatDelay = (30 + Math.floor(Math.random() * 31)) * 1000; // 30-60s
+          console.log(`[InstagramBot] ⏳ Anti-Spam Gap: Waiting ${Math.round(betweenChatDelay / 1000)}s before next DM (30-60s rule)...`);
+          await new Promise((r) => setTimeout(r, betweenChatDelay));
+        }
+
+        console.log(`[InstagramBot] ☀️ Wake-reply ${i + 1}/${queue.length}: @${msg.senderUsername}: "${msg.text.substring(0, 40)}..."`);
+        const reply = await this.generateSmartAutoReply(msg.senderName, msg.text);
+
+        // Simulate reading the message + typing reply (full human simulation)
+        const igBridgeSeen = {
+          markSeen: async (t: string, itemId: string) => {
+            await this.bridgeCall("/mark-seen", "POST", { threadId: t, itemId }).catch(() => {});
+          },
+        };
+        await humanBotFirewallService.simulateInstagramHumanTyping(
+          igBridgeSeen, msg.threadId, msg.itemId, msg.text, reply
+        );
+
+        await this.bridgeCall("/send-message", "POST", {
+          threadId: msg.threadId,
+          message: humanBotFirewallService.injectAntiHashZeroWidthEntropy(
+            humanBotFirewallService.dynamicMessageVariation(reply)
+          ),
+        });
+
+        humanBotFirewallService.recordDispatchedMessage("instagram", recipientKey);
+        console.log(`[InstagramBot] ☀️ Wake-reply sent to @${msg.senderUsername}: "${reply.substring(0, 50)}..."`);
+      } catch (err: any) {
+        console.warn(`[InstagramBot] Wake-queue reply failed for @${msg.senderUsername}:`, err?.message || err);
+      }
+    }
+
+    this.isProcessingWakeQueue = false;
+    console.log(`[InstagramBot] ☀️ Wake-up queue processing complete!`);
   }
 
   /**
@@ -588,6 +705,23 @@ class InstagramBotService {
         // Auto-reply if enabled
         if (this.autoReplyEnabled) {
           const recipientKey = senderUsername || senderPk;
+
+          // ── ANTI-DETECTION: During sleep hours (12AM-5AM IST), queue message for morning reply ──
+          const { isSleep } = this.isSleepHoursIST();
+          if (isSleep) {
+            this.sleepQueue.push({
+              threadId: thread.thread_id,
+              itemId,
+              senderName,
+              senderUsername,
+              senderPk,
+              text,
+              receivedAt: Date.now(),
+            });
+            console.log(`[InstagramBot] 😴 Sleep mode: Queued message from @${senderUsername} for morning reply (queue: ${this.sleepQueue.length})`);
+            continue; // Don't reply now, will reply after wake-up
+          }
+
           const firewallCheck = humanBotFirewallService.canSendAutoReply("instagram", recipientKey);
 
           if (!firewallCheck.allowed) {
@@ -605,9 +739,13 @@ class InstagramBotService {
               };
               await humanBotFirewallService.simulateInstagramHumanTyping(igBridgeSeen, thread.thread_id, itemId, text, reply);
 
+              // ── ANTI-SPAM: Dynamic message variation + zero-width entropy (double-layer) ──
+              const variedReply = humanBotFirewallService.dynamicMessageVariation(reply);
+              const finalReply = humanBotFirewallService.injectAntiHashZeroWidthEntropy(variedReply);
+
               await this.bridgeCall("/send-message", "POST", {
                 threadId: thread.thread_id,
-                message: reply,
+                message: finalReply,
               });
 
               humanBotFirewallService.recordDispatchedMessage("instagram", recipientKey);
@@ -622,6 +760,10 @@ class InstagramBotService {
       if (e?.message?.includes("login_required") || e?.message?.includes("Not logged in")) {
         console.warn("[InstagramBot] Session expired during inbox check. Marking logged out.");
         this.isLoggedIn = false;
+      }
+      // Silently handle sleep mode / budget exhaustion from bridge
+      if (e?.message?.includes("Sleep mode") || e?.message?.includes("budget exhausted")) {
+        console.log(`[InstagramBot] 🌙 Bridge stealth gate active: ${e.message}`);
       }
     }
   }
@@ -649,9 +791,13 @@ class InstagramBotService {
       const typingDelay = humanBotFirewallService.calculateDynamicTypingDelay(message);
       await new Promise((resolve) => setTimeout(resolve, Math.min(typingDelay, 4000)));
 
+      // ── ANTI-SPAM: Dynamic text variation + zero-width anti-hash entropy ──
+      const variedMessage = humanBotFirewallService.dynamicMessageVariation(message);
+      const finalMessage = humanBotFirewallService.injectAntiHashZeroWidthEntropy(variedMessage);
+
       const res = await this.bridgeCall("/send-message", "POST", {
         recipient: cleanTarget,
-        message,
+        message: finalMessage,
       });
 
       if (res.ok) {
@@ -782,15 +928,64 @@ INSTRUCTIONS:
     return `Haanji ${senderName}! Main Friday hoon — DK Boss abhi busy hain, maine aapka DM note kar liya hai 👍`;
   }
 
+  // ── ANTI-DETECTION: Search cooldown & cache tracking ──
+  private searchCooldownMs = 8000; // Minimum 8s between consecutive searches
+  private lastSearchTimestamp = 0;
+  private searchCache = new Map<string, { timestamp: number; result: any }>();
+  private readonly SEARCH_CACHE_TTL_MS = 120_000; // 2 minutes
+
+  // Rotating User-Agent pool — Indian Windows Chrome/Edge users only
+  private static readonly UA_POOL = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36 Edg/129.0.0.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 Edg/128.0.0.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+  ];
+
   public async searchUserLive(query: string): Promise<any> {
     const raw = String(query || "").replace(/^@/, "").trim();
     if (!raw) {
       return { success: false, message: "Search query zaroori hai." };
     }
 
+    // ── ANTI-DETECTION: Check cache first ──
+    const cacheKey = raw.toLowerCase();
+    const cached = this.searchCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < this.SEARCH_CACHE_TTL_MS) {
+      console.log(`[InstagramBot] Search cache hit for "${raw}" — skipping API call`);
+      return { ...cached.result, cached: true };
+    }
+
+    // ── ANTI-DETECTION: Enforce minimum cooldown between searches ──
+    const now = Date.now();
+    const elapsed = now - this.lastSearchTimestamp;
+    if (elapsed < this.searchCooldownMs) {
+      const waitMs = this.searchCooldownMs - elapsed + Math.floor(Math.random() * 2000);
+      console.log(`[InstagramBot] Search cooldown: waiting ${waitMs}ms before next search`);
+      await new Promise((r) => setTimeout(r, waitMs));
+    }
+
+    // ── ANTI-DETECTION: Simulate human typing the search query ──
+    await humanBotFirewallService.simulateInstagramSearchTyping(raw);
+    this.lastSearchTimestamp = Date.now();
+
     // 1. Search via Instagrapi bridge if available
     try {
-      const res = await this.bridgeCall(`/search?query=${encodeURIComponent(raw)}`, "GET");
+      const res = await this.bridgeCall(`/search?query=${encodeURIComponent(raw)}`, "GET", undefined, 35000);
+
+      // Handle rate-limiting from bridge
+      if (res?.rateLimited || res?.retryAfterSec) {
+        console.warn(`[InstagramBot] ⚠️ Bridge search rate-limited. Retry after ${res.retryAfterSec || 60}s`);
+        // Don't fall through to web fallback — Instagram already flagged this session
+        return {
+          success: false,
+          query: raw,
+          rateLimited: true,
+          message: `Boss, Instagram ne search temporarily block kar diya hai (automation protection). ${res.retryAfterSec || 60} seconds baad try karein. 🛡️`,
+        };
+      }
+
       if (res && res.ok && Array.isArray(res.users) && res.users.length > 0) {
         const profiles = res.users.slice(0, 8).map((u: any, idx: number) => ({
           rank: idx + 1,
@@ -803,7 +998,7 @@ INSTRUCTIONS:
           profilePicUrl: u.profile_pic_url || null,
         }));
 
-        return {
+        const result = {
           success: true,
           query: raw,
           totalFound: profiles.length,
@@ -811,13 +1006,20 @@ INSTRUCTIONS:
           sourceProvider: "instagrapi_session",
           message: `Instagrapi se "${raw}" ke ${profiles.length} real profiles mil gaye hain.`,
         };
+
+        // Cache the result
+        this.searchCache.set(cacheKey, { timestamp: Date.now(), result });
+        return result;
       }
     } catch (e) {
       console.warn("[InstagramBot] Instagrapi search error:", e);
     }
 
-    // 2. Query Instagram Live Web Topsearch fallback
+    // 2. Query Instagram Live Web Topsearch fallback — with anti-detection
     try {
+      // ── ANTI-DETECTION: Extra delay before web fallback (2-5s) ──
+      await new Promise((r) => setTimeout(r, 2000 + Math.floor(Math.random() * 3000)));
+
       const sessionId = this.getActiveSessionId();
       let dsUserId = "0";
       if (sessionId) {
@@ -827,20 +1029,39 @@ INSTRUCTIONS:
         }
       }
 
+      // ── ANTI-DETECTION: Rotating User-Agent ──
+      const randomUA = InstagramBotService.UA_POOL[Math.floor(Math.random() * InstagramBotService.UA_POOL.length)];
+
       const headers: Record<string, string> = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+        "User-Agent": randomUA,
         "X-IG-App-ID": "936619743392459",
         "Accept": "*/*",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://www.instagram.com/",
+        "Accept-Language": "en-IN,hi;q=0.9,en;q=0.8",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Referer": "https://www.instagram.com/explore/",
+        "X-Requested-With": "XMLHttpRequest",
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin",
       };
 
       if (sessionId) {
         headers["Cookie"] = `sessionid=${sessionId}; ds_user_id=${dsUserId};`;
       }
 
-      const searchUrl = `https://www.instagram.com/api/v1/web/search/topsearch/?context=blended&query=${encodeURIComponent(raw)}&rank_token=${Math.random().toString(36).substring(2, 10)}`;
-      const res = await fetch(searchUrl, { headers });
+      const searchUrl = `https://www.instagram.com/api/v1/web/search/topsearch/?context=blended&query=${encodeURIComponent(raw)}&rank_token=${Math.random().toString(36).substring(2, 10)}&include_reel=false`;
+      const res = await fetch(searchUrl, { headers, signal: AbortSignal.timeout(15000) });
+
+      // ── ANTI-DETECTION: Handle rate-limiting on web API too ──
+      if (res.status === 429) {
+        console.warn("[InstagramBot] ⚠️ Web TopSearch rate-limited (429)");
+        return {
+          success: false,
+          query: raw,
+          rateLimited: true,
+          message: `Boss, Instagram web search bhi rate-limited hai. Thodi der baad try karein. 🛡️`,
+        };
+      }
 
       if (res.ok) {
         const data: any = await res.json();
@@ -860,7 +1081,7 @@ INSTRUCTIONS:
             };
           });
 
-          return {
+          const result = {
             success: true,
             query: raw,
             totalFound: profiles.length,
@@ -868,6 +1089,10 @@ INSTRUCTIONS:
             sourceProvider: "instagram_web_topsearch",
             message: `Instagram se "${raw}" ke ${profiles.length} live profiles search ho gaye hain.`,
           };
+
+          // Cache the result
+          this.searchCache.set(cacheKey, { timestamp: Date.now(), result });
+          return result;
         }
       }
     } catch (webSearchErr: any) {
@@ -915,8 +1140,11 @@ INSTRUCTIONS:
       console.warn("[InstagramBot] Instagrapi getUserInfo notice:", bridgeErr?.message || bridgeErr);
     }
 
-    // 2. Query Web Profile Info API fallback
+    // 2. Query Web Profile Info API fallback — with anti-detection
     try {
+      // ── ANTI-DETECTION: Human delay before web profile fetch (1-3s) ──
+      await new Promise((r) => setTimeout(r, 1000 + Math.floor(Math.random() * 2000)));
+
       const sessionId = this.getActiveSessionId();
       let dsUserId = "0";
       if (sessionId) {
@@ -926,12 +1154,18 @@ INSTRUCTIONS:
         }
       }
 
+      // ── ANTI-DETECTION: Rotating User-Agent ──
+      const randomUA = InstagramBotService.UA_POOL[Math.floor(Math.random() * InstagramBotService.UA_POOL.length)];
+
       const headers: Record<string, string> = {
         "x-ig-app-id": "936619743392459",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+        "User-Agent": randomUA,
         "Accept": "*/*",
-        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Language": "en-IN,hi;q=0.9,en;q=0.8",
         "Referer": profileUrl,
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin",
       };
       if (sessionId) {
         headers["Cookie"] = `sessionid=${sessionId}; ds_user_id=${dsUserId};`;
@@ -939,6 +1173,7 @@ INSTRUCTIONS:
 
       const res = await fetch(`https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(clean)}`, {
         headers,
+        signal: AbortSignal.timeout(15000),
       });
 
       if (res.ok) {

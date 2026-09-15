@@ -93,6 +93,187 @@ class HumanBotFirewallService {
     return modifiedWords.join(' ') + endEntropy;
   }
 
+  // ──────────────────────────────────────────────────────────────────────
+  // DYNAMIC MESSAGE TEXT VARIATION (Spam Filter Bypass)
+  // Makes every outgoing message visually unique so Instagram's spam
+  // clustering algorithm cannot group them as template/broadcast messages.
+  // Uses: Synonym swaps, Hinglish fillers, emoji rotation, punctuation
+  // variation, sentence reordering, and casual text transforms.
+  // ──────────────────────────────────────────────────────────────────────
+
+  // Common Hindi/Hinglish synonym swaps (word -> alternatives)
+  private static readonly SYNONYM_MAP: Record<string, string[]> = {
+    'hello': ['hey', 'hi', 'hii', 'heyy', 'yo'],
+    'hi': ['hello', 'hey', 'hii', 'heyy', 'heya'],
+    'hey': ['hi', 'hello', 'hii', 'heya', 'yo'],
+    'ok': ['okay', 'alright', 'theek hai', 'sahi', 'acha'],
+    'okay': ['ok', 'alright', 'theek hai', 'sahi hai', 'acha'],
+    'thanks': ['thank you', 'shukriya', 'dhanyavaad', 'ty', 'thnx'],
+    'thank': ['thanks', 'shukriya', 'dhanyavaad'],
+    'yes': ['haan', 'ha', 'yep', 'yup', 'ji'],
+    'no': ['nahi', 'nah', 'nope', 'na'],
+    'please': ['plz', 'pls', 'kripa karke'],
+    'good': ['accha', 'badhiya', 'great', 'nice', 'awesome', 'mast'],
+    'bad': ['bura', 'kharab', 'not good'],
+    'wait': ['ruko', 'hold on', 'ek sec', 'ruk'],
+    'sorry': ['maaf karo', 'my bad', 'sorry yaar', 'oops'],
+    'sure': ['bilkul', 'zaroor', 'of course', 'haan bhai', 'pakka'],
+    'bro': ['bhai', 'yaar', 'dude', 'buddy', 'dost'],
+    'what': ['kya', 'konsa'],
+    'when': ['kab'],
+    'where': ['kahan', 'kidhar'],
+    'how': ['kaise', 'kaisa'],
+    'why': ['kyun', 'kyu', 'kyunki'],
+    'nice': ['badhiya', 'mast', 'accha', 'sahi', 'kamaal'],
+    'great': ['awesome', 'amazing', 'kamaal', 'zabardast', 'shandar'],
+    'cool': ['mast', 'sahi', 'badhiya', 'lit'],
+    'bye': ['alvida', 'see ya', 'chal phir', 'tata', 'baad me milte'],
+    'morning': ['subah', 'good morning', 'suprabhat'],
+    'night': ['raat', 'good night', 'shubh ratri'],
+    'friend': ['dost', 'yaar', 'bhai', 'buddy'],
+    'problem': ['dikkat', 'issue', 'pareshani', 'trouble'],
+    'happy': ['khush', 'glad', 'excited'],
+    'sad': ['dukhi', 'upset', 'udaas'],
+    'today': ['aaj'],
+    'tomorrow': ['kal'],
+    'now': ['abhi', 'right now', 'filhaal'],
+    'later': ['baad me', 'phir', 'thodi der baad'],
+    'very': ['bahut', 'bohot', 'kaafi'],
+    'think': ['lagta', 'sochta', 'feel karta'],
+    'understand': ['samajh', 'samjha', 'got it'],
+    'tell': ['bata', 'batao', 'bol'],
+    'see': ['dekh', 'dekho', 'dekhna'],
+    'know': ['pata', 'maloom'],
+    'come': ['aa', 'aao', 'aaja'],
+    'go': ['ja', 'jao', 'chalo'],
+  };
+
+  // Random Hinglish fillers to sprinkle naturally
+  private static readonly HINGLISH_FILLERS = [
+    'btw', 'waise', 'haan', 'acha', 'like', 'basically',
+    'matlab', 'you know', 'samjhe', 'dekho', 'sun',
+    'bhai', 'yaar', 'dost', 'boss', 'bro',
+  ];
+
+  // Emoji clusters to randomly append or swap
+  private static readonly EMOJI_POOL = [
+    '😊', '👍', '🙏', '😄', '💪', '🔥', '✨', '😁', '🤝', '💯',
+    '😅', '🫡', '👌', '🙌', '😎', '🤗', '✅', '💫', '🎯', '😇',
+  ];
+
+  // Sentence-ending punctuation variations
+  private static readonly PUNCTUATION_VARIANTS = ['.', '!', '..', '...', '~', ' 😊', ' 👍', ' ✨'];
+
+  /**
+   * Dynamic Message Text Variation — Spam Filter Bypass
+   * Makes every outgoing message unique by applying random combinations of:
+   * 1. Synonym word swaps (English <-> Hinglish)
+   * 2. Random filler word insertion
+   * 3. Emoji rotation/insertion
+   * 4. Punctuation variation
+   * 5. Capitalization tweaks
+   * 6. Sentence order shuffling (for multi-sentence messages)
+   *
+   * Combined with injectAntiHashZeroWidthEntropy(), this creates
+   * a double-layer defense against Instagram's spam clustering.
+   */
+  public dynamicMessageVariation(text: string): string {
+    if (!text || typeof text !== 'string') return text;
+    let msg = text.trim();
+    if (!msg) return msg;
+
+    // Skip variation for code blocks, URLs, or very short messages
+    if (msg.includes('```') || msg.includes('http://') || msg.includes('https://')) {
+      return msg;
+    }
+
+    // 1. SYNONYM SWAP: 25% chance per matching word
+    const words = msg.split(' ');
+    const swappedWords = words.map((word) => {
+      const lower = word.toLowerCase().replace(/[^a-z]/g, '');
+      if (lower && HumanBotFirewallService.SYNONYM_MAP[lower] && Math.random() < 0.25) {
+        const alternatives = HumanBotFirewallService.SYNONYM_MAP[lower];
+        const replacement = alternatives[Math.floor(Math.random() * alternatives.length)];
+        // Preserve original casing pattern
+        if (word[0] === word[0].toUpperCase()) {
+          return replacement.charAt(0).toUpperCase() + replacement.slice(1);
+        }
+        return replacement;
+      }
+      return word;
+    });
+    msg = swappedWords.join(' ');
+
+    // 2. HINGLISH FILLER INSERTION: 15% chance to add a casual filler
+    if (Math.random() < 0.15 && msg.length > 15) {
+      const filler = HumanBotFirewallService.HINGLISH_FILLERS[
+        Math.floor(Math.random() * HumanBotFirewallService.HINGLISH_FILLERS.length)
+      ];
+      const insertPos = Math.random() < 0.5 ? 'start' : 'middle';
+      if (insertPos === 'start') {
+        msg = filler + ', ' + msg.charAt(0).toLowerCase() + msg.slice(1);
+      } else {
+        const sentenceParts = msg.split('. ');
+        if (sentenceParts.length >= 2) {
+          const idx = Math.floor(Math.random() * (sentenceParts.length - 1)) + 1;
+          sentenceParts[idx] = filler + ', ' + sentenceParts[idx].charAt(0).toLowerCase() + sentenceParts[idx].slice(1);
+          msg = sentenceParts.join('. ');
+        }
+      }
+    }
+
+    // 3. EMOJI ROTATION: 20% chance to append a random emoji
+    if (Math.random() < 0.20) {
+      const emoji = HumanBotFirewallService.EMOJI_POOL[
+        Math.floor(Math.random() * HumanBotFirewallService.EMOJI_POOL.length)
+      ];
+      // Swap existing trailing emoji or append
+      const trailingEmojiRegex = /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F900}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}✅💯🎯💫🫡]+$/u;
+      if (trailingEmojiRegex.test(msg)) {
+        msg = msg.replace(trailingEmojiRegex, emoji);
+      } else {
+        msg = msg + ' ' + emoji;
+      }
+    }
+
+    // 4. PUNCTUATION VARIATION: Vary sentence endings
+    if (Math.random() < 0.30) {
+      // Replace last punctuation with a variant
+      const lastChar = msg[msg.length - 1];
+      if (['.', '!'].includes(lastChar)) {
+        const variant = HumanBotFirewallService.PUNCTUATION_VARIANTS[
+          Math.floor(Math.random() * HumanBotFirewallService.PUNCTUATION_VARIANTS.length)
+        ];
+        msg = msg.slice(0, -1) + variant;
+      }
+    }
+
+    // 5. CASUAL CAPITALIZATION TWEAK: 10% chance to lowercase first letter (casual vibe)
+    if (Math.random() < 0.10 && msg.length > 5) {
+      msg = msg.charAt(0).toLowerCase() + msg.slice(1);
+    }
+
+    // 6. MULTI-SENTENCE SHUFFLE: If 3+ sentences, 15% chance to swap two adjacent ones
+    if (Math.random() < 0.15) {
+      const sentences = msg.split(/(?<=[.!?])\s+/);
+      if (sentences.length >= 3) {
+        const swapIdx = 1 + Math.floor(Math.random() * (sentences.length - 2));
+        [sentences[swapIdx], sentences[swapIdx - 1]] = [sentences[swapIdx - 1], sentences[swapIdx]];
+        msg = sentences.join(' ');
+      }
+    }
+
+    // 7. DOUBLE/SINGLE EXCLAMATION VARIATION: "!!" <-> "!" <-> "!!!"
+    if (Math.random() < 0.20) {
+      msg = msg.replace(/!{1,3}/g, () => {
+        const variants = ['!', '!!', '!!!'];
+        return variants[Math.floor(Math.random() * variants.length)];
+      });
+    }
+
+    return msg;
+  }
+
   // QWERTY keyboard adjacent key map for realistic human typos
   private static readonly ADJACENT_KEYS: Record<string, string[]> = {
     a: ['q', 'w', 's', 'z'],
@@ -623,9 +804,14 @@ class HumanBotFirewallService {
   }
 
   /**
-   * Instagram Human Simulator:
-   * 1. Marks thread item seen.
-   * 2. Simulates realistic reading + typing duration before message broadcast.
+   * Instagram Ultra-Realistic Human DM Lifecycle Engine:
+   * 1. [STANDBY / OFFLINE]: Bot is NOT constantly online.
+   * 2. [10-SECOND NOTICE DELAY]: When message arrives, wait ~10s before opening chat (looks unread on sender's phone).
+   * 3. [SEEN RECEIPT]: Open chat -> Mark message as seen (`direct_message_seen`).
+   * 4. [UNDERSTANDING / THINKING DELAY]: Pause 3 to 6 seconds while reading & understanding what to reply.
+   * 5. [TYPING DELAY]: Character-by-character human typing presence (with natural word gaps & pauses).
+   * 6. [PRE-SEND DELAY]: 0.5s - 1.5s final pause before tapping Send button.
+   * 7. [POST-DISPATCH STANDBY / OFFLINE]: After dispatch, close active session & return to offline idle.
    */
   public async simulateInstagramHumanTyping(
     ig: any,
@@ -634,13 +820,14 @@ class HumanBotFirewallService {
     incomingText: string,
     replyText: string
   ): Promise<void> {
-    const { readDelayMs, typingDelayMs } = this.calculateHumanDelays(incomingText, replyText);
-
     try {
-      // 1. Initial 10-15s pause before opening/checking the DM (Appears unread on sender's phone)
-      await this.sleep(readDelayMs);
+      // ── STAGE 1: 10-Second Notice Delay (Phone in pocket/table -> pick up phone -> unlock) ──
+      const noticeDelayMs = this.gaussianRandom(10000, 1000, 9000, 13000); // 9-13s (around 10s)
+      console.log(`[HumanFirewall] 📱 Stage 1: Notification received. Waiting ${(noticeDelayMs/1000).toFixed(1)}s before opening DM (sender sees Unread)...`);
+      await this.sleep(noticeDelayMs);
 
-      // 2. Open chat -> Mark item as seen
+      // ── STAGE 2: Open Chat & Mark Seen ──
+      console.log(`[HumanFirewall] 👁️ Stage 2: Opening chat and marking message as SEEN...`);
       if (ig && threadId && itemId) {
         try {
           if (typeof ig.markSeen === "function") {
@@ -652,16 +839,23 @@ class HumanBotFirewallService {
         } catch {}
       }
 
-      // 3. Human reaction pause after opening chat
-      const thinkingDelay = this.gaussianRandom(850, 180, 500, 1400);
-      await this.sleep(thinkingDelay);
+      // ── STAGE 3: Samajhne Ka Delay (Understanding / Thinking Delay: 3-6s) ──
+      const understandingDelayMs = this.gaussianRandom(4000, 700, 3000, 6000); // 3-6s
+      console.log(`[HumanFirewall] 🤔 Stage 3: Reading & understanding message for ${(understandingDelayMs/1000).toFixed(1)}s...`);
+      await this.sleep(understandingDelayMs);
 
-      // 4. Human typing duration (Includes Gaussian word gaps and typo-backspace pauses)
+      // ── STAGE 4: Typing Delay (Real human speed: ~100ms per char + word gaps) ──
+      const { typingDelayMs } = this.calculateHumanDelays(incomingText, replyText);
+      console.log(`[HumanFirewall] ⌨️ Stage 4: Simulating human typing for ${(typingDelayMs/1000).toFixed(1)}s (${replyText.length} chars)...`);
       await this.sleep(typingDelayMs);
 
-      // 5. Pre-send tap pause
-      const preSendPause = this.gaussianRandom(400, 70, 250, 600);
+      // ── STAGE 5: Pre-Send Tap Delay (0.5s - 1.5s pause before pressing send) ──
+      const preSendPause = this.gaussianRandom(850, 150, 500, 1500);
+      console.log(`[HumanFirewall] 👆 Stage 5: Final ${(preSendPause/1000).toFixed(1)}s pause before tapping Send...`);
       await this.sleep(preSendPause);
+
+      // ── STAGE 6: Offline / Standby log ──
+      console.log(`[HumanFirewall] 🚀 Stage 6: Dispatched! Returning to offline idle standby.`);
     } catch (e) {
       console.warn("[HumanFirewall] Instagram presence simulation notice:", e);
     }
