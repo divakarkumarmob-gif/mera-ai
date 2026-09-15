@@ -10,6 +10,8 @@
  * 6. Anti-Ban Human Simulation: Rate-limits, human typing delays, and LRU memory caching.
  */
 
+import fs from "fs";
+import path from "path";
 import { whatsappBotService } from "../whatsappBotService";
 import { humanBotFirewallService } from "../humanBotFirewallService";
 
@@ -66,9 +68,55 @@ class WhatsAppIntelligenceService {
 
   // WhatsApp Status (Stories) In-Memory Ring Buffer (Latest 50 stories)
   private statusStories: StatusStoryItem[] = [];
+  private readonly STATUS_CACHE_FILE = path.join(process.cwd(), ".cache", "whatsapp_status_stories.json");
 
   // Received Media Ring Buffer (Latest 50 received files across contacts)
   private receivedMediaVault: ReceivedMediaItem[] = [];
+
+  constructor() {
+    this.loadCachedStories();
+  }
+
+  private loadCachedStories(): void {
+    try {
+      if (fs.existsSync(this.STATUS_CACHE_FILE)) {
+        const raw = fs.readFileSync(this.STATUS_CACHE_FILE, "utf-8");
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          const now = Date.now();
+          // Keep stories within 24h validity window
+          this.statusStories = parsed.filter((s) => now - s.timestamp < 24 * 60 * 60 * 1000);
+          console.log(`[WhatsAppIntelligence] 📦 Loaded ${this.statusStories.length} active 24h status stories from persistent cache.`);
+        }
+      }
+    } catch (e) {
+      console.warn("[WhatsAppIntelligence] Notice loading cached status stories:", e);
+    }
+  }
+
+  private saveCachedStories(): void {
+    try {
+      const dir = path.dirname(this.STATUS_CACHE_FILE);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      // Exclude binary buffers and raw socket objects from JSON serialization
+      const serializable = this.statusStories.map((s) => ({
+        id: s.id,
+        senderPhone: s.senderPhone,
+        senderJid: s.senderJid,
+        senderName: s.senderName,
+        isFromMe: s.isFromMe,
+        type: s.type,
+        caption: s.caption,
+        aiDescription: s.aiDescription,
+        ocrText: s.ocrText,
+        timestamp: s.timestamp,
+        dateStr: s.dateStr,
+      }));
+      fs.writeFileSync(this.STATUS_CACHE_FILE, JSON.stringify(serializable, null, 2), "utf-8");
+    } catch (e) {
+      console.warn("[WhatsAppIntelligence] Notice saving cached status stories:", e);
+    }
+  }
 
   /**
    * Generates a Gaussian distributed random human jitter delay (400ms - 1200ms) to emulate natural human pauses.
@@ -324,6 +372,7 @@ class WhatsAppIntelligenceService {
     this.statusStories = this.statusStories.filter((s) => s.id !== id);
     this.statusStories.unshift(item);
     if (this.statusStories.length > 50) this.statusStories.pop();
+    this.saveCachedStories();
 
     console.log(`[WhatsAppIntelligence] 📸 Status captured from ${senderName} (+${senderPhone}) [${type}]: ${caption.slice(0, 30)}`);
 
@@ -352,6 +401,7 @@ class WhatsAppIntelligenceService {
               if (visionRes) {
                 item.aiDescription = visionRes.shortSummary || visionRes.analysis;
                 if (visionRes.ocrText) item.ocrText = visionRes.ocrText;
+                this.saveCachedStories();
                 console.log(`[WhatsAppIntelligence] 🧠 AI Vision analyzed status from ${senderName}: ${item.aiDescription?.slice(0, 60)}...`);
               }
             }
