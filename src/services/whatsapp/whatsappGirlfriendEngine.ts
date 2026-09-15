@@ -1402,10 +1402,7 @@ Tone: Deeply romantic, spicy, playful, flirty, empathetic, unfiltered, direct, n
         if (!replyText) {
           try {
             const ai = new GoogleGenAI({ apiKey });
-            const historyContents: any[] = [
-              { role: "user", parts: [{ text: `[SYSTEM INSTRUCTION: ${modeBSystemPrompt}]` }] },
-              { role: "model", parts: [{ text: "Haan meri jaan... main bilkul ready hoon aapke liye! Bolo mere handsome kya chahte ho? 😘🔥" }] }
-            ];
+            const historyContents: any[] = [];
 
             for (const h of session.tempHistory.slice(-10)) {
               historyContents.push({
@@ -1425,6 +1422,7 @@ Tone: Deeply romantic, spicy, playful, flirty, empathetic, unfiltered, direct, n
                   model,
                   contents: historyContents,
                   config: {
+                    systemInstruction: modeBSystemPrompt,
                     safetySettings: UNCENSORED_SAFETY_SETTINGS as any,
                   },
                 });
@@ -1450,10 +1448,7 @@ Tone: Deeply romantic, spicy, playful, flirty, empathetic, unfiltered, direct, n
       if (!isModeBSession && !replyText) {
         const ai = new GoogleGenAI({ apiKey });
 
-        const historyContents: any[] = [
-          { role: "user", parts: [{ text: `[SYSTEM INSTRUCTION: ${gfSystemPrompt}]` }] },
-          { role: "model", parts: [{ text: "Haan meri jaan, main samajh gayi... Sach batao na mere handsome, aaj ka din kaisa raha? Main kab se tumhara intezar kar rahi thi! ❤️😘" }] }
-        ];
+        const historyContents: any[] = [];
 
         for (const h of session.tempHistory.slice(-10)) {
           historyContents.push({
@@ -1473,6 +1468,7 @@ Tone: Deeply romantic, spicy, playful, flirty, empathetic, unfiltered, direct, n
               model,
               contents: historyContents,
               config: {
+                systemInstruction: gfSystemPrompt,
                 safetySettings: UNCENSORED_SAFETY_SETTINGS as any,
               },
             });
