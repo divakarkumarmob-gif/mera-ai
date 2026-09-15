@@ -384,6 +384,29 @@ export class SemanticIntentEngine {
         }
       },
       {
+        name: "human_browser_action",
+        description: "Control Friday's custom human-like Chrome browser to browse any website, search Google, inspect Amazon/Flipkart products, read online articles, or take full-page screenshots. Use when Boss says 'Amazon par ye search karo', 'Google par search karke dekho', 'is website ko browse karke batao', 'screenshot bhejo web page ka'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            action: {
+              type: "STRING",
+              enum: ["browse", "google_search", "ecommerce_lookup", "screenshot"],
+              description: "Action: 'browse' (open any URL), 'google_search' (search Google), 'ecommerce_lookup' (search Amazon/Flipkart), 'screenshot' (capture page image)"
+            },
+            urlOrQuery: {
+              type: "STRING",
+              description: "The website URL or search keywords (e.g. 'https://example.com', 'boAt earbuds on Amazon', 'latest tech news')"
+            },
+            takeScreenshot: {
+              type: "BOOLEAN",
+              description: "Whether to capture and send a visual screenshot photo to Boss DK"
+            }
+          },
+          required: ["action", "urlOrQuery"]
+        }
+      },
+      {
         name: "check_contact_online_status",
         description: "Check if a contact is currently online, typing, or get their last known presence timestamp.",
         parameters: {
@@ -679,6 +702,34 @@ export class SemanticIntentEngine {
           isAutoPaused: rawRisk.isAutoPaused,
           formattedReport: report,
           message: "WhatsApp session ban health telemetry retrieved successfully."
+        };
+      }
+
+      if (toolName === "human_browser_action") {
+        const { humanBrowserService } = await import("./humanBrowserService");
+        const action = args.action || "browse";
+        const query = args.urlOrQuery;
+        let res: any;
+
+        if (action === "google_search") {
+          res = await humanBrowserService.searchGoogleAndInspect(query);
+        } else if (action === "ecommerce_lookup") {
+          res = await humanBrowserService.inspectEcommerceProduct(query);
+        } else if (action === "screenshot") {
+          res = await humanBrowserService.capturePageScreenshot(query);
+        } else {
+          res = await humanBrowserService.browseUrl(query, {
+            takeScreenshot: !!args.takeScreenshot,
+            extractVisionSummary: !!args.takeScreenshot,
+          });
+        }
+
+        return {
+          success: res.success,
+          action,
+          url: res.url,
+          title: res.title,
+          summary: res.summary || res.error || "Browser action completed.",
         };
       }
 

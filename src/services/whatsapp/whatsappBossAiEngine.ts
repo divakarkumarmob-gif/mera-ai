@@ -79,6 +79,19 @@ export class WhatsAppBossAiEngine {
       }
     }
 
+    // ── Chrome Default AI Mode & Google Search Fast-Path ──
+    const chromeSearchMatch =
+      messageText.match(/^(?:chrome\s+ai\s+mode|ai\s+mode|chrome\s+ai|google\s+ai|chrome|google)[-:\s]+(.+)$/i) ||
+      messageText.match(/^\/(?:chrome|google|aimode|ai)\s+(.+)$/i);
+    if (chromeSearchMatch && chromeSearchMatch[1]?.trim()) {
+      const query = chromeSearchMatch[1].trim();
+      const { humanBrowserService } = await import("../humanBrowserService");
+      const searchRes = await humanBrowserService.searchGoogleAndInspect(query);
+      if (searchRes.success && searchRes.summary) {
+        return `🌐 *[Chrome Default AI Mode & Search]* 🇮🇳\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${searchRes.summary}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n_Fetched directly from Chrome Default AI Mode & Knowledge Graph_ ✨`;
+      }
+    }
+
     // Background Auto-Fact Observation (Mem0 / ChatGPT style)
     const { unifiedMemoryService } = await import("../unifiedMemoryService");
     unifiedMemoryService.observeAndExtractFacts("Boss DK", messageText, "whatsapp", true);
@@ -441,6 +454,29 @@ export class WhatsAppBossAiEngine {
           type: "OBJECT",
           properties: {},
           required: []
+        }
+      },
+      {
+        name: "human_browser_action",
+        description: "Control Friday's custom human-like Chrome browser to browse any website, search Google, inspect Amazon/Flipkart products, read online articles, or take full-page screenshots. Use when Boss says 'Amazon par ye search karo', 'Google par search karke dekho', 'is website ko browse karke batao', 'screenshot bhejo web page ka'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            action: {
+              type: "STRING",
+              enum: ["browse", "google_search", "ecommerce_lookup", "screenshot"],
+              description: "Action: 'browse' (open any URL), 'google_search' (search Google), 'ecommerce_lookup' (search Amazon/Flipkart), 'screenshot' (capture page image)"
+            },
+            urlOrQuery: {
+              type: "STRING",
+              description: "The website URL or search keywords (e.g. 'https://example.com', 'boAt earbuds on Amazon', 'latest tech news')"
+            },
+            takeScreenshot: {
+              type: "BOOLEAN",
+              description: "Whether to capture and send a visual screenshot photo to Boss DK"
+            }
+          },
+          required: ["action", "urlOrQuery"]
         }
       },
       {
@@ -1641,6 +1677,11 @@ ${triumphCelebrationContext}
 - When Boss asks about WhatsApp ban health, ban risk, session safety, or account health (e.g. "whatsapp ban health", "ban risk kitna hai", "session health kaisa hai", "account safe hai kya"):
   • Call 'get_whatsapp_session_ban_health' immediately and provide the comprehensive health report to Boss!
 
+🌐 CUSTOM HUMAN CHROME BROWSER MANDATE:
+- When Boss asks to browse the web, search Google, check e-commerce products (Amazon/Flipkart), read articles, or inspect websites (e.g. "Amazon par search karo...", "Google par search karke dekho", "is website par kya hai", "page ka screenshot do"):
+  • IMMEDIATELY call 'human_browser_action' with the appropriate action ('browse', 'google_search', 'ecommerce_lookup', or 'screenshot')!
+  • If Boss requests a visual look or screenshot, set takeScreenshot: true so Friday sends the screenshot photo to Boss!
+
 COMMUNICATION STYLE:
 - Address DK warmly and respectfully as 'Boss' or 'DK Boss'.
 - Speak in natural, crisp, intelligent Hinglish (blend of Hindi and English).
@@ -1984,6 +2025,44 @@ COMMUNICATION STYLE:
             isAutoPaused: rawRisk.isAutoPaused,
             formattedReport: report,
             message: "WhatsApp session ban health telemetry retrieved successfully."
+          };
+        }
+
+        if (toolName === "human_browser_action") {
+          const { humanBrowserService } = await import("../humanBrowserService");
+          const action = args.action || "browse";
+          const query = args.urlOrQuery;
+          let res: any;
+
+          if (action === "google_search") {
+            res = await humanBrowserService.searchGoogleAndInspect(query);
+          } else if (action === "ecommerce_lookup") {
+            res = await humanBrowserService.inspectEcommerceProduct(query);
+          } else if (action === "screenshot") {
+            const ssRes = await humanBrowserService.capturePageScreenshot(query);
+            if (ssRes.success && ssRes.buffer && sendPhotoFn) {
+              await sendPhotoFn(replyJid, ssRes.buffer, `🌐 *Screenshot of:* ${ssRes.title || query}`, messageKey);
+              return { success: true, message: `Screenshot of ${query} captured via Chrome and sent to Boss DK.` };
+            }
+            res = ssRes;
+          } else {
+            res = await humanBrowserService.browseUrl(query, {
+              takeScreenshot: !!args.takeScreenshot,
+              extractVisionSummary: !!args.takeScreenshot,
+            });
+            if (res.success && res.screenshotBuffer && args.takeScreenshot && sendPhotoFn) {
+              try {
+                await sendPhotoFn(replyJid, res.screenshotBuffer, `🌐 *Web Page View:* ${res.title || query}`, messageKey);
+              } catch {}
+            }
+          }
+
+          return {
+            success: res.success,
+            action,
+            url: res.url,
+            title: res.title,
+            summary: res.summary || res.error || "Browser action completed.",
           };
         }
 

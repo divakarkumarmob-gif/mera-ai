@@ -114,9 +114,10 @@ class StealthScraperService {
     // 1. Check if Premium Scraping APIs are configured via environment variables
     if (useScrapingApi) {
       // ScraperAPI (https://www.scraperapi.com)
-      if (process.env.SCRAPER_API_KEY) {
+      const scraperApiKey = process.env.SCRAPERAPI_KEY || process.env.SCRAPER_API_KEY;
+      if (scraperApiKey) {
         try {
-          const scraperUrl = `https://api.scraperapi.com?api_key=${process.env.SCRAPER_API_KEY}&url=${encodeURIComponent(targetUrl)}&country_code=in&render=true`;
+          const scraperUrl = `https://api.scraperapi.com?api_key=${scraperApiKey.trim()}&url=${encodeURIComponent(targetUrl)}&country_code=in&render=true`;
           const resp = await fetch(scraperUrl, { signal: AbortSignal.timeout(timeoutMs) });
           if (resp.ok) {
             const html = await resp.text();
@@ -136,9 +137,10 @@ class StealthScraperService {
       }
 
       // ZenRows (https://www.zenrows.com)
-      if (process.env.ZENROWS_API_KEY) {
+      const zenrowsApiKey = process.env.ZENROWS_API_KEY || process.env.ZENROWS_KEY;
+      if (zenrowsApiKey) {
         try {
-          const zenUrl = `https://api.zenrows.com/v1/?apikey=${process.env.ZENROWS_API_KEY}&url=${encodeURIComponent(targetUrl)}&js_render=true&antibot=true&premium_proxy=true&proxy_country=in`;
+          const zenUrl = `https://api.zenrows.com/v1/?apikey=${zenrowsApiKey.trim()}&url=${encodeURIComponent(targetUrl)}&js_render=true&antibot=true&premium_proxy=true&proxy_country=in`;
           const resp = await fetch(zenUrl, { signal: AbortSignal.timeout(timeoutMs) });
           if (resp.ok) {
             const html = await resp.text();
