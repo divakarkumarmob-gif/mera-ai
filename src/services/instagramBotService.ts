@@ -200,7 +200,11 @@ class InstagramBotService {
    */
   public async initSession() {
     try {
-      await this.waitForBridgeReady(10, 1000);
+      const ready = await this.ensureBridgeRunning();
+      if (!ready) {
+        console.warn("[InstagramBot] Bridge is not ready during initSession standby.");
+        return;
+      }
 
       // 1. Priority 1: Check .env INSTAGRAM_SESSION_ID or INSTAGRAM_SESSIONID or INSTAGRAM_COOKIE
       const envSession = (process.env.INSTAGRAM_SESSION_ID || process.env.INSTAGRAM_SESSIONID || process.env.INSTAGRAM_COOKIE || "").trim();
@@ -228,6 +232,9 @@ class InstagramBotService {
           if (restored) {
             this.lastError = null;
             return;
+          } else {
+            console.log("[InstagramBot] Corrupted or legacy session detected in Firestore. Purging old session...");
+            await db.collection("instagram_auth").doc("session").delete().catch(() => {});
           }
         }
       }
