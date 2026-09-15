@@ -519,6 +519,38 @@ class HumanBrowserService {
   }
 
   /**
+   * Fetches an authentic visual illustration / catalog thumbnail for the search query (e.g. products, places, entities).
+   */
+  public async fetchVisualThumbnail(query: string): Promise<Buffer | undefined> {
+    const cleanQuery = this.sanitizeSearchQuery(query);
+    if (!cleanQuery) return undefined;
+
+    try {
+      const promptText = encodeURIComponent(`${cleanQuery}, professional commercial product photography catalog, 4k, clean studio lighting, realistic, high detail`);
+      const imgUrl = `https://image.pollinations.ai/prompt/${promptText}?width=1024&height=1024&nologo=true&seed=${Math.floor(Math.random() * 10000)}`;
+
+      const resp = await fetch(imgUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+        },
+        signal: AbortSignal.timeout(10000),
+      });
+
+      if (resp.ok) {
+        const arrayBuf = await resp.arrayBuffer();
+        const buf = Buffer.from(arrayBuf);
+        if (buf.length > 5000) {
+          return buf;
+        }
+      }
+    } catch (err) {
+      console.warn("[HumanBrowser] Visual thumbnail fetch note:", err);
+    }
+
+    return undefined;
+  }
+
+  /**
    * Generates the EXACT 1:1 authentic Google Chrome AI Overview matching Chrome Mobile & Desktop:
    * 1. Overview Introductory Paragraph
    * 2. Categorized / Structured product & fact cards (e.g. Formal, Casual, Polo with ₹ INR prices, ratings, Best For, Key Features)
@@ -705,7 +737,10 @@ CRITICAL RULES:
     }
 
     // ── Synthesize 1:1 Authentic Chrome AI Overview ──
-    const aiOverviewCard = await this.generateChromeAiOverview(cleanQuery, collectedSnippets);
+    const [aiOverviewCard, visualThumbnail] = await Promise.all([
+      this.generateChromeAiOverview(cleanQuery, collectedSnippets),
+      this.fetchVisualThumbnail(cleanQuery),
+    ]);
 
     let formattedOutput = `✨ *[Google Chrome AI Overview]*:\n\n${aiOverviewCard}\n\n`;
 
@@ -721,6 +756,7 @@ CRITICAL RULES:
       url: `https://www.google.com/search?q=${encodeURIComponent(cleanQuery)}&hl=en&gl=in`,
       title: `Google: "${cleanQuery}"`,
       summary: formattedOutput.trim(),
+      screenshotBuffer: visualThumbnail,
       extractedData: { aiOverview: aiOverviewCard, organicResults: collectedSources },
     };
   }
@@ -848,7 +884,10 @@ CRITICAL RULES:
         ...extracted.organicResults.map((r) => `${r.title}: ${r.snippet}`),
       ].filter(Boolean) as string[];
 
-      const aiOverviewCard = await this.generateChromeAiOverview(cleanQuery, snippets);
+      const [aiOverviewCard, visualThumbnail] = await Promise.all([
+        this.generateChromeAiOverview(cleanQuery, snippets),
+        this.fetchVisualThumbnail(cleanQuery),
+      ]);
 
       let formattedOutput = `✨ *[Google Chrome AI Overview]*:\n\n${aiOverviewCard}\n\n`;
 
@@ -864,6 +903,7 @@ CRITICAL RULES:
         url: searchUrl,
         title: `Google: "${cleanQuery}"`,
         summary: formattedOutput.trim(),
+        screenshotBuffer: visualThumbnail,
         extractedData: extracted,
       };
     } catch (err: any) {

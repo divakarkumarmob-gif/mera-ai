@@ -90,7 +90,16 @@ export class WhatsAppBossAiEngine {
       const { humanBrowserService } = await import("../humanBrowserService");
       const searchRes = await humanBrowserService.searchGoogleAndInspect(rawQuery);
       if (searchRes.success && searchRes.summary) {
-        return `🌐 *[Chrome Default AI Mode & Search]* 🇮🇳\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${searchRes.summary}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n_Fetched directly from Chrome Default AI Mode & Knowledge Graph_ ✨`;
+        const fullCaption = `🌐 *[Chrome Default AI Mode & Search]* 🇮🇳\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${searchRes.summary}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n_Fetched directly from Chrome Default AI Mode & Knowledge Graph_ ✨`;
+        if (searchRes.screenshotBuffer && sendPhotoFn && replyJid) {
+          try {
+            await sendPhotoFn(replyJid, searchRes.screenshotBuffer, fullCaption, messageKey);
+            return ""; // Photo sent with full caption!
+          } catch (pErr) {
+            console.warn("[WhatsAppBossAI] Notice sending Chrome AI Mode photo:", pErr);
+          }
+        }
+        return fullCaption;
       }
     }
 
@@ -2038,6 +2047,12 @@ COMMUNICATION STYLE:
 
           if (action === "google_search") {
             res = await humanBrowserService.searchGoogleAndInspect(query);
+            if (res.success && res.screenshotBuffer && sendPhotoFn && replyJid) {
+              try {
+                const fullCaption = `🌐 *[Chrome Default AI Mode & Search]* 🇮🇳\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${res.summary}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n_Fetched directly from Chrome Default AI Mode & Knowledge Graph_ ✨`;
+                await sendPhotoFn(replyJid, res.screenshotBuffer, fullCaption, messageKey);
+              } catch {}
+            }
           } else if (action === "ecommerce_lookup") {
             res = await humanBrowserService.inspectEcommerceProduct(query);
           } else if (action === "screenshot") {
