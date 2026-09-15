@@ -63,6 +63,8 @@ class InstagramBotService {
     this.initSession();
   }
 
+  private startingPromise: Promise<boolean> | null = null;
+
   /**
    * Spawns and manages the Python Instagrapi Bridge subprocess
    */
@@ -75,15 +77,27 @@ class InstagramBotService {
       }
     } catch {}
 
-    this.startBridgeProcess();
-    return this.waitForBridgeReady(25, 1000);
+    if (this.startingPromise) {
+      return this.startingPromise;
+    }
+
+    this.startingPromise = (async () => {
+      try {
+        this.startBridgeProcess();
+        const ready = await this.waitForBridgeReady(60, 1000);
+        return ready;
+      } finally {
+        this.startingPromise = null;
+      }
+    })();
+
+    return this.startingPromise;
   }
 
   private startBridgeProcess() {
     try {
       if (this.bridgeProcess) {
-        try { this.bridgeProcess.kill(); } catch {}
-        this.bridgeProcess = null;
+        return;
       }
 
       const pythonScript = path.resolve(process.cwd(), "src", "python", "instagram_bridge.py");
@@ -121,7 +135,7 @@ class InstagramBotService {
     }
   }
 
-  private async waitForBridgeReady(maxRetries = 25, delayMs = 1000): Promise<boolean> {
+  private async waitForBridgeReady(maxRetries = 60, delayMs = 1000): Promise<boolean> {
     for (let i = 0; i < maxRetries; i++) {
       try {
         const res = await fetch(`${BRIDGE_URL}/health`, { signal: AbortSignal.timeout(2000) });
