@@ -36,6 +36,9 @@ function deserialize(json: string): any {
 }
 
 export async function useFirestoreAuthState() {
+  // In-memory hot cache to eliminate Firestore latency & key decryption race conditions (prevents Bad MAC errors)
+  const inMemoryKeyCache = new Map<string, any>();
+
   // --- Load existing creds, or initialize fresh ones ---
   let creds: any;
   try {
@@ -64,22 +67,38 @@ export async function useFirestoreAuthState() {
       keys: {
         get: async (type: string, ids: string[]) => {
           const result: Record<string, any> = {};
-          await Promise.all(
-            ids.map(async (id) => {
-              try {
-                const snap = await keysCol(type).doc(id).get();
-                if (snap.exists && snap.data()?.json) {
-                  let value = deserialize(snap.data()!.json);
-                  if (type === "app-state-sync-key" && value) {
-                    value = baileys.proto.Message.AppStateSyncKeyData.fromObject(value);
+          const missingIds: string[] = [];
+
+          // 1. Check local in-memory hot cache first (instant synchronous lookup)
+          for (const id of ids) {
+            const cacheKey = `${type}:${id}`;
+            if (inMemoryKeyCache.has(cacheKey)) {
+              result[id] = inMemoryKeyCache.get(cacheKey);
+            } else {
+              missingIds.push(id);
+            }
+          }
+
+          // 2. Fetch missing keys from Firestore in parallel
+          if (missingIds.length > 0) {
+            await Promise.all(
+              missingIds.map(async (id) => {
+                try {
+                  const snap = await keysCol(type).doc(id).get();
+                  if (snap.exists && snap.data()?.json) {
+                    let value = deserialize(snap.data()!.json);
+                    if (type === "app-state-sync-key" && value) {
+                      value = baileys.proto.Message.AppStateSyncKeyData.fromObject(value);
+                    }
+                    result[id] = value;
+                    inMemoryKeyCache.set(`${type}:${id}`, value);
                   }
-                  result[id] = value;
+                } catch (e) {
+                  console.error(`[WhatsAppAuth] Failed to load key ${type}/${id}:`, e);
                 }
-              } catch (e) {
-                console.error(`[WhatsAppAuth] Failed to load key ${type}/${id}:`, e);
-              }
-            })
-          );
+              })
+            );
+          }
           return result;
         },
         set: async (data: Record<string, Record<string, any>>) => {
@@ -87,10 +106,15 @@ export async function useFirestoreAuthState() {
           for (const type in data) {
             for (const id in data[type]) {
               const value = data[type][id];
+              const cacheKey = `${type}:${id}`;
               const ref = keysCol(type).doc(id);
+
+              // Update hot cache immediately
               if (value) {
+                inMemoryKeyCache.set(cacheKey, value);
                 writes.push(ref.set({ json: serialize(value) }).then(() => {}));
               } else {
+                inMemoryKeyCache.delete(cacheKey);
                 writes.push(ref.delete().then(() => {}).catch(() => {}));
               }
             }

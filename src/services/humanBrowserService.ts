@@ -198,6 +198,8 @@ class HumanBrowserService {
         }
       }
 
+      const isRenderOrCloud = !!(process.env.RENDER || process.env.RENDER_SERVICE_ID || process.env.NODE_ENV === "production");
+
       const args = [
         "--no-sandbox",
         "--disable-setuid-sandbox",
@@ -215,6 +217,20 @@ class HumanBrowserService {
         "--accept-lang=en-IN,en-GB,en-US,en,hi",
         `--user-data-dir=${this.PROFILE_DIR}`,
       ];
+
+      // Ultra-low RAM flags for Render 512MB container
+      if (isRenderOrCloud) {
+        args.push(
+          "--single-process",
+          "--renderer-process-limit=1",
+          "--js-flags=--max-old-space-size=96",
+          "--disable-background-networking",
+          "--disable-default-apps",
+          "--disable-extensions",
+          "--disable-sync",
+          "--disable-software-rasterizer"
+        );
+      }
 
       if (proxyUrl) {
         console.log(`[HumanBrowser] 🇮🇳 Routing Chrome through Indian Residential Proxy Tunnel.`);
