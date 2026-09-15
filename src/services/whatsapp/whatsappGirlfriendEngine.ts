@@ -1391,9 +1391,9 @@ Tone: Deeply romantic, spicy, playful, flirty, empathetic, unfiltered, direct, n
 
         try {
           const openReply = await this.queryUncensoredGfEngine(modeBSystemPrompt, rawText, session.tempHistory);
-          if (openReply)
+          if (openReply) {
             replyText = openReply;
-        }
+          }
         } catch (openErr) {
         console.warn("[WhatsAppGirlfriend] Mode B Open model query failed, falling back to Gemini:", openErr);
       }
