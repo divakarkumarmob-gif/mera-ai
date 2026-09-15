@@ -31118,33 +31118,93 @@ _Hamara sweet time complete ho gaya aur privacy ke liye saari temporary chats cl
         return questions[Math.floor(Math.random() * questions.length)];
       }
       isPhotoOrGiftRequest(text) {
-        return /\b(photo|pic|selfie|tasveer|tasvir|image|gift|kya\s*pehna|outfit|rose|flower|bouquet|chocolate|look|love\s*letter|shayari\s*card|khat|letter\s*likho|love\s*card)\b/i.test(text);
+        return /\b(?:photo|pic|picture|selfie|tasveer|tasvir|image|gift|kya\s*pehna|outfit|dress|rose|flower|bouquet|chocolate|look|love\s*letter|shayari\s*card|khat|letter\s*likho|love\s*card|chehra|apni\s*photo|photo\s*bhejo|image\s*banao|photo\s*banao|draw|generate\s*image|generate\s*photo|dikhao|apna\s*look)\b/i.test(text);
       }
-      async generateGirlfriendPhotoOrGift(text) {
+      async generateGirlfriendPhotoOrGift(text, jid) {
         try {
           const { imageGenerationService: imageGenerationService2 } = await Promise.resolve().then(() => (init_imageGenerationService(), imageGenerationService_exports));
+          const activeProfile = await girlfriendProfileService.getActiveProfile(jid || "");
           const lower = text.toLowerCase();
-          let prompt = "Aesthetic flatlay of a blooming deep red roses bouquet with velvet ribbon, soft warm glowing romantic bokeh lights, hyperrealistic, elegant, 8k";
-          let caption = "Ye raha mere baby ke liye chhota sa romantic gift! Kaisa laga? \u{1F618}\u{1F339}";
-          if (/\b(polaroid|handwritten|doodle|note\s*likho|khat|letter|love\s*letter)\b/i.test(lower)) {
-            prompt = "Aesthetic vintage Polaroid photo frame with handwritten heartfelt love calligraphy saying 'For DK - Forever Yours', red heart doodles, soft warm candle flare, dried rose petals on rustic wooden table, cinematic 8k";
-            caption = "Ye Polaroid handwritten note sirf mere DK ke liye... Hamesha sambhal ke rakhna jaan! \u{1F48C}\u2764\uFE0F\u2728";
-          } else if (/\b(love\s*letter|shayari\s*card|love\s*card)\b/i.test(lower)) {
-            prompt = "Aesthetic vintage Polaroid love letter card with handwritten romantic calligraphy, dried rose petals and soft candlelight, cinematic 8k";
-            caption = "Ye love letter sirf aur sirf mere handsome ke liye... Dil se padhna jaan! \u{1F48C}\u2764\uFE0F";
-          } else if (/\b(selfie|photo|pic|tasveer|tasvir|look|chehra)\b/i.test(lower)) {
-            prompt = "POV romantic photo of an exquisite ceramic coffee cup with delicate heart latte foam art and a handwritten sweet love note beside it on a wooden table, warm sun flare, aesthetic cafe";
-            caption = "Main abhi coffee pi rahi hoon baby aur sirf aapke baare me soch rahi hoon! \u2615\u2764\uFE0F";
-          } else if (/\b(pehna|outfit|dress|kapde)\b/i.test(lower)) {
-            prompt = "Aesthetic flatlay of a gorgeous elegant pastel pink silk dress with delicate rose gold necklace and cute earrings, soft ambient sunlight";
-            caption = "Aaj maine aapka favorite pastel outfit pehna hai! Kaisa lag raha hai? \u{1F457}\u2728";
-          } else if (/\b(chocolate|meetha|sweet)\b/i.test(lower)) {
-            prompt = "Luxury box of handcrafted dark chocolates with golden sprinkles and red satin bow on velvet table";
-            caption = "Mere handsome ke liye sweet chocolates! Pehle ek bite mujhe khilao... \u{1F36B}\u{1F618}";
+          const apiKey = process.env.GEMINI_API_KEY;
+          let finalDiffusionPrompt = "";
+          let finalCaption = "";
+          let isPortrait = true;
+          if (apiKey) {
+            try {
+              const ai2 = new GoogleGenAI22({ apiKey });
+              const promptFormulator = `You are the AI Visual Imagination & Selfie Engine for a Virtual Girlfriend named "${activeProfile.name}".
+Girlfriend Appearance / Profile: "${activeProfile.description || "Stunning 21-year-old beautiful Indian woman with expressive brown eyes, shiny black hair, natural radiant smile, stylish modern look"}".
+User's message: "${text}"
+
+TASK:
+1. Formulate a hyper-realistic, 8K, cinematic diffusion image prompt (for Flux.1 / SDXL) based on the user's request:
+   - If user asks for her selfie / photo / outfit / look / bed / saree / dress / home (e.g. "apni photo bhejo", "selfie dikhao", "saree me photo", "bed par leti hui photo"):
+     Create a realistic, photorealistic smartphone selfie or candid aesthetic photo of the Indian girlfriend "${activeProfile.name}" matching her profile and the requested clothing/setting/mood with natural lighting, sharp focus, 8k resolution.
+   - If user asks for a romantic gift (roses, chocolate, handwritten polaroid, love card):
+     Create a gorgeous, cinematic, 8k aesthetic flatlay of the requested gift item.
+   - If user asks for ANY other object, scene, car, pet, landscape, or creative concept (e.g. "cat ki photo", "car banao", "sunset beach"):
+     Create a stunning, ultra-detailed 8k photograph or illustration of that exact subject.
+2. Formulate a short, sweet, loving girlfriend caption in Hinglish (1-2 sentences with emojis, e.g. "Ye lo mere baby, sirf aapke liye photo! Kaisi lag rahi hoon? \u{1F618}\u2764\uFE0F").
+
+Respond in valid JSON format:
+{
+  "prompt": "<hyper-realistic diffusion prompt>",
+  "caption": "<sweet Hinglish girlfriend caption>",
+  "isPortrait": true
+}`;
+              for (const model of ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.5-flash"]) {
+                try {
+                  const resp = await ai2.models.generateContent({
+                    model,
+                    contents: promptFormulator,
+                    config: {
+                      responseMimeType: "application/json",
+                      safetySettings: UNCENSORED_SAFETY_SETTINGS
+                    }
+                  });
+                  const jsonText = resp.text?.trim();
+                  if (jsonText) {
+                    const parsed = JSON.parse(jsonText);
+                    if (parsed.prompt && parsed.caption) {
+                      finalDiffusionPrompt = parsed.prompt;
+                      finalCaption = parsed.caption;
+                      isPortrait = parsed.isPortrait !== false;
+                      break;
+                    }
+                  }
+                } catch {
+                }
+              }
+            } catch (aiErr) {
+              console.warn("[WhatsAppGirlfriend] AI image prompt formulation notice:", aiErr);
+            }
           }
-          const res = await imageGenerationService2.generateImage(prompt, { aspectRatio: "1:1" });
+          if (!finalDiffusionPrompt) {
+            const isSelfie = /\b(selfie|photo|pic|tasveer|tasvir|look|chehra|apni|dress|pehna|outfit|saree|kurti|face)\b/i.test(lower);
+            if (isSelfie) {
+              finalDiffusionPrompt = `Cinematic photorealistic smartphone selfie of a gorgeous 21-year-old Indian woman named ${activeProfile.name}, ${activeProfile.description || "radiant warm skin, beautiful expressive brown eyes, long black hair"}, natural warm room lighting, aesthetic background, candid sweet smile, 8k resolution, photorealistic masterpiece`;
+              finalCaption = `Ye lo mere handsome... sirf aapke liye selfie! Kaisi lag rahi hoon? \u{1F648}\u{1F618}\u2764\uFE0F`;
+              isPortrait = true;
+            } else if (/\b(polaroid|handwritten|doodle|note\s*likho|khat|letter|love\s*letter)\b/i.test(lower)) {
+              finalDiffusionPrompt = `Aesthetic vintage Polaroid photo frame with handwritten heartfelt love calligraphy saying 'For DK - Forever Yours', red heart doodles, soft warm candle flare, dried rose petals on rustic wooden table, cinematic 8k`;
+              finalCaption = `Ye Polaroid handwritten note sirf mere handsome ke liye... Hamesha sambhal ke rakhna jaan! \u{1F48C}\u2764\uFE0F\u2728`;
+            } else if (/\b(chocolate|meetha|sweet)\b/i.test(lower)) {
+              finalDiffusionPrompt = `Luxury box of handcrafted dark chocolates with golden sprinkles and red satin bow on velvet table, 8k`;
+              finalCaption = `Mere handsome ke liye sweet chocolates! Pehle ek bite mujhe khilao... \u{1F36B}\u{1F618}`;
+            } else if (/\b(rose|flower|bouquet|gulaab)\b/i.test(lower)) {
+              finalDiffusionPrompt = `Aesthetic flatlay of a blooming deep red roses bouquet with velvet ribbon, soft warm glowing romantic bokeh lights, hyperrealistic, elegant, 8k`;
+              finalCaption = `Ye raha mere baby ke liye chhota sa romantic gift! Kaisa laga? \u{1F618}\u{1F339}`;
+            } else {
+              finalDiffusionPrompt = `Cinematic ultra-realistic 4k photograph of ${text}, highly detailed, vivid natural colors, realistic textures, volumetric lighting, 8k resolution`;
+              finalCaption = `Ye dekhiye mere baby, aapke liye ye photo banayi hai! Kaisi lagi? \u2728\u{1F970}`;
+            }
+          }
+          const res = await imageGenerationService2.generateImage(finalDiffusionPrompt, {
+            aspectRatio: isPortrait ? "9:16" : "1:1",
+            enhancePrompt: true
+          });
           if (res.success && res.buffer && res.buffer.length > 0) {
-            return { buffer: res.buffer, caption };
+            return { buffer: res.buffer, caption: finalCaption || "Ye lo baby, aapki photo! \u{1F618}\u2728" };
           }
         } catch (err) {
           console.warn("[WhatsAppGirlfriend] Photo/Gift generation error:", err);
@@ -31757,7 +31817,7 @@ ${callCard}`,
             sock.sendPresenceUpdate?.("composing", jid).catch(() => {
             });
           }
-          const photoResult = await this.generateGirlfriendPhotoOrGift(rawText);
+          const photoResult = await this.generateGirlfriendPhotoOrGift(rawText, jid);
           if (photoResult) {
             await sendPhotoFn(jid, photoResult.buffer, photoResult.caption, messageKey);
             session.tempHistory.push({ role: "user", text: rawText });
@@ -52554,6 +52614,16 @@ _Girlfriend mode band kar diya gaya hai. Ab main normal Friday AI Assistant ke r
           return;
         }
         if (chatId && this.isGirlfriendModeActive(chatId)) {
+          const { whatsappGirlfriendEngine: whatsappGirlfriendEngine2 } = await Promise.resolve().then(() => (init_whatsappGirlfriendEngine(), whatsappGirlfriendEngine_exports));
+          if (whatsappGirlfriendEngine2.isPhotoOrGiftRequest(text)) {
+            await this.sendChatAction(chatId, "upload_photo");
+            const photoRes = await whatsappGirlfriendEngine2.generateGirlfriendPhotoOrGift(text, String(chatId));
+            if (photoRes && photoRes.buffer) {
+              await this.sendPhoto(chatId, photoRes.buffer, photoRes.caption);
+              _TelegramBotService.recordChatTurn(chatId, "Friday (Girlfriend)", photoRes.caption);
+              return;
+            }
+          }
           await this.sendChatAction(chatId, "typing");
           const gfReply = await this.generateGirlfriendReply(chatId, senderName, text);
           await this.sendMessage(chatId, gfReply);

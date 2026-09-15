@@ -2575,6 +2575,17 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
     }
 
     if (chatId && this.isGirlfriendModeActive(chatId)) {
+      const { whatsappGirlfriendEngine } = await import("./whatsapp/whatsappGirlfriendEngine");
+      if (whatsappGirlfriendEngine.isPhotoOrGiftRequest(text)) {
+        await this.sendChatAction(chatId, "upload_photo");
+        const photoRes = await whatsappGirlfriendEngine.generateGirlfriendPhotoOrGift(text, String(chatId));
+        if (photoRes && photoRes.buffer) {
+          await this.sendPhoto(chatId, photoRes.buffer, photoRes.caption);
+          TelegramBotService.recordChatTurn(chatId, "Friday (Girlfriend)", photoRes.caption);
+          return;
+        }
+      }
+
       await this.sendChatAction(chatId, "typing");
       const gfReply = await this.generateGirlfriendReply(chatId, senderName, text);
       await this.sendMessage(chatId, gfReply);
