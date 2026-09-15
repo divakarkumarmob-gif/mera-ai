@@ -6,21 +6,61 @@ Provides a lightweight local HTTP API for Node.js backend.
 
 import sys
 import os
+import subprocess
+
+# Auto-discovery of python site-packages and self-healing installer for Linux/Render
+try:
+    from instagrapi import Client
+    from instagrapi.exceptions import (
+        TwoFactorRequired,
+        BadPassword,
+        PleaseWaitFewMinutes,
+        LoginRequired,
+        ChallengeRequired,
+        UserNotFound,
+    )
+except ImportError:
+    try:
+        import site
+        extra_paths = []
+        if hasattr(site, "getsitepackages"):
+            extra_paths.extend(site.getsitepackages())
+        if hasattr(site, "getusersitepackages"):
+            extra_paths.append(site.getusersitepackages())
+        for p in extra_paths:
+            if p and os.path.exists(p) and p not in sys.path:
+                sys.path.append(p)
+        from instagrapi import Client
+        from instagrapi.exceptions import (
+            TwoFactorRequired,
+            BadPassword,
+            PleaseWaitFewMinutes,
+            LoginRequired,
+            ChallengeRequired,
+            UserNotFound,
+        )
+    except ImportError:
+        sys.stderr.write("[InstagrapiBridge] Auto-installing instagrapi in active Python environment...\n")
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "instagrapi", "--break-system-packages", "--no-warn-script-location"])
+        except Exception:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "instagrapi", "--user", "--no-warn-script-location"])
+        from instagrapi import Client
+        from instagrapi.exceptions import (
+            TwoFactorRequired,
+            BadPassword,
+            PleaseWaitFewMinutes,
+            LoginRequired,
+            ChallengeRequired,
+            UserNotFound,
+        )
+
 import json
 import argparse
 import tempfile
 import traceback
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
-from instagrapi import Client
-from instagrapi.exceptions import (
-    TwoFactorRequired,
-    BadPassword,
-    PleaseWaitFewMinutes,
-    LoginRequired,
-    ChallengeRequired,
-    UserNotFound,
-)
 
 # Global client and state
 cl = Client()

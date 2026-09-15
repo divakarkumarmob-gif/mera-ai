@@ -76,7 +76,7 @@ class InstagramBotService {
     } catch {}
 
     this.startBridgeProcess();
-    return this.waitForBridgeReady(15, 600);
+    return this.waitForBridgeReady(25, 1000);
   }
 
   private startBridgeProcess() {
@@ -93,7 +93,7 @@ class InstagramBotService {
       }
 
       console.log(`[InstagramBot] Starting Python Instagrapi bridge on port ${BRIDGE_PORT}...`);
-      const pythonCmd = process.platform === "win32" ? "python" : "python3";
+      const pythonCmd = process.platform === "win32" ? "python" : (process.env.PYTHON_BIN || "python3");
       
       this.bridgeProcess = spawn(pythonCmd, [pythonScript, "--port", String(BRIDGE_PORT)], {
         env: { ...process.env, PYTHONUNBUFFERED: "1" },
@@ -121,7 +121,7 @@ class InstagramBotService {
     }
   }
 
-  private async waitForBridgeReady(maxRetries = 15, delayMs = 600): Promise<boolean> {
+  private async waitForBridgeReady(maxRetries = 25, delayMs = 1000): Promise<boolean> {
     for (let i = 0; i < maxRetries; i++) {
       try {
         const res = await fetch(`${BRIDGE_URL}/health`, { signal: AbortSignal.timeout(2000) });
