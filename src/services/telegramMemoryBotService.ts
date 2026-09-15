@@ -487,9 +487,9 @@ Even agar Firebase configured nahi hai, ye bot Telegram ke Cloud Servers ko **da
     // Step 2.5: Truth Verification & Fact-Checking Audit
     const { truthVerificationCheckerEngine } = await import("./truthVerificationCheckerEngine");
     if (truthVerificationCheckerEngine.isTruthChallenge(text)) {
-      const recentTurns = TelegramMemoryBotService.conversationTurns.get(firstName) || [];
-      const recentContextStr = recentTurns.slice(-6).map((m) => `${m.sender}: "${m.text}"`).join("\n");
-      const lastReply = recentTurns.slice().reverse().find((m) => m.sender === "Friday")?.text || "";
+      const recentTurns = TelegramMemoryBotService.chatHistory || [];
+      const recentContextStr = recentTurns.slice(-6).map((m) => `${m.senderName}: "${m.text}"`).join("\n");
+      const lastReply = recentTurns.slice().reverse().find((m) => m.senderName === "Friday")?.text || "";
       const auditRes = await truthVerificationCheckerEngine.performTruthAudit(text, recentContextStr, lastReply);
       if (auditRes.auditCard) {
         await this.safeSendMessage(chatId, auditRes.auditCard);

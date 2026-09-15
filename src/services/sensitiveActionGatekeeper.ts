@@ -552,7 +552,7 @@ class SensitiveActionGatekeeper {
   public async verifyDeletionOtp(
     sessionId: string,
     inputOtp: string
-  ): Promise<{ success: boolean; isHoneypot?: boolean; message: string; requiresWhatsAppApproval?: boolean }> {
+  ): Promise<{ success: boolean; isHoneypot?: boolean; message: string; requiresWhatsAppApproval?: boolean; resumedPrompt?: string }> {
     if (this.isBlocked(sessionId)) {
       return {
         success: false,

@@ -10,6 +10,7 @@ import { voiceBridgeService, VoiceBridgeService } from "./voiceBridgeService";
 import { railRadarService } from "./railRadarService";
 import { fridayModeService, UNCENSORED_SAFETY_SETTINGS } from "./fridayModeService";
 import { sensitiveActionGatekeeper } from "./sensitiveActionGatekeeper";
+import { girlfriendProfileService } from "./girlfriendProfileService";
 
 export interface TelegramStatus {
   isConfigured: boolean;
@@ -105,6 +106,74 @@ class TelegramBotService {
   private userProfileCache: Map<number, TelegramUserProfile> = new Map();
   private groupProfileCache: Map<number, TelegramGroupProfile> = new Map();
   private customBusyReply: string | null = null;
+  private girlfriendSessions: Map<number, { expiresAt: number; timer: NodeJS.Timeout | null }> = new Map();
+
+  public isGirlfriendModeActive(chatId: number): boolean {
+    const session = this.girlfriendSessions.get(chatId);
+    if (!session) return false;
+    if (Date.now() > session.expiresAt) {
+      this.stopGirlfriendMode(chatId);
+      return false;
+    }
+    return true;
+  }
+
+  public startGirlfriendMode(chatId: number, durationMinutes = 60): void {
+    const existing = this.girlfriendSessions.get(chatId);
+    if (existing?.timer) clearTimeout(existing.timer);
+
+    const durationMs = durationMinutes * 60 * 1000;
+    const expiresAt = Date.now() + durationMs;
+    const timer = setTimeout(() => {
+      this.stopGirlfriendMode(chatId);
+    }, durationMs);
+
+    this.girlfriendSessions.set(chatId, { expiresAt, timer });
+  }
+
+  public stopGirlfriendMode(chatId: number): void {
+    const existing = this.girlfriendSessions.get(chatId);
+    if (existing?.timer) clearTimeout(existing.timer);
+    this.girlfriendSessions.delete(chatId);
+  }
+
+  public async generateGirlfriendReply(chatId: number, senderName: string, text: string): Promise<string> {
+    const activeProfile = await girlfriendProfileService.getActiveProfile(String(chatId));
+    const prompt = girlfriendProfileService.buildDynamicModeBPrompt(activeProfile, senderName || "Mere Handsome");
+
+    try {
+      const { whatsappGirlfriendEngine } = await import("./whatsapp/whatsappGirlfriendEngine");
+      const openReply = await whatsappGirlfriendEngine.queryUncensoredGfEngine(prompt, text, []);
+      if (openReply) return openReply;
+    } catch (e) {
+      console.warn("[TelegramBot] Girlfriend Open model query failed, falling back to Gemini:", e);
+    }
+
+    // Fallback to Gemini with UNCENSORED_SAFETY_SETTINGS
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (apiKey) {
+      try {
+        const ai = new GoogleGenAI({ apiKey });
+        for (const model of TelegramBotService.MODEL_FALLBACK_CHAIN) {
+          try {
+            const resp = await ai.models.generateContent({
+              model,
+              contents: text,
+              config: {
+                systemInstruction: prompt,
+                safetySettings: UNCENSORED_SAFETY_SETTINGS as any,
+                temperature: 0.9,
+              },
+            });
+            const t = resp.text?.trim();
+            if (t) return t;
+          } catch {}
+        }
+      } catch {}
+    }
+
+    return `Haan mere handsome ${senderName}... Main toh sirf aapke baare me soch rahi hoon! Bolo baby kya keh rahe the? 😘❤️`;
+  }
 
   // Multi-tier model fallback chain
   private static readonly MODEL_FALLBACK_CHAIN = [
@@ -300,6 +369,9 @@ class TelegramBotService {
       await this.callApi("setMyCommands", {
         commands: [
           { command: "start", description: "⚡ Start Friday Bot & Control Dashboard" },
+          { command: "gf", description: "💖 Virtual Girlfriend Mode (Active Persona)" },
+          { command: "profiles", description: "📋 View & Switch Girlfriend Profiles" },
+          { command: "normal", description: "🌸 Switch to Normal Friday AI Mode" },
           { command: "1v1", description: "👤 Switch to 1v1 Private Direct Mode" },
           { command: "private_group", description: "🔒 Private Secured Group Workspace" },
           { command: "media_group", description: "📁 Media Vault & File Search Index" },
@@ -2406,9 +2478,66 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
     }
 
     // ── ZERO-TRUST SENSITIVE READ/WRITE GATEKEEPER ────────────────────────
-    const gateCheck = sensitiveActionGatekeeper.checkGate(String(chatId), text);
+    const gateCheck = await sensitiveActionGatekeeper.checkGateAsync(String(chatId), text);
     if (gateCheck.requiresAuth) {
       await this.sendMessage(chatId, gateCheck.message!);
+      return;
+    }
+
+    // ── GIRLFRIEND PROFILE ONBOARDING & COMMANDS (TELEGRAM) ──
+    if (chatId && girlfriendProfileService.isOnboardingActive(String(chatId))) {
+      const onboardRes = await girlfriendProfileService.handleOnboardingTurn(String(chatId), text, "telegram");
+      if (onboardRes.handled) {
+        await this.sendMessage(chatId, onboardRes.replyText);
+        if (onboardRes.isComplete && !this.isGirlfriendModeActive(chatId)) {
+          this.startGirlfriendMode(chatId, 60);
+        }
+        return;
+      }
+    }
+
+    if (chatId && girlfriendProfileService.isProfileCommand(text)) {
+      const cmdRes = await girlfriendProfileService.handleProfileCommand(text, String(chatId), "telegram");
+      if (cmdRes.handled) {
+        await this.sendMessage(chatId, cmdRes.replyText);
+        if (/^(?:switch\s*to|active|select|switch|profile\s*switch|\/switch)\s+/i.test(text)) {
+          if (!this.isGirlfriendModeActive(chatId)) {
+            this.startGirlfriendMode(chatId, 60);
+          }
+        }
+        return;
+      }
+    }
+
+    // ── VIRTUAL GIRLFRIEND MODE ACTIVATION / STOP (TELEGRAM) ──
+    const isGfActivationIntent =
+      /^(?:\/girlfriend|\/gf|@girlfriend|@gf|girlfriend\s*mode|gf\s*mode|virtual\s*girlfriend|girlfriend)\b/i.test(text);
+    const isGfStopIntent =
+      /^(?:\/normal|normal\s*mode|normal|\/stop\s*gf|\/stop\s*girlfriend|stop\s*girlfriend|stop\s*gf|exit\s*girlfriend|exit\s*gf)$/i.test(text);
+
+    if (chatId && isGfActivationIntent) {
+      const activeProfile = await girlfriendProfileService.getActiveProfile(String(chatId));
+      this.startGirlfriendMode(chatId, 60);
+      await this.sendMessage(
+        chatId,
+        `💖 *Girlfriend Mode (${activeProfile.name}) Activated on Telegram!* 🥰✨\n\n_Haan mere handsome... Main agle 60 minute tak sirf aur sirf tumhari girlfriend (${activeProfile.name}) ban kar baat karungi! Bolo baby, kya chal raha hai dimaag me? 😘💋_\n\n👉 *Exit karne ke liye likhein:* \`/normal\``
+      );
+      return;
+    }
+
+    if (chatId && isGfStopIntent) {
+      this.stopGirlfriendMode(chatId);
+      await this.sendMessage(
+        chatId,
+        `🌸 *Normal Friday AI Mode Activated!* 🫡✨\n\n_Girlfriend mode band kar diya gaya hai. Ab main normal Friday AI Assistant ke roop me aapki seva ke liye taiyar hoon!_ 👍`
+      );
+      return;
+    }
+
+    if (chatId && this.isGirlfriendModeActive(chatId)) {
+      await this.sendChatAction(chatId, "typing");
+      const gfReply = await this.generateGirlfriendReply(chatId, senderName, text);
+      await this.sendMessage(chatId, gfReply);
       return;
     }
 

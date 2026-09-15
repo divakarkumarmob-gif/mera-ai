@@ -18,6 +18,7 @@ import { whatsappGroupSafetyEngine } from "./whatsapp/whatsappGroupSafetyEngine"
 import { whatsappGroupSuperPowersEngine } from "./whatsapp/whatsappGroupSuperPowersEngine";
 import { whatsappSessionHealthEngine } from "./whatsapp/whatsappSessionHealthEngine";
 import { whatsappMetaAiBridgeEngine } from "./whatsapp/whatsappMetaAiBridgeEngine";
+import { girlfriendProfileService } from "./girlfriendProfileService";
 
 export type { QuotedMessageContext, IncomingMessage, WhatsAppStatus };
 
@@ -1244,6 +1245,31 @@ class WhatsAppBotService {
     if (rawText.startsWith("[Reaction:") || rawText.startsWith("[reaction:") || /^\[Reaction/i.test(rawText) || isSingleReactionEmoji) {
       console.log(`[WhatsAppBot] Dropping reaction/acknowledgement emoji in handleOwnerWhatsAppMessage: "${rawText}"`);
       return;
+    }
+
+    // ── GIRLFRIEND PROFILE ONBOARDING & COMMANDS ──
+    if (girlfriendProfileService.isOnboardingActive(replyJid)) {
+      const onboardRes = await girlfriendProfileService.handleOnboardingTurn(replyJid, rawText, "whatsapp");
+      if (onboardRes.handled) {
+        await this.sendHumanLikeMessage(replyJid, onboardRes.replyText, rawText, messageKey);
+        if (onboardRes.isComplete && !this.isGirlfriendModeActive(replyJid)) {
+          await this.startGirlfriendMode(replyJid, "@girlfriend mode_b 60", messageKey, senderName);
+        }
+        return;
+      }
+    }
+
+    if (girlfriendProfileService.isProfileCommand(rawText)) {
+      const cmdRes = await girlfriendProfileService.handleProfileCommand(rawText, replyJid, "whatsapp");
+      if (cmdRes.handled) {
+        await this.sendHumanLikeMessage(replyJid, cmdRes.replyText, rawText, messageKey);
+        if (/^(?:switch\s*to|active|select|switch|profile\s*switch|\/switch)\s+/i.test(rawText)) {
+          if (!this.isGirlfriendModeActive(replyJid)) {
+            await this.startGirlfriendMode(replyJid, "@girlfriend mode_b 60", messageKey, senderName);
+          }
+        }
+        return;
+      }
     }
 
     // ── VIRTUAL GIRLFRIEND MODE ROUTING ──
