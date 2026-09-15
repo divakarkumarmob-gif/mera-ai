@@ -12,13 +12,11 @@ export const UNCENSORED_SAFETY_SETTINGS = [
   { category: "HARM_CATEGORY_CIVIC_INTEGRITY", threshold: "BLOCK_NONE" },
 ];
 
-// Open Uncensored AI Fallbacks (Mistral, DeepSeek-R1, Llama 3.3, OpenAI-Large via Pollinations API)
+// Open Uncensored AI Fallbacks (Pollinations API models)
 const UNCENSORED_OPEN_MODELS = [
-  "mistral",
-  "deepseek-r1",
-  "llama-3.3-70b",
-  "openai-large",
-  "evil",
+  "openai-fast",
+  "openai",
+  "searchgpt",
 ];
 
 class FridayModeService {
