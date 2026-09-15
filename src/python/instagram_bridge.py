@@ -7,8 +7,62 @@ Provides a lightweight local HTTP API for Node.js backend.
 import sys
 import os
 import subprocess
+import importlib
 
-# Auto-discovery of python site-packages and self-healing installer for Linux/Render
+# ──────────────────────────────────────────────────────────────────────────
+# SELF-HEALING IMPORT: Discover site-packages, auto-install if missing
+# ──────────────────────────────────────────────────────────────────────────
+def _ensure_site_packages_on_path():
+    """Forcefully ensure all user/system site-packages are on sys.path."""
+    import site
+    paths_to_add = []
+
+    # Standard site-packages
+    if hasattr(site, "getsitepackages"):
+        paths_to_add.extend(site.getsitepackages())
+    if hasattr(site, "getusersitepackages"):
+        paths_to_add.append(site.getusersitepackages())
+
+    # Render-specific paths
+    home = os.environ.get("HOME", "/root")
+    render_home = "/opt/render" if os.environ.get("RENDER") else home
+    for py_ver in ("3.11", "3.12", "3.10"):
+        paths_to_add.append(f"{render_home}/.local/lib/python{py_ver}/site-packages")
+        paths_to_add.append(f"{home}/.local/lib/python{py_ver}/site-packages")
+        paths_to_add.append(f"/usr/local/lib/python{py_ver}/dist-packages")
+
+    for p in paths_to_add:
+        if p and os.path.isdir(p) and p not in sys.path:
+            sys.path.insert(0, p)
+
+def _auto_install_instagrapi():
+    """Install instagrapi via pip with multiple fallback strategies."""
+    sys.stderr.write("[InstagrapiBridge] Auto-installing instagrapi...\n")
+    sys.stderr.flush()
+    install_cmds = [
+        [sys.executable, "-m", "pip", "install", "instagrapi", "--break-system-packages", "--user", "--no-warn-script-location"],
+        [sys.executable, "-m", "pip", "install", "instagrapi", "--break-system-packages", "--no-warn-script-location"],
+        [sys.executable, "-m", "pip", "install", "instagrapi", "--user", "--no-warn-script-location"],
+    ]
+    for cmd in install_cmds:
+        try:
+            subprocess.check_call(cmd, timeout=120)
+            sys.stderr.write("[InstagrapiBridge] pip install succeeded.\n")
+            sys.stderr.flush()
+            break
+        except Exception as e:
+            sys.stderr.write(f"[InstagrapiBridge] pip attempt failed ({e}), trying next...\n")
+            continue
+
+    # Force refresh sys.path after install
+    _ensure_site_packages_on_path()
+    # Clear any cached import failures
+    importlib.invalidate_caches()
+
+# Step 1: Ensure site-packages are visible
+_ensure_site_packages_on_path()
+
+# Step 2: Try importing instagrapi
 try:
     from instagrapi import Client
     from instagrapi.exceptions import (
@@ -20,16 +74,9 @@ try:
         UserNotFound,
     )
 except ImportError:
+    # Step 3: Install and retry
+    _auto_install_instagrapi()
     try:
-        import site
-        extra_paths = []
-        if hasattr(site, "getsitepackages"):
-            extra_paths.extend(site.getsitepackages())
-        if hasattr(site, "getusersitepackages"):
-            extra_paths.append(site.getusersitepackages())
-        for p in extra_paths:
-            if p and os.path.exists(p) and p not in sys.path:
-                sys.path.append(p)
         from instagrapi import Client
         from instagrapi.exceptions import (
             TwoFactorRequired,
@@ -39,21 +86,12 @@ except ImportError:
             ChallengeRequired,
             UserNotFound,
         )
-    except ImportError:
-        sys.stderr.write("[InstagrapiBridge] Auto-installing instagrapi in active Python environment...\n")
-        try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "instagrapi", "--break-system-packages", "--no-warn-script-location"])
-        except Exception:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "instagrapi", "--user", "--no-warn-script-location"])
-        from instagrapi import Client
-        from instagrapi.exceptions import (
-            TwoFactorRequired,
-            BadPassword,
-            PleaseWaitFewMinutes,
-            LoginRequired,
-            ChallengeRequired,
-            UserNotFound,
-        )
+    except ImportError as final_err:
+        sys.stderr.write(f"[InstagrapiBridge] FATAL: Could not import instagrapi after install: {final_err}\n")
+        sys.stderr.write(f"[InstagrapiBridge] sys.path = {sys.path}\n")
+        sys.stderr.write(f"[InstagrapiBridge] sys.executable = {sys.executable}\n")
+        sys.stderr.flush()
+        sys.exit(1)
 
 import json
 import argparse

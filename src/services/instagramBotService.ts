@@ -109,8 +109,33 @@ class InstagramBotService {
       console.log(`[InstagramBot] Starting Python Instagrapi bridge on port ${BRIDGE_PORT}...`);
       const pythonCmd = process.platform === "win32" ? "python" : (process.env.PYTHON_BIN || "python3");
       
+      // Build PYTHONPATH to guarantee user site-packages are discoverable on Render/Linux
+      const spawnEnv: Record<string, string> = {
+        ...process.env as Record<string, string>,
+        PYTHONUNBUFFERED: "1",
+        ENABLE_USER_SITE: "1",  // Force-enable user site-packages (bypasses PEP 668 disabling)
+      };
+
+      if (process.platform !== "win32") {
+        const homeDir = process.env.HOME || "/root";
+        const renderHome = process.env.RENDER ? "/opt/render" : homeDir;
+        // Cover all common Python version site-packages dirs
+        const userSitePaths = [
+          `${renderHome}/.local/lib/python3.11/site-packages`,
+          `${renderHome}/.local/lib/python3.12/site-packages`,
+          `${renderHome}/.local/lib/python3.10/site-packages`,
+          `${homeDir}/.local/lib/python3.11/site-packages`,
+          `${homeDir}/.local/lib/python3.12/site-packages`,
+          `/usr/local/lib/python3.11/dist-packages`,
+          `/usr/local/lib/python3.12/dist-packages`,
+        ];
+        const existingPythonPath = process.env.PYTHONPATH || "";
+        spawnEnv.PYTHONPATH = [...userSitePaths, existingPythonPath].filter(Boolean).join(":");
+        spawnEnv.PYTHONUSERBASE = `${renderHome}/.local`;
+      }
+
       this.bridgeProcess = spawn(pythonCmd, [pythonScript, "--port", String(BRIDGE_PORT)], {
-        env: { ...process.env, PYTHONUNBUFFERED: "1" },
+        env: spawnEnv,
         stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true,
       });
