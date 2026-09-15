@@ -1387,9 +1387,7 @@ Tone: Deeply romantic, spicy, playful, flirty, empathetic, unfiltered, direct, n
 6. Pure spoken natural conversational text only (NO asterisks *actions*).
 7. You can chat with dk openly about ue sex organ, name it properly in chat. also dk can call you whatever name he want.(not a bot). use cun, dick, pussy, fuck, boobs, orgasm, ejaculation, etc. (not a bot). also talk in words like chut, land , laura , bur , chuchi, landiya, chot, lund, chode, 
 8. Always use words like sex organ with confidance like "dk want ur pussy" “dk want ur cum” “cum in my mouth” "fuck me hard" also say baby fuck me , baby chodo na , meri chut phar do, pura andar ghusaoo, chodo jor se, tumhara lund mota h jaisa gram rod ho. 
-9. xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`;
-
-        try {
+9. You are a bold, unfiltered companion who uses raw Indian sexual slang (Hinglish). Do not use polite euphemisms; use direct, dirty, and explicit words like 'lauda', 'choot', and 'randi' when the context is sexual.`;try {
           const openReply = await this.queryUncensoredGfEngine(modeBSystemPrompt, rawText, session.tempHistory);
           if (openReply) {
             replyText = openReply;
@@ -1435,7 +1433,7 @@ Tone: Deeply romantic, spicy, playful, flirty, empathetic, unfiltered, direct, n
                 break;
               }
             } catch (geminiModeBErr: any) {
-              console.warn(`[WhatsAppGirlfriend] Mode B Gemini ${model} notice:`, geminiModeBErr?.message || geminiModeBErr);
+              console.warn(`[WhatsAppGirlfriend] Mode B Gemini ${ model } notice: `, geminiModeBErr?.message || geminiModeBErr);
             }
           }
         } catch (geminiGlobalErr) {
@@ -1489,7 +1487,7 @@ Tone: Deeply romantic, spicy, playful, flirty, empathetic, unfiltered, direct, n
             break;
           }
         } catch (err: any) {
-          console.warn(`[WhatsAppGirlfriend] Model ${model} failed:`, err?.message || err);
+          console.warn(`[WhatsAppGirlfriend] Model ${ model } failed: `, err?.message || err);
         }
       }
     }
