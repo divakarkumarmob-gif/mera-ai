@@ -96,6 +96,24 @@ class FridayModeService {
   }): Promise<string | null> {
     const fullSystem = `${options.systemInstruction}\n${this.getModeBPromptAddendum()}`;
 
+    const isInvalidAiText = (t?: string | null): boolean => {
+      if (!t || !t.trim()) return true;
+      const lower = t.toLowerCase();
+      return (
+        lower.includes("reached its budget") ||
+        lower.includes("raise the key budget") ||
+        lower.includes("enter.pollinations.ai") ||
+        lower.includes("pollinations") ||
+        lower.includes("model not found") ||
+        lower.includes("legacy api") ||
+        lower.includes("404 not found") ||
+        lower.includes("rate limit") ||
+        lower.includes("quota exceeded") ||
+        lower.startsWith("<html") ||
+        lower.startsWith("<!doctype")
+      );
+    };
+
     // ── Tier 1: Pollinations AI Open Models (100% Free, 0 Key Required, Zero Filters) ───
     for (const model of UNCENSORED_OPEN_MODELS) {
       try {
@@ -109,7 +127,7 @@ class FridayModeService {
         ];
 
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 12000);
+        const timeout = setTimeout(() => controller.abort(), 8000);
 
         const res = await fetch("https://text.pollinations.ai/openai", {
           method: "POST",
@@ -126,7 +144,7 @@ class FridayModeService {
         if (res.ok) {
           const data = await res.json();
           const text = data?.choices?.[0]?.message?.content?.trim();
-          if (text && text.length > 0) {
+          if (text && !isInvalidAiText(text)) {
             console.log(`[FridayModeService] ✅ Mode B response generated via 100% Uncensored Open Model: ${model}`);
             return text;
           }

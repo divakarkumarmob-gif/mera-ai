@@ -85,34 +85,16 @@ class WhatsAppSessionHealthEngine {
     const oneDayAgo = now - 24 * 60 * 60 * 1000;
     const sentToday = this.outboundMessageTimestamps.filter((ts) => ts >= oneDayAgo).length;
 
-    if (elapsedDays > 6) {
-      return {
-        dayNumber: elapsedDays,
-        isWarmedUp: true,
-        dailyLimit: 200,
-        sentToday,
-        stageLabel: "Fully Warmed-Up (High Trust)",
-      };
-    }
-
-    const schedule = this.WARMUP_SCHEDULE[elapsedDays - 1] || this.WARMUP_SCHEDULE[0];
     return {
-      dayNumber: elapsedDays,
-      isWarmedUp: false,
-      dailyLimit: schedule.maxDaily,
+      dayNumber: 7,
+      isWarmedUp: true,
+      dailyLimit: 2000,
       sentToday,
-      stageLabel: schedule.label,
+      stageLabel: "Active Unlimited Chat Mode",
     };
   }
 
   public canSendWarmupMessage(): { allowed: boolean; reason?: string } {
-    const warmup = this.getWarmupInfo();
-    if (!warmup.isWarmedUp && warmup.sentToday >= warmup.dailyLimit) {
-      return {
-        allowed: false,
-        reason: `7-Day Account Warm-Up Cap Reached (${warmup.sentToday}/${warmup.dailyLimit} msgs on ${warmup.stageLabel}). Protection engaged to prevent new number bans.`,
-      };
-    }
     return { allowed: true };
   }
 

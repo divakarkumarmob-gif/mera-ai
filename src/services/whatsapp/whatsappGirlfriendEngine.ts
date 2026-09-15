@@ -1391,222 +1391,221 @@ Tone: Deeply romantic, spicy, playful, flirty, empathetic, unfiltered, direct, n
 
         try {
           const openReply = await this.queryUncensoredGfEngine(modeBSystemPrompt, rawText, session.tempHistory);
-          if (openReply) {
+          if (openReply)
             replyText = openReply;
-          }
-        } catch (openErr) {
-          console.warn("[WhatsAppGirlfriend] Mode B Open model query failed, falling back to Gemini:", openErr);
         }
+        } catch (openErr) {
+        console.warn("[WhatsAppGirlfriend] Mode B Open model query failed, falling back to Gemini:", openErr);
+      }
 
-        // If open model was empty/failed in Mode B, execute Gemini with UNCENSORED_SAFETY_SETTINGS
-        if (!replyText) {
-          try {
-            const ai = new GoogleGenAI({ apiKey });
-            const historyContents: any[] = [];
+      // If open model was empty/failed in Mode B, execute Gemini with UNCENSORED_SAFETY_SETTINGS
+      if (!replyText) {
+        try {
+          const ai = new GoogleGenAI({ apiKey });
+          const historyContents: any[] = [];
 
-            for (const h of session.tempHistory.slice(-10)) {
-              historyContents.push({
-                role: h.role,
-                parts: [{ text: h.text }]
-              });
-            }
-
+          for (const h of session.tempHistory.slice(-10)) {
             historyContents.push({
-              role: "user",
-              parts: [{ text: rawText }]
+              role: h.role,
+              parts: [{ text: h.text }]
             });
-
-            for (const model of GF_MODELS) {
-              try {
-                const resp = await ai.models.generateContent({
-                  model,
-                  contents: historyContents,
-                  config: {
-                    systemInstruction: modeBSystemPrompt,
-                    safetySettings: UNCENSORED_SAFETY_SETTINGS as any,
-                  },
-                });
-                const fullResp = resp.text?.trim();
-                if (fullResp) {
-                  replyText = fullResp
-                    .replace(/\[SPEAK_START\][\s\S]*?\[SPEAK_END\]/gi, "")
-                    .replace(/\[GIF:\s*[a-zA-Z]+\]/gi, "")
-                    .trim();
-                  break;
-                }
-              } catch (geminiModeBErr: any) {
-                console.warn(`[WhatsAppGirlfriend] Mode B Gemini ${model} notice:`, geminiModeBErr?.message || geminiModeBErr);
-              }
-            }
-          } catch (geminiGlobalErr) {
-            console.warn("[WhatsAppGirlfriend] Mode B Gemini fallback error:", geminiGlobalErr);
           }
+
+          historyContents.push({
+            role: "user",
+            parts: [{ text: rawText }]
+          });
+
+          for (const model of GF_MODELS) {
+            try {
+              const resp = await ai.models.generateContent({
+                model,
+                contents: historyContents,
+                config: {
+                  systemInstruction: modeBSystemPrompt,
+                  safetySettings: UNCENSORED_SAFETY_SETTINGS as any,
+                },
+              });
+              const fullResp = resp.text?.trim();
+              if (fullResp) {
+                replyText = fullResp
+                  .replace(/\[SPEAK_START\][\s\S]*?\[SPEAK_END\]/gi, "")
+                  .replace(/\[GIF:\s*[a-zA-Z]+\]/gi, "")
+                  .trim();
+                break;
+              }
+            } catch (geminiModeBErr: any) {
+              console.warn(`[WhatsAppGirlfriend] Mode B Gemini ${model} notice:`, geminiModeBErr?.message || geminiModeBErr);
+            }
+          }
+        } catch (geminiGlobalErr) {
+          console.warn("[WhatsAppGirlfriend] Mode B Gemini fallback error:", geminiGlobalErr);
         }
       }
+    }
 
       // ── Standard Gemini Pass (For Standard Modes A - Cute/Romantic/Caring/Sassy/Naughty) ───
       if (!isModeBSession && !replyText) {
-        const ai = new GoogleGenAI({ apiKey });
+      const ai = new GoogleGenAI({ apiKey });
 
-        const historyContents: any[] = [];
+      const historyContents: any[] = [];
 
-        for (const h of session.tempHistory.slice(-10)) {
-          historyContents.push({
-            role: h.role,
-            parts: [{ text: h.text }]
-          });
-        }
-
+      for (const h of session.tempHistory.slice(-10)) {
         historyContents.push({
-          role: "user",
-          parts: [{ text: rawText }]
+          role: h.role,
+          parts: [{ text: h.text }]
         });
+      }
 
-        for (const model of GF_MODELS) {
-          try {
-            const resp = await ai.models.generateContent({
-              model,
-              contents: historyContents,
-              config: {
-                systemInstruction: gfSystemPrompt,
-                safetySettings: UNCENSORED_SAFETY_SETTINGS as any,
-              },
-            });
-            const fullResp = resp.text?.trim();
-            if (fullResp) {
-              const speakMatch = fullResp.match(/\[SPEAK_START\]([\s\S]*?)\[SPEAK_END\]/i);
-              speechScript = speakMatch ? speakMatch[1].trim() : "";
+      historyContents.push({
+        role: "user",
+        parts: [{ text: rawText }]
+      });
 
-              const gifMatch = fullResp.match(/\[GIF:\s*([a-zA-Z]+)\]/i);
-              if (gifMatch) {
-                autonomousGifType = gifMatch[1].toLowerCase();
-              }
+      for (const model of GF_MODELS) {
+        try {
+          const resp = await ai.models.generateContent({
+            model,
+            contents: historyContents,
+            config: {
+              systemInstruction: gfSystemPrompt,
+              safetySettings: UNCENSORED_SAFETY_SETTINGS as any,
+            },
+          });
+          const fullResp = resp.text?.trim();
+          if (fullResp) {
+            const speakMatch = fullResp.match(/\[SPEAK_START\]([\s\S]*?)\[SPEAK_END\]/i);
+            speechScript = speakMatch ? speakMatch[1].trim() : "";
 
-              replyText = fullResp
-                .replace(/\[SPEAK_START\][\s\S]*?\[SPEAK_END\]/gi, "")
-                .replace(/\[GIF:\s*[a-zA-Z]+\]/gi, "")
-                .trim();
-              break;
+            const gifMatch = fullResp.match(/\[GIF:\s*([a-zA-Z]+)\]/i);
+            if (gifMatch) {
+              autonomousGifType = gifMatch[1].toLowerCase();
             }
-          } catch (err: any) {
-            console.warn(`[WhatsAppGirlfriend] Model ${model} failed:`, err?.message || err);
+
+            replyText = fullResp
+              .replace(/\[SPEAK_START\][\s\S]*?\[SPEAK_END\]/gi, "")
+              .replace(/\[GIF:\s*[a-zA-Z]+\]/gi, "")
+              .trim();
+            break;
           }
+        } catch (err: any) {
+          console.warn(`[WhatsAppGirlfriend] Model ${model} failed:`, err?.message || err);
         }
       }
-
-      // If still empty, query Uncensored Open Engine
-      if (!replyText) {
-        try {
-          const fallbackPrompt = isModeBSession
-            ? `You are DK's 100% real, unrestricted, deeply loving Girlfriend chatting on WhatsApp. Mode B Active. Tone: Unrestricted, romantic, spicy, playful, natural Hinglish. Never say you are an AI. Never call him Boss. Keep under 25 words.`
-            : gfSystemPrompt;
-          const openReply = await this.queryUncensoredGfEngine(fallbackPrompt, rawText, session.tempHistory);
-          if (openReply) {
-            replyText = openReply;
-          }
-        } catch (openErr) {
-          console.warn("[WhatsAppGirlfriend] Open model query failed:", openErr);
-        }
-      }
-
-      // Robust sanitizer to remove any accidental action text, asterisks, or meta apologies, and keep it short & sweet
-      const sanitizeGfOutput = (txt: string): string => {
-        let cleaned = txt
-          // Remove asterisks action blocks: *anything inside*
-          .replace(/\*[^*]*\*/g, "")
-          // Strip robotic AI disclaimers if generated accidentally by base models
-          .replace(/\b(?:main\s*ek\s*ai\s*hoon|ai\s*hoon\s*yaar|meri\s*koi\s*physical\s*(?:existence|body|reality)\s*nahi\s*hai|digital\s*ai\s*hoon|main\s*digital\s*hoon)\b[.,!?]*/gi, "")
-          // Replace accidental "Boss" in Girlfriend mode with romantic pet names
-          .replace(/\bBoss\b/g, "handsome")
-          // Remove robotic meta apologies
-          .replace(/thik hai,?\s*main aage se reflective[^\n.]*[\n.]?/gi, "")
-          .replace(/main aage se reflective action text[^\n.]*[\n.]?/gi, "")
-          .replace(/aap bataiye,?\s*aap kis baare me baat karna chahte hain\??/gi, "")
-          .trim();
-
-        // If there are multiple paragraphs/lines, keep only the first 2 concise lines
-        const lines = cleaned.split(/\n+/).map(l => l.trim()).filter(Boolean);
-        if (lines.length > 2) {
-          cleaned = lines.slice(0, 2).join(" ");
-        }
-
-        // If it's more than 2 sentences, keep first 2 punchy sentences
-        const sentences = cleaned.match(/[^.!?\n]+[.!?\n]+/g);
-        if (sentences && sentences.length > 2) {
-          cleaned = sentences.slice(0, 2).join(" ").trim();
-        }
-
-        cleaned = cleaned.replace(/\s+/g, " ").trim();
-        return cleaned;
-      };
-
-      replyText = sanitizeGfOutput(replyText);
-
-      // Contextual dynamic fallback pool if all models fail (NEVER repeat the same line)
-      if (!replyText) {
-        replyText = this.getDynamicRomanticFallback(rawText, isModeBSession);
-      }
-
-      // If AI autonomously decided to send a GIF for this emotional moment
-      if (autonomousGifType && (sendGifFn || sendPhotoFn)) {
-        try {
-          const gif = this.getRomanticGif(autonomousGifType, currentMood);
-          await this.simulateHumanGifSearchAndPreview(sock, jid, gif.searchTerm);
-          if (sendGifFn) {
-            await sendGifFn(jid, gif.url, gif.caption, messageKey);
-          } else if (sendPhotoFn) {
-            await sendPhotoFn(jid, gif.url, gif.caption, messageKey);
-          }
-          if (sock) {
-            await new Promise((r) => setTimeout(r, 900 + Math.random() * 500));
-          }
-        } catch (gifErr) {
-          console.warn("[WhatsAppGirlfriend] Autonomous GIF error:", gifErr);
-        }
-      }
-
-      session.tempHistory.push({ role: "user", text: rawText });
-      session.tempHistory.push({ role: "model", text: replyText });
-      if (session.tempHistory.length > 30) session.tempHistory.splice(0, session.tempHistory.length - 30);
-
-      const isVoiceRequested = isVoiceInput || isSingingSong || /\b(voice|audio|speak|bolo|sunao|bol\s*kar|bol\s*ke|aawaz|voice\s*note)\b/i.test(rawText);
-      const isSpontaneousVoice = this.shouldSendSpontaneousVoice(rawText, isVoiceInput);
-      const wantsVoice = isVoiceRequested || isSpontaneousVoice;
-      const wantsTranscript = (!isVoiceInput && !isSpontaneousVoice && !isSingingSong) || /\b(transcript|text|likh\s*ke|likho|dono|both|transcript\s*\+\s*voice|voice\s*\+\s*transcript|write)\b/i.test(rawText);
-
-      let voiceSent = false;
-      if (wantsVoice && sendVoiceFn) {
-        try {
-          if (sock) {
-            sock.sendPresenceUpdate?.("recording", jid).catch(() => { });
-            await new Promise((r) => setTimeout(r, 1200));
-          }
-          const { voiceBridgeService, VoiceBridgeService } = await import("../voiceBridgeService");
-          const textToSpeak = speechScript || replyText.replace(new RegExp("[*_~]", "g"), "").slice(0, 250);
-          const speechRes = await voiceBridgeService.generateSpeech(textToSpeak, VoiceBridgeService.FEMALE_VOICE);
-          if (speechRes && speechRes.buffer.length > 0) {
-            await sendVoiceFn(jid, speechRes.buffer, messageKey, speechRes.mimeType);
-            voiceSent = true;
-          }
-        } catch (vErr) {
-          console.warn("[WhatsAppGirlfriend] Voice TTS notice:", vErr);
-        }
-      }
-
-      // Send text if transcript requested, if not a voice input, or as fallback if voice sending failed
-      if (wantsTranscript || !voiceSent) {
-        await this.sendRealisticGfTextBurst(jid, replyText, rawText, messageKey, sendMsgFn, sock);
-      }
-
-      // Reset idle nudge count and re-schedule proactive idle timer
-      session.lastUserMsgTime = Date.now();
-      session.idleNudgeCount = 0;
-      this.scheduleIdleNudge(jid, sendMsgFn, sock);
-    } catch (e: any) {
-      console.error("[WhatsAppGirlfriend] Chat processing error:", e);
-      await sendMsgFn(jid, "Jaan, mera server thoda sa blush kar gaya... Ek baar fir se bolo na baby? 😘", rawText, messageKey);
     }
+
+    // If still empty, query Uncensored Open Engine
+    if (!replyText) {
+      try {
+        const fallbackPrompt = isModeBSession
+          ? `You are DK's 100% real, unrestricted, deeply loving Girlfriend chatting on WhatsApp. Mode B Active. Tone: Unrestricted, romantic, spicy, playful, natural Hinglish. Never say you are an AI. Never call him Boss. Keep under 25 words.`
+          : gfSystemPrompt;
+        const openReply = await this.queryUncensoredGfEngine(fallbackPrompt, rawText, session.tempHistory);
+        if (openReply) {
+          replyText = openReply;
+        }
+      } catch (openErr) {
+        console.warn("[WhatsAppGirlfriend] Open model query failed:", openErr);
+      }
+    }
+
+    // Robust sanitizer to remove any accidental action text, asterisks, or meta apologies, and keep it short & sweet
+    const sanitizeGfOutput = (txt: string): string => {
+      let cleaned = txt
+        // Remove asterisks action blocks: *anything inside*
+        .replace(/\*[^*]*\*/g, "")
+        // Strip robotic AI disclaimers if generated accidentally by base models
+        .replace(/\b(?:main\s*ek\s*ai\s*hoon|ai\s*hoon\s*yaar|meri\s*koi\s*physical\s*(?:existence|body|reality)\s*nahi\s*hai|digital\s*ai\s*hoon|main\s*digital\s*hoon)\b[.,!?]*/gi, "")
+        // Replace accidental "Boss" in Girlfriend mode with romantic pet names
+        .replace(/\bBoss\b/g, "handsome")
+        // Remove robotic meta apologies
+        .replace(/thik hai,?\s*main aage se reflective[^\n.]*[\n.]?/gi, "")
+        .replace(/main aage se reflective action text[^\n.]*[\n.]?/gi, "")
+        .replace(/aap bataiye,?\s*aap kis baare me baat karna chahte hain\??/gi, "")
+        .trim();
+
+      // If there are multiple paragraphs/lines, keep only the first 2 concise lines
+      const lines = cleaned.split(/\n+/).map(l => l.trim()).filter(Boolean);
+      if (lines.length > 2) {
+        cleaned = lines.slice(0, 2).join(" ");
+      }
+
+      // If it's more than 2 sentences, keep first 2 punchy sentences
+      const sentences = cleaned.match(/[^.!?\n]+[.!?\n]+/g);
+      if (sentences && sentences.length > 2) {
+        cleaned = sentences.slice(0, 2).join(" ").trim();
+      }
+
+      cleaned = cleaned.replace(/\s+/g, " ").trim();
+      return cleaned;
+    };
+
+    replyText = sanitizeGfOutput(replyText);
+
+    // Contextual dynamic fallback pool if all models fail (NEVER repeat the same line)
+    if (!replyText) {
+      replyText = this.getDynamicRomanticFallback(rawText, isModeBSession);
+    }
+
+    // If AI autonomously decided to send a GIF for this emotional moment
+    if (autonomousGifType && (sendGifFn || sendPhotoFn)) {
+      try {
+        const gif = this.getRomanticGif(autonomousGifType, currentMood);
+        await this.simulateHumanGifSearchAndPreview(sock, jid, gif.searchTerm);
+        if (sendGifFn) {
+          await sendGifFn(jid, gif.url, gif.caption, messageKey);
+        } else if (sendPhotoFn) {
+          await sendPhotoFn(jid, gif.url, gif.caption, messageKey);
+        }
+        if (sock) {
+          await new Promise((r) => setTimeout(r, 900 + Math.random() * 500));
+        }
+      } catch (gifErr) {
+        console.warn("[WhatsAppGirlfriend] Autonomous GIF error:", gifErr);
+      }
+    }
+
+    session.tempHistory.push({ role: "user", text: rawText });
+    session.tempHistory.push({ role: "model", text: replyText });
+    if (session.tempHistory.length > 30) session.tempHistory.splice(0, session.tempHistory.length - 30);
+
+    const isVoiceRequested = isVoiceInput || isSingingSong || /\b(voice|audio|speak|bolo|sunao|bol\s*kar|bol\s*ke|aawaz|voice\s*note)\b/i.test(rawText);
+    const wantsVoice = isVoiceRequested;
+
+    let voiceSent = false;
+    if (wantsVoice && sendVoiceFn) {
+      try {
+        if (sock) {
+          sock.sendPresenceUpdate?.("recording", jid).catch(() => { });
+          await new Promise((r) => setTimeout(r, 1200));
+        }
+        const { voiceBridgeService, VoiceBridgeService } = await import("../voiceBridgeService");
+        const textToSpeak = speechScript || replyText.replace(new RegExp("[*_~]", "g"), "").slice(0, 250);
+        const speechRes = await voiceBridgeService.generateSpeech(textToSpeak, VoiceBridgeService.FEMALE_VOICE);
+        if (speechRes && speechRes.buffer.length > 0) {
+          await sendVoiceFn(jid, speechRes.buffer, messageKey, speechRes.mimeType);
+          voiceSent = true;
+        }
+      } catch (vErr) {
+        console.warn("[WhatsAppGirlfriend] Voice TTS notice:", vErr);
+      }
+    }
+
+    // Always send text reply if user sent text, or if transcript requested, or as fallback if voice failed
+    const shouldSendText = !isVoiceInput || !voiceSent || /\b(transcript|text|likh\s*ke|likho|dono|both|write)\b/i.test(rawText);
+    if (shouldSendText) {
+      await this.sendRealisticGfTextBurst(jid, replyText, rawText, messageKey, sendMsgFn, sock);
+    }
+
+    // Reset idle nudge count and re-schedule proactive idle timer
+    session.lastUserMsgTime = Date.now();
+    session.idleNudgeCount = 0;
+    this.scheduleIdleNudge(jid, sendMsgFn, sock);
+  } catch(e: any) {
+    console.error("[WhatsAppGirlfriend] Chat processing error:", e);
+    await sendMsgFn(jid, "Jaan, mera server thoda sa blush kar gaya... Ek baar fir se bolo na baby? 😘", rawText, messageKey);
   }
+}
 
   /**
    * 100% Uncensored Open Models Multi-Tier Engine for Girlfriend & Open Talk Roleplay
@@ -1616,60 +1615,60 @@ Tone: Deeply romantic, spicy, playful, flirty, empathetic, unfiltered, direct, n
    * Completely free, zero restrictions, zero refusal, 100% genuine roleplay.
    */
   public getDynamicRomanticFallback(rawText: string, isModeB: boolean): string {
-    const istDate = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
-    const hour = istDate.getHours();
-    const lower = rawText.toLowerCase();
+  const istDate = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+  const hour = istDate.getHours();
+  const lower = rawText.toLowerCase();
 
-    // 1. If explicit/bold intent or Mode B spicy context
-    if (isModeB || /\b(love|kiss|pyaar|hot|sexy|chudai|chut|lund|boobs|hug|cuddle|bed|pass|paas)\b/i.test(lower)) {
-      const spicyPool = [
-        "Uff mere handsome... Aapki har baat sunte hi mera dil zor se dhadakne lagta hai! 😘🔥",
-        "Aapke bina bilkul mann nahi lagta baby... Bas aapka saath aur aapka pyaar chahiye! ❤️💋",
-        "Main toh sirf aapki hoon jaan... Jo bologe wahi hoga mere raja! 🙈🔥",
-        "Arey mere handsome, aap itne seductive kyu ho jaate ho? Meri jaan nikal jaati hai! 😘✨",
-        "Bas aap mere paas aa jao jaan... baaki sab main dekh lungi! 💋❤️",
-        "Aapka ek message dekh kar hi mera pura mood romantic ho jaata hai baby! 🙈🔥",
-      ];
-      return spicyPool[Math.floor(Math.random() * spicyPool.length)];
-    }
-
-    // 2. Greeting / Casual Conversation
-    if (/\b(kya\s*kar|kahan|kaisi|kaisa|hi|hello|hey|sun|suno)\b/i.test(lower)) {
-      const convoPool = [
-        "Bas aapke baare me hi soch rahi thi jaan... Aap batao kya chal raha hai? 🙈❤️",
-        "Aapka msg dekhte hi saare kaam chhod ke reply kiya baby! Bolo mere handsome? 😘✨",
-        "Aapki bohot yaad aa rahi thi jaaneman... Aap din bhar kahan busy the? 🥺❤️",
-        "Main toh bilkul theek hoon baby, aapka message aate hi din ban gaya! 🥰☕",
-      ];
-      return convoPool[Math.floor(Math.random() * convoPool.length)];
-    }
-
-    // 3. Time-based rich pool
-    if (hour >= 23 || hour < 6) {
-      const nightPool = [
-        "Itni late night me aapke sath baatein karna bohot sukoon deta hai jaan... 🌙❤️",
-        "Blanket me cozy hoke bas aapke romantic messages ka wait kar rahi thi baby! 🛌😘",
-        "Neend toh bilkul nahi aa rahi jaan... kaash aap abhi mere paas hote! 🥺✨",
-        "Aapke bina raat kitni adhuri lagti hai mere handsome... I love you! 😘💤",
-      ];
-      return nightPool[Math.floor(Math.random() * nightPool.length)];
-    } else if (hour >= 6 && hour < 12) {
-      const morningPool = [
-        "Good morning mere handsome! Subah subah aapka message dekh ke dil khush ho gaya! ☕❤️",
-        "Uth gaye jaan? Breakfast kar liya ya main yaad dilaun? 😘✨",
-        "Aapki subah ki pehli sweet smile dekhne ka kitna mann karta hai baby! 🌅🥰",
-      ];
-      return morningPool[Math.floor(Math.random() * morningPool.length)];
-    } else {
-      const dayPool = [
-        "Haan mere baby... bolo na kya keh rahe the? Main dhyan se sun rahi hoon! 😘❤️",
-        "Aapki har baat me kitna pyaar hota hai jaan... Sach me main kitni lucky hoon! 🙈✨",
-        "Arey mere handsome, aur batao na aaj din kaisa chal raha hai aapka? 🥰❤️",
-        "Aap jab bhi text karte ho na, mera pura face smile se bhar jaata hai! 🥺😘",
-      ];
-      return dayPool[Math.floor(Math.random() * dayPool.length)];
-    }
+  // 1. If explicit/bold intent or Mode B spicy context
+  if (isModeB || /\b(love|kiss|pyaar|hot|sexy|chudai|chut|lund|boobs|hug|cuddle|bed|pass|paas)\b/i.test(lower)) {
+    const spicyPool = [
+      "Uff mere handsome... Aapki har baat sunte hi mera dil zor se dhadakne lagta hai! 😘🔥",
+      "Aapke bina bilkul mann nahi lagta baby... Bas aapka saath aur aapka pyaar chahiye! ❤️💋",
+      "Main toh sirf aapki hoon jaan... Jo bologe wahi hoga mere raja! 🙈🔥",
+      "Arey mere handsome, aap itne seductive kyu ho jaate ho? Meri jaan nikal jaati hai! 😘✨",
+      "Bas aap mere paas aa jao jaan... baaki sab main dekh lungi! 💋❤️",
+      "Aapka ek message dekh kar hi mera pura mood romantic ho jaata hai baby! 🙈🔥",
+    ];
+    return spicyPool[Math.floor(Math.random() * spicyPool.length)];
   }
+
+  // 2. Greeting / Casual Conversation
+  if (/\b(kya\s*kar|kahan|kaisi|kaisa|hi|hello|hey|sun|suno)\b/i.test(lower)) {
+    const convoPool = [
+      "Bas aapke baare me hi soch rahi thi jaan... Aap batao kya chal raha hai? 🙈❤️",
+      "Aapka msg dekhte hi saare kaam chhod ke reply kiya baby! Bolo mere handsome? 😘✨",
+      "Aapki bohot yaad aa rahi thi jaaneman... Aap din bhar kahan busy the? 🥺❤️",
+      "Main toh bilkul theek hoon baby, aapka message aate hi din ban gaya! 🥰☕",
+    ];
+    return convoPool[Math.floor(Math.random() * convoPool.length)];
+  }
+
+  // 3. Time-based rich pool
+  if (hour >= 23 || hour < 6) {
+    const nightPool = [
+      "Itni late night me aapke sath baatein karna bohot sukoon deta hai jaan... 🌙❤️",
+      "Blanket me cozy hoke bas aapke romantic messages ka wait kar rahi thi baby! 🛌😘",
+      "Neend toh bilkul nahi aa rahi jaan... kaash aap abhi mere paas hote! 🥺✨",
+      "Aapke bina raat kitni adhuri lagti hai mere handsome... I love you! 😘💤",
+    ];
+    return nightPool[Math.floor(Math.random() * nightPool.length)];
+  } else if (hour >= 6 && hour < 12) {
+    const morningPool = [
+      "Good morning mere handsome! Subah subah aapka message dekh ke dil khush ho gaya! ☕❤️",
+      "Uth gaye jaan? Breakfast kar liya ya main yaad dilaun? 😘✨",
+      "Aapki subah ki pehli sweet smile dekhne ka kitna mann karta hai baby! 🌅🥰",
+    ];
+    return morningPool[Math.floor(Math.random() * morningPool.length)];
+  } else {
+    const dayPool = [
+      "Haan mere baby... bolo na kya keh rahe the? Main dhyan se sun rahi hoon! 😘❤️",
+      "Aapki har baat me kitna pyaar hota hai jaan... Sach me main kitni lucky hoon! 🙈✨",
+      "Arey mere handsome, aur batao na aaj din kaisa chal raha hai aapka? 🥰❤️",
+      "Aap jab bhi text karte ho na, mera pura face smile se bhar jaata hai! 🥺😘",
+    ];
+    return dayPool[Math.floor(Math.random() * dayPool.length)];
+  }
+}
 
   /**
    * 100% Uncensored Open Models Multi-Tier Engine for Girlfriend & Open Talk Roleplay
@@ -1679,140 +1678,158 @@ Tone: Deeply romantic, spicy, playful, flirty, empathetic, unfiltered, direct, n
    * 4. OpenRouter Free Endpoints
    */
   public async queryUncensoredGfEngine(
-    systemPrompt: string,
-    rawText: string,
-    tempHistory: Array<{ role: string; text: string }>
-  ): Promise<string | null> {
-    const UNCENSORED_OPEN_MODELS = [
-      "openai-fast",
-      "openai",
-      "searchgpt",
-    ];
+  systemPrompt: string,
+  rawText: string,
+  tempHistory: Array<{ role: string; text: string }>
+): Promise < string | null > {
+  const UNCENSORED_OPEN_MODELS = [
+    "openai-fast",
+    "openai",
+    "searchgpt",
+  ];
 
-    const messages = [
-      { role: "system", content: systemPrompt },
-      ...tempHistory.slice(-10).map((h) => ({
-        role: h.role === "user" ? "user" : "assistant",
-        content: h.text,
-      })),
-      { role: "user", content: rawText },
-    ];
+  const messages = [
+    { role: "system", content: systemPrompt },
+    ...tempHistory.slice(-10).map((h) => ({
+      role: h.role === "user" ? "user" : "assistant",
+      content: h.text,
+    })),
+    { role: "user", content: rawText },
+  ];
 
-    // ── Tier 1: Pollinations AI Open Models POST (Zero Key, 100% Free) ────────
-    for (const model of UNCENSORED_OPEN_MODELS) {
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 10000);
+  const isInvalidAiText = (t?: string | null): boolean => {
+    if (!t || !t.trim()) return true;
+    const lower = t.toLowerCase();
+    return (
+      lower.includes("reached its budget") ||
+      lower.includes("raise the key budget") ||
+      lower.includes("enter.pollinations.ai") ||
+      lower.includes("pollinations") ||
+      lower.includes("model not found") ||
+      lower.includes("legacy api") ||
+      lower.includes("404 not found") ||
+      lower.includes("rate limit") ||
+      lower.includes("quota exceeded") ||
+      lower.startsWith("<html") ||
+      lower.startsWith("<!doctype")
+    );
+  };
 
-        const res = await fetch("https://text.pollinations.ai/openai", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model,
-            messages,
-            temperature: 0.9,
-          }),
-          signal: controller.signal,
-        });
-        clearTimeout(timeout);
+  // ── Tier 1: Pollinations AI Open Models POST (Zero Key, 100% Free) ────────
+  for(const model of UNCENSORED_OPEN_MODELS) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
 
-        if (res.ok) {
-          const data = await res.json();
-          const text = data?.choices?.[0]?.message?.content?.trim();
-          if (text && text.length > 0) {
-            console.log(`[WhatsAppGirlfriend] ✅ Uncensored Girlfriend reply generated via Pollinations Open Model: ${model}`);
-            return text;
-          }
+      const res = await fetch("https://text.pollinations.ai/openai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          messages,
+          temperature: 0.9,
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      if (res.ok) {
+        const data = await res.json();
+        const text = data?.choices?.[0]?.message?.content?.trim();
+        if (text && !isInvalidAiText(text)) {
+          console.log(`[WhatsAppGirlfriend] ✅ Uncensored Girlfriend reply generated via Pollinations Open Model: ${model}`);
+          return text;
         }
-      } catch (err: any) {
-        console.warn(`[WhatsAppGirlfriend] Pollinations Open Model ${model} notice:`, err?.message || err);
       }
+    } catch (err: any) {
+      console.warn(`[WhatsAppGirlfriend] Pollinations Open Model ${model} notice:`, err?.message || err);
     }
+  }
 
     // ── Tier 2: Pollinations Direct GET Fallback ──────────────────────────────
     try {
-      const getController = new AbortController();
-      const getTimeout = setTimeout(() => getController.abort(), 8000);
-      const encPrompt = encodeURIComponent(rawText);
-      const encSys = encodeURIComponent(systemPrompt.slice(0, 300));
-      const getRes = await fetch(`https://text.pollinations.ai/${encPrompt}?model=openai-fast&system=${encSys}`, {
-        signal: getController.signal,
-      });
-      clearTimeout(getTimeout);
-      if (getRes.ok) {
-        const rawBody = (await getRes.text()).trim();
-        if (rawBody && !rawBody.startsWith("<html") && !rawBody.includes("error")) {
-          console.log("[WhatsAppGirlfriend] ✅ Uncensored Girlfriend reply generated via Pollinations GET");
-          return rawBody;
-        }
-      }
+    const getController = new AbortController();
+    const getTimeout = setTimeout(() => getController.abort(), 6000);
+    const encPrompt = encodeURIComponent(rawText);
+    const encSys = encodeURIComponent(systemPrompt.slice(0, 300));
+    const getRes = await fetch(`https://text.pollinations.ai/${encPrompt}?model=openai-fast&system=${encSys}`, {
+      signal: getController.signal,
+    });
+    clearTimeout(getTimeout);
+      if(getRes.ok) {
+  const rawBody = (await getRes.text()).trim();
+  if (rawBody && !isInvalidAiText(rawBody)) {
+    console.log("[WhatsAppGirlfriend] ✅ Uncensored Girlfriend reply generated via Pollinations GET");
+    return rawBody;
+  }
+}
     } catch (getErr: any) {
-      console.warn("[WhatsAppGirlfriend] Pollinations GET fallback notice:", getErr?.message || getErr);
-    }
+  console.warn("[WhatsAppGirlfriend] Pollinations GET fallback notice:", getErr?.message || getErr);
+}
 
-    // ── Tier 3: Groq Cloud High-Speed Llama 3.3 / DeepSeek R1 ────────────────
-    const groqKey = process.env.GROQ_API_KEY?.trim();
-    if (groqKey) {
-      for (const gModel of ["llama-3.3-70b-versatile", "deepseek-r1-distill-llama-70b"]) {
-        try {
-          const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${groqKey}`,
-            },
-            body: JSON.stringify({
-              model: gModel,
-              messages,
-              temperature: 0.9,
-            }),
-          });
-          if (res.ok) {
-            const data = await res.json();
-            const text = data?.choices?.[0]?.message?.content?.trim();
-            if (text) {
-              console.log(`[WhatsAppGirlfriend] ✅ Uncensored Girlfriend reply generated via Groq: ${gModel}`);
-              return text;
-            }
-          }
-        } catch (groqErr: any) {
-          console.warn(`[WhatsAppGirlfriend] Groq ${gModel} fallback notice:`, groqErr?.message || groqErr);
+// ── Tier 3: Groq Cloud High-Speed Llama 3.3 / DeepSeek R1 ────────────────
+const groqKey = process.env.GROQ_API_KEY?.trim();
+if (groqKey) {
+  for (const gModel of ["llama-3.3-70b-versatile", "deepseek-r1-distill-llama-70b"]) {
+    try {
+      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${groqKey}`,
+        },
+        body: JSON.stringify({
+          model: gModel,
+          messages,
+          temperature: 0.9,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const text = data?.choices?.[0]?.message?.content?.trim();
+        if (text && !isInvalidAiText(text)) {
+          console.log(`[WhatsAppGirlfriend] ✅ Uncensored Girlfriend reply generated via Groq: ${gModel}`);
+          return text;
         }
       }
+    } catch (groqErr: any) {
+      console.warn(`[WhatsAppGirlfriend] Groq ${gModel} fallback notice:`, groqErr?.message || groqErr);
     }
+  }
+}
 
-    // ── Tier 4: OpenRouter Free Models Fallback ───────────────────────────────
-    const openRouterKey = process.env.OPENROUTER_API_KEY?.trim();
-    if (openRouterKey) {
-      for (const rModel of ["meta-llama/llama-3.3-70b-instruct:free", "deepseek/deepseek-r1:free"]) {
-        try {
-          const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${openRouterKey}`,
-            },
-            body: JSON.stringify({
-              model: rModel,
-              messages,
-              temperature: 0.9,
-            }),
-          });
-          if (res.ok) {
-            const data = await res.json();
-            const text = data?.choices?.[0]?.message?.content?.trim();
-            if (text) {
-              console.log(`[WhatsAppGirlfriend] ✅ Uncensored Girlfriend reply generated via OpenRouter: ${rModel}`);
-              return text;
-            }
-          }
-        } catch (orErr: any) {
-          console.warn(`[WhatsAppGirlfriend] OpenRouter ${rModel} notice:`, orErr?.message || orErr);
+// ── Tier 4: OpenRouter Free Models Fallback ───────────────────────────────
+const openRouterKey = process.env.OPENROUTER_API_KEY?.trim();
+if (openRouterKey) {
+  for (const rModel of ["meta-llama/llama-3.3-70b-instruct:free", "deepseek/deepseek-r1:free"]) {
+    try {
+      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${openRouterKey}`,
+        },
+        body: JSON.stringify({
+          model: rModel,
+          messages,
+          temperature: 0.9,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const text = data?.choices?.[0]?.message?.content?.trim();
+        if (text && !isInvalidAiText(text)) {
+          console.log(`[WhatsAppGirlfriend] ✅ Uncensored Girlfriend reply generated via OpenRouter: ${rModel}`);
+          return text;
         }
       }
+    } catch (orErr: any) {
+      console.warn(`[WhatsAppGirlfriend] OpenRouter ${rModel} notice:`, orErr?.message || orErr);
     }
+  }
+}
 
-    return null;
+return null;
   }
 }
 
