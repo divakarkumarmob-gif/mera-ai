@@ -157,6 +157,14 @@ class InstagramBotService {
       this.bridgeProcess.stdout?.on("data", (data) => {
         const text = data.toString().trim();
         if (text) console.log(`[InstagrapiBridge:out] ${text}`);
+        if (text.includes("Server running at") || text.includes("InstagrapiBridge] Server running")) {
+          this.isBridgeReady = true;
+          if (!this.isLoggedIn) {
+            setTimeout(() => {
+              this.initSession().catch(() => {});
+            }, 1000);
+          }
+        }
       });
 
       this.bridgeProcess.stderr?.on("data", (data) => {
@@ -174,7 +182,7 @@ class InstagramBotService {
     }
   }
 
-  private async waitForBridgeReady(maxRetries = 60, delayMs = 1000): Promise<boolean> {
+  private async waitForBridgeReady(maxRetries = 120, delayMs = 1000): Promise<boolean> {
     for (let i = 0; i < maxRetries; i++) {
       try {
         const res = await fetch(`${BRIDGE_URL}/health`, { signal: AbortSignal.timeout(2000) });
