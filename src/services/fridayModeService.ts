@@ -284,6 +284,17 @@ class FridayModeService {
 
     return null;
   }
+
+  /**
+   * Detects explicit sexual slang, dirty words, and erotic dirty talk.
+   * In Normal Mode (Mode A), if user uses these words, Friday strictly deflects with "Main nahi samjha Boss".
+   */
+  public isUncensoredExplicitSexualContent(text: string): boolean {
+    if (!text || typeof text !== "string") return false;
+    const clean = text.toLowerCase();
+    const explicitRegex = /\b(?:lauda|laude|lawda|lawde|loda|lode|lund|lundd|choot|chut|chuto|chudai|chudna|chudva|chudwa|chodo|chodoge|chodna|chode|bhosdi|bhosdike|bhosadi|bhosadike|bhosada|randi|randya|gaand|chuchi|chuchiya|chuchiyo|boobs|boobies|tits|nipples|pussy|dick|cock|blowjob|handjob|orgasm|erotic|cum|masturbat|mutth|mutthal|sexy\s*baatein|gandi\s*baatein|dirty\s*talk|chudakkad|chinal|bhadwe|bhadwa)\b/i;
+    return explicitRegex.test(clean);
+  }
 }
 
 export const fridayModeService = new FridayModeService();

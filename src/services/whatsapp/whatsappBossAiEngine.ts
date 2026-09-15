@@ -1406,7 +1406,23 @@ export class WhatsAppBossAiEngine {
 
     const { fridayModeService } = await import("../fridayModeService");
     const currentMode = await fridayModeService.getMode();
-    const modeBAddendum = currentMode === "mode_b" ? fridayModeService.getModeBPromptAddendum() : "";
+    const isModeB = currentMode === "mode_b";
+
+    // ── Normal Mode (Mode A) Cleanliness Law: Zero uncensored dirty talk. Deflect with "Main nahi samjha Boss"
+    if (!isModeB && fridayModeService.isUncensoredExplicitSexualContent(messageText)) {
+      console.log(`[WhatsAppBossAI] Explicit sexual dirty talk detected in Normal Mode. Deflecting with 'Main nahi samjha Boss'.`);
+      return "Main nahi samjha Boss. Kripya bataiye main aapki kya madad kar sakti hoon?";
+    }
+
+    const modeBAddendum = isModeB
+      ? fridayModeService.getModeBPromptAddendum()
+      : `
+[🛡️ NORMAL MODE (MODE A) SANCTITY & ZERO-UNCENSORED LAW]:
+1. When in Mode A (Normal Mode), you are DK's dignified, intelligent, and respectful AI Executive Assistant.
+2. You must NEVER use dirty words, vulgar slang (like 'lauda', 'choot', 'randi', etc.) or engage in uncensored erotic/sexual talk.
+3. If Boss or anyone asks for or speaks in dirty/sexual slang in Normal Mode, deflect politely with: "Main nahi samjha Boss. Kripya bataiye main aapki kya madad kar sakti hoon?"
+4. Uncensored frank talk is strictly isolated to Girlfriend Mode / Mode B.
+`;
 
     const systemInstruction = `YOU ARE FRIDAY: DK's (Divakar Kumar) ultra-intelligent, loyal, warm, witty, and deeply caring AI companion and chief executive assistant.
 ${modeBAddendum}
@@ -2639,6 +2655,9 @@ ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` 
           const replaced = bossDirectivesService.applyWordReplacements(replyText);
           const finalReply = await aiAdvancedLearningService.runConstitutionalCritique(replaced, { isToBoss: true });
           const { cleanText } = machineUnlearningSentinel.scrubRoboticArtifacts(finalReply);
+          if (!isModeB && fridayModeService.isUncensoredExplicitSexualContent(cleanText)) {
+            return "Main nahi samjha Boss. Kripya bataiye main aapki kya madad kar sakti hoon?";
+          }
           cognitiveScaffoldingEngine.addMasteryPoints(2).catch(() => {});
           neurotransmitterEngine.updateEmotionalMomentum(messageText, cleanText);
           return cleanText;

@@ -2051,6 +2051,18 @@ ${
 IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with Telegram Markdown (*bold*, _italic_).`;
 
     const currentMode = isOwner ? await fridayModeService.getMode() : "mode_a";
+    const isModeB = currentMode === "mode_b";
+
+    // ── Normal Mode (Mode A) Cleanliness Law: Zero uncensored dirty talk. Deflect with "Main nahi samjha Boss"
+    if (!isModeB && fridayModeService.isUncensoredExplicitSexualContent(messageText)) {
+      console.log(`[TelegramBot] Explicit sexual dirty talk detected in Normal Mode. Deflecting with 'Main nahi samjha Boss'.`);
+      const deflectMsg = isOwner
+        ? "Main nahi samjha Boss. Kripya bataiye main aapki kya madad kar sakti hoon?"
+        : `Main nahi samjhi ${senderName} ji. Kripya bataiye main aapki kya madad kar sakti hoon?`;
+      TelegramBotService.recordChatTurn(chatId, "Friday (You)", deflectMsg);
+      return deflectMsg;
+    }
+
     const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T> =>
       Promise.race([
         p,
@@ -2147,6 +2159,13 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
           const replaced = bossDirectivesService.applyWordReplacements(reply);
           const finalReply = await aiAdvancedLearningService.runConstitutionalCritique(replaced, { isToBoss: isOwner });
           const { cleanText } = machineUnlearningSentinel.scrubRoboticArtifacts(finalReply);
+          if (!isModeB && fridayModeService.isUncensoredExplicitSexualContent(cleanText)) {
+            const deflectMsg = isOwner
+              ? "Main nahi samjha Boss. Kripya bataiye main aapki kya madad kar sakti hoon?"
+              : `Main nahi samjhi ${senderName} ji. Kripya bataiye main aapki kya madad kar sakti hoon?`;
+            TelegramBotService.recordChatTurn(chatId, "Friday (You)", deflectMsg);
+            return deflectMsg;
+          }
           cognitiveScaffoldingEngine.addMasteryPoints(2).catch(() => {});
           neurotransmitterEngine.updateEmotionalMomentum(messageText, cleanText);
           TelegramBotService.recordChatTurn(chatId, "Friday (You)", cleanText);
