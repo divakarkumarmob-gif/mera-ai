@@ -99,8 +99,9 @@ export class WhatsAppBossAiEngine {
     // ── WhatsApp Session Health & Dynamic Ban Risk Telemetry Fast-Path ──
     const cleanLower = messageText.trim().toLowerCase();
     const isBanHealthQuery =
-      /\b(?:ban\s*(?:risk|percent|percentage|score|chance|rate)|session\s*health|bot\s*(?:health|safety|risk)|safety\s*score|health\s*report)\b/i.test(cleanLower) ||
-      /(?:ban\s*(?:hone|ka|ki)\s*(?:chance|percent|percentage|risk|probability)|bot\s*safe\s*hai|whatsapp\s*health|session\s*kaisa\s*hai)/i.test(cleanLower);
+      /\b(?:ban\s*(?:risk|health|heath|percent|percentage|score|chance|rate|check|status|report)|session\s*health|bot\s*(?:health|heath|safety|risk|status)|safety\s*score|health\s*report|account\s*health|whatsapp\s*health)\b/i.test(cleanLower) ||
+      /(?:ban\s*(?:hone|ka|ki|heath|healt)\s*(?:chance|percent|percentage|risk|probability|status|score|report)|bot\s*safe\s*hai|whatsapp\s*(?:ban|session|account)?\s*(?:health|heath|safe|risk|report|score)|session\s*kaisa\s*hai|whatsapp\s*ka\s*health|ban\s*health)/i.test(cleanLower) ||
+      /\b(?:whatsappp?|wa)\s*(?:ban\s*)?(?:health|heath|status|report)\b/i.test(cleanLower);
 
     if (isBanHealthQuery) {
       const { whatsappSessionHealthEngine } = await import("./whatsappSessionHealthEngine");
@@ -431,6 +432,15 @@ export class WhatsAppBossAiEngine {
             mediaType: { type: "STRING", enum: ["any", "photo", "video", "document", "voice", "status", "dp"], description: "Type of media to forward: 'photo', 'video', 'document', 'voice', 'status', 'dp', or 'any'" }
           },
           required: ["contactNameOrPhone"]
+        }
+      },
+      {
+        name: "get_whatsapp_session_ban_health",
+        description: "Check live WhatsApp session health, account ban risk score percentage, connection stability, warm-up status, and anti-ban firewall telemetry. Use when Boss asks about WhatsApp health, ban risk, session safety, or 'whatsapp ban health kaisa hai'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {},
+          required: []
         }
       },
       {
@@ -1621,6 +1631,16 @@ ${triumphCelebrationContext}
 ⏰ RECURRING CRON AUTOMATION & DAILY ROUTINES MANDATE:
 - Whenever Boss asks to send him anything daily, recurringly, or at a specific time (e.g. "har roz / daily shaam 6 bje weather ka news bhej dena", "roz subah 7 bje jagana / briefing bhejna"), YOU MUST IMMEDIATELY INVOKE 'create_automated_cron_task'!
 
+📸 WHATSAPP STATUS (STORIES) & DP QUERY MANDATE:
+- When Boss asks what is in someone's WhatsApp status or his own status (e.g. "status me kya h", "mera status kya hai", "kiska status aaya", "usne kya status lagaya hai", "Ram ka status dekha kya", "status me kya tha"):
+  • IMMEDIATELY call 'get_recent_whatsapp_statuses' (with filterContactOrPhone: 'me' / 'mera' if Boss is asking about his own status, or contact name/phone if asking about someone else).
+  • Explain clearly what is inside the status using 'aiVisualDescription' (which contains the full AI vision summary of photos/videos), 'caption', and 'senderName'!
+  • If Boss asks to forward the photo/video of the status, call 'forward_contact_media_or_messages' with mediaType: 'status'.
+
+🛡️ WHATSAPP SESSION BAN HEALTH MANDATE:
+- When Boss asks about WhatsApp ban health, ban risk, session safety, or account health (e.g. "whatsapp ban health", "ban risk kitna hai", "session health kaisa hai", "account safe hai kya"):
+  • Call 'get_whatsapp_session_ban_health' immediately and provide the comprehensive health report to Boss!
+
 COMMUNICATION STYLE:
 - Address DK warmly and respectfully as 'Boss' or 'DK Boss'.
 - Speak in natural, crisp, intelligent Hinglish (blend of Hindi and English).
@@ -1937,8 +1957,34 @@ COMMUNICATION STYLE:
 
         if (toolName === "get_recent_whatsapp_statuses") {
           const { whatsappIntelligenceService } = await import("./whatsappIntelligenceService");
-          const list = whatsappIntelligenceService.getRecentStatusStories(args.limit || 10, args.filterContactOrPhone);
-          return { totalStatusStoriesCount: list.length, stories: list };
+          const list = await whatsappIntelligenceService.getRecentStatusStories(args.limit || 10, args.filterContactOrPhone);
+          return {
+            totalStatusStoriesCount: list.length,
+            filterApplied: args.filterContactOrPhone || "none",
+            stories: list.map((s) => ({
+              senderName: s.senderName || s.senderPhone || "Contact",
+              senderPhone: s.senderPhone,
+              isBossStatus: !!s.isFromMe,
+              type: s.type,
+              caption: s.caption || "No text caption",
+              aiVisualDescription: s.aiDescription || (s.type === "text" ? s.caption : "Visual status captured and viewed (photo/video)"),
+              ocrText: s.ocrText,
+              timePosted: s.dateStr,
+            })),
+          };
+        }
+
+        if (toolName === "get_whatsapp_session_ban_health") {
+          const { whatsappSessionHealthEngine } = await import("./whatsappSessionHealthEngine");
+          const report = whatsappSessionHealthEngine.getFormattedBossReport();
+          const rawRisk = whatsappSessionHealthEngine.calculateBanRisk();
+          return {
+            banRiskScore: rawRisk.score,
+            riskTier: rawRisk.tier,
+            isAutoPaused: rawRisk.isAutoPaused,
+            formattedReport: report,
+            message: "WhatsApp session ban health telemetry retrieved successfully."
+          };
         }
 
         if (toolName === "check_contact_online_status") {

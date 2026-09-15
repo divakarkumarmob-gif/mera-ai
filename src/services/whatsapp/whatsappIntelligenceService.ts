@@ -18,8 +18,12 @@ export interface StatusStoryItem {
   senderPhone: string;
   senderJid: string;
   senderName?: string;
+  isFromMe?: boolean;
   type: "image" | "video" | "text";
   caption?: string;
+  aiDescription?: string;
+  ocrText?: string;
+  buffer?: Buffer;
   timestamp: number;
   dateStr: string;
   mediaKey?: any;
@@ -262,9 +266,34 @@ class WhatsAppIntelligenceService {
     const remoteJid = msg.key.remoteJid;
     if (remoteJid !== "status@broadcast") return;
 
-    const senderJid = msg.key.participant || remoteJid;
-    const senderPhone = senderJid.replace(/\D/g, "");
+    const isFromMe = !!msg.key?.fromMe;
+    const sock = (whatsappBotService as any).sock;
+    const ownerRaw = process.env.OWNER_WHATSAPP_NUMBER || process.env.BOSS_WHATSAPP_NUMBER || "";
+    const ownerClean = ownerRaw.replace(/\D/g, "");
+    const botUserPhone = (sock?.user?.id || "").replace(/:.*@/, "@").replace(/\D/g, "");
+
+    let senderJid = msg.key.participant || (isFromMe ? (sock?.user?.id || (ownerClean ? `${ownerClean}@s.whatsapp.net` : "")) : remoteJid);
+    if (!senderJid) senderJid = remoteJid;
+    senderJid = senderJid.replace(/:.*@/, "@");
+    let senderPhone = senderJid.replace(/\D/g, "");
+
+    if (isFromMe && !senderPhone) {
+      senderPhone = ownerClean || botUserPhone;
+    }
+
+    const isOwner = isFromMe || (senderPhone && (senderPhone === ownerClean || senderPhone === botUserPhone));
     const id = msg.key.id || `status_${Date.now()}`;
+
+    let senderName = isOwner ? "Boss (DK)" : "Unknown";
+    try {
+      const { contactsService } = await import("../contactsService");
+      const savedContact = await contactsService.findContact(senderPhone);
+      if (savedContact?.name) {
+        senderName = savedContact.name;
+      } else if (msg.pushName) {
+        senderName = msg.pushName;
+      }
+    } catch {}
 
     const isImage = !!msg.message?.imageMessage;
     const isVideo = !!msg.message?.videoMessage;
@@ -283,6 +312,8 @@ class WhatsAppIntelligenceService {
       id,
       senderPhone,
       senderJid,
+      senderName,
+      isFromMe: !!isOwner,
       type,
       caption: caption.trim() || undefined,
       timestamp: now,
@@ -294,24 +325,57 @@ class WhatsAppIntelligenceService {
     this.statusStories.unshift(item);
     if (this.statusStories.length > 50) this.statusStories.pop();
 
-    console.log(`[WhatsAppIntelligence] 📸 Status captured from +${senderPhone} [${type}]: ${caption.slice(0, 30)}`);
+    console.log(`[WhatsAppIntelligence] 📸 Status captured from ${senderName} (+${senderPhone}) [${type}]: ${caption.slice(0, 30)}`);
+
+    // ── Asynchronous AI Vision Analysis on Image / Video Statuses ──
+    if (isImage || isVideo) {
+      (async () => {
+        try {
+          const Baileys = await import("@whiskeysockets/baileys");
+          const downloadFn = (Baileys as any).downloadMediaMessage || (Baileys as any).default?.downloadMediaMessage;
+          if (downloadFn) {
+            const buffer: Buffer = await downloadFn(msg, "buffer", {}, { reuploadRequest: sock?.updateMediaMessage });
+            if (buffer && buffer.length > 0) {
+              item.buffer = buffer;
+              const { visionMemoryService } = await import("../visionMemoryService");
+              const mimeType = isVideo
+                ? (msg.message?.videoMessage?.mimetype || "video/mp4")
+                : (msg.message?.imageMessage?.mimetype || "image/jpeg");
+              const visionRes = await visionMemoryService.processIncomingMedia(
+                buffer,
+                mimeType,
+                senderName,
+                caption,
+                `status_${type}_${senderPhone}`,
+                "status@broadcast"
+              );
+              if (visionRes) {
+                item.aiDescription = visionRes.shortSummary || visionRes.analysis;
+                if (visionRes.ocrText) item.ocrText = visionRes.ocrText;
+                console.log(`[WhatsAppIntelligence] 🧠 AI Vision analyzed status from ${senderName}: ${item.aiDescription?.slice(0, 60)}...`);
+              }
+            }
+          }
+        } catch (visionErr) {
+          console.warn("[WhatsAppIntelligence] Error downloading/analyzing status media:", visionErr);
+        }
+      })();
+    }
 
     // ── Human Status Viewing & "Viewed by Friday" Registration ──
     // Mark status as viewed with Gaussian human delay (12s to 45s natural pause before opening status)
     try {
       const { contactsService } = await import("../contactsService");
       const savedContact = await contactsService.findContact(senderPhone);
-      const isOwner = senderPhone === process.env.OWNER_WHATSAPP_NUMBER?.replace(/\D/g, "");
 
       // 85% probability for saved/owner, 35% natural random curiosity for unsaved numbers
       const shouldView = savedContact || isOwner || Math.random() < 0.35;
 
-      if (shouldView) {
+      if (shouldView && !isFromMe) {
         // Gaussian Human Status Viewing Delay (mean: 24s, std: 6s, min: 12s, max: 48s)
         const delayMs = humanBotFirewallService.gaussianRandom(24000, 6000, 12000, 48000);
         setTimeout(async () => {
           try {
-            const sock = (whatsappBotService as any).sock;
             if (sock && whatsappBotService.isSocketConnected() && msg.key) {
               await sock.readMessages([
                 {
@@ -320,7 +384,7 @@ class WhatsAppIntelligenceService {
                   participant: msg.key.participant || senderJid,
                 },
               ]);
-              console.log(`[WhatsAppIntelligence] 👁️ Friday viewed status from ${savedContact?.name || senderPhone} (Visible in viewer list after ${Math.round(delayMs / 1000)}s Gaussian delay).`);
+              console.log(`[WhatsAppIntelligence] 👁️ Friday viewed status from ${senderName} (+${senderPhone}) (Visible in viewer list after ${Math.round(delayMs / 1000)}s Gaussian delay).`);
             }
           } catch (viewErr) {
             console.warn("[WhatsAppIntelligence] Notice marking status viewed:", viewErr);
@@ -330,11 +394,30 @@ class WhatsAppIntelligenceService {
     } catch {}
   }
 
-  public getRecentStatusStories(limit = 10, filterPhone?: string): StatusStoryItem[] {
+  public async getRecentStatusStories(limit = 10, filterContactOrPhone?: string): Promise<StatusStoryItem[]> {
     let list = this.statusStories;
-    if (filterPhone) {
-      const clean = filterPhone.replace(/\D/g, "");
-      list = list.filter((s) => s.senderPhone.includes(clean));
+    if (filterContactOrPhone && filterContactOrPhone.trim()) {
+      const q = filterContactOrPhone.trim().toLowerCase();
+      const cleanDigits = q.replace(/\D/g, "");
+      const isMeQuery = ["me", "mera", "meri", "my", "mine", "boss", "dk", "apna", "self"].includes(q);
+
+      if (isMeQuery) {
+        list = list.filter((s) => s.isFromMe || (s.senderName && s.senderName.toLowerCase().includes("boss")));
+      } else {
+        let resolvedPhone = cleanDigits;
+        try {
+          const { contactsService } = await import("../contactsService");
+          const found = await contactsService.findContact(filterContactOrPhone);
+          if (found?.phone) resolvedPhone = found.phone.replace(/\D/g, "");
+        } catch {}
+
+        list = list.filter((s) => {
+          if (resolvedPhone && s.senderPhone.includes(resolvedPhone)) return true;
+          if (s.senderName && s.senderName.toLowerCase().includes(q)) return true;
+          if (s.caption && s.caption.toLowerCase().includes(q)) return true;
+          return false;
+        });
+      }
     }
     return list.slice(0, limit);
   }
@@ -435,19 +518,28 @@ class WhatsAppIntelligenceService {
 
     // ── Case B: Forward WhatsApp Status Story ──
     if (options.mediaType === "status") {
-      const stories = this.getRecentStatusStories(5, phone);
+      const stories = await this.getRecentStatusStories(5, phone);
       if (stories.length === 0) {
         return { success: false, forwardedType: "status", message: `Boss, ${contactDisplayName} ka koi recent WhatsApp status story nahi mila.` };
       }
 
       const story = stories[0];
-      const caption = `📲 *[WhatsApp Status Story from ${contactDisplayName}]*\n⏰ ${story.dateStr}\n${story.caption ? `💬 "${story.caption}"` : ""}`;
+      const caption = `📲 *[WhatsApp Status Story from ${contactDisplayName}]*\n⏰ ${story.dateStr}\n${story.caption ? `💬 "${story.caption}"` : ""}${story.aiDescription ? `\n🔍 *AI Visual Summary:* ${story.aiDescription}` : ""}`;
 
       if (story.type === "text" && story.caption) {
         const textMsg = `📲 *[WhatsApp Text Status from ${contactDisplayName}]*\n⏰ ${story.dateStr}\n\n"${story.caption}"`;
         const { sendWhatsAppUnified } = await import("../whatsappService");
         await sendWhatsAppUnified(bossPhone, textMsg, { channel: "whatsapp2" });
         return { success: true, forwardedType: "status_text", message: textMsg };
+      }
+
+      if (story.buffer && story.buffer.length > 0) {
+        if (story.type === "video") {
+          await whatsappBotService.sendSafeMediaMessage(bossPhone, { video: story.buffer, caption });
+        } else {
+          await whatsappBotService.sendPhotoMessage(bossPhone, story.buffer, caption);
+        }
+        return { success: true, forwardedType: story.type, message: `📲 *${contactDisplayName}* ka status story (${story.type}) forward kar diya gaya hai!` };
       }
 
       if (story.mediaKey) {

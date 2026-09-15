@@ -375,6 +375,15 @@ export class SemanticIntentEngine {
         }
       },
       {
+        name: "get_whatsapp_session_ban_health",
+        description: "Check live WhatsApp session health, account ban risk score percentage, connection stability, warm-up status, and anti-ban firewall telemetry. Use when Boss asks about WhatsApp health, ban risk, session safety, or 'whatsapp ban health kaisa hai'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {},
+          required: []
+        }
+      },
+      {
         name: "check_contact_online_status",
         description: "Check if a contact is currently online, typing, or get their last known presence timestamp.",
         parameters: {
@@ -643,8 +652,34 @@ export class SemanticIntentEngine {
 
       if (toolName === "get_recent_whatsapp_statuses") {
         const { whatsappIntelligenceService } = await import("./whatsapp/whatsappIntelligenceService");
-        const list = whatsappIntelligenceService.getRecentStatusStories(args.limit || 10, args.filterContactOrPhone);
-        return { totalStatusStoriesCount: list.length, stories: list };
+        const list = await whatsappIntelligenceService.getRecentStatusStories(args.limit || 10, args.filterContactOrPhone);
+        return {
+          totalStatusStoriesCount: list.length,
+          filterApplied: args.filterContactOrPhone || "none",
+          stories: list.map((s) => ({
+            senderName: s.senderName || s.senderPhone || "Contact",
+            senderPhone: s.senderPhone,
+            isBossStatus: !!s.isFromMe,
+            type: s.type,
+            caption: s.caption || "No text caption",
+            aiVisualDescription: s.aiDescription || (s.type === "text" ? s.caption : "Visual status captured and viewed"),
+            ocrText: s.ocrText,
+            timePosted: s.dateStr,
+          })),
+        };
+      }
+
+      if (toolName === "get_whatsapp_session_ban_health") {
+        const { whatsappSessionHealthEngine } = await import("./whatsapp/whatsappSessionHealthEngine");
+        const report = whatsappSessionHealthEngine.getFormattedBossReport();
+        const rawRisk = whatsappSessionHealthEngine.calculateBanRisk();
+        return {
+          banRiskScore: rawRisk.score,
+          riskTier: rawRisk.tier,
+          isAutoPaused: rawRisk.isAutoPaused,
+          formattedReport: report,
+          message: "WhatsApp session ban health telemetry retrieved successfully."
+        };
       }
 
       if (toolName === "check_contact_online_status") {
