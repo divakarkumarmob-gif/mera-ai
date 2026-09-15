@@ -526,25 +526,16 @@ class HumanBrowserService {
     if (!cleanQuery) return undefined;
 
     try {
-      const promptText = encodeURIComponent(`${cleanQuery}, professional commercial product photography catalog, 4k, clean studio lighting, realistic, high detail`);
-      const imgUrl = `https://image.pollinations.ai/prompt/${promptText}?width=1024&height=1024&nologo=true&seed=${Math.floor(Math.random() * 10000)}`;
-
-      const resp = await fetch(imgUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
-        },
-        signal: AbortSignal.timeout(10000),
-      });
-
-      if (resp.ok) {
-        const arrayBuf = await resp.arrayBuffer();
-        const buf = Buffer.from(arrayBuf);
-        if (buf.length > 5000) {
-          return buf;
-        }
+      const { imageGenerationService } = await import("./imageGenerationService");
+      const imgRes = await imageGenerationService.generateImage(
+        `Commercial studio product photography catalog of ${cleanQuery}, clean minimal aesthetic, 4k ultra detailed, studio lighting, hyperrealistic`,
+        { enhancePrompt: false, aspectRatio: "1:1" }
+      );
+      if (imgRes.success && imgRes.buffer && imgRes.buffer.length > 5000) {
+        return imgRes.buffer;
       }
     } catch (err) {
-      console.warn("[HumanBrowser] Visual thumbnail fetch note:", err);
+      console.warn("[HumanBrowser] Visual thumbnail generation error:", err);
     }
 
     return undefined;
