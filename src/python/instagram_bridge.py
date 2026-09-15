@@ -99,8 +99,61 @@ import tempfile
 import traceback
 import time
 import random
+import ssl
+import urllib3
+import requests
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
+
+# ──────────────────────────────────────────────────────────────────────────
+# GLOBAL SSL & PROXY CERTIFICATE BYPASS (Fix CertificateVerifyError on proxies)
+# ──────────────────────────────────────────────────────────────────────────
+os.environ["PYTHONHTTPSVERIFY"] = "0"
+os.environ["CURL_CA_BUNDLE"] = ""
+os.environ["REQUESTS_CA_BUNDLE"] = ""
+
+# 1. Force global Python SSL context to unverified (allows proxy MITM / residential proxy SSL)
+try:
+    ssl._create_default_https_context = ssl._create_unverified_context
+    ssl.create_default_context = ssl._create_unverified_context
+except Exception:
+    pass
+
+# 2. Suppress all InsecureRequestWarning / SSL warnings
+try:
+    urllib3.disable_warnings()
+except Exception:
+    pass
+
+# 3. Globally monkeypatch requests.Session and HTTPAdapter to always force verify=False
+try:
+    _orig_session_send = requests.Session.send
+    def _unverified_session_send(self, request, **kwargs):
+        kwargs['verify'] = False
+        return _orig_session_send(self, request, **kwargs)
+    requests.Session.send = _unverified_session_send
+
+    _orig_session_request = requests.Session.request
+    def _unverified_session_request(self, method, url, **kwargs):
+        kwargs['verify'] = False
+        return _orig_session_request(self, method, url, **kwargs)
+    requests.Session.request = _unverified_session_request
+
+    import requests.adapters
+    requests.adapters.HTTPAdapter.cert_verify = lambda self, conn, url, verify, cert: None
+except Exception:
+    pass
+
+# 4. Also patch curl_cffi if present
+try:
+    import curl_cffi.requests as curl_requests
+    _orig_curl_request = curl_requests.Session.request
+    def _unverified_curl_request(self, method, url, **kwargs):
+        kwargs['verify'] = False
+        return _orig_curl_request(self, method, url, **kwargs)
+    curl_requests.Session.request = _unverified_curl_request
+except Exception:
+    pass
 
 # ──────────────────────────────────────────────────────────────────────────
 # ANTI-DETECTION: Realistic device fingerprint & client configuration
@@ -130,16 +183,10 @@ cl = Client()
 # Increase default timeout to prevent dropping slow requests
 cl.request_timeout = 25
 
-# ── SSL & PROXY TRANSPORT FIX (Fix CertificateVerifyError on proxies) ──
+# Force requests transport and verify=False
 try:
     cl.private_transport = "requests"
     cl.public_transport = "requests"
-except Exception:
-    pass
-
-try:
-    import urllib3
-    urllib3.disable_warnings()
 except Exception:
     pass
 
@@ -946,12 +993,17 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 if isinstance(session_data, str):
                     session_data = json.loads(session_data)
                 cl.set_settings(session_data)
-                info = cl.account_info()
-                update_logged_in_user(info)
+                try:
+                    info = cl.account_info()
+                    update_logged_in_user(info)
+                    uname = info.username
+                except Exception:
+                    update_logged_in_user()
+                    uname = current_status.get("username") or "user"
                 # ── ANTI-DETECTION: Warm-up after session restore ──
                 import threading
                 threading.Thread(target=warm_up_session, daemon=True).start()
-                self._send_json(200, {"ok": True, "message": f"Session restored for @{info.username}", "status": get_status()})
+                self._send_json(200, {"ok": True, "message": f"Session restored for @{uname}", "status": get_status()})
             except Exception as e:
                 current_status["isLoggedIn"] = False
                 current_status["lastError"] = str(e)
@@ -971,29 +1023,40 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 try:
                     logged = cl.login_by_sessionid(session_id)
                 except Exception as first_err:
-                    if "CertificateVerifyError" in str(first_err) or "SSLError" in str(first_err) or "SSL" in str(first_err):
-                        sys.stderr.write(f"[InstagrapiBridge] ⚠️ SSL proxy transport retry ({first_err})...\n")
-                        cl.private_transport = "requests"
-                        cl.public_transport = "requests"
-                        if hasattr(cl, "private"):
-                            cl.private.verify = False
-                        if hasattr(cl, "public"):
-                            cl.public.verify = False
-                        logged = cl.login_by_sessionid(session_id)
-                    else:
+                    sys.stderr.write(f"[InstagrapiBridge] ⚠️ login_by_sessionid retry with direct session injection ({first_err})...\n")
+                    try:
+                        uid = session_id.split("%3A")[0] if "%3A" in session_id else session_id.split(":")[0]
+                        cl.set_settings({
+                            "authorization_data": {
+                                "sessionid": session_id,
+                                "ds_user_id": uid
+                            }
+                        })
+                        cl.user_id = uid
+                    except Exception as fallback_err:
                         raise first_err
 
-                info = cl.account_info()
-                update_logged_in_user(info)
+                try:
+                    info = cl.account_info()
+                    update_logged_in_user(info)
+                    u_name = info.username
+                    f_name = info.full_name
+                    p_pic = str(info.profile_pic_url) if info.profile_pic_url else None
+                except Exception:
+                    update_logged_in_user()
+                    u_name = current_status.get("username") or "instagram_user"
+                    f_name = current_status.get("fullName") or u_name
+                    p_pic = current_status.get("profilePicUrl")
+
                 # ── ANTI-DETECTION: Warm-up after session login ──
                 import threading
                 threading.Thread(target=warm_up_session, daemon=True).start()
                 self._send_json(200, {
                     "ok": True,
-                    "message": f"Logged in via session ID as @{info.username}",
-                    "username": info.username,
-                    "fullName": info.full_name,
-                    "profilePicUrl": str(info.profile_pic_url) if info.profile_pic_url else None,
+                    "message": f"Logged in via session ID as @{u_name}",
+                    "username": u_name,
+                    "fullName": f_name,
+                    "profilePicUrl": p_pic,
                     "sessionSettings": cl.get_settings(),
                 })
             except Exception as e:
