@@ -2690,6 +2690,41 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                   } catch (e: any) {
                     result = { success: false, message: `Instagram DM send fail hua: ${e?.message || e}` };
                   }
+                } else if (call.name === "search_instagram_user" || call.name === "instagram_search_user") {
+                  const { query } = call.args || {};
+                  try {
+                    result = await instagramBotService.searchUserHumanPaced(String(query || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Instagram search fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "get_instagram_user_info" || call.name === "instagram_get_user_info") {
+                  const { username } = call.args || {};
+                  try {
+                    result = await instagramBotService.getUserInfoLive(String(username || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Instagram user info fetch fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "follow_instagram_user" || call.name === "instagram_follow_user") {
+                  const { username } = call.args || {};
+                  try {
+                    result = await instagramBotService.followUserHumanPaced(String(username || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Instagram follow fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "like_instagram_post" || call.name === "instagram_like_post") {
+                  const { mediaId } = call.args || {};
+                  try {
+                    result = await instagramBotService.likeMediaHumanPaced(String(mediaId || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Instagram like fail hua: ${e?.message || e}` };
+                  }
+                } else if (call.name === "comment_instagram_post" || call.name === "instagram_comment_post") {
+                  const { mediaId, commentText, text } = call.args || {};
+                  try {
+                    result = await instagramBotService.commentMediaHumanPaced(String(mediaId || ""), String(commentText || text || ""));
+                  } catch (e: any) {
+                    result = { success: false, message: `Instagram comment fail hua: ${e?.message || e}` };
+                  }
                 } else if (call.name === "scan_link_safety") {
                   const { url } = call.args || {};
                   try {

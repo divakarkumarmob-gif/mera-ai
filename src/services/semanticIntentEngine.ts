@@ -475,6 +475,97 @@ export class SemanticIntentEngine {
           required: []
         }
       },
+      {
+        name: "instagram_search_user",
+        description: "Search for real Instagram users or profiles by name or query. Use when Boss says 'Instagram par ye ID search karo', 'Instagram pe ye user dhundo'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            query: { type: "STRING", description: "Username or search query to find on Instagram" }
+          },
+          required: ["query"]
+        }
+      },
+      {
+        name: "instagram_get_user_info",
+        description: "Fetch live profile details, bio, follower count, following count, total posts, and recent posts of an Instagram user. Use when Boss says 'Instagram ID ki detail nikalo', 'Instagram profile check karo', 'bio dekho'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            username: { type: "STRING", description: "Instagram username e.g. 'divakar_kumar' or '@username'" }
+          },
+          required: ["username"]
+        }
+      },
+      {
+        name: "instagram_send_dm",
+        description: "Send an Instagram Direct Message (DM) to any user or handle. Use when Boss says 'Instagram par isko DM karo / message bhejo'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            recipient: { type: "STRING", description: "Instagram username or recipient ID" },
+            message: { type: "STRING", description: "Message text to send" }
+          },
+          required: ["recipient", "message"]
+        }
+      },
+      {
+        name: "instagram_follow_user",
+        description: "Follow an Instagram user or account. Use when Boss says 'Instagram par isko follow karo'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            username: { type: "STRING", description: "Instagram username to follow" }
+          },
+          required: ["username"]
+        }
+      },
+      {
+        name: "instagram_unfollow_user",
+        description: "Unfollow an Instagram user or account. Use when Boss says 'Instagram par isko unfollow karo'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            username: { type: "STRING", description: "Instagram username to unfollow" }
+          },
+          required: ["username"]
+        }
+      },
+      {
+        name: "instagram_like_post",
+        description: "Like an Instagram post or Reel using its media ID or URL. Use when Boss says 'Instagram par is post ko like karo'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            mediaId: { type: "STRING", description: "Media ID or post ID of the Instagram post" }
+          },
+          required: ["mediaId"]
+        }
+      },
+      {
+        name: "instagram_comment_post",
+        description: "Post a comment on an Instagram post or Reel. Use when Boss says 'Instagram post par ye comment likho'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            mediaId: { type: "STRING", description: "Media ID of the Instagram post" },
+            commentText: { type: "STRING", description: "Comment text to post" }
+          },
+          required: ["mediaId", "commentText"]
+        }
+      },
+      {
+        name: "instagram_view_user_feed",
+        description: "Inspect and list recent posts, reels, likes, and captions from an Instagram account feed. Use when Boss says 'Instagram par iske recent posts/reels dekho'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            username: { type: "STRING", description: "Instagram username to view feed" },
+            maxPosts: { type: "NUMBER", description: "Number of recent posts to inspect (default: 6)" }
+          },
+          required: ["username"]
+        }
+      },
     ];
   }
 
@@ -906,6 +997,54 @@ export class SemanticIntentEngine {
         const { whatsappDailyQuotaEngine } = await import("./whatsapp/whatsappDailyQuotaEngine");
         const res = await whatsappDailyQuotaEngine.resetDailyCounters(args.contactNameOrPhone);
         return { success: res.success, message: res.message };
+      }
+
+      if (toolName === "instagram_search_user") {
+        const { instagramBotService } = await import("./instagramBotService");
+        const res = await instagramBotService.searchUserHumanPaced(args.query);
+        return res;
+      }
+
+      if (toolName === "instagram_get_user_info") {
+        const { instagramBotService } = await import("./instagramBotService");
+        const res = await instagramBotService.getUserInfoLive(args.username);
+        return res;
+      }
+
+      if (toolName === "instagram_send_dm") {
+        const { instagramBotService } = await import("./instagramBotService");
+        const res = await instagramBotService.sendMessageToTarget(args.recipient, args.message);
+        return res;
+      }
+
+      if (toolName === "instagram_follow_user") {
+        const { instagramBotService } = await import("./instagramBotService");
+        const res = await instagramBotService.followUserHumanPaced(args.username);
+        return res;
+      }
+
+      if (toolName === "instagram_unfollow_user") {
+        const { instagramBotService } = await import("./instagramBotService");
+        const res = await instagramBotService.unfollowUserHumanPaced(args.username);
+        return res;
+      }
+
+      if (toolName === "instagram_like_post") {
+        const { instagramBotService } = await import("./instagramBotService");
+        const res = await instagramBotService.likeMediaHumanPaced(args.mediaId);
+        return res;
+      }
+
+      if (toolName === "instagram_comment_post") {
+        const { instagramBotService } = await import("./instagramBotService");
+        const res = await instagramBotService.commentMediaHumanPaced(args.mediaId, args.commentText);
+        return res;
+      }
+
+      if (toolName === "instagram_view_user_feed") {
+        const { instagramBotService } = await import("./instagramBotService");
+        const res = await instagramBotService.getUserFeedAndPostsHumanPaced(args.username, args.maxPosts || 6);
+        return res;
       }
     } catch (err: any) {
       console.warn(`[SemanticIntentEngine] Tool execution error for ${toolName}:`, err);

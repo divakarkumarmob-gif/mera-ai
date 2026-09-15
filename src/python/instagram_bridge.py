@@ -8,6 +8,7 @@ import sys
 import os
 import json
 import argparse
+import tempfile
 import traceback
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
@@ -181,6 +182,54 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 self._send_json(404, {"ok": False, "error": str(e)})
             return
 
+        if path == "/user-feed":
+            username = query.get("username", [""])[0].strip().replace("@", "")
+            amount = int(query.get("amount", [6])[0])
+            if not username:
+                self._send_json(400, {"ok": False, "error": "username is required"})
+                return
+            try:
+                user_pk = cl.user_id_from_username(username)
+                medias = cl.user_medias(user_pk, amount=amount)
+                posts = []
+                for m in medias:
+                    posts.append({
+                        "id": str(m.id),
+                        "code": getattr(m, "code", ""),
+                        "caption": getattr(m, "caption_text", "") or "",
+                        "likeCount": getattr(m, "like_count", 0),
+                        "commentCount": getattr(m, "comment_count", 0),
+                        "mediaType": "Video/Reel" if getattr(m, "media_type", 1) == 2 else "Photo",
+                        "postUrl": f"https://www.instagram.com/p/{getattr(m, 'code', '')}/",
+                    })
+                self._send_json(200, {"ok": True, "posts": posts})
+            except Exception as e:
+                self._send_json(500, {"ok": False, "error": str(e)})
+            return
+
+        if path == "/user-followers":
+            username = query.get("username", [""])[0].strip().replace("@", "")
+            amount = int(query.get("amount", [15])[0])
+            if not username:
+                self._send_json(400, {"ok": False, "error": "username is required"})
+                return
+            try:
+                user_pk = cl.user_id_from_username(username)
+                followers_dict = cl.user_followers(user_pk, amount=amount)
+                followers = []
+                for _, u in followers_dict.items():
+                    followers.append({
+                        "pk": str(getattr(u, "pk", "")),
+                        "username": getattr(u, "username", ""),
+                        "fullName": getattr(u, "full_name", ""),
+                        "profilePicUrl": str(getattr(u, "profile_pic_url", "")),
+                        "isVerified": getattr(u, "is_verified", False),
+                    })
+                self._send_json(200, {"ok": True, "followers": followers})
+            except Exception as e:
+                self._send_json(500, {"ok": False, "error": str(e)})
+            return
+
         if path == "/search":
             q = query.get("query", [""])[0].strip()
             if not q:
@@ -265,7 +314,6 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 return
 
             try:
-                # If 2FA code is provided
                 if verification_code:
                     cl.login(username, password, verification_code=verification_code)
                 else:
@@ -281,7 +329,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
                     "profilePicUrl": str(info.profile_pic_url) if info.profile_pic_url else None,
                     "sessionSettings": cl.get_settings(),
                 })
-            except TwoFactorRequired as e:
+            except TwoFactorRequired:
                 current_status["requiresTwoFactor"] = True
                 current_status["twoFactorInfo"] = {
                     "username": username,
@@ -350,6 +398,85 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 self._send_json(200, {"ok": True, "message": "Message sent successfully", "result": str(res)})
             except Exception as e:
                 self._send_json(500, {"ok": False, "error": f"Failed to send direct message: {str(e)}"})
+            return
+
+        if path == "/like":
+            if not current_status["isLoggedIn"]:
+                self._send_json(401, {"ok": False, "error": "Not logged in to Instagram"})
+                return
+            media_id = str(body.get("mediaId", "")).strip()
+            if not media_id:
+                self._send_json(400, {"ok": False, "error": "mediaId is required"})
+                return
+            try:
+                res = cl.media_like(media_id)
+                self._send_json(200, {"ok": True, "message": f"Media {media_id} liked successfully", "result": res})
+            except Exception as e:
+                self._send_json(500, {"ok": False, "error": str(e)})
+            return
+
+        if path == "/comment":
+            if not current_status["isLoggedIn"]:
+                self._send_json(401, {"ok": False, "error": "Not logged in to Instagram"})
+                return
+            media_id = str(body.get("mediaId", "")).strip()
+            text = str(body.get("text", "")).strip()
+            if not media_id or not text:
+                self._send_json(400, {"ok": False, "error": "mediaId and text are required"})
+                return
+            try:
+                comment = cl.media_comment(media_id, text)
+                self._send_json(200, {"ok": True, "message": "Comment posted successfully", "commentId": getattr(comment, "pk", "posted")})
+            except Exception as e:
+                self._send_json(500, {"ok": False, "error": str(e)})
+            return
+
+        if path == "/follow":
+            if not current_status["isLoggedIn"]:
+                self._send_json(401, {"ok": False, "error": "Not logged in to Instagram"})
+                return
+            target = str(body.get("username", "")).strip().replace("@", "")
+            if not target:
+                self._send_json(400, {"ok": False, "error": "username is required"})
+                return
+            try:
+                user_pk = int(target) if target.isdigit() else int(cl.user_id_from_username(target))
+                res = cl.user_follow(user_pk)
+                self._send_json(200, {"ok": True, "message": f"Successfully followed @{target} on Instagram", "result": res})
+            except Exception as e:
+                self._send_json(500, {"ok": False, "error": f"Follow failed: {str(e)}"})
+            return
+
+        if path == "/unfollow":
+            if not current_status["isLoggedIn"]:
+                self._send_json(401, {"ok": False, "error": "Not logged in to Instagram"})
+                return
+            target = str(body.get("username", "")).strip().replace("@", "")
+            if not target:
+                self._send_json(400, {"ok": False, "error": "username is required"})
+                return
+            try:
+                user_pk = int(target) if target.isdigit() else int(cl.user_id_from_username(target))
+                res = cl.user_unfollow(user_pk)
+                self._send_json(200, {"ok": True, "message": f"Successfully unfollowed @{target} on Instagram", "result": res})
+            except Exception as e:
+                self._send_json(500, {"ok": False, "error": f"Unfollow failed: {str(e)}"})
+            return
+
+        if path == "/mark-seen":
+            if not current_status["isLoggedIn"]:
+                self._send_json(401, {"ok": False, "error": "Not logged in to Instagram"})
+                return
+            thread_id = str(body.get("threadId", "")).strip()
+            item_id = str(body.get("itemId", "")).strip()
+            try:
+                if thread_id and item_id and thread_id.isdigit() and item_id.isdigit():
+                    cl.direct_message_seen(int(thread_id), int(item_id))
+                elif thread_id and thread_id.isdigit():
+                    cl.direct_send_seen(int(thread_id))
+                self._send_json(200, {"ok": True, "message": "Marked seen"})
+            except Exception as e:
+                self._send_json(200, {"ok": False, "error": str(e)})
             return
 
         self._send_json(404, {"ok": False, "error": f"Path not found: {path}"})

@@ -536,8 +536,13 @@ class InstagramBotService {
               console.log(`[InstagramBot] Generating human-like AI reply for @${senderUsername}: "${text}"`);
               const reply = await this.generateSmartAutoReply(senderName, text);
 
-              // Simulate human reading time + typing presence
-              await humanBotFirewallService.simulateInstagramHumanTyping(null, thread.thread_id, itemId, text, reply);
+              // Simulate natural 10-15s reading notice delay + seen mark + typing presence
+              const igBridgeSeen = {
+                markSeen: async (t: string, i: string) => {
+                  await this.bridgeCall("/mark-seen", "POST", { threadId: t, itemId: i }).catch(() => {});
+                },
+              };
+              await humanBotFirewallService.simulateInstagramHumanTyping(igBridgeSeen, thread.thread_id, itemId, text, reply);
 
               await this.bridgeCall("/send-message", "POST", {
                 threadId: thread.thread_id,
@@ -907,6 +912,148 @@ INSTRUCTIONS:
       message: `Instagram par @${clean} ka profile link: ${profileUrl}`,
       sourceProvider: "instagram_profile_link",
     };
+  }
+
+  /**
+   * Human-Paced Search
+   */
+  public async searchUserHumanPaced(query: string): Promise<any> {
+    const raw = String(query || "").trim().replace(/^@/, "");
+    await humanBotFirewallService.simulateInstagramSearchTyping(raw);
+    return this.searchUserLive(query);
+  }
+
+  /**
+   * Human-Paced Post Feed & Profile inspection
+   */
+  public async getUserFeedAndPostsHumanPaced(username: string, maxPosts = 6): Promise<any> {
+    if (!this.isLoggedIn) {
+      return { success: false, message: "Instagram is not connected." };
+    }
+    const clean = String(username || "").trim().replace(/^@/, "");
+    try {
+      await humanBotFirewallService.simulateInstagramSearchTyping(clean);
+      const res = await this.bridgeCall(`/user-feed?username=${encodeURIComponent(clean)}&amount=${maxPosts}`, "GET");
+      if (res && res.ok) {
+        await humanBotFirewallService.simulateInstagramScrollStep();
+        return {
+          success: true,
+          username: clean,
+          posts: res.posts || [],
+        };
+      }
+      return { success: false, message: res?.error || "Failed to fetch user feed." };
+    } catch (e: any) {
+      return { success: false, message: e?.message || "Failed to fetch feed." };
+    }
+  }
+
+  /**
+   * Human-Paced Media Like:
+   * Simulates natural tap timing and delays before liking.
+   */
+  public async likeMediaHumanPaced(mediaId: string): Promise<any> {
+    if (!this.isLoggedIn) {
+      return { success: false, message: "Instagram is not connected." };
+    }
+    try {
+      await humanBotFirewallService.simulateInstagramLikeTap();
+      const res = await this.bridgeCall("/like", "POST", { mediaId });
+      if (res && res.ok) {
+        return { success: true, message: `Post ${mediaId} liked with natural human gesture! ❤️` };
+      }
+      return { success: false, message: res?.error || "Failed to like post." };
+    } catch (e: any) {
+      return { success: false, message: e?.message || "Like failed." };
+    }
+  }
+
+  /**
+   * Human-Paced Media Comment:
+   * Types comment with natural human speed and typing presence before posting.
+   */
+  public async commentMediaHumanPaced(mediaId: string, text: string): Promise<any> {
+    if (!this.isLoggedIn) {
+      return { success: false, message: "Instagram is not connected." };
+    }
+    try {
+      await humanBotFirewallService.simulateInstagramCommentTyping(text);
+      const res = await this.bridgeCall("/comment", "POST", { mediaId, text });
+      if (res && res.ok) {
+        return { success: true, message: `Comment posted on ${mediaId} with natural typing delays! 💬`, commentId: res.commentId };
+      }
+      return { success: false, message: res?.error || "Failed to post comment." };
+    } catch (e: any) {
+      return { success: false, message: e?.message || "Comment failed." };
+    }
+  }
+
+  /**
+   * Human-Paced Followers List:
+   */
+  public async getUserFollowersHumanPaced(username: string, maxCount = 15): Promise<any> {
+    if (!this.isLoggedIn) {
+      return { success: false, message: "Instagram is not connected." };
+    }
+    const clean = String(username || "").trim().replace(/^@/, "");
+    try {
+      await humanBotFirewallService.simulateInstagramSearchTyping(clean);
+      await humanBotFirewallService.sleep(500);
+      const res = await this.bridgeCall(`/user-followers?username=${encodeURIComponent(clean)}&amount=${maxCount}`, "GET");
+      if (res && res.ok) {
+        await humanBotFirewallService.simulateInstagramScrollStep();
+        return {
+          success: true,
+          target: clean,
+          count: (res.followers || []).length,
+          followers: res.followers || [],
+        };
+      }
+      return { success: false, message: res?.error || "Failed to fetch followers." };
+    } catch (e: any) {
+      return { success: false, message: e?.message || "Failed to fetch followers." };
+    }
+  }
+  /**
+   * Human-Paced Follow User:
+   */
+  public async followUserHumanPaced(username: string): Promise<any> {
+    if (!this.isLoggedIn) {
+      return { success: false, message: "Instagram is not connected. Please log in first." };
+    }
+    const clean = String(username || "").trim().replace(/^@/, "");
+    try {
+      await humanBotFirewallService.simulateInstagramSearchTyping(clean);
+      await humanBotFirewallService.sleep(600);
+      const res = await this.bridgeCall("/follow", "POST", { username: clean });
+      if (res && res.ok) {
+        return { success: true, message: `Boss, Instagram par @${clean} ko follow kar liya gaya hai! ✅` };
+      }
+      return { success: false, message: res?.error || "Follow failed." };
+    } catch (e: any) {
+      return { success: false, message: e?.message || "Follow failed." };
+    }
+  }
+
+  /**
+   * Human-Paced Unfollow User:
+   */
+  public async unfollowUserHumanPaced(username: string): Promise<any> {
+    if (!this.isLoggedIn) {
+      return { success: false, message: "Instagram is not connected. Please log in first." };
+    }
+    const clean = String(username || "").trim().replace(/^@/, "");
+    try {
+      await humanBotFirewallService.simulateInstagramSearchTyping(clean);
+      await humanBotFirewallService.sleep(600);
+      const res = await this.bridgeCall("/unfollow", "POST", { username: clean });
+      if (res && res.ok) {
+        return { success: true, message: `Boss, Instagram par @${clean} ko unfollow kar diya gaya hai! ✅` };
+      }
+      return { success: false, message: res?.error || "Unfollow failed." };
+    } catch (e: any) {
+      return { success: false, message: e?.message || "Unfollow failed." };
+    }
   }
 }
 

@@ -139,15 +139,9 @@ class HumanBotFirewallService {
     const inClean = (incomingText || "").trim();
     const inCharCount = inClean.length;
 
-    // 1. Reading Time: Gaussian per character (mean: 310ms, std: 45ms, min: 250ms)
-    let baseRead = 0;
-    for (let i = 0; i < inCharCount; i++) {
-      baseRead += this.gaussianRandom(310, 45, 250, 450);
-    }
-    // Realistic human reading & comprehension pause (min 2.2s, max 6.5s)
-    const readDelayMs = inCharCount > 0
-      ? Math.max(2200, Math.min(6500, baseRead))
-      : this.gaussianRandom(2800, 400, 2200, 4000);
+    // 1. Initial Notification / Reading Pause (10s - 15s): Real humans do not open notifications instantly
+    const baseNoticeDelay = this.gaussianRandom(12000, 1200, 10000, 15000);
+    const readDelayMs = baseNoticeDelay;
 
     // 2. Typing Time with Gaussian word gap & Typo simulation
     const words = (replyText || "").trim().split(/\s+/).filter(Boolean);
@@ -643,16 +637,31 @@ class HumanBotFirewallService {
     const { readDelayMs, typingDelayMs } = this.calculateHumanDelays(incomingText, replyText);
 
     try {
-      // 1. Mark item as seen
+      // 1. Initial 10-15s pause before opening/checking the DM (Appears unread on sender's phone)
+      await this.sleep(readDelayMs);
+
+      // 2. Open chat -> Mark item as seen
       if (ig && threadId && itemId) {
         try {
-          const directThread = ig.entity.directThread(threadId);
-          await directThread.markItemSeen(itemId).catch(() => {});
+          if (typeof ig.markSeen === "function") {
+            await ig.markSeen(threadId, itemId).catch(() => {});
+          } else if (ig.entity?.directThread) {
+            const directThread = ig.entity.directThread(threadId);
+            await directThread.markItemSeen(itemId).catch(() => {});
+          }
         } catch {}
       }
 
-      // 2. Total human pause (reading + typing)
-      await this.sleep(readDelayMs + typingDelayMs);
+      // 3. Human reaction pause after opening chat
+      const thinkingDelay = this.gaussianRandom(850, 180, 500, 1400);
+      await this.sleep(thinkingDelay);
+
+      // 4. Human typing duration (Includes Gaussian word gaps and typo-backspace pauses)
+      await this.sleep(typingDelayMs);
+
+      // 5. Pre-send tap pause
+      const preSendPause = this.gaussianRandom(400, 70, 250, 600);
+      await this.sleep(preSendPause);
     } catch (e) {
       console.warn("[HumanFirewall] Instagram presence simulation notice:", e);
     }
