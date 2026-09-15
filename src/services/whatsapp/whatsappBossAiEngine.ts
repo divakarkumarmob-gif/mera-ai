@@ -82,11 +82,13 @@ export class WhatsAppBossAiEngine {
     // ── Chrome Default AI Mode & Google Search Fast-Path ──
     const chromeSearchMatch =
       messageText.match(/^(?:chrome\s+ai\s+mode|ai\s+mode|chrome\s+ai|google\s+ai|chrome|google)[-:\s]+(.+)$/i) ||
-      messageText.match(/^\/(?:chrome|google|aimode|ai)\s+(.+)$/i);
-    if (chromeSearchMatch && chromeSearchMatch[1]?.trim()) {
-      const query = chromeSearchMatch[1].trim();
+      messageText.match(/^(?:par|pe|kripya|please)?\s*search\s*karo\s*(?:ai\s*mode\s*[-:]?\s*|chrome\s*[-:]?\s*|google\s*[-:]?\s*)?(.+)$/i) ||
+      messageText.match(/(?:chrome|google|browser)\s*(?:pe|par|me)?\s*(?:search|dhundo|dekho|khojo)\s*(?:karo)?\s*[-:]?\s*(.+)$/i) ||
+      messageText.match(/^\/(?:chrome|google|aimode|ai|search)\s+(.+)$/i);
+    if (chromeSearchMatch && (chromeSearchMatch[1]?.trim() || chromeSearchMatch[2]?.trim())) {
+      const rawQuery = (chromeSearchMatch[1] || chromeSearchMatch[2] || "").trim();
       const { humanBrowserService } = await import("../humanBrowserService");
-      const searchRes = await humanBrowserService.searchGoogleAndInspect(query);
+      const searchRes = await humanBrowserService.searchGoogleAndInspect(rawQuery);
       if (searchRes.success && searchRes.summary) {
         return `🌐 *[Chrome Default AI Mode & Search]* 🇮🇳\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${searchRes.summary}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n_Fetched directly from Chrome Default AI Mode & Knowledge Graph_ ✨`;
       }
