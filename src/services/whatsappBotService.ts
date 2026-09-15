@@ -1172,6 +1172,36 @@ class WhatsAppBotService {
                   async (gText, gJid, gName, gKey) => {
                     const isGfAct = /^(?:@girlfriend|\/girlfriend|@gf|\/gf|girlfriend\s*mode|gf\s*mode|virtual\s*girlfriend|girlfriend)\b/i.test(gText);
                     const isGfStop = /^(?:@normal|\/normal|normal\s*mode|normal|@stop\s*gf|@stop\s*girlfriend|stop\s*girlfriend|stop\s*gf|exit\s*girlfriend|exit\s*gf)$/i.test(gText);
+                    const isProfileCmd = girlfriendProfileService.isProfileCommand(gText) || girlfriendProfileService.isOnboardingActive(gJid);
+                    const isAllowed = girlfriendProfileService.isAuthorized(sPhone, false);
+
+                    if ((isGfAct || isProfileCmd) && !isAllowed) {
+                      await this.sendHumanLikeMessage(
+                        gJid,
+                        `⚠️ *Access Restricted:* Virtual Girlfriend Mode & Profile Management sirf Boss (DK) ke liye authorized hai.\n\n_Agar aapko access chahiye to Boss DK se unke WhatsApp par request karein:_ \`pass allow all to ${sPhone}\``,
+                        gText,
+                        gKey
+                      );
+                      return true;
+                    }
+
+                    if (isProfileCmd) {
+                      if (girlfriendProfileService.isOnboardingActive(gJid)) {
+                        const onboardRes = await girlfriendProfileService.handleOnboardingTurn(gJid, gText, "whatsapp");
+                        if (onboardRes.handled) {
+                          await this.sendHumanLikeMessage(gJid, onboardRes.replyText, gText, gKey);
+                          if (onboardRes.isComplete && !this.isGirlfriendModeActive(gJid)) {
+                            await this.startGirlfriendMode(gJid, "@girlfriend mode_b 60", gKey, gName);
+                          }
+                          return true;
+                        }
+                      }
+                      const cmdRes = await girlfriendProfileService.handleProfileCommand(gText, gJid, "whatsapp");
+                      if (cmdRes.handled) {
+                        await this.sendHumanLikeMessage(gJid, cmdRes.replyText, gText, gKey);
+                        return true;
+                      }
+                    }
 
                     if (isGfAct) {
                       await this.startGirlfriendMode(gJid, gText, gKey, gName);
@@ -1245,6 +1275,15 @@ class WhatsAppBotService {
     if (rawText.startsWith("[Reaction:") || rawText.startsWith("[reaction:") || /^\[Reaction/i.test(rawText) || isSingleReactionEmoji) {
       console.log(`[WhatsAppBot] Dropping reaction/acknowledgement emoji in handleOwnerWhatsAppMessage: "${rawText}"`);
       return;
+    }
+
+    // ── GIRLFRIEND ACCESS GRANT / REVOKE (Boss Only) ──
+    if (girlfriendProfileService.isAccessGrantCommand(rawText)) {
+      const grantRes = await girlfriendProfileService.handleAccessGrantCommand(rawText, true);
+      if (grantRes.handled) {
+        await this.sendHumanLikeMessage(replyJid, grantRes.replyText, rawText, messageKey);
+        return;
+      }
     }
 
     // ── GIRLFRIEND PROFILE ONBOARDING & COMMANDS ──

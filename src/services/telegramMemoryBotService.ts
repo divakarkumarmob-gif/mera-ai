@@ -350,6 +350,25 @@ Even agar Firebase configured nahi hai, ye bot Telegram ke Cloud Servers ko **da
       return;
     }
 
+    // ── Command: /profiles or /gf_profiles ────────────────────────────────
+    if (/^\/(?:profiles|gf_profiles|girlfriends|allprofiles)/i.test(text) || /^(all profiles|gf profiles|girlfriend profiles)/i.test(text)) {
+      const { girlfriendProfileService } = await import("./girlfriendProfileService");
+      const profiles = await girlfriendProfileService.getAllProfiles();
+      const active = await girlfriendProfileService.getActiveProfile(String(chatId));
+
+      let msg = `💖 *Friday Memory Vault: Girlfriend Profiles (${profiles.length}):*\n\n`;
+      profiles.forEach((p, idx) => {
+        const isActive = p.id.toLowerCase() === active.id.toLowerCase();
+        const activeTag = isActive ? " `[ACTIVE 🟢]`" : "";
+        msg += `${idx + 1}. *${p.name}*${activeTag}\n`;
+        msg += `   📝 _Bio:_ ${p.description || "N/A"}\n`;
+        msg += `   📜 _Rules:_ ${p.instruction ? (p.instruction.length > 80 ? p.instruction.substring(0, 77) + "..." : p.instruction) : "Default"}\n\n`;
+      });
+      msg += `_All profiles are permanently synced in Cloud Firestore & Memory Vault._ ✅`;
+      await this.safeSendMessage(chatId, msg);
+      return;
+    }
+
     // ── Command: /memory or /memories ──────────────────────────────────────
     if (/^\/(?:memory|memories|list|vault)/i.test(text)) {
       const facts = await unifiedMemoryService.listAllFacts();

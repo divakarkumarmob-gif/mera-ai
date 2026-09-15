@@ -33,6 +33,7 @@ class GirlfriendProfileService {
   private profilesCache: Map<string, GirlfriendProfile> = new Map();
   private activeProfileByContext: Map<string, string> = new Map();
   private onboardingSessions: Map<string, OnboardingSession> = new Map();
+  private allowedUsers: Set<string> = new Set();
   private isInitialized = false;
 
   constructor() {
@@ -66,14 +67,134 @@ class GirlfriendProfileService {
           }
         }
       }
+
+      // Load allowed whitelist numbers / users
+      const accessDoc = await db.collection("girlfriend_access_control").doc("allowed_users").get();
+      if (accessDoc.exists) {
+        const data = accessDoc.data();
+        if (Array.isArray(data?.numbers)) {
+          for (const n of data.numbers) {
+            const clean = String(n).trim().replace(/\D/g, "");
+            if (clean) this.allowedUsers.add(clean);
+          }
+        }
+      }
+
       this.isInitialized = true;
-      console.log(`[GirlfriendProfileService] Loaded ${this.profilesCache.size} girlfriend profiles into RAM.`);
+      console.log(`[GirlfriendProfileService] Loaded ${this.profilesCache.size} girlfriend profiles, ${this.allowedUsers.size} allowed users into RAM.`);
     } catch (err) {
       console.warn("[GirlfriendProfileService] Failed to load profiles from Firestore:", err);
       if (!this.profilesCache.has(DEFAULT_GIRLFRIEND_PROFILE.id)) {
         this.profilesCache.set(DEFAULT_GIRLFRIEND_PROFILE.id, DEFAULT_GIRLFRIEND_PROFILE);
       }
     }
+  }
+
+  /**
+   * Checks if user is authorized to manage girlfriend profiles or trigger girlfriend mode.
+   * Only BOSS (isOwner = true) OR specifically allowed numbers (whitelisted by Boss) are permitted.
+   */
+  public isAuthorized(userIdentifier: string, isOwner: boolean): boolean {
+    if (isOwner) return true;
+    if (!userIdentifier) return false;
+    const cleanNumber = userIdentifier.replace(/\D/g, "");
+    if (cleanNumber && this.allowedUsers.has(cleanNumber)) return true;
+    if (this.allowedUsers.has(userIdentifier.trim().toLowerCase())) return true;
+    return false;
+  }
+
+  public async grantAccess(target: string): Promise<{ success: boolean; message: string; targetClean: string }> {
+    if (!this.isInitialized) await this.init();
+    const clean = target.replace(/\D/g, "") || target.trim().toLowerCase();
+    if (!clean) return { success: false, message: "⚠️ Valid number ya username specify karein.", targetClean: "" };
+
+    this.allowedUsers.add(clean);
+    await db.collection("girlfriend_access_control").doc("allowed_users").set({
+      numbers: Array.from(this.allowedUsers),
+      updatedAt: Date.now(),
+    }, { merge: true }).catch(() => {});
+
+    return {
+      success: true,
+      targetClean: clean,
+      message: `✅ *Permission Granted!* Boss, number \`+${clean}\` ko Girlfriend Mode aur Profile management use karne ki full authorization de di gayi hai! 🔓✨`,
+    };
+  }
+
+  public async revokeAccess(target: string): Promise<{ success: boolean; message: string }> {
+    if (!this.isInitialized) await this.init();
+    const clean = target.replace(/\D/g, "") || target.trim().toLowerCase();
+    if (!clean) return { success: false, message: "⚠️ Valid number specify karein." };
+
+    this.allowedUsers.delete(clean);
+    await db.collection("girlfriend_access_control").doc("allowed_users").set({
+      numbers: Array.from(this.allowedUsers),
+      updatedAt: Date.now(),
+    }, { merge: true }).catch(() => {});
+
+    return {
+      success: true,
+      message: `🚫 *Permission Revoked!* Number \`+${clean}\` ka Girlfriend Mode & Profile access permanently revoke kar diya gaya hai.`,
+    };
+  }
+
+  public getAllowedUsers(): string[] {
+    return Array.from(this.allowedUsers);
+  }
+
+  public isAccessGrantCommand(text: string): boolean {
+    const t = text.trim();
+    return (
+      /^(?:pass\s*allow\s*all\s*to|allow\s*all\s*to|pass\s*allow\s*girlfriend\s*to|allow\s*girlfriend\s*to|pass\s*allow\s*gf\s*to|allow\s*gf\s*to|pass\s*allow\s*to|allow\s*to|girlfriend\s*allow\s*to|gf\s*allow\s*to)\s+(.+)/i.test(t) ||
+      /^(?:revoke\s*all\s*from|revoke\s*girlfriend\s*from|revoke\s*gf\s*from|disallow\s*gf|disallow\s*girlfriend|revoke\s*gf|revoke\s*access)\s+(.+)/i.test(t) ||
+      /^(?:list\s*allowed\s*gf|allowed\s*gf\s*users|allowed\s*gf\s*numbers|gf\s*permissions|who\s*can\s*use\s*gf)$/i.test(t)
+    );
+  }
+
+  public async handleAccessGrantCommand(text: string, isOwner: boolean): Promise<{ handled: boolean; replyText: string }> {
+    const t = text.trim();
+
+    if (!isOwner) {
+      return {
+        handled: true,
+        replyText: "⛔ *Access Denied:* Girlfriend access permissions sirf Boss (DK) ke dwara grant ya revoke ki ja sakti hain.",
+      };
+    }
+
+    // 1. Grant command: "allow girlfriend to no-xxxxx", "allow all to no-xxxxx", "pass allow all to <number>", etc.
+    const allowMatch = t.match(/^(?:pass\s*allow\s*all\s*to|allow\s*all\s*to|pass\s*allow\s*girlfriend\s*to|allow\s*girlfriend\s*to|pass\s*allow\s*gf\s*to|allow\s*gf\s*to|pass\s*allow\s*to|allow\s*to|girlfriend\s*allow\s*to|gf\s*allow\s*to)\s+(.+)/i);
+    if (allowMatch && allowMatch[1]?.trim()) {
+      const rawTarget = allowMatch[1].trim();
+      const res = await this.grantAccess(rawTarget);
+      return { handled: true, replyText: res.message };
+    }
+
+    // 2. Revoke command: revoke gf from <number>, revoke girlfriend from no-xxxxx
+    const revokeMatch = t.match(/^(?:revoke\s*all\s*from|revoke\s*girlfriend\s*from|revoke\s*gf\s*from|disallow\s*gf|disallow\s*girlfriend|revoke\s*gf|revoke\s*access)\s+(.+)/i);
+    if (revokeMatch && revokeMatch[1]?.trim()) {
+      const rawTarget = revokeMatch[1].trim();
+      const res = await this.revokeAccess(rawTarget);
+      return { handled: true, replyText: res.message };
+    }
+
+    // 3. List allowed: list allowed gf
+    if (/^(?:list\s*allowed\s*gf|allowed\s*gf\s*users|allowed\s*gf\s*numbers|gf\s*permissions|who\s*can\s*use\s*gf)$/i.test(t)) {
+      const list = this.getAllowedUsers();
+      if (list.length === 0) {
+        return {
+          handled: true,
+          replyText: `🔒 *Girlfriend Mode Access Control:*\n\nAbhi sirf **Boss DK (Owner)** authorized hain. Kisi aur number ko allow karne ke liye likhein:\n👉 \`pass allow all to <number>\``,
+        };
+      }
+      let msg = `🔓 *Girlfriend Mode Authorized Users (${list.length}):*\n\n• 👑 *Boss DK (Owner)*: Full Super-Admin\n`;
+      list.forEach((num, idx) => {
+        msg += `• 👤 User ${idx + 1}: \`+${num}\` (Allowed)\n`;
+      });
+      msg += `\n👉 *Revoke karne ke liye likhein:* \`revoke gf from <number>\``;
+      return { handled: true, replyText: msg };
+    }
+
+    return { handled: false, replyText: "" };
   }
 
   public normalizeId(name: string): string {
@@ -125,11 +246,24 @@ class GirlfriendProfileService {
     };
     this.profilesCache.set(id, finalProfile);
 
-    // Save to Firestore asynchronously
+    // 1. Save to Cloud Firestore asynchronously
     db.collection("girlfriend_profiles")
       .doc(id)
       .set(finalProfile)
       .catch((e) => console.warn(`[GirlfriendProfileService] Failed to save profile ${id} to Firestore:`, e));
+
+    // 2. Sync to Friday Executive Memory Vault
+    try {
+      const { unifiedMemoryService } = await import("./unifiedMemoryService");
+      unifiedMemoryService.addAtomicFact(
+        `Girlfriend Persona Profile [${finalProfile.name}]: ${finalProfile.description}. Tone & Slang Instructions: ${finalProfile.instruction}`,
+        "relationship",
+        "explicit_command",
+        1.0
+      ).catch(() => {});
+    } catch (memErr) {
+      console.warn("[GirlfriendProfileService] Memory sync notice:", memErr);
+    }
 
     return finalProfile;
   }
@@ -146,6 +280,12 @@ class GirlfriendProfileService {
 
     const id = target.id.toLowerCase();
     this.profilesCache.delete(id);
+
+    // Remove from Friday Memory Vault
+    try {
+      const { unifiedMemoryService } = await import("./unifiedMemoryService");
+      unifiedMemoryService.removeAtomicFact(`Girlfriend Persona Profile [${target.name}]`).catch(() => {});
+    } catch {}
 
     // Reset any active contexts pointing to deleted profile
     for (const [ctx, activeId] of this.activeProfileByContext.entries()) {

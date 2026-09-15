@@ -2484,7 +2484,33 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
       return;
     }
 
+    // ── GIRLFRIEND ACCESS GRANT / REVOKE (Telegram Boss Only) ──
+    if (girlfriendProfileService.isAccessGrantCommand(text)) {
+      const grantRes = await girlfriendProfileService.handleAccessGrantCommand(text, isOwner);
+      if (grantRes.handled) {
+        await this.sendMessage(chatId, grantRes.replyText);
+        return;
+      }
+    }
+
     // ── GIRLFRIEND PROFILE ONBOARDING & COMMANDS (TELEGRAM) ──
+    const isGfActivationIntent =
+      /^(?:\/girlfriend|\/gf|@girlfriend|@gf|girlfriend\s*mode|gf\s*mode|virtual\s*girlfriend|girlfriend)\b/i.test(text);
+    const isGfStopIntent =
+      /^(?:\/normal|normal\s*mode|normal|\/stop\s*gf|\/stop\s*girlfriend|stop\s*girlfriend|stop\s*gf|exit\s*girlfriend|exit\s*gf)$/i.test(text);
+    const isProfileCmd = girlfriendProfileService.isProfileCommand(text) || (chatId && girlfriendProfileService.isOnboardingActive(String(chatId)));
+
+    const isGfAllowed = girlfriendProfileService.isAuthorized(String(from?.id || chatId), isOwner);
+
+    if (chatId && (isGfActivationIntent || isProfileCmd) && !isGfAllowed) {
+      const userTag = from?.username ? `@${from.username}` : (from?.id ? String(from.id) : String(chatId));
+      await this.sendMessage(
+        chatId,
+        `⚠️ *Access Restricted:* Virtual Girlfriend Mode & Profile Management sirf Boss (DK) ke liye authorized hai.\n\n_Agar aapko access chahiye to Boss DK se bolein:_ \`pass allow all to ${userTag}\``
+      );
+      return;
+    }
+
     if (chatId && girlfriendProfileService.isOnboardingActive(String(chatId))) {
       const onboardRes = await girlfriendProfileService.handleOnboardingTurn(String(chatId), text, "telegram");
       if (onboardRes.handled) {
@@ -2510,11 +2536,6 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
     }
 
     // ── VIRTUAL GIRLFRIEND MODE ACTIVATION / STOP (TELEGRAM) ──
-    const isGfActivationIntent =
-      /^(?:\/girlfriend|\/gf|@girlfriend|@gf|girlfriend\s*mode|gf\s*mode|virtual\s*girlfriend|girlfriend)\b/i.test(text);
-    const isGfStopIntent =
-      /^(?:\/normal|normal\s*mode|normal|\/stop\s*gf|\/stop\s*girlfriend|stop\s*girlfriend|stop\s*gf|exit\s*girlfriend|exit\s*gf)$/i.test(text);
-
     if (chatId && isGfActivationIntent) {
       const activeProfile = await girlfriendProfileService.getActiveProfile(String(chatId));
       this.startGirlfriendMode(chatId, 60);
