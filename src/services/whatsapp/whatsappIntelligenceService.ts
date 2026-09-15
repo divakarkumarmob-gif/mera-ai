@@ -319,17 +319,31 @@ class WhatsAppIntelligenceService {
     const ownerRaw = process.env.OWNER_WHATSAPP_NUMBER || process.env.BOSS_WHATSAPP_NUMBER || "";
     const ownerClean = ownerRaw.replace(/\D/g, "");
     const botUserPhone = (sock?.user?.id || "").replace(/:.*@/, "@").replace(/\D/g, "");
+    const botLidClean = (sock?.user?.lid || sock?.authState?.creds?.me?.lid || "").replace(/:.*@/, "@").replace(/\D/g, "");
 
-    let senderJid = msg.key.participant || (isFromMe ? (sock?.user?.id || (ownerClean ? `${ownerClean}@s.whatsapp.net` : "")) : remoteJid);
-    if (!senderJid) senderJid = remoteJid;
+    // Extract real participant JID and alternate Phone JID from WhatsApp LID headers
+    const rawParticipant: string = msg.key.participant || (isFromMe ? (sock?.user?.id || (ownerClean ? `${ownerClean}@s.whatsapp.net` : "")) : remoteJid);
+    const altPhoneJid: string | undefined =
+      (msg as any).key?.participantPn ||
+      (msg as any).key?.senderPn ||
+      (msg as any).key?.participantAlt ||
+      (msg as any).key?.remoteJidAlt;
+
+    let senderJid = altPhoneJid || rawParticipant || remoteJid;
     senderJid = senderJid.replace(/:.*@/, "@");
     let senderPhone = senderJid.replace(/\D/g, "");
+    const rawParticipantPhone = (rawParticipant || "").replace(/\D/g, "");
 
     if (isFromMe && !senderPhone) {
       senderPhone = ownerClean || botUserPhone;
     }
 
-    const isOwner = isFromMe || (senderPhone && (senderPhone === ownerClean || senderPhone === botUserPhone));
+    const isOwner =
+      isFromMe ||
+      (senderPhone && (senderPhone === ownerClean || senderPhone === botUserPhone)) ||
+      (botLidClean && (senderPhone === botLidClean || rawParticipantPhone === botLidClean)) ||
+      (rawParticipantPhone && rawParticipantPhone === ownerClean);
+
     const id = msg.key.id || `status_${Date.now()}`;
 
     let senderName = isOwner ? "Boss (DK)" : "Unknown";
@@ -452,7 +466,15 @@ class WhatsAppIntelligenceService {
       const isMeQuery = ["me", "mera", "meri", "my", "mine", "boss", "dk", "apna", "self"].includes(q);
 
       if (isMeQuery) {
-        list = list.filter((s) => s.isFromMe || (s.senderName && s.senderName.toLowerCase().includes("boss")));
+        const ownerClean = (process.env.OWNER_WHATSAPP_NUMBER || process.env.BOSS_WHATSAPP_NUMBER || "").replace(/\D/g, "");
+        list = list.filter((s) => s.isFromMe || (s.senderName && s.senderName.toLowerCase().includes("boss")) || (ownerClean && s.senderPhone.includes(ownerClean)));
+        // Fallback: If no explicit isFromMe match found, check if the single most recent status is from the owner's active LID session
+        if (list.length === 0 && this.statusStories.length > 0) {
+          const first = this.statusStories[0];
+          if (first.senderName?.toLowerCase().includes("dk") || first.senderName?.toLowerCase().includes("boss")) {
+            list = [first];
+          }
+        }
       } else {
         let resolvedPhone = cleanDigits;
         try {

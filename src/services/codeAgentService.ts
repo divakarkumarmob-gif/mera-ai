@@ -467,45 +467,31 @@ Rules:
 
   public async getPendingRequest(): Promise<CodeAgentRequest | null> {
     try {
-      const snap = await requestsCol()
-        .where("status", "==", "pending_approval")
-        .orderBy("createdAt", "desc")
-        .limit(1)
-        .get();
+      const snap = await requestsCol().where("status", "==", "pending_approval").limit(10).get();
       if (!snap.empty) {
-        const req = snap.docs[0].data() as CodeAgentRequest;
-        this.inMemoryCache.set(req.id, req);
-        return req;
+        const sorted = snap.docs
+          .map((d) => d.data() as CodeAgentRequest)
+          .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        this.inMemoryCache.set(sorted[0].id, sorted[0]);
+        return sorted[0];
       }
       return null;
-    } catch (err: any) {
-      console.warn("[CodeAgent] getPendingRequest query failed (composite index missing). Self-healing with fallback query:", err?.message || err);
+    } catch {
       try {
-        const snap = await requestsCol().where("status", "==", "pending_approval").limit(10).get();
-        if (!snap.empty) {
-          const sorted = snap.docs
-            .map((d) => d.data() as CodeAgentRequest)
-            .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-          this.inMemoryCache.set(sorted[0].id, sorted[0]);
-          return sorted[0];
+        const snap = await requestsCol().limit(30).get();
+        const pending = snap.docs
+          .map((d) => d.data() as CodeAgentRequest)
+          .filter((r) => r.status === "pending_approval")
+          .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        if (pending.length > 0) {
+          this.inMemoryCache.set(pending[0].id, pending[0]);
+          return pending[0];
         }
       } catch {
-        try {
-          const snap = await requestsCol().limit(30).get();
-          const pending = snap.docs
-            .map((d) => d.data() as CodeAgentRequest)
-            .filter((r) => r.status === "pending_approval")
-            .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-          if (pending.length > 0) {
-            this.inMemoryCache.set(pending[0].id, pending[0]);
-            return pending[0];
-          }
-        } catch {
-          const cached = Array.from(this.inMemoryCache.values())
-            .filter((r) => r.status === "pending_approval")
-            .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-          if (cached.length > 0) return cached[0];
-        }
+        const cached = Array.from(this.inMemoryCache.values())
+          .filter((r) => r.status === "pending_approval")
+          .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        if (cached.length > 0) return cached[0];
       }
       return null;
     }

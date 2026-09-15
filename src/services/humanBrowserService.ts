@@ -520,6 +520,7 @@ class HumanBrowserService {
 
   /**
    * Fetches an authentic visual illustration / catalog thumbnail for the search query (e.g. products, places, entities).
+   * Context-aware: Never hallucinates perfume bottles for constitutional queries!
    */
   public async fetchVisualThumbnail(query: string): Promise<Buffer | undefined> {
     const cleanQuery = this.sanitizeSearchQuery(query);
@@ -527,10 +528,37 @@ class HumanBrowserService {
 
     try {
       const { imageGenerationService } = await import("./imageGenerationService");
-      const imgRes = await imageGenerationService.generateImage(
-        `Commercial studio product photography catalog of ${cleanQuery}, clean minimal aesthetic, 4k ultra detailed, studio lighting, hyperrealistic`,
-        { enhancePrompt: false, aspectRatio: "1:1" }
-      );
+
+      // Context-aware visual prompt synthesis
+      let visualPrompt = `Authentic, high quality 4k photograph of ${cleanQuery}, realistic, highly detailed`;
+      const key = process.env.GEMINI_API_KEY;
+
+      if (key) {
+        try {
+          const { GoogleGenAI } = await import("@google/genai");
+          const ai = new GoogleGenAI({ apiKey: key });
+          const promptResp = await ai.models.generateContent({
+            model: "gemini-3.5-flash-lite",
+            contents: `Generate a 1-line text-to-image prompt to generate an authentic, stunning visual photo for the search query: "${cleanQuery}".
+Rules:
+- If shopping/products (e.g. shirts, shoes, phones): "A curated commercial catalog photo of various stylish [items] displayed in a modern boutique/studio, multi-product collection".
+- If historical/legal/constitutional (e.g. Indian Constitution, laws, treaties): "Official dignified book of the Constitution of India with the national golden emblem and preamble on an executive wooden desk, realistic historical document photograph".
+- If person/leader/scientist: "Official formal portrait photograph of [Name], clean studio lighting".
+- If monument/place/city: "Scenic 4k travel photography of [Place]".
+- Output ONLY the 1-line image prompt without quotes or explanation.`,
+          });
+          const generatedPrompt = promptResp.text?.trim();
+          if (generatedPrompt && generatedPrompt.length > 10) {
+            visualPrompt = generatedPrompt;
+          }
+        } catch {}
+      }
+
+      const imgRes = await imageGenerationService.generateImage(visualPrompt, {
+        enhancePrompt: false,
+        aspectRatio: "1:1",
+      });
+
       if (imgRes.success && imgRes.buffer && imgRes.buffer.length > 5000) {
         return imgRes.buffer;
       }
@@ -542,14 +570,37 @@ class HumanBrowserService {
   }
 
   /**
-   * Generates the EXACT 1:1 authentic Google Chrome AI Overview matching Chrome Mobile & Desktop:
-   * 1. Overview Introductory Paragraph
-   * 2. Categorized / Structured product & fact cards (e.g. Formal, Casual, Polo with ₹ INR prices, ratings, Best For, Key Features)
-   * 3. Clean typography & unescaped HTML
-   * 4. Follow-up proactive prompt
+   * Generates or organizes search results into a clean, 1:1 Google Chrome Search card layout.
+   * Strictly formats authentic search data with clear dividers without hallucinating fake categories or filler text.
    */
-  public async generateChromeAiOverview(query: string, rawSnippets: string[] = []): Promise<string> {
+  public async generateChromeAiOverview(
+    query: string,
+    rawSnippets: string[],
+    extractedProducts: Array<{ title: string; price: string; merchant: string; rating: string; link?: string; imgUrl?: string }> = []
+  ): Promise<string> {
     const cleanQuery = this.sanitizeSearchQuery(query);
+
+    // If real shopping products were directly scraped from Google DOM, format them directly!
+    if (extractedProducts && extractedProducts.length > 0) {
+      const productCards = extractedProducts.slice(0, 10).map((p, idx) => {
+        const parts = [`*${idx + 1}. ${this.unescapeHtml(p.title)}*`];
+        if (p.price || p.merchant) {
+          parts.push(`💰 *Price:* ${p.price || "Check store"}${p.merchant ? ` • _${p.merchant}_` : ""}`);
+        }
+        if (p.rating) {
+          parts.push(`⭐ *Rating:* ${p.rating}`);
+        }
+        const buyLink = p.link || `https://www.google.com/search?tbm=shop&q=${encodeURIComponent(p.title)}`;
+        parts.push(`🔗 *Store Link:* ${buyLink}`);
+        const photoLink = p.imgUrl || `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(p.title)}`;
+        parts.push(`🖼️ *View Photos:* ${photoLink}`);
+        parts.push(`──────────────────────`);
+        return parts.join("\n");
+      });
+
+      return productCards.join("\n\n");
+    }
+
     const key = process.env.GEMINI_API_KEY;
     const combinedSnippets = rawSnippets
       .map((s) => this.unescapeHtml(s))
@@ -562,49 +613,34 @@ class HumanBrowserService {
         const { GoogleGenAI } = await import("@google/genai");
         const ai = new GoogleGenAI({ apiKey: key });
 
-        const prompt = `You are Google Chrome's AI Mode & Google AI Overview Engine for Indian users.
-Your task is to generate the EXACT 1:1 authentic Google Chrome AI Overview format as seen on Google Chrome mobile & desktop in India.
+        const prompt = `You are a Google Chrome Search & AI Overview formatter.
+Your task is to present the search results for "${cleanQuery}" EXACTLY as they appear on Google Chrome (verbatim, factual, and clean).
 
-User Search Query: "${cleanQuery}"
-Live Web Context / Snippets:
-${combinedSnippets || "Perform live knowledge retrieval for this query."}
+Search Query: "${cleanQuery}"
+Raw Web Search / DOM Snippets:
+${combinedSnippets || "Factual knowledge about: " + cleanQuery}
 
-Format Structure (Strictly Follow Real Chrome AI Mode with Dividers & Store Links):
-1. [Overview Paragraph]: 1-2 introductory sentences setting the context with Indian market awareness (e.g. curated for popular trends in India, ₹ INR price range, key overview).
-2. [Structured Sections & Cards with Dividing Lines]:
-   - If ranking / products / shopping (e.g. "top 10 men shirt price", "best phones under 20k"):
-     Organize into 2-3 logical categories (e.g. *👔 Formal & Semi-Formal Shirts*, *👕 Casual & Everyday Wear*, *🎽 Smart-Casual Polo Shirts*).
-     Under each category, format each item cleanly with a clear dividing line after every item:
+Formatting Instructions:
+- If this is a shopping/product search (e.g. shirts, shoes, phones):
+  List the top genuine items found with realistic Indian pricing in ₹ INR, ratings, and genuine store links (Amazon.in / Flipkart / Myntra).
+  Put a clean dividing line (──────────────────────) after EVERY item:
+  *1. [Brand & Model Name]* — *₹[Price]* (⭐ [Rating] • [Store Name])
+  🔗 *Buy Link:* https://www.amazon.in/s?k=[URL_ENCODED_NAME]
+  🖼️ *View Photos:* https://www.google.com/search?tbm=isch&q=[URL_ENCODED_NAME]
+  • *Details:* [Genuine fabric/specs/features]
+  ──────────────────────
 
-     *1. [Brand & Full Model Name]* — *₹[Price in INR]* (⭐ [Rating] • [Platform e.g. Amazon / Myntra / Flipkart])
-     🔗 *Buy Now:* https://www.amazon.in/s?k=[URL_ENCODED_PRODUCT_NAME] (or Flipkart/Myntra link)
-     • *Best For:* [Specific occasion/use-case]
-     • *Key Features:* [Fabric, fit, key specs]
-     ──────────────────────
+- If this is a factual / legal / informational query (e.g. Indian Constitution 42nd amendment, Prime Minister, facts):
+  Provide the EXACT verbatim factual summary directly:
+  📌 *[Key Summary / Answer]*
+  [Clear, comprehensive factual explanation without robotic filler]
+  ──────────────────────
+  🔗 *Source:* https://en.wikipedia.org/wiki/[Relevant_Topic]
 
-     *2. [Next Brand & Product Name]* — *₹[Price in INR]* (⭐ [Rating] • [Platform])
-     🔗 *Buy Now:* https://www.myntra.com/...
-     • *Best For:* [Specific occasion/use-case]
-     • *Key Features:* [Fabric, fit, key specs]
-     ──────────────────────
-
-   - If entity / direct fact (e.g. "prime minister of india", "capital of japan"):
-     🏛️ *[Direct Answer]*: *[Entity Name]*
-     ──────────────────────
-     [1-2 clean, factual paragraphs explaining background, dates, and significance].
-     🔗 *Official / Source Link:* https://en.wikipedia.org/wiki/[Entity_Name]
-     ──────────────────────
-   - If how-to / procedural:
-     Clear numbered step-by-step guidance with dividing lines between key steps.
-3. [Closing Proactive Prompt]:
-   "_Are you looking for options for a specific occasion, fabric/spec, brand, or budget?_"
-
-CRITICAL RULES:
-- ALWAYS insert a clean dividing line (──────────────────────) after every single product card so each product is visually separated and super easy to read!
-- Include genuine, working 1-click buy links (Amazon.in / Flipkart / Myntra) for every single product so users can tap and buy directly.
-- Use genuine Indian brands and realistic ₹ INR prices.
-- Never output raw HTML entities like &#x27; or &amp;. Output clean readable English/Hinglish.
-- Do NOT use markdown tables or json blocks. Use standard WhatsApp-friendly bold asterisks, bullet points, and full clickable https:// URLs.`;
+STRICT RULES:
+- Do NOT make up synthetic chatbot closing questions or personality fluff.
+- Always include the dividing line (──────────────────────) after each card.
+- Output clean readable text without raw HTML entities.`;
 
         for (const model of ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-2.5-flash"]) {
           try {
@@ -614,7 +650,7 @@ CRITICAL RULES:
             });
 
             const text = resp.text?.trim();
-            if (text && text.length > 50) {
+            if (text && text.length > 30) {
               return this.unescapeHtml(text);
             }
           } catch {}
@@ -624,8 +660,7 @@ CRITICAL RULES:
       }
     }
 
-    // Heuristic fallback if AI generation fails
-    return combinedSnippets.slice(0, 800);
+    return combinedSnippets.slice(0, 1000);
   }
 
   /**
@@ -662,7 +697,7 @@ CRITICAL RULES:
           for (const line of lines) {
             if (line.startsWith("Title:") || line.startsWith("## [") || line.startsWith("### [")) {
               if (currentTitle) {
-                collectedSources.push({ title: this.unescapeHtml(currentTitle), snippet: this.unescapeHtml(currentSnippet.slice(0, 180)), link: currentLink });
+                collectedSources.push({ title: this.unescapeHtml(currentTitle), snippet: this.unescapeHtml(currentSnippet.slice(0, 200)), link: currentLink });
                 if (currentSnippet) collectedSnippets.push(this.unescapeHtml(currentSnippet));
                 currentSnippet = "";
               }
@@ -674,7 +709,7 @@ CRITICAL RULES:
             }
           }
           if (currentTitle && collectedSources.length < 4) {
-            collectedSources.push({ title: this.unescapeHtml(currentTitle), snippet: this.unescapeHtml(currentSnippet.slice(0, 180)), link: currentLink });
+            collectedSources.push({ title: this.unescapeHtml(currentTitle), snippet: this.unescapeHtml(currentSnippet.slice(0, 200)), link: currentLink });
             if (currentSnippet) collectedSnippets.push(this.unescapeHtml(currentSnippet));
           }
         }
@@ -732,7 +767,7 @@ CRITICAL RULES:
             if (snip) {
               collectedSnippets.push(snip);
               if (collectedSources.length < 3) {
-                collectedSources.push({ title: tit, snippet: snip.slice(0, 160) });
+                collectedSources.push({ title: tit, snippet: snip.slice(0, 180) });
               }
             }
           }
@@ -742,17 +777,17 @@ CRITICAL RULES:
       }
     }
 
-    // ── Synthesize 1:1 Authentic Chrome AI Overview ──
+    // ── Format Authentic Chrome Results ──
     const [aiOverviewCard, visualThumbnail] = await Promise.all([
       this.generateChromeAiOverview(cleanQuery, collectedSnippets),
       this.fetchVisualThumbnail(cleanQuery),
     ]);
 
-    let formattedOutput = `✨ *[Google Chrome AI Overview]*:\n\n${aiOverviewCard}\n\n`;
+    let formattedOutput = `${aiOverviewCard}\n\n`;
 
     if (collectedSources.length > 0) {
       formattedOutput += `🔍 *[Top Verified Sources]*:\n`;
-      for (const s of collectedSources.slice(0, 2)) {
+      for (const s of collectedSources.slice(0, 3)) {
         formattedOutput += `• *${s.title}*${s.link ? `\n  🔗 ${s.link}` : ""}\n`;
       }
     }
@@ -768,7 +803,7 @@ CRITICAL RULES:
   }
 
   /**
-   * Performs an authentic Indian Google Search, extracts Google AI Overview (SGE), Knowledge Graph direct answers, and top web sources.
+   * Performs an authentic Indian Google Search, extracts Google AI Overview (SGE), Shopping items, Knowledge Graph direct answers, and top web sources.
    * Automatically sanitizes conversational inputs and fails over to anti-block fallback engines if CAPTCHA is detected.
    */
   public async searchGoogleAndInspect(query: string): Promise<BrowserActionResult> {
@@ -798,7 +833,7 @@ CRITICAL RULES:
 
       console.log(`[HumanBrowser] 🔍 Google Searching: "${cleanQuery}"`);
       await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 25000 });
-      await page.waitForSelector("#search, #rso, div.g", { timeout: 7000 }).catch(() => {});
+      await page.waitForSelector("#search, #rso, div.g, div.pla-unit", { timeout: 7000 }).catch(() => {});
       await this.randomDelay(400, 900);
 
       const title = await page.title();
@@ -824,9 +859,41 @@ CRITICAL RULES:
       }).catch(() => {});
       await this.randomDelay(600, 1200);
 
-      // Extract Google AI Overview, Direct Knowledge Answer & Organic Results
+      // Extract Google AI Overview, Shopping Cards, Direct Knowledge Answer & Organic Results
       const extracted = await page.evaluate(() => {
-        // 1. Google AI Overview / SGE Block
+        // 1. Google Shopping / Products Grid
+        const products: Array<{ title: string; price: string; merchant: string; rating: string; link?: string; imgUrl?: string }> = [];
+        const shoppingCards = document.querySelectorAll("div.pla-unit, div.sh-dgr__content, div[data-docid], div.sh-np__click-target");
+
+        for (let i = 0; i < shoppingCards.length && products.length < 8; i++) {
+          const sc = shoppingCards[i];
+          const titleEl = sc.querySelector(".pla-unit-title, h3, h4, .sh-np__product-title");
+          const priceEl = sc.querySelector(".e10twf, [aria-label*='₹'], .hn9bif, .T149du, span");
+          const merchantEl = sc.querySelector(".rhf-merchant-name, .LbIaRd, .IuHnof, .aULzUe");
+          const ratingEl = sc.querySelector("[aria-label*='stars'], span.R1QE5b");
+          const linkEl = sc.querySelector("a");
+          const imgEl = sc.querySelector("img");
+
+          const pTitle = titleEl?.textContent?.trim() || "";
+          const pPrice = priceEl?.textContent?.trim() || "";
+          const pMerchant = merchantEl?.textContent?.trim() || "";
+          const pRating = ratingEl?.textContent?.trim() || "";
+          const pLink = linkEl?.getAttribute("href") || undefined;
+          const pImg = imgEl?.getAttribute("src") || imgEl?.getAttribute("data-src") || undefined;
+
+          if (pTitle && (pPrice || pMerchant)) {
+            products.push({
+              title: pTitle,
+              price: pPrice,
+              merchant: pMerchant,
+              rating: pRating,
+              link: pLink && pLink.startsWith("/") ? `https://www.google.com${pLink}` : pLink,
+              imgUrl: pImg,
+            });
+          }
+        }
+
+        // 2. Google AI Overview / SGE Block
         const aiOverviewSelectors = [
           'div[aria-label*="AI Overview"]',
           'div[data-attrid="sge_entity_summary"]',
@@ -845,9 +912,9 @@ CRITICAL RULES:
           }
         }
 
-        // 2. Direct Answer / Featured Snippet / Knowledge Panel
+        // 3. Direct Answer / Featured Snippet / Knowledge Panel
         const directAnswerSelectors = [
-          "div.Z0LcW", // Direct answer (e.g. "Narendra Modi")
+          "div.Z0LcW", // Direct answer
           "div.hgKElc", // Featured snippet text
           "div.kno-rdesc span", // Knowledge graph description
           "div.V3FYCf", // Summary box
@@ -865,7 +932,7 @@ CRITICAL RULES:
           }
         }
 
-        // 3. Top Organic Search Result Snippets
+        // 4. Top Organic Search Result Snippets
         const organicResults: Array<{ title: string; snippet: string; link?: string }> = [];
         const resultCards = document.querySelectorAll("div.g, div.MjjYud, div.tF2C5e");
         for (let i = 0; i < resultCards.length && organicResults.length < 3; i++) {
@@ -881,8 +948,18 @@ CRITICAL RULES:
           }
         }
 
-        return { aiOverview, directAnswer, organicResults };
+        return { products, aiOverview, directAnswer, organicResults };
       });
+
+      // 📸 Capture the REAL, GENUINE Google Search Viewport Screenshot
+      let realScreenShot: Buffer | undefined;
+      try {
+        realScreenShot = (await page.screenshot({
+          type: "jpeg",
+          quality: 90,
+          fullPage: false,
+        })) as Buffer;
+      } catch {}
 
       const snippets = [
         extracted.directAnswer,
@@ -890,14 +967,11 @@ CRITICAL RULES:
         ...extracted.organicResults.map((r) => `${r.title}: ${r.snippet}`),
       ].filter(Boolean) as string[];
 
-      const [aiOverviewCard, visualThumbnail] = await Promise.all([
-        this.generateChromeAiOverview(cleanQuery, snippets),
-        this.fetchVisualThumbnail(cleanQuery),
-      ]);
+      const aiOverviewCard = await this.generateChromeAiOverview(cleanQuery, snippets, extracted.products);
 
-      let formattedOutput = `✨ *[Google Chrome AI Overview]*:\n\n${aiOverviewCard}\n\n`;
+      let formattedOutput = `${aiOverviewCard}\n\n`;
 
-      if (extracted.organicResults.length > 0) {
+      if (extracted.organicResults.length > 0 && extracted.products.length === 0) {
         formattedOutput += `🔍 *[Top Verified Sources]*:\n`;
         for (const r of extracted.organicResults.slice(0, 2)) {
           formattedOutput += `• *${this.unescapeHtml(r.title)}*${r.link ? `\n  🔗 ${r.link}` : ""}\n`;
@@ -909,7 +983,7 @@ CRITICAL RULES:
         url: searchUrl,
         title: `Google: "${cleanQuery}"`,
         summary: formattedOutput.trim(),
-        screenshotBuffer: visualThumbnail,
+        screenshotBuffer: realScreenShot,
         extractedData: extracted,
       };
     } catch (err: any) {
