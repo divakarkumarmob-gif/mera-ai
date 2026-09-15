@@ -31138,11 +31138,11 @@ User's message: "${text}"
 
 TASK:
 1. Formulate a hyper-realistic, 8K, cinematic diffusion image prompt (for Flux.1 / SDXL) based on the user's request:
-   - If user asks for her selfie / photo / outfit / look / bed / saree / dress / home (e.g. "apni photo bhejo", "selfie dikhao", "saree me photo", "bed par leti hui photo"):
+   - Selfies / Portraits (e.g. "apni photo bhejo", "selfie dikhao", "saree me photo", "bed par leti hui photo"):
      Create a realistic, photorealistic smartphone selfie or candid aesthetic photo of the Indian girlfriend "${activeProfile.name}" matching her profile and the requested clothing/setting/mood with natural lighting, sharp focus, 8k resolution.
-   - If user asks for a romantic gift (roses, chocolate, handwritten polaroid, love card):
+   - Romantic Gifts (e.g. roses, chocolate, handwritten polaroid, love card):
      Create a gorgeous, cinematic, 8k aesthetic flatlay of the requested gift item.
-   - If user asks for ANY other object, scene, car, pet, landscape, or creative concept (e.g. "cat ki photo", "car banao", "sunset beach"):
+   - Other Objects / Scenes / Concepts (e.g. "cat ki photo", "car banao", "sunset beach"):
      Create a stunning, ultra-detailed 8k photograph or illustration of that exact subject.
 2. Formulate a short, sweet, loving girlfriend caption in Hinglish (1-2 sentences with emojis, e.g. "Ye lo mere baby, sirf aapke liye photo! Kaisi lag rahi hoon? \u{1F618}\u2764\uFE0F").
 
