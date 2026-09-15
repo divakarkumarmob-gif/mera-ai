@@ -130,6 +130,27 @@ cl = Client()
 # Increase default timeout to prevent dropping slow requests
 cl.request_timeout = 25
 
+# ── SSL & PROXY TRANSPORT FIX (Fix CertificateVerifyError on proxies) ──
+try:
+    cl.private_transport = "requests"
+    cl.public_transport = "requests"
+except Exception:
+    pass
+
+try:
+    import urllib3
+    urllib3.disable_warnings()
+except Exception:
+    pass
+
+try:
+    if hasattr(cl, "private"):
+        cl.private.verify = False
+    if hasattr(cl, "public"):
+        cl.public.verify = False
+except Exception:
+    pass
+
 # Apply device fingerprint for stealth
 cl.set_device(DEVICE_SETTINGS)
 _chosen_locale = random.choice(LOCALE_POOL)
@@ -162,6 +183,11 @@ if not _proxy_url:
 if _proxy_url:
     try:
         cl.set_proxy(_proxy_url)
+        # Ensure verify=False is preserved after proxy setup
+        if hasattr(cl, "private"):
+            cl.private.verify = False
+        if hasattr(cl, "public"):
+            cl.public.verify = False
         # Mask credentials in log
         _masked = _proxy_url[:20] + "..." if len(_proxy_url) > 20 else _proxy_url
         sys.stderr.write(f"[InstagrapiBridge] 🌐 Proxy active: {_masked}\n")
@@ -942,7 +968,21 @@ class BridgeHandler(BaseHTTPRequestHandler):
             session_id = session_id.strip("\"'")
 
             try:
-                logged = cl.login_by_sessionid(session_id)
+                try:
+                    logged = cl.login_by_sessionid(session_id)
+                except Exception as first_err:
+                    if "CertificateVerifyError" in str(first_err) or "SSLError" in str(first_err) or "SSL" in str(first_err):
+                        sys.stderr.write(f"[InstagrapiBridge] ⚠️ SSL proxy transport retry ({first_err})...\n")
+                        cl.private_transport = "requests"
+                        cl.public_transport = "requests"
+                        if hasattr(cl, "private"):
+                            cl.private.verify = False
+                        if hasattr(cl, "public"):
+                            cl.public.verify = False
+                        logged = cl.login_by_sessionid(session_id)
+                    else:
+                        raise first_err
+
                 info = cl.account_info()
                 update_logged_in_user(info)
                 # ── ANTI-DETECTION: Warm-up after session login ──
