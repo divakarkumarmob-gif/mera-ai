@@ -1020,37 +1020,61 @@ class BridgeHandler(BaseHTTPRequestHandler):
             session_id = session_id.strip("\"'")
 
             try:
-                try:
-                    logged = cl.login_by_sessionid(session_id)
-                except Exception as first_err:
-                    sys.stderr.write(f"[InstagrapiBridge] ⚠️ login_by_sessionid retry with direct session injection ({first_err})...\n")
-                    try:
-                        uid = session_id.split("%3A")[0] if "%3A" in session_id else session_id.split(":")[0]
-                        cl.set_settings({
-                            "authorization_data": {
-                                "sessionid": session_id,
-                                "ds_user_id": uid
-                            }
-                        })
-                        cl.user_id = uid
-                    except Exception as fallback_err:
-                        raise first_err
+                # ── Direct Session Cookie & Authorization Injection (Bypasses fragile users/info endpoint) ──
+                if "%3A" in session_id:
+                    uid = session_id.split("%3A")[0]
+                elif ":" in session_id:
+                    uid = session_id.split(":")[0]
+                else:
+                    uid = session_id
+
+                settings = cl.get_settings()
+                if not isinstance(settings, dict):
+                    settings = {}
+                settings["authorization_data"] = {
+                    "sessionid": session_id,
+                    "ds_user_id": str(uid),
+                }
+                cl.set_settings(settings)
+                cl.user_id = str(uid)
+
+                # Inject cookies directly into requests sessions for all transports
+                for session_obj in [getattr(cl, "private", None), getattr(cl, "public", None)]:
+                    if session_obj and hasattr(session_obj, "cookies"):
+                        try:
+                            session_obj.cookies.set("sessionid", session_id, domain=".instagram.com", path="/")
+                            session_obj.cookies.set("ds_user_id", str(uid), domain=".instagram.com", path="/")
+                        except Exception:
+                            pass
+
+                # Fetch account information using standard accounts/current_user endpoint
+                u_name = f"user_{uid}"
+                f_name = u_name
+                p_pic = None
 
                 try:
                     info = cl.account_info()
                     update_logged_in_user(info)
                     u_name = info.username
-                    f_name = info.full_name
+                    f_name = info.full_name or u_name
                     p_pic = str(info.profile_pic_url) if info.profile_pic_url else None
-                except Exception:
+                except Exception as acc_err:
+                    sys.stderr.write(f"[InstagrapiBridge] Notice: account_info gentle warning ({acc_err}), using session ID user {uid}\n")
                     update_logged_in_user()
-                    u_name = current_status.get("username") or "instagram_user"
+                    u_name = current_status.get("username") or u_name
                     f_name = current_status.get("fullName") or u_name
                     p_pic = current_status.get("profilePicUrl")
+
+                current_status["isLoggedIn"] = True
+                current_status["userId"] = str(uid)
+                current_status["username"] = u_name
+                current_status["fullName"] = f_name
+                current_status["lastError"] = None
 
                 # ── ANTI-DETECTION: Warm-up after session login ──
                 import threading
                 threading.Thread(target=warm_up_session, daemon=True).start()
+
                 self._send_json(200, {
                     "ok": True,
                     "message": f"Logged in via session ID as @{u_name}",
