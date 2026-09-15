@@ -114,19 +114,11 @@ class WhatsAppBotService {
       this.keepAliveTimer = setTimeout(async () => {
         if (this.sock && this.isConnected) {
           try {
-            // Check IST night sleep hours (1:00 AM to 6:30 AM IST)
-            const currentHourIST = new Date(
-              new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" })
-            ).getHours();
-
-            const isNightSleepTime = currentHourIST >= 1 && currentHourIST < 6;
-            if (isNightSleepTime) {
-              // During human sleep hours, stay strictly unavailable (Offline)
-              await this.sock.sendPresenceUpdate("unavailable");
-            } else if (whatsappGirlfriendEngine.hasActiveGirlfriendOnline()) {
+            // 24/7 Active keep-alive presence handling (Sleep mode disabled)
+            if (whatsappGirlfriendEngine.hasActiveGirlfriendOnline()) {
               await this.sock.sendPresenceUpdate("available");
             } else {
-              // Daytime Inbound Entropy: 35% chance to simulate a natural quick human browsing session
+              // 24/7 Inbound Entropy: 35% chance to simulate a natural quick human browsing session
               if (Math.random() < 0.35) {
                 await humanBotFirewallService.simulateWhatsAppInboundEntropy(this.sock, Array.from(this.recentActiveJids));
               } else {
@@ -146,7 +138,7 @@ class WhatsAppBotService {
     };
 
     scheduleNextKeepAlive();
-    console.log("[WhatsAppBot] Realistic Human Circadian Keep-Alive active (Gaussian 6-16m intervals with Inbound Entropy & Night Sleep Mode).");
+    console.log("[WhatsAppBot] Realistic Human Circadian Keep-Alive active (Gaussian 6-16m intervals with 24/7 Inbound Entropy - Sleep mode disabled).");
   }
 
   private stopKeepAlive() {

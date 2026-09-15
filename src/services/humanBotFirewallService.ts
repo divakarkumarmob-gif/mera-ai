@@ -526,14 +526,6 @@ class HumanBotFirewallService {
     const { readDelayMs, typingDelayMs } = this.calculateHumanDelays(incomingText, replyText);
 
     try {
-      // If nighttime in IST (12:00 AM - 6:30 AM), add human drowsiness / wake reaction buffer
-      const istHours = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" })).getHours();
-      const isNight = istHours >= 0 && istHours < 7;
-      if (isNight) {
-        const nightDelay = this.gaussianRandom(5200, 1100, 3500, 8000);
-        await this.sleep(nightDelay);
-      }
-
       // 1. Reading pause while still OFFLINE (Simulating lockscreen/notification preview reading)
       await this.sleep(readDelayMs);
 
@@ -581,24 +573,13 @@ class HumanBotFirewallService {
    * 2. Scrolls through recent active chats, subscribes to contact presence, checks statuses/profile previews.
    * 3. Idles naturally for 8s-22s (mimicking human reading/scrolling chat history & status feed).
    * 4. Switches back to 'unavailable' (Offline).
-   * Pauses during human sleep hours (1:00 AM - 6:30 AM IST).
+   * Active 24/7 (Sleep hours disabled).
    */
   public async simulateWhatsAppInboundEntropy(sock: any, knownJids: string[] = []): Promise<void> {
     if (!sock) return;
 
     try {
-      const istHours = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" })).getHours();
-      const isSleepHour = istHours >= 1 && istHours < 7; // 1 AM to 6:59 AM IST
-
-      if (isSleepHour) {
-        // Human is sleeping; strictly maintain offline state
-        if (sock.sendPresenceUpdate) {
-          await sock.sendPresenceUpdate("unavailable").catch(() => {});
-        }
-        return;
-      }
-
-      // Human checks WhatsApp
+      // Human checks WhatsApp (24/7 Active)
       console.log("[HumanFirewall] 📱 Human Entropy: Simulating natural phone unlock & WhatsApp chat scrolling session...");
       if (sock.sendPresenceUpdate) {
         await sock.sendPresenceUpdate("available").catch(() => {});
