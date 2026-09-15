@@ -1,11 +1,10 @@
-import { IgApiClient } from "instagram-private-api";
 import { GoogleGenAI } from "@google/genai";
 import { db } from "./firebaseAdmin";
-import { contactsService } from "./contactsService";
 import { dailyUpdateService } from "./dailyUpdateService";
 import { humanBotFirewallService } from "./humanBotFirewallService";
 import fs from "fs";
 import path from "path";
+import { spawn, ChildProcess } from "child_process";
 
 export interface InstagramStatus {
   isLoggedIn: boolean;
@@ -19,6 +18,7 @@ export interface InstagramStatus {
   twoFactorInfo?: any;
   lastError?: string | null;
   isEnvConfigured?: boolean;
+  bridgeRunning?: boolean;
 }
 
 export interface InstagramUserProfile {
@@ -30,9 +30,12 @@ export interface InstagramUserProfile {
 }
 
 const LOCAL_SESSION_FILE = path.resolve(process.cwd(), "data", "instagram_session.json");
+const BRIDGE_PORT = parseInt(process.env.INSTAGRAM_BRIDGE_PORT || "5185", 10);
+const BRIDGE_URL = `http://127.0.0.1:${BRIDGE_PORT}`;
 
 class InstagramBotService {
-  private ig: IgApiClient | null = null;
+  private bridgeProcess: ChildProcess | null = null;
+  private isBridgeReady: boolean = false;
   private isLoggedIn: boolean = false;
   private currentUsername: string | null = null;
   private currentFullName: string | null = null;
@@ -42,7 +45,7 @@ class InstagramBotService {
   private autoReplyEnabled: boolean = true;
   private pollInterval: any = null;
   private processedItemIds: Set<string> = new Set();
-  private pendingTwoFactor: { twoFactorIdentifier: string; username: string } | null = null;
+  private pendingTwoFactor: { username: string } | null = null;
   private messageCallback: ((msg: { sender: string; text: string; time: string; igid: string }) => void) | null = null;
   private lastError: string | null = null;
   private activeSessionId: string | null = null;
@@ -56,7 +59,92 @@ class InstagramBotService {
   ];
 
   constructor() {
+    this.startBridgeProcess();
     this.initSession();
+  }
+
+  /**
+   * Spawns and manages the Python Instagrapi Bridge subprocess
+   */
+  private startBridgeProcess() {
+    try {
+      const pythonScript = path.resolve(process.cwd(), "src", "python", "instagram_bridge.py");
+      if (!fs.existsSync(pythonScript)) {
+        console.error(`[InstagramBot] Bridge script not found at ${pythonScript}`);
+        return;
+      }
+
+      console.log(`[InstagramBot] Starting Python Instagrapi bridge on port ${BRIDGE_PORT}...`);
+      const pythonCmd = process.platform === "win32" ? "python" : "python3";
+      
+      this.bridgeProcess = spawn(pythonCmd, [pythonScript, "--port", String(BRIDGE_PORT)], {
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+
+      this.bridgeProcess.stdout?.on("data", (data) => {
+        const text = data.toString().trim();
+        if (text) console.log(`[InstagrapiBridge:out] ${text}`);
+      });
+
+      this.bridgeProcess.stderr?.on("data", (data) => {
+        const text = data.toString().trim();
+        if (text) console.log(`[InstagrapiBridge:err] ${text}`);
+      });
+
+      this.bridgeProcess.on("exit", (code) => {
+        console.warn(`[InstagramBot] Bridge process exited with code ${code}`);
+        this.isBridgeReady = false;
+        this.bridgeProcess = null;
+      });
+
+      // Periodic check to verify bridge readiness
+      this.waitForBridgeReady(15, 1000);
+    } catch (e: any) {
+      console.error("[InstagramBot] Failed to spawn Python bridge:", e?.message || e);
+    }
+  }
+
+  private async waitForBridgeReady(maxRetries = 15, delayMs = 1000): Promise<boolean> {
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        const res = await fetch(`${BRIDGE_URL}/health`, { signal: AbortSignal.timeout(2000) });
+        if (res.ok) {
+          this.isBridgeReady = true;
+          console.log("[InstagramBot] Python Instagrapi bridge is ready and healthy! 🚀");
+          return true;
+        }
+      } catch {}
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+    console.warn("[InstagramBot] Python Instagrapi bridge healthcheck timed out.");
+    return false;
+  }
+
+  private async bridgeCall(endpoint: string, method: "GET" | "POST" = "GET", bodyData?: any, timeoutMs = 25000): Promise<any> {
+    if (!this.isBridgeReady) {
+      const ready = await this.waitForBridgeReady(5, 500);
+      if (!ready) {
+        throw new Error("Instagrapi Python bridge is not responding. Please ensure Python and instagrapi are installed.");
+      }
+    }
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+
+    const options: RequestInit = {
+      method,
+      headers,
+      signal: AbortSignal.timeout(timeoutMs),
+    };
+
+    if (bodyData && method === "POST") {
+      options.body = JSON.stringify(bodyData);
+    }
+
+    const res = await fetch(`${BRIDGE_URL}${endpoint}`, options);
+    const data = await res.json().catch(() => ({}));
+    return data;
   }
 
   public getActiveSessionId(): string | null {
@@ -83,6 +171,8 @@ class InstagramBotService {
    */
   public async initSession() {
     try {
+      await this.waitForBridgeReady(10, 1000);
+
       // 1. Priority 1: Check .env INSTAGRAM_SESSION_ID or INSTAGRAM_SESSIONID or INSTAGRAM_COOKIE
       const envSession = (process.env.INSTAGRAM_SESSION_ID || process.env.INSTAGRAM_SESSIONID || process.env.INSTAGRAM_COOKIE || "").trim();
       const envUser = (process.env.INSTAGRAM_USERNAME || "").trim();
@@ -164,38 +254,20 @@ class InstagramBotService {
     }
   }
 
-  /**
-   * Configures a genuine Indian Mobile Device profile for Instagram API client
-   * matching standard Android device identity with IST timezone (+05:30) and Indian locale.
-   */
-  private configureIndianDevice(ig: IgApiClient, username: string) {
-    ig.state.generateDevice(username);
-    ig.state.timezoneOffset = "19800"; // +05:30 IST
-    ig.state.language = "en_IN";
-    ig.state.radioType = "wifi-none";
-  }
-
   private async restoreSession(username: string, sessionState: any): Promise<boolean> {
     try {
-      const ig = new IgApiClient();
-      this.configureIndianDevice(ig, username);
-      await ig.state.deserialize(sessionState);
-
-      // Verify that session is valid
-      const currentUser = await ig.account.currentUser();
-      if (currentUser && currentUser.pk) {
-        this.ig = ig;
+      const res = await this.bridgeCall("/restore-session", "POST", { session: sessionState });
+      if (res && res.ok && res.status?.isLoggedIn) {
         this.isLoggedIn = true;
-        this.currentUsername = currentUser.username;
-        this.currentFullName = currentUser.full_name || currentUser.username;
-        this.currentProfilePicUrl = currentUser.profile_pic_url || null;
-        console.log(`[InstagramBot] Session active & verified for @${currentUser.username} (${currentUser.full_name})!`);
-
+        this.currentUsername = res.status.username || username;
+        this.currentFullName = res.status.fullName || this.currentUsername;
+        this.currentProfilePicUrl = res.status.profilePicUrl || null;
+        console.log(`[InstagramBot] Session active & verified for @${this.currentUsername}!`);
         this.startInboxPolling();
         return true;
       }
     } catch (e: any) {
-      console.warn("[InstagramBot] Saved session expired or invalid:", e?.message || e);
+      console.warn("[InstagramBot] Saved session restore failed:", e?.message || e);
     }
     return false;
   }
@@ -205,124 +277,63 @@ class InstagramBotService {
    */
   public async login(username: string, password?: string, verificationCode?: string): Promise<{ success: boolean; requiresTwoFactor?: boolean; message: string }> {
     let cleanUser = username.trim().replace(/^@/, "");
-    // If it's not an email, strip extra spaces
     if (!cleanUser.includes("@")) {
       cleanUser = cleanUser.replace(/\s+/g, "");
     }
 
     try {
-      // If resolving 2FA challenge
-      if (verificationCode && this.pendingTwoFactor && this.ig) {
-        console.log(`[InstagramBot] Submitting 2FA code for @${cleanUser}...`);
-        const twoFactorRes = await this.ig.account.twoFactorLogin({
-          username: cleanUser.toLowerCase(),
-          verificationCode: verificationCode.trim(),
-          twoFactorIdentifier: this.pendingTwoFactor.twoFactorIdentifier,
-          verificationMethod: "1", // SMS or Authenticator App
-        });
+      console.log(`[InstagramBot] Logging in to Instagram via Instagrapi bridge as ${cleanUser}...`);
+      const payload: any = { username: cleanUser, password: password || "" };
+      if (verificationCode) {
+        payload.verificationCode = verificationCode.trim();
+      }
 
+      const res = await this.bridgeCall("/login", "POST", payload);
+
+      if (res.requiresTwoFactor) {
+        this.pendingTwoFactor = { username: cleanUser };
+        return {
+          success: false,
+          requiresTwoFactor: true,
+          message: res.message || "Instagram 2FA verification code required. Please enter the OTP.",
+        };
+      }
+
+      if (res.ok) {
         this.isLoggedIn = true;
-        const userObj: any = twoFactorRes;
-        this.currentUsername = userObj.username || userObj.logged_in_user?.username || cleanUser;
-        this.currentFullName = userObj.full_name || userObj.logged_in_user?.full_name || this.currentUsername;
-        this.currentProfilePicUrl = userObj.profile_pic_url || userObj.logged_in_user?.profile_pic_url || null;
+        this.currentUsername = res.username || cleanUser;
+        this.currentFullName = res.fullName || this.currentUsername;
+        this.currentProfilePicUrl = res.profilePicUrl || null;
         this.pendingTwoFactor = null;
+        this.lastError = null;
 
-        const sessionState = await this.ig.state.serialize();
-        await this.saveSessionToStorage(this.currentUsername, sessionState);
+        if (res.sessionSettings) {
+          await this.saveSessionToStorage(this.currentUsername, res.sessionSettings);
+        }
+
         this.startInboxPolling();
-
+        console.log(`[InstagramBot] Logged in successfully as @${this.currentUsername}! 🎉`);
         return {
           success: true,
           message: `Instagram login successful for @${this.currentUsername}! 🎉`,
         };
       }
 
-      if (!password) {
-        return { success: false, message: "Password is required for Instagram login." };
-      }
-
-      console.log(`[InstagramBot] Logging in to Instagram as ${cleanUser}...`);
-      const ig = new IgApiClient();
-      this.configureIndianDevice(ig, cleanUser);
-
-      // Perform pre-login flow simulation so Instagram registers mobile device handshake
-      try {
-        await ig.simulate.preLoginFlow();
-      } catch (flowErr) {
-        console.warn("[InstagramBot] Pre-login simulation notice:", flowErr);
-      }
-
-      try {
-        const user = await ig.account.login(cleanUser, password);
-        this.ig = ig;
-        this.isLoggedIn = true;
-        this.currentUsername = user.username;
-        this.currentFullName = user.full_name || user.username;
-        this.currentProfilePicUrl = user.profile_pic_url || null;
-
-        // Post-login flow in background
-        process.nextTick(async () => {
-          try {
-            await ig.simulate.postLoginFlow();
-          } catch {}
-        });
-
-        const sessionState = await ig.state.serialize();
-        await this.saveSessionToStorage(user.username, sessionState);
-        this.startInboxPolling();
-
-        console.log(`[InstagramBot] Logged in successfully as @${user.username}!`);
-        return {
-          success: true,
-          message: `Instagram login successful for @${user.username}! 🎉`,
-        };
-      } catch (loginError: any) {
-        // Handle 2FA / Two-Factor Authentication requirement
-        if (loginError.name === "IgLoginTwoFactorRequiredError" || loginError.response?.body?.two_factor_required) {
-          const twoFactorInfo = loginError.response?.body?.two_factor_info || {};
-          this.ig = ig;
-          this.pendingTwoFactor = {
-            twoFactorIdentifier: twoFactorInfo.two_factor_identifier || "",
-            username: cleanUser,
-          };
-          return {
-            success: false,
-            requiresTwoFactor: true,
-            message: "Instagram 2FA verification code required. Please enter the OTP sent to your phone/authenticator.",
-          };
-        }
-
-        // Handle Checkpoint / Challenge
-        if (loginError.name === "IgCheckpointError") {
-          return {
-            success: false,
-            message: "Instagram security checkpoint triggered. Please open Instagram on your phone once to tap 'This Was Me', then login again or use Session ID login.",
-          };
-        }
-
-        // Account not found or bad request
-        const rawMsg = loginError?.response?.body?.message || loginError?.message || "";
-        if (rawMsg.toLowerCase().includes("can't find an account") || rawMsg.includes("400")) {
-          return {
-            success: false,
-            message: `Instagram ko account nahi mila. Agar username/number se nahi ho raha, toh apna registered Email ID daalein ya neeche 'Session ID Login' use karein.`,
-          };
-        }
-
-        throw loginError;
-      }
+      return {
+        success: false,
+        message: res.error || res.message || "Instagram login failed. Please verify credentials.",
+      };
     } catch (e: any) {
       console.error("[InstagramBot] Login error:", e?.message || e);
       return {
         success: false,
-        message: e?.response?.body?.message || e?.message || "Instagram login failed. Please verify credentials.",
+        message: e?.message || "Instagram login failed. Please verify credentials.",
       };
     }
   }
 
   /**
-   * Login using Instagram Web sessionid cookie (Bypasses Meta account lookup, checkpoints & password challenges)
+   * Login using Instagram Web sessionid cookie
    */
   public async loginWithSessionId(sessionId: string, usernameHint?: string): Promise<{ success: boolean; message: string }> {
     try {
@@ -337,204 +348,32 @@ class InstagramBotService {
       }
 
       this.activeSessionId = cleanSession;
-      console.log("[InstagramBot] Logging in via Session ID cookie...");
-      const ig = new IgApiClient();
+      console.log("[InstagramBot] Logging in via Session ID cookie using Instagrapi bridge...");
 
-      let dsUserId = "0";
-      // Instagram sessionid format is typically: <numeric_ds_user_id>%3A<token> or <numeric_ds_user_id>:<token>
-      const parts = cleanSession.split(/%3A|:/);
-      if (parts.length > 0 && /^\d+$/.test(parts[0])) {
-        dsUserId = parts[0];
-      }
+      const res = await this.bridgeCall("/login-session", "POST", { sessionId: cleanSession });
 
-      this.configureIndianDevice(ig, dsUserId !== "0" ? dsUserId : (usernameHint || "user_session"));
-
-      const csrfToken = "csrftoken_" + Math.random().toString(36).substring(2, 12);
-      const mid = "Y" + Math.random().toString(36).substring(2, 10);
-
-      const jarSerialized = {
-        version: "tough-cookie@4.1.4",
-        storeType: "MemoryCookieStore",
-        rejectPublicSuffixes: true,
-        cookies: [
-          {
-            key: "sessionid",
-            value: cleanSession,
-            domain: "i.instagram.com",
-            path: "/",
-            hostOnly: false,
-            creation: new Date().toISOString(),
-            lastAccessed: new Date().toISOString(),
-            httpOnly: true,
-            secure: true,
-          },
-          {
-            key: "sessionid",
-            value: cleanSession,
-            domain: "instagram.com",
-            path: "/",
-            hostOnly: false,
-            creation: new Date().toISOString(),
-            lastAccessed: new Date().toISOString(),
-            httpOnly: true,
-            secure: true,
-          },
-          {
-            key: "ds_user_id",
-            value: dsUserId,
-            domain: "i.instagram.com",
-            path: "/",
-            hostOnly: false,
-            creation: new Date().toISOString(),
-            lastAccessed: new Date().toISOString(),
-            httpOnly: false,
-            secure: true,
-          },
-          {
-            key: "ds_user_id",
-            value: dsUserId,
-            domain: "instagram.com",
-            path: "/",
-            hostOnly: false,
-            creation: new Date().toISOString(),
-            lastAccessed: new Date().toISOString(),
-            httpOnly: false,
-            secure: true,
-          },
-          {
-            key: "csrftoken",
-            value: csrfToken,
-            domain: "i.instagram.com",
-            path: "/",
-            hostOnly: false,
-            creation: new Date().toISOString(),
-            lastAccessed: new Date().toISOString(),
-            httpOnly: false,
-            secure: true,
-          },
-          {
-            key: "mid",
-            value: mid,
-            domain: "i.instagram.com",
-            path: "/",
-            hostOnly: false,
-            creation: new Date().toISOString(),
-            lastAccessed: new Date().toISOString(),
-            httpOnly: false,
-            secure: true,
-          },
-        ],
-      };
-
-      await ig.state.deserializeCookieJar(jarSerialized as any);
-
-      // Multi-strategy user resolver (bypasses the fragile /api/v1/accounts/current_user/?edit=true endpoint)
-      let resolvedUsername = usernameHint ? usernameHint.replace(/^@/, "").trim() : "";
-      let resolvedFullName = resolvedUsername || "Instagram User";
-      let resolvedPic: string | null = null;
-      let isVerified = false;
-
-      // Strategy 1: Direct Web Profile Endpoint with session cookie
-      if (dsUserId !== "0") {
-        try {
-          const webRes = await fetch(`https://www.instagram.com/api/v1/users/${dsUserId}/info/`, {
-            headers: {
-              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-              "Cookie": `sessionid=${cleanSession}; ds_user_id=${dsUserId};`,
-              "X-IG-App-ID": "936619743392459",
-            },
-          });
-          if (webRes.ok) {
-            const data = await webRes.json();
-            if (data?.user?.username) {
-              resolvedUsername = data.user.username;
-              resolvedFullName = data.user.full_name || resolvedUsername;
-              resolvedPic = data.user.profile_pic_url || null;
-              isVerified = true;
-              console.log(`[InstagramBot] Verified via Instagram Web API: @${resolvedUsername}`);
-            }
-          }
-        } catch (webErr: any) {
-          console.warn("[InstagramBot] Web info strategy notice:", webErr?.message);
-        }
-      }
-
-      // Strategy 2: Try ig.user.info(dsUserId) via private API
-      if (!isVerified && dsUserId !== "0") {
-        try {
-          const uInfo = await ig.user.info(dsUserId);
-          if (uInfo && (uInfo as any).username) {
-            resolvedUsername = (uInfo as any).username;
-            resolvedFullName = (uInfo as any).full_name || resolvedUsername;
-            resolvedPic = (uInfo as any).profile_pic_url || null;
-            isVerified = true;
-            console.log(`[InstagramBot] Verified via ig.user.info: @${resolvedUsername}`);
-          }
-        } catch (uErr: any) {
-          console.warn("[InstagramBot] ig.user.info strategy notice:", uErr?.message);
-        }
-      }
-
-      // Strategy 3: Try ig.feed.directInbox() to confirm session works
-      if (!isVerified) {
-        try {
-          const inbox = await ig.feed.directInbox().request();
-          if (inbox) {
-            isVerified = true;
-            if ((inbox as any).viewer?.username) {
-              resolvedUsername = (inbox as any).viewer.username;
-              resolvedFullName = (inbox as any).viewer.full_name || resolvedUsername;
-              resolvedPic = (inbox as any).viewer.profile_pic_url || null;
-            }
-            console.log(`[InstagramBot] Verified via directInbox session handshake!`);
-          }
-        } catch (inboxErr: any) {
-          console.warn("[InstagramBot] directInbox verification notice:", inboxErr?.message);
-        }
-      }
-
-      // Strategy 4: Try ig.account.currentUser()
-      if (!isVerified) {
-        try {
-          const currentUser = await ig.account.currentUser();
-          if (currentUser && currentUser.username) {
-            resolvedUsername = currentUser.username;
-            resolvedFullName = currentUser.full_name || currentUser.username;
-            resolvedPic = currentUser.profile_pic_url || null;
-            isVerified = true;
-          }
-        } catch (curErr: any) {
-          console.warn("[InstagramBot] ig.account.currentUser strategy failed:", curErr?.message);
-        }
-      }
-
-      // If we have a dsUserId or any verification succeeded, accept session
-      if (isVerified || dsUserId !== "0") {
-        if (!resolvedUsername) {
-          resolvedUsername = `user_${dsUserId}`;
-          resolvedFullName = `Instagram User (${dsUserId})`;
-        }
-
-        this.ig = ig;
+      if (res.ok) {
         this.isLoggedIn = true;
-        this.currentUsername = resolvedUsername;
-        this.currentFullName = resolvedFullName;
-        this.currentProfilePicUrl = resolvedPic;
+        this.currentUsername = res.username || usernameHint || "instagram_user";
+        this.currentFullName = res.fullName || this.currentUsername;
+        this.currentProfilePicUrl = res.profilePicUrl || null;
+        this.lastError = null;
 
-        const sessionState = await ig.state.serialize();
-        await this.saveSessionToStorage(resolvedUsername, sessionState);
+        if (res.sessionSettings) {
+          await this.saveSessionToStorage(this.currentUsername, res.sessionSettings);
+        }
+
         this.startInboxPolling();
-
-        console.log(`[InstagramBot] Session login successful for @${resolvedUsername}! 🎉`);
+        console.log(`[InstagramBot] Session login successful for @${this.currentUsername}! 🎉`);
         return {
           success: true,
-          message: `Instagram session login successful for @${resolvedUsername}! 🎉`,
+          message: `Instagram session login successful for @${this.currentUsername}! 🎉`,
         };
       }
 
       return {
         success: false,
-        message: "Invalid or expired Instagram Session ID. Please re-copy from browser and try again.",
+        message: res.error || "Invalid or expired Instagram Session ID.",
       };
     } catch (e: any) {
       console.error("[InstagramBot] Session login error:", e?.message || e);
@@ -554,13 +393,14 @@ class InstagramBotService {
       this.currentUsername = null;
       this.currentFullName = null;
       this.currentProfilePicUrl = null;
-      this.ig = null;
       this.activeSessionId = null;
 
       if (this.pollInterval) {
-        clearInterval(this.pollInterval);
+        clearTimeout(this.pollInterval);
         this.pollInterval = null;
       }
+
+      await this.bridgeCall("/logout", "POST", {}).catch(() => {});
 
       // Remove from Firestore & Local file
       await db.collection("instagram_auth").doc("session").delete().catch(() => {});
@@ -589,6 +429,7 @@ class InstagramBotService {
       requiresTwoFactor: !!this.pendingTwoFactor,
       lastError: this.lastError,
       isEnvConfigured: hasEnvSession || hasEnvCreds,
+      bridgeRunning: this.isBridgeReady,
     };
   }
 
@@ -602,7 +443,6 @@ class InstagramBotService {
 
   /**
    * Starts periodic inbox polling with randomized Gaussian jitter and circadian awareness
-   * to avoid repetitive machine interval signatures on Meta servers.
    */
   private startInboxPolling() {
     if (this.pollInterval) clearTimeout(this.pollInterval);
@@ -618,7 +458,6 @@ class InstagramBotService {
     if (this.pollInterval) clearTimeout(this.pollInterval);
     if (!this.isLoggedIn) return;
 
-    // Random interval between 18s and 32s scaled by Circadian night/day multiplier
     const circadian = humanBotFirewallService.getCircadianDelayMultiplier();
     const baseMs = 18000 + Math.floor(Math.random() * 14000); // 18s - 32s
     const actualDelay = Math.round(baseMs * circadian.multiplier);
@@ -632,47 +471,45 @@ class InstagramBotService {
   }
 
   /**
-   * Polls Direct Inbox for new incoming messages
+   * Polls Direct Inbox for new incoming messages via Instagrapi bridge
    */
   public async checkInbox() {
-    if (!this.ig || !this.isLoggedIn) return;
+    if (!this.isLoggedIn) return;
 
     try {
       this.lastCheckedAt = Date.now();
-      const inbox = this.ig.feed.directInbox();
-      const threads = await inbox.items();
+      const res = await this.bridgeCall("/inbox", "GET");
+      const threads = res?.threads || [];
 
       for (const thread of threads) {
-        if (!thread.items || thread.items.length === 0) continue;
+        if (!thread.messages || thread.messages.length === 0) continue;
 
-        const latestItem = thread.items[0];
-        const itemId = latestItem.item_id;
+        const latestItem = thread.messages[0];
+        const itemId = latestItem.id;
 
         // Skip already processed items
         if (this.processedItemIds.has(itemId)) continue;
         this.processedItemIds.add(itemId);
 
-        // Keep set size reasonable
         if (this.processedItemIds.size > 500) {
           const arr = Array.from(this.processedItemIds);
           this.processedItemIds = new Set(arr.slice(-250));
         }
 
-        // Only process text messages not sent by logged in user
-        const isFromSelf = String(latestItem.user_id) === String(this.ig.state.cookieUserId);
+        const senderUser = thread.users?.[0];
+        const senderUsername = senderUser?.username || "";
+        const isFromSelf = senderUsername && this.currentUsername && senderUsername.toLowerCase() === this.currentUsername.toLowerCase();
+        
         if (isFromSelf || latestItem.item_type !== "text") continue;
 
         const text = latestItem.text?.trim() || "";
         if (!text) continue;
 
-        const senderUser = thread.users?.[0];
-        const senderName = senderUser?.full_name || senderUser?.username || "Instagram User";
-        const senderUsername = senderUser?.username || "";
-        const senderPk = senderUser?.pk?.toString() || "";
+        const senderName = senderUser?.full_name || senderUsername || "Instagram User";
+        const senderPk = senderUser?.pk || "";
 
         this.totalMessagesProcessed++;
 
-        // Save sender user to Firestore
         if (senderPk) {
           this.saveInstagramUser(senderPk, senderName, senderUsername).catch(() => {});
         }
@@ -691,22 +528,24 @@ class InstagramBotService {
         if (this.autoReplyEnabled) {
           const recipientKey = senderUsername || senderPk;
           const firewallCheck = humanBotFirewallService.canSendAutoReply("instagram", recipientKey);
-          
+
           if (!firewallCheck.allowed) {
             console.log(`[InstagramBot] Auto-reply rate-limited by Human Firewall: ${firewallCheck.reason}`);
           } else {
             try {
               console.log(`[InstagramBot] Generating human-like AI reply for @${senderUsername}: "${text}"`);
               const reply = await this.generateSmartAutoReply(senderName, text);
-              
+
               // Simulate human reading time + typing presence
-              await humanBotFirewallService.simulateInstagramHumanTyping(this.ig, thread.thread_id, itemId, text, reply);
+              await humanBotFirewallService.simulateInstagramHumanTyping(null, thread.thread_id, itemId, text, reply);
 
-              const directThread = this.ig.entity.directThread(thread.thread_id);
-              await directThread.broadcastText(reply);
+              await this.bridgeCall("/send-message", "POST", {
+                threadId: thread.thread_id,
+                message: reply,
+              });
+
               humanBotFirewallService.recordDispatchedMessage("instagram", recipientKey);
-
-              console.log(`[InstagramBot] Sent Human AI reply to @${senderUsername}: "${reply.substring(0, 50)}..."`);
+              console.log(`[InstagramBot] Sent Instagrapi AI reply to @${senderUsername}: "${reply.substring(0, 50)}..."`);
             } catch (replyErr: any) {
               console.warn(`[InstagramBot] Failed to auto-reply to @${senderUsername}:`, replyErr?.message || replyErr);
             }
@@ -714,8 +553,7 @@ class InstagramBotService {
         }
       }
     } catch (e: any) {
-      // If login session expired during poll
-      if (e?.message?.includes("login_required") || e?.name === "IgLoginRequiredError") {
+      if (e?.message?.includes("login_required") || e?.message?.includes("Not logged in")) {
         console.warn("[InstagramBot] Session expired during inbox check. Marking logged out.");
         this.isLoggedIn = false;
       }
@@ -723,13 +561,13 @@ class InstagramBotService {
   }
 
   /**
-   * Sends an Instagram DM directly by username or user ID.
+   * Sends an Instagram DM directly by username or user ID via Instagrapi bridge
    */
   public async sendMessageToTarget(
     target: string,
     message: string
   ): Promise<{ success: boolean; message: string; resolvedName?: string }> {
-    if (!this.ig || !this.isLoggedIn) {
+    if (!this.isLoggedIn) {
       return {
         success: false,
         message: "Instagram is not connected. Please log in with your Instagram ID & Password in Friday settings.",
@@ -742,51 +580,26 @@ class InstagramBotService {
     }
 
     try {
-      let targetPk: string | null = null;
-      let displayName: string = cleanTarget;
-
-      // 1. If numeric PK
-      if (/^\d{6,25}$/.test(cleanTarget)) {
-        targetPk = cleanTarget;
-      } else {
-        // 2. Search exact username using Instagram API
-        try {
-          const user = await this.ig.user.searchExact(cleanTarget);
-          if (user && user.pk) {
-            targetPk = user.pk.toString();
-            displayName = user.full_name || `@${user.username}`;
-          }
-        } catch {
-          // If searchExact fails, fallback to general search
-          const searchRes = await this.ig.user.search(cleanTarget);
-          if (searchRes.users && searchRes.users.length > 0) {
-            const first = searchRes.users[0];
-            targetPk = first.pk.toString();
-            displayName = first.full_name || `@${first.username}`;
-          }
-        }
-      }
-
-      if (!targetPk) {
-        return {
-          success: false,
-          message: `Boss, Instagram par '${target}' ka account nahi mila. Kripya correct username check karein.`,
-        };
-      }
-
-      // Simulate human typing delay before sending DM
       const typingDelay = humanBotFirewallService.calculateDynamicTypingDelay(message);
       await new Promise((resolve) => setTimeout(resolve, Math.min(typingDelay, 4000)));
 
-      // Create or get direct thread and send text
-      const thread = this.ig.entity.directThread([targetPk]);
-      await thread.broadcastText(message);
-      humanBotFirewallService.recordDispatchedMessage("instagram", cleanTarget);
+      const res = await this.bridgeCall("/send-message", "POST", {
+        recipient: cleanTarget,
+        message,
+      });
+
+      if (res.ok) {
+        humanBotFirewallService.recordDispatchedMessage("instagram", cleanTarget);
+        return {
+          success: true,
+          resolvedName: `@${cleanTarget}`,
+          message: `Boss, Instagram par @${cleanTarget} ko DM bhej diya gaya hai: "${message}" ✅`,
+        };
+      }
 
       return {
-        success: true,
-        resolvedName: displayName,
-        message: `Boss, Instagram par ${displayName} ko DM bhej diya gaya hai: "${message}" ✅`,
+        success: false,
+        message: res.error || "Failed to send Instagram DM.",
       };
     } catch (e: any) {
       console.error(`[InstagramBot] Send DM to ${target} failed:`, e?.message || e);
@@ -821,9 +634,6 @@ class InstagramBotService {
     }
   }
 
-  /**
-   * Checks if an incoming message is requesting a sensitive / privileged action.
-   */
   private isSensitiveAction(text: string): boolean {
     const sensitivePatterns = [
       /(commit|push|merge|code\s*agent|rollback|deploy|branch)/i,
@@ -835,9 +645,6 @@ class InstagramBotService {
     return sensitivePatterns.some((pattern) => pattern.test(text));
   }
 
-  /**
-   * Generates a smart conversational reply using Gemini multi-tier model fallback.
-   */
   private async generateSmartAutoReply(senderName: string, messageText: string): Promise<string> {
     if (this.isSensitiveAction(messageText)) {
       return `Haanji ${senderName}! Main Friday hoon (DK Boss ka AI assistant). Security policy ke mutabiq sensitive actions ya confidential settings Instagram se allow nahi hain. Kripya DK se direct WhatsApp ya Voice call par sampark karein. 🙏`;
@@ -909,96 +716,51 @@ INSTRUCTIONS:
     return `Haanji ${senderName}! Main Friday hoon — DK Boss abhi busy hain, maine aapka DM note kar liya hai 👍`;
   }
 
-  /**
-   * Sends a Photo/Image with realistic 0.5s tap simulation for picker and send action.
-   */
-  public async sendPhotoMessage(target: string, imageBuffer: Buffer): Promise<{ success: boolean; message: string }> {
-    if (!this.ig || !this.isLoggedIn) {
-      return { success: false, message: "Instagram is not connected. Please log in first." };
-    }
-
-    try {
-      const cleanTarget = String(target || "").trim().replace(/^@/, "");
-      const user = await this.ig.user.searchExact(cleanTarget);
-      if (!user || !user.pk) {
-        return { success: false, message: `Instagram user @${target} not found.` };
-      }
-
-      // Simulate Human Photo Picker & Taps (0.5s intervals)
-      await humanBotFirewallService.simulateInstagramPhotoDelays();
-
-      const thread = this.ig.entity.directThread([user.pk.toString()]);
-      await thread.broadcastPhoto({ file: imageBuffer });
-      humanBotFirewallService.recordDispatchedMessage("instagram", cleanTarget);
-
-      return { success: true, message: `Photo sent to @${cleanTarget} on Instagram!` };
-    } catch (e: any) {
-      return { success: false, message: `Failed to send photo on Instagram: ${e?.message || e}` };
-    }
-  }
-
-  /**
-   * Human-Paced Search / Live Search via Instagram Session:
-   * Uses authenticated Session ID topsearch and IgApiClient search to find real Instagram users.
-   */
-  public async searchUserHumanPaced(query: string): Promise<any> {
-    return this.searchUserLive(query);
-  }
-
-  /**
-   * Real-time Instagram Live Search using Session ID & IgApiClient:
-   * 1. If logged in to IgApiClient -> searches live via ig.user.search(query)
-   * 2. If Session ID is available -> searches live via Instagram Web Topsearch API (context=blended)
-   * 3. Fallback -> Instagram Web Topsearch / profile query
-   */
   public async searchUserLive(query: string): Promise<any> {
     const raw = String(query || "").replace(/^@/, "").trim();
     if (!raw) {
       return { success: false, message: "Search query zaroori hai." };
     }
 
-    const sessionId = this.getActiveSessionId();
-    let dsUserId = "0";
-    if (sessionId) {
-      const parts = sessionId.split(/%3A|:/);
-      if (parts.length > 0 && /^\d+$/.test(parts[0])) {
-        dsUserId = parts[0];
-      }
-    }
-
-    // 1. Try via IgApiClient session if logged in
-    if (this.ig && this.isLoggedIn) {
-      try {
-        await humanBotFirewallService.simulateInstagramSearchTyping(raw);
-        const searchRes = await this.ig.user.search(raw);
-        if (searchRes && Array.isArray(searchRes.users) && searchRes.users.length > 0) {
-          const profiles = searchRes.users.slice(0, 8).map((u, idx) => ({
-            rank: idx + 1,
-            pk: u.pk?.toString(),
-            username: u.username,
-            fullName: u.full_name || u.username,
-            profileUrl: `https://www.instagram.com/${u.username}/`,
-            isVerified: !!u.is_verified,
-            isPrivate: !!u.is_private,
-            profilePicUrl: u.profile_pic_url || null,
-          }));
-
-          return {
-            success: true,
-            query: raw,
-            totalFound: profiles.length,
-            profiles,
-            sourceProvider: "instagram_logged_in_session",
-            message: `Instagram session se "${raw}" ke ${profiles.length} real profiles mil gaye hain.`,
-          };
-        }
-      } catch (igErr: any) {
-        console.warn("[InstagramBot] IgApiClient searchUser notice:", igErr?.message || igErr);
-      }
-    }
-
-    // 2. Query Instagram Live Web Topsearch with Session ID cookie
+    // 1. Search via Instagrapi bridge if available
     try {
+      const res = await this.bridgeCall(`/search?query=${encodeURIComponent(raw)}`, "GET");
+      if (res && res.ok && Array.isArray(res.users) && res.users.length > 0) {
+        const profiles = res.users.slice(0, 8).map((u: any, idx: number) => ({
+          rank: idx + 1,
+          pk: u.pk,
+          username: u.username,
+          fullName: u.full_name || u.username,
+          profileUrl: `https://www.instagram.com/${u.username}/`,
+          isVerified: !!u.is_verified,
+          isPrivate: !!u.is_private,
+          profilePicUrl: u.profile_pic_url || null,
+        }));
+
+        return {
+          success: true,
+          query: raw,
+          totalFound: profiles.length,
+          profiles,
+          sourceProvider: "instagrapi_session",
+          message: `Instagrapi se "${raw}" ke ${profiles.length} real profiles mil gaye hain.`,
+        };
+      }
+    } catch (e) {
+      console.warn("[InstagramBot] Instagrapi search error:", e);
+    }
+
+    // 2. Query Instagram Live Web Topsearch fallback
+    try {
+      const sessionId = this.getActiveSessionId();
+      let dsUserId = "0";
+      if (sessionId) {
+        const parts = sessionId.split(/%3A|:/);
+        if (parts.length > 0 && /^\d+$/.test(parts[0])) {
+          dsUserId = parts[0];
+        }
+      }
+
       const headers: Record<string, string> = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
         "X-IG-App-ID": "936619743392459",
@@ -1037,8 +799,8 @@ INSTRUCTIONS:
             query: raw,
             totalFound: profiles.length,
             profiles,
-            sourceProvider: sessionId ? "instagram_session_topsearch" : "instagram_web_topsearch",
-            message: `Instagram session se "${raw}" ke ${profiles.length} live profiles search ho gaye hain.`,
+            sourceProvider: "instagram_web_topsearch",
+            message: `Instagram se "${raw}" ke ${profiles.length} live profiles search ho gaye hain.`,
           };
         }
       }
@@ -1046,36 +808,6 @@ INSTRUCTIONS:
       console.warn("[InstagramBot] Web TopSearch failed:", webSearchErr?.message || webSearchErr);
     }
 
-    // 3. If query might be a direct handle, check live profile info
-    try {
-      const infoRes = await this.getUserInfoLive(raw);
-      if (infoRes && infoRes.success && infoRes.username) {
-        return {
-          success: true,
-          query: raw,
-          totalFound: 1,
-          profiles: [
-            {
-              rank: 1,
-              username: infoRes.username,
-              fullName: infoRes.fullName || infoRes.username,
-              profileUrl: infoRes.profileUrl || `https://www.instagram.com/${infoRes.username}/`,
-              isVerified: !!infoRes.isVerified,
-              isPrivate: !!infoRes.isPrivate,
-              followersCount: infoRes.followersCount,
-              followingCount: infoRes.followingCount,
-              totalPosts: infoRes.totalPosts,
-              bio: infoRes.biography,
-              profilePicUrl: infoRes.profilePicUrl,
-            },
-          ],
-          sourceProvider: infoRes.sourceProvider || "instagram_live_profile",
-          message: `Instagram par @${infoRes.username} ka live profile mil gaya hai.`,
-        };
-      }
-    } catch {}
-
-    // 4. Honest response if not found anywhere on Instagram
     return {
       success: true,
       query: raw,
@@ -1083,44 +815,51 @@ INSTRUCTIONS:
       profiles: [],
       notFound: true,
       message: `Boss, Instagram par "${raw}" search karne par koi profile nahi mila. Kripya correct spelling ya exact username check karein.`,
-      instagramSearchUrl: `https://www.instagram.com/explore/search/keyword/?q=${encodeURIComponent(raw)}`,
     };
   }
 
-  /**
-   * Live Instagram User Info Lookup via Session ID / IgApiClient / Web Profile API:
-   */
   public async getUserInfoLive(usernameOrQuery: string): Promise<any> {
     const raw = String(usernameOrQuery || "").replace(/^@/, "").trim();
     if (!raw) return { success: false, message: "Instagram username zaroori hai." };
 
     const clean = raw.toLowerCase().replace(/\s+/g, ".");
     const profileUrl = `https://www.instagram.com/${clean}/`;
-    const sessionId = this.getActiveSessionId();
-    let dsUserId = "0";
-    if (sessionId) {
-      const parts = sessionId.split(/%3A|:/);
-      if (parts.length > 0 && /^\d+$/.test(parts[0])) {
-        dsUserId = parts[0];
-      }
-    }
 
-    // 1. Try human-paced IgApiClient inspector if logged in
-    if (this.ig && this.isLoggedIn) {
-      try {
-        const clientRes = await this.getUserFeedAndPostsHumanPaced(clean);
-        if (clientRes && clientRes.success) {
-          return {
-            ...clientRes,
-            profileUrl,
-            sourceProvider: "instagram_logged_in_session",
-          };
-        }
-      } catch {}
-    }
-
-    // 2. Query Web Profile Info API with session cookie
+    // 1. Try Instagrapi Bridge
     try {
+      const res = await this.bridgeCall(`/user-info?username=${encodeURIComponent(clean)}`, "GET");
+      if (res && res.ok && res.user) {
+        const u = res.user;
+        return {
+          success: true,
+          username: u.username,
+          fullName: u.full_name || u.username,
+          biography: u.biography || "",
+          followersCount: u.follower_count || 0,
+          followingCount: u.following_count || 0,
+          totalPosts: u.media_count || 0,
+          isVerified: !!u.is_verified,
+          isPrivate: !!u.is_private,
+          profilePicUrl: u.profile_pic_url,
+          profileUrl,
+          sourceProvider: "instagrapi_profile",
+        };
+      }
+    } catch (bridgeErr: any) {
+      console.warn("[InstagramBot] Instagrapi getUserInfo notice:", bridgeErr?.message || bridgeErr);
+    }
+
+    // 2. Query Web Profile Info API fallback
+    try {
+      const sessionId = this.getActiveSessionId();
+      let dsUserId = "0";
+      if (sessionId) {
+        const parts = sessionId.split(/%3A|:/);
+        if (parts.length > 0 && /^\d+$/.test(parts[0])) {
+          dsUserId = parts[0];
+        }
+      }
+
       const headers: Record<string, string> = {
         "x-ig-app-id": "936619743392459",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
@@ -1140,21 +879,6 @@ INSTRUCTIONS:
         const json = await res.json();
         const user = json?.data?.user;
         if (user) {
-          const edges = user.edge_owner_to_timeline_media?.edges || [];
-          const latestPosts = edges.slice(0, 4).map((e: any) => {
-            const node = e.node;
-            const caption = node.edge_media_to_caption?.edges?.[0]?.node?.text || "";
-            return {
-              type: node.is_video ? "Reel / Video" : "Photo",
-              caption: caption.length > 120 ? caption.slice(0, 120) + "..." : caption,
-              likes: node.edge_liked_by?.count || node.edge_media_preview_like?.count || 0,
-              comments: node.edge_media_to_comment?.count || 0,
-              views: node.video_view_count || undefined,
-              postUrl: `https://www.instagram.com/p/${node.shortcode}/`,
-              shortcode: node.shortcode,
-            };
-          });
-
           return {
             success: true,
             username: user.username,
@@ -1167,9 +891,7 @@ INSTRUCTIONS:
             isPrivate: !!user.is_private,
             profilePicUrl: user.profile_pic_url_hd || user.profile_pic_url,
             profileUrl,
-            recentPostsCount: latestPosts.length,
-            latestPosts,
-            sourceProvider: sessionId ? "instagram_session_api" : "instagram_web_api",
+            sourceProvider: "instagram_web_api",
           };
         }
       }
@@ -1177,47 +899,6 @@ INSTRUCTIONS:
       console.warn("[InstagramBot] web_profile_info fetch notice:", webErr?.message || webErr);
     }
 
-    // 3. Fallback: Instagram HTML Meta Scraper
-    try {
-      const res = await fetch(profileUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        },
-      });
-
-      if (res.ok) {
-        const html = await res.text();
-        const ogTitleMatch = html.match(/<meta\s+(?:property|name)="og:title"\s+content="([^"]*)"/i) || html.match(/<meta\s+content="([^"]*)"\s+(?:property|name)="og:title"/i);
-        const descMatch = html.match(/<meta\s+name="description"\s+content="([^"]*)"/i) || html.match(/<meta\s+content="([^"]*)"\s+name="description"/i);
-
-        const ogTitle = ogTitleMatch ? ogTitleMatch[1] : "";
-        const metaDesc = descMatch ? descMatch[1] : "";
-
-        let fullName = "";
-        const nameMatch = ogTitle.match(/^(.*?)\s*\(@[a-zA-Z0-9._]+\)/);
-        if (nameMatch) fullName = nameMatch[1].trim();
-
-        const followersMatch = metaDesc.match(/([0-9.,]+[KkMmBb]?)\s+Followers/i);
-        const followingMatch = metaDesc.match(/([0-9.,]+[KkMmBb]?)\s+Following/i);
-        const postsMatch = metaDesc.match(/([0-9.,]+[KkMmBb]?)\s+Posts/i);
-
-        if (fullName || followersMatch) {
-          return {
-            success: true,
-            username: clean,
-            fullName: fullName || clean,
-            followersCount: followersMatch ? followersMatch[1] : undefined,
-            followingCount: followingMatch ? followingMatch[1] : undefined,
-            totalPosts: postsMatch ? postsMatch[1] : undefined,
-            profileUrl,
-            sourceProvider: "instagram_html_meta",
-          };
-        }
-      }
-    } catch {}
-
-    // Default basic link
     return {
       success: true,
       username: clean,
@@ -1226,161 +907,6 @@ INSTRUCTIONS:
       message: `Instagram par @${clean} ka profile link: ${profileUrl}`,
       sourceProvider: "instagram_profile_link",
     };
-  }
-
-  /**
-   * Human-Paced Profile & Feed Inspector:
-   * Inspects profile bio, counts, and scrolls through recent posts with 0.5s-0.7s human scroll steps.
-   */
-  public async getUserFeedAndPostsHumanPaced(username: string, maxPosts = 6): Promise<any> {
-    if (!this.ig || !this.isLoggedIn) {
-      return { success: false, message: "Instagram is not connected." };
-    }
-
-    try {
-      const clean = String(username || "").trim().replace(/^@/, "");
-      
-      // 1. Human search / open profile pause: 0.5s
-      await humanBotFirewallService.simulateInstagramSearchTyping(clean);
-
-      const user = await this.ig.user.searchExact(clean);
-      if (!user || !user.pk) {
-        return { success: false, message: `User @${username} not found on Instagram.` };
-      }
-
-      // 2. Fetch user detailed info
-      const userInfo = await this.ig.user.info(user.pk);
-
-      // 3. User Feed: Scroll posts one-by-one with human pauses
-      const userFeed = this.ig.feed.user(user.pk);
-      const items = await userFeed.items();
-      const posts: any[] = [];
-
-      for (let i = 0; i < Math.min(items.length, maxPosts); i++) {
-        // Human scroll gesture pause (0.5s - 0.7s)
-        await humanBotFirewallService.simulateInstagramScrollStep();
-
-        const item: any = items[i];
-        posts.push({
-          id: item.id,
-          code: item.code,
-          caption: item.caption?.text || "",
-          likeCount: item.like_count || 0,
-          commentCount: item.comment_count || 0,
-          mediaType: item.media_type === 2 ? "Video/Reel" : item.media_type === 8 ? "Carousel" : "Photo",
-          takenAt: item.taken_at ? new Date(item.taken_at * 1000).toISOString() : undefined,
-          postUrl: `https://www.instagram.com/p/${item.code}/`,
-        });
-      }
-
-      return {
-        success: true,
-        username: userInfo.username,
-        fullName: userInfo.full_name,
-        biography: userInfo.biography,
-        followersCount: userInfo.follower_count,
-        followingCount: userInfo.following_count,
-        totalPosts: userInfo.media_count,
-        isPrivate: userInfo.is_private,
-        isVerified: userInfo.is_verified,
-        posts,
-      };
-    } catch (e: any) {
-      return { success: false, message: `Failed to inspect profile: ${e?.message || e}` };
-    }
-  }
-
-  /**
-   * Human-Paced Post Like:
-   * Pauses 0.5s on post, double-taps/likes, and pauses 0.5s.
-   */
-  public async likeMediaHumanPaced(mediaId: string): Promise<any> {
-    if (!this.ig || !this.isLoggedIn) {
-      return { success: false, message: "Instagram is not connected." };
-    }
-
-    try {
-      await humanBotFirewallService.simulateInstagramLikeTap();
-      await this.ig.media.like({
-        mediaId,
-        d: 0,
-        moduleInfo: {
-          module_name: "profile",
-          username: this.currentUsername || "",
-          user_id: this.ig.state.cookieUserId,
-        } as any,
-      });
-      return { success: true, message: `Post ${mediaId} liked with natural human gesture! ❤️` };
-    } catch (e: any) {
-      return { success: false, message: `Like failed: ${e?.message || e}` };
-    }
-  }
-
-  /**
-   * Human-Paced Post Comment:
-   * Types comment with 0.5s inter-word gap and 0.5s post button tap.
-   */
-  public async commentMediaHumanPaced(mediaId: string, text: string): Promise<any> {
-    if (!this.ig || !this.isLoggedIn) {
-      return { success: false, message: "Instagram is not connected." };
-    }
-
-    try {
-      await humanBotFirewallService.simulateInstagramCommentTyping(text);
-      const res: any = await this.ig.media.comment({
-        mediaId,
-        text: text.trim(),
-      });
-      return { success: true, message: `Comment posted on ${mediaId} with natural typing delays! 💬`, commentId: res?.pk || res?.id || "posted" };
-    } catch (e: any) {
-      return { success: false, message: `Comment failed: ${e?.message || e}` };
-    }
-  }
-
-  /**
-   * Human-Paced Followers / Following Scroll List:
-   */
-  public async getUserFollowersHumanPaced(username: string, maxCount = 15): Promise<any> {
-    if (!this.ig || !this.isLoggedIn) {
-      return { success: false, message: "Instagram is not connected." };
-    }
-
-    try {
-      const clean = String(username || "").trim().replace(/^@/, "");
-      await humanBotFirewallService.simulateInstagramSearchTyping(clean);
-
-      const user = await this.ig.user.searchExact(clean);
-      if (!user || !user.pk) {
-        return { success: false, message: `User @${username} not found.` };
-      }
-
-      // Tap followers list & scroll with human pauses
-      await humanBotFirewallService.sleep(500);
-
-      const followersFeed = this.ig.feed.accountFollowers(user.pk);
-      const items = await followersFeed.items();
-      const list: any[] = [];
-
-      for (let i = 0; i < Math.min(items.length, maxCount); i++) {
-        await humanBotFirewallService.simulateInstagramScrollStep();
-        const f = items[i];
-        list.push({
-          username: f.username,
-          fullName: f.full_name,
-          isVerified: f.is_verified,
-          profilePicUrl: f.profile_pic_url,
-        });
-      }
-
-      return {
-        success: true,
-        target: clean,
-        count: list.length,
-        followers: list,
-      };
-    } catch (e: any) {
-      return { success: false, message: `Failed to fetch followers: ${e?.message || e}` };
-    }
   }
 }
 
