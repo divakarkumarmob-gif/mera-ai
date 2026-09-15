@@ -66,8 +66,26 @@ class InstagramBotService {
   /**
    * Spawns and manages the Python Instagrapi Bridge subprocess
    */
+  public async ensureBridgeRunning(): Promise<boolean> {
+    try {
+      const res = await fetch(`${BRIDGE_URL}/health`, { signal: AbortSignal.timeout(1500) });
+      if (res.ok) {
+        this.isBridgeReady = true;
+        return true;
+      }
+    } catch {}
+
+    this.startBridgeProcess();
+    return this.waitForBridgeReady(15, 600);
+  }
+
   private startBridgeProcess() {
     try {
+      if (this.bridgeProcess) {
+        try { this.bridgeProcess.kill(); } catch {}
+        this.bridgeProcess = null;
+      }
+
       const pythonScript = path.resolve(process.cwd(), "src", "python", "instagram_bridge.py");
       if (!fs.existsSync(pythonScript)) {
         console.error(`[InstagramBot] Bridge script not found at ${pythonScript}`);
@@ -78,7 +96,9 @@ class InstagramBotService {
       const pythonCmd = process.platform === "win32" ? "python" : "python3";
       
       this.bridgeProcess = spawn(pythonCmd, [pythonScript, "--port", String(BRIDGE_PORT)], {
+        env: { ...process.env, PYTHONUNBUFFERED: "1" },
         stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
       });
 
       this.bridgeProcess.stdout?.on("data", (data) => {
@@ -96,15 +116,12 @@ class InstagramBotService {
         this.isBridgeReady = false;
         this.bridgeProcess = null;
       });
-
-      // Periodic check to verify bridge readiness
-      this.waitForBridgeReady(15, 1000);
     } catch (e: any) {
       console.error("[InstagramBot] Failed to spawn Python bridge:", e?.message || e);
     }
   }
 
-  private async waitForBridgeReady(maxRetries = 15, delayMs = 1000): Promise<boolean> {
+  private async waitForBridgeReady(maxRetries = 15, delayMs = 600): Promise<boolean> {
     for (let i = 0; i < maxRetries; i++) {
       try {
         const res = await fetch(`${BRIDGE_URL}/health`, { signal: AbortSignal.timeout(2000) });
@@ -121,11 +138,9 @@ class InstagramBotService {
   }
 
   private async bridgeCall(endpoint: string, method: "GET" | "POST" = "GET", bodyData?: any, timeoutMs = 25000): Promise<any> {
-    if (!this.isBridgeReady) {
-      const ready = await this.waitForBridgeReady(5, 500);
-      if (!ready) {
-        throw new Error("Instagrapi Python bridge is not responding. Please ensure Python and instagrapi are installed.");
-      }
+    const ready = await this.ensureBridgeRunning();
+    if (!ready) {
+      throw new Error("Instagrapi Python bridge is not responding. Please ensure Python and instagrapi are installed.");
     }
 
     const headers: Record<string, string> = {
