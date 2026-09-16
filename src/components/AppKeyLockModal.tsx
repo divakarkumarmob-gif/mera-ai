@@ -12,9 +12,9 @@ interface AppKeyLockModalProps {
 export default function AppKeyLockModal({ onUnlocked }: AppKeyLockModalProps) {
     const [usernameInput, setUsernameInput] = useState(() => {
         try {
-            return localStorage.getItem('friday_last_login_username') || 'boss';
+            return localStorage.getItem('friday_last_login_username') || '';
         } catch {
-            return 'boss';
+            return '';
         }
     });
     const [passwordInput, setPasswordInput] = useState('');
@@ -59,6 +59,11 @@ export default function AppKeyLockModal({ onUnlocked }: AppKeyLockModalProps) {
         if (e) e.preventDefault();
         const trimmedUser = usernameInput.trim().toLowerCase();
         const trimmedPass = passwordInput.trim();
+        if (!trimmedUser) {
+            setErrorMsg('Kripya Username enter karein.');
+            triggerShake();
+            return;
+        }
         if (!trimmedPass) {
             setErrorMsg('Kripya Password enter karein.');
             triggerShake();
@@ -77,7 +82,7 @@ export default function AppKeyLockModal({ onUnlocked }: AppKeyLockModalProps) {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    username: trimmedUser || 'boss',
+                    username: trimmedUser,
                     password: trimmedPass,
                     key: trimmedPass,
                 }),
@@ -330,7 +335,7 @@ export default function AppKeyLockModal({ onUnlocked }: AppKeyLockModalProps) {
                     {/* Unlock / Enter Button */}
                     <button
                         type="submit"
-                        disabled={loading || passwordInput.length === 0}
+                        disabled={loading || usernameInput.trim().length === 0 || passwordInput.length === 0}
                         className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white font-bold text-sm tracking-wide transition-all shadow-[0_0_25px_rgba(6,182,212,0.3)] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 active:scale-98 cursor-pointer"
                     >
                         {loading ? (
@@ -338,7 +343,7 @@ export default function AppKeyLockModal({ onUnlocked }: AppKeyLockModalProps) {
                         ) : (
                             <>
                                 <Unlock className="w-4 h-4" />
-                                <span>Login as {usernameInput ? `@${usernameInput}` : 'User'}</span>
+                                <span>Login {usernameInput.trim() ? `as @${usernameInput.trim()}` : ''}</span>
                             </>
                         )}
                     </button>

@@ -241,7 +241,7 @@ class AppSecurityService {
         });
       }
 
-      // Ensure primary 'boss' profile is present
+      // Ensure primary 'boss' profile is present if an active App Key was already set by Boss
       if (!this.userProfiles.has("boss")) {
         await this.ensureDefaultBossProfile();
       }
@@ -255,20 +255,23 @@ class AppSecurityService {
   }
 
   /**
-   * Ensures default 'boss' profile is seeded into memory and Firestore.
+   * If Boss previously set an App Key in Firestore or environment, syncs it as 'boss' profile.
+   * Does NOT hardcode any default password.
    */
-  private async ensureDefaultBossProfile(): Promise<UserProfile> {
+  private async ensureDefaultBossProfile(): Promise<UserProfile | null> {
     const keyData = await this.getAppKeyData();
-    const defaultPass = keyData?.appKey || "boss123";
+    if (!keyData?.appKey) {
+      return null;
+    }
     const bossProfile: UserProfile = {
       username: "boss",
       displayName: "DK Boss",
-      password: defaultPass,
+      password: keyData.appKey,
       role: "boss",
       createdAt: Date.now(),
-      updatedAt: Date.now(),
+      updatedAt: keyData.updatedAt || Date.now(),
       createdBy: "system",
-      source: "system",
+      source: keyData.source || "system",
       isActive: true,
     };
     this.userProfiles.set("boss", bossProfile);
@@ -1066,31 +1069,14 @@ ya
     let cleanUser = String(usernameInput || "").trim().toLowerCase();
     const cleanPass = String(passwordInput || "").trim();
 
+    if (!cleanUser) {
+      return { success: false, message: "Kripya Username enter karein." };
+    }
     if (!cleanPass) {
       return { success: false, message: "Kripya Password enter karein." };
     }
 
     await this.syncProfilesFromFirestore();
-
-    // If no username is provided, try finding matching profile by password or check boss
-    if (!cleanUser) {
-      const bossProfile = this.userProfiles.get("boss");
-      const keyData = await this.getAppKeyData();
-      if ((bossProfile && bossProfile.password === cleanPass) || (keyData && keyData.appKey === cleanPass)) {
-        cleanUser = "boss";
-      } else {
-        // Search if any active profile has this password
-        for (const [uname, prof] of this.userProfiles.entries()) {
-          if (prof.isActive && prof.password === cleanPass) {
-            cleanUser = uname;
-            break;
-          }
-        }
-      }
-      if (!cleanUser) {
-        cleanUser = "boss";
-      }
-    }
 
     const profile = this.userProfiles.get(cleanUser);
 
