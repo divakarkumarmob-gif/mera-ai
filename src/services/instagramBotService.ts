@@ -259,6 +259,21 @@ class InstagramBotService {
 
       if (envSession) {
         console.log("[InstagramBot] Auto-logging in via .env INSTAGRAM_SESSION_ID...");
+
+        // ── CRITICAL: Purge old cached sessions so they don't interfere with new session ID ──
+        // Old Firestore/local sessions contain stale authorization_data that would overwrite
+        // the new session ID if env login fails and fallback kicks in.
+        try {
+          await db.collection("instagram_auth").doc("session").delete().catch(() => {});
+          console.log("[InstagramBot] Cleared old Firestore session cache (new env session takes priority).");
+        } catch {}
+        try {
+          if (fs.existsSync(LOCAL_SESSION_FILE)) {
+            fs.unlinkSync(LOCAL_SESSION_FILE);
+            console.log("[InstagramBot] Cleared old local session cache.");
+          }
+        } catch {}
+
         const res = await this.loginWithSessionId(envSession, envUser || undefined);
         if (res.success) {
           this.lastError = null;
@@ -266,10 +281,27 @@ class InstagramBotService {
         } else {
           this.lastError = res.message;
           console.warn("[InstagramBot] .env session login failed:", res.message);
+          // ── DO NOT fall through to Firestore/local restore when env session is set ──
+          // The user explicitly set a new session ID — restoring old cached session would
+          // overwrite the new one and cause confusion.
+          console.warn("[InstagramBot] Skipping Firestore/local session restore (env session ID is set, old cache already purged).");
+
+          // Still try username/password fallback if available
+          const envPass = (process.env.INSTAGRAM_PASSWORD || "").trim();
+          if (envUser && envPass) {
+            console.log(`[InstagramBot] Trying .env credentials fallback for @${envUser}...`);
+            const credRes = await this.login(envUser, envPass);
+            if (credRes.success) {
+              this.lastError = null;
+            } else {
+              this.lastError = credRes.message;
+            }
+          }
+          return;
         }
       }
 
-      // 2. Priority 2: Try restore from Firestore
+      // 2. Priority 2: Try restore from Firestore (only when NO env session ID is configured)
       const sessionDoc = await db.collection("instagram_auth").doc("session").get().catch(() => null);
       if (sessionDoc && sessionDoc.exists) {
         const data = sessionDoc.data() as any;
@@ -433,7 +465,8 @@ class InstagramBotService {
       this.activeSessionId = cleanSession;
       console.log("[InstagramBot] Logging in via Session ID cookie using Instagrapi bridge...");
 
-      const res = await this.bridgeCall("/login-session", "POST", { sessionId: cleanSession });
+      // Increased timeout: proxy can be slow + account_info retry (2 attempts) + warm-up
+      const res = await this.bridgeCall("/login-session", "POST", { sessionId: cleanSession }, 60000);
 
       if (res.ok) {
         this.isLoggedIn = true;
@@ -447,11 +480,22 @@ class InstagramBotService {
         }
 
         this.startInboxPolling();
-        console.log(`[InstagramBot] Session login successful for @${this.currentUsername}! 🎉`);
+        const verifiedStr = res.verified ? "✅ verified" : "⚠️ unverified (uid fallback)";
+        console.log(`[InstagramBot] Session login successful for @${this.currentUsername}! 🎉 (${verifiedStr})`);
         return {
           success: true,
           message: `Instagram session login successful for @${this.currentUsername}! 🎉`,
         };
+      }
+
+      // Clear stored session on explicit failure
+      this.activeSessionId = null;
+
+      if (res.sessionExpired) {
+        console.warn("[InstagramBot] Session ID is expired/invalid. Need fresh session ID from browser.");
+      }
+      if (res.requiresTwoFactor) {
+        console.warn("[InstagramBot] 2FA is enabled. Session ID login won't work — use username/password with 2FA code.");
       }
 
       return {
