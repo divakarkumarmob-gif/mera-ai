@@ -1036,7 +1036,15 @@ class BridgeHandler(BaseHTTPRequestHandler):
                     "ds_user_id": str(uid),
                 }
                 cl.set_settings(settings)
-                cl.user_id = str(uid)
+                # Set user_id safely — newer instagrapi versions have it as a read-only property
+                # derived from authorization_data.ds_user_id (already set above in settings).
+                # Try direct internal attribute as fallback for older versions.
+                try:
+                    cl.user_id = str(uid)
+                except AttributeError:
+                    # user_id is a read-only property; set via internal attribute if available
+                    if hasattr(cl, '_user_id'):
+                        cl._user_id = str(uid)
 
                 # Inject cookies directly into requests sessions for all transports
                 for session_obj in [getattr(cl, "private", None), getattr(cl, "public", None)]:
