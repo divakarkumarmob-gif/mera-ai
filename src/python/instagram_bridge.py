@@ -1020,7 +1020,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
             session_id = session_id.strip("\"'")
 
             try:
-                # ── Direct Session Cookie & Authorization Injection ──
+                # Extract uid from session ID format: uid%3Ahash%3Aversion%3Atoken
                 if "%3A" in session_id:
                     uid = session_id.split("%3A")[0]
                 elif ":" in session_id:
@@ -1028,87 +1028,96 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 else:
                     uid = session_id
 
-                settings = cl.get_settings()
-                if not isinstance(settings, dict):
-                    settings = {}
-                settings["authorization_data"] = {
-                    "sessionid": session_id,
-                    "ds_user_id": str(uid),
-                }
-                cl.set_settings(settings)
-                # Set user_id safely — newer instagrapi versions have it as a read-only property
-                # derived from authorization_data.ds_user_id (already set above in settings).
+                sys.stderr.write(f"[InstagrapiBridge] Attempting login_by_sessionid for uid={uid}...\n")
+
+                # ── Use instagrapi's built-in login_by_sessionid() ──
+                # This properly: 1) sets cookies, 2) calls init() to rebuild headers,
+                # 3) sets Authorization Bearer header, 4) sets should_use_header_over_cookies=True
+                # 5) verifies session via user_info_v1() instead of fragile account_info()
                 try:
-                    cl.user_id = str(uid)
-                except AttributeError:
-                    if hasattr(cl, '_user_id'):
-                        cl._user_id = str(uid)
+                    cl.login_by_sessionid(session_id)
+                    account_verified = True
+                    sys.stderr.write(f"[InstagrapiBridge] login_by_sessionid succeeded! username={cl.username}\n")
+                except Exception as login_err:
+                    sys.stderr.write(f"[InstagrapiBridge] login_by_sessionid failed: {login_err}\n")
+                    account_verified = False
 
-                # Inject cookies directly into requests sessions for all transports
-                for session_obj in [getattr(cl, "private", None), getattr(cl, "public", None)]:
-                    if session_obj and hasattr(session_obj, "cookies"):
-                        try:
-                            session_obj.cookies.set("sessionid", session_id, domain=".instagram.com", path="/")
-                            session_obj.cookies.set("ds_user_id", str(uid), domain=".instagram.com", path="/")
-                        except Exception:
-                            pass
+                    # Fallback: manual injection for older/broken instagrapi versions
+                    sys.stderr.write(f"[InstagrapiBridge] Trying manual session injection fallback...\n")
+                    settings = cl.get_settings()
+                    if not isinstance(settings, dict):
+                        settings = {}
+                    settings["cookies"] = {"sessionid": session_id}
+                    settings["authorization_data"] = {
+                        "sessionid": session_id,
+                        "ds_user_id": str(uid),
+                        "should_use_header_over_cookies": True,
+                    }
+                    cl.set_settings(settings)
 
-                # ── Verify session by calling account_info (with retry) ──
-                u_name = f"user_{uid}"
+                    # Call init() to rebuild headers, cookies, Authorization header
+                    try:
+                        cl.init()
+                    except Exception as init_err:
+                        sys.stderr.write(f"[InstagrapiBridge] init() warning: {init_err}\n")
+
+                    # Update Authorization header manually
+                    try:
+                        cl.authorization_data = settings["authorization_data"]
+                        if hasattr(cl, 'private') and hasattr(cl, 'base_headers'):
+                            cl.private.headers.update(cl.base_headers)
+                            if cl.authorization:
+                                cl.private.headers.update({"Authorization": cl.authorization})
+                    except Exception as hdr_err:
+                        sys.stderr.write(f"[InstagrapiBridge] Header update warning: {hdr_err}\n")
+
+                # Get user info
+                u_name = getattr(cl, 'username', None) or f"user_{uid}"
                 f_name = u_name
                 p_pic = None
-                account_verified = False
 
-                for attempt in range(2):
+                if account_verified:
+                    # login_by_sessionid sets cl.username, try to get full info
                     try:
                         info = cl.account_info()
                         u_name = info.username
                         f_name = info.full_name or u_name
                         p_pic = str(info.profile_pic_url) if info.profile_pic_url else None
-                        current_status["isLoggedIn"] = True
-                        current_status["username"] = u_name
-                        current_status["fullName"] = f_name
-                        current_status["profilePicUrl"] = p_pic
                         current_status["pk"] = str(info.pk)
-                        account_verified = True
-                        break
-                    except Exception as acc_err:
-                        err_str = str(acc_err)
-                        sys.stderr.write(f"[InstagrapiBridge] account_info attempt {attempt+1} failed: {err_str}\n")
-                        if attempt == 0:
-                            # Brief pause before retry (proxy may be slow)
-                            time.sleep(2.0)
-                            continue
-                        # Check if it's a 400 error (expired session or 2FA)
-                        if "400" in err_str:
-                            if "two-factor" in err_str.lower() or "two_factor" in err_str.lower():
-                                current_status["isLoggedIn"] = False
-                                current_status["lastError"] = "Two-factor authentication is enabled. Use username/password login with 2FA code."
-                                self._send_json(401, {
-                                    "ok": False,
-                                    "error": "Two-factor authentication is enabled on this account. Session ID login won't work with 2FA. Use username/password login and provide the 2FA code.",
-                                    "requiresTwoFactor": True,
-                                })
-                                return
-                            else:
-                                # 400 = session expired or invalid
+                    except Exception as info_err:
+                        sys.stderr.write(f"[InstagrapiBridge] account_info after login: {info_err} (non-fatal)\n")
+                else:
+                    # Manual fallback — try account_info with retry
+                    for attempt in range(2):
+                        try:
+                            info = cl.account_info()
+                            u_name = info.username
+                            f_name = info.full_name or u_name
+                            p_pic = str(info.profile_pic_url) if info.profile_pic_url else None
+                            current_status["pk"] = str(info.pk)
+                            account_verified = True
+                            break
+                        except Exception as acc_err:
+                            err_str = str(acc_err)
+                            sys.stderr.write(f"[InstagrapiBridge] account_info attempt {attempt+1} failed: {err_str}\n")
+                            if attempt == 0:
+                                time.sleep(2.0)
+                                continue
+                            if "400" in err_str:
                                 current_status["isLoggedIn"] = False
                                 current_status["lastError"] = "Session ID expired or invalid."
                                 self._send_json(401, {
                                     "ok": False,
-                                    "error": f"Session ID is expired or invalid (Instagram returned 400). Please get a fresh session ID from your browser. Details: {err_str}",
+                                    "error": f"Session ID is expired or invalid (Instagram returned 400). Get a fresh session ID from your browser. Error: {err_str}",
                                     "sessionExpired": True,
                                 })
                                 return
-                        # Other errors — still try to proceed with uid-based fallback
-                        sys.stderr.write(f"[InstagrapiBridge] Notice: account_info non-400 error ({err_str}), proceeding with session ID user {uid}\n")
 
                 if not account_verified:
-                    # Fallback: mark as logged in with limited info from session ID uid
                     current_status["isLoggedIn"] = True
-                    current_status["lastError"] = None
-                    sys.stderr.write(f"[InstagrapiBridge] Session accepted with uid fallback (no account_info verification)\n")
+                    sys.stderr.write(f"[InstagrapiBridge] Session accepted with uid fallback (unverified)\n")
 
+                current_status["isLoggedIn"] = True
                 current_status["userId"] = str(uid)
                 current_status["username"] = u_name
                 current_status["fullName"] = f_name
