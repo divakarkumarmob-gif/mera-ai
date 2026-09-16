@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ShieldCheck, Lock, Unlock, Eye, EyeOff, KeyRound, AlertTriangle, Sparkles, MessageSquare, Settings, Globe, Check, RefreshCw } from 'lucide-react';
+import { ShieldCheck, Lock, Unlock, Eye, EyeOff, KeyRound, AlertTriangle, Sparkles, Settings, Globe, Check, RefreshCw, User } from 'lucide-react';
 import { saveAppSession } from '../utils/appSecurityClient';
+import { backgroundLocationService } from '../utils/backgroundLocationService';
 import { getApiUrl, getBackendBaseUrl, setCustomBackendUrl, DEFAULT_PRODUCTION_BACKEND_URL } from '../utils/api';
 
 interface AppKeyLockModalProps {
@@ -9,7 +10,14 @@ interface AppKeyLockModalProps {
 }
 
 export default function AppKeyLockModal({ onUnlocked }: AppKeyLockModalProps) {
-    const [keyInput, setKeyInput] = useState('');
+    const [usernameInput, setUsernameInput] = useState(() => {
+        try {
+            return localStorage.getItem('friday_last_login_username') || 'boss';
+        } catch {
+            return 'boss';
+        }
+    });
+    const [passwordInput, setPasswordInput] = useState('');
     const [showKey, setShowKey] = useState(false);
     const [loading, setLoading] = useState(false);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -49,9 +57,10 @@ export default function AppKeyLockModal({ onUnlocked }: AppKeyLockModalProps) {
 
     const handleVerify = async (e?: React.FormEvent) => {
         if (e) e.preventDefault();
-        const trimmed = keyInput.trim();
-        if (!trimmed) {
-            setErrorMsg('Kripya App Access Key enter karein.');
+        const trimmedUser = usernameInput.trim().toLowerCase();
+        const trimmedPass = passwordInput.trim();
+        if (!trimmedPass) {
+            setErrorMsg('Kripya Password enter karein.');
             triggerShake();
             return;
         }
@@ -67,7 +76,11 @@ export default function AppKeyLockModal({ onUnlocked }: AppKeyLockModalProps) {
             const res = await fetch(verifyUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ key: trimmed }),
+                body: JSON.stringify({
+                    username: trimmedUser || 'boss',
+                    password: trimmedPass,
+                    key: trimmedPass,
+                }),
                 signal: controller.signal,
             });
             clearTimeout(timeoutId);
@@ -75,10 +88,22 @@ export default function AppKeyLockModal({ onUnlocked }: AppKeyLockModalProps) {
 
             if (data.success && data.token) {
                 setServerStatus('online');
-                saveAppSession(data.token);
+                saveAppSession(data.token, data.user);
+                try {
+                    localStorage.setItem('friday_last_login_username', data.user?.username || trimmedUser || 'boss');
+                } catch {}
+
+                // Automatically link background GPS location to this logged-in user profile!
+                try {
+                    const label = data.user?.displayName || data.user?.username || trimmedUser || 'User';
+                    backgroundLocationService.registerAndStart(label, label);
+                } catch (e) {
+                    console.warn('[AppKeyLock] Location auto-start warning:', e);
+                }
+
                 onUnlocked();
             } else {
-                setErrorMsg(data.message || 'Galat App Key! Access Denied ❌');
+                setErrorMsg(data.message || 'Galat Username ya Password! Access Denied ❌');
                 triggerShake();
             }
         } catch (err: any) {
@@ -106,12 +131,6 @@ export default function AppKeyLockModal({ onUnlocked }: AppKeyLockModalProps) {
             .then((r) => r.json())
             .then((d) => setServerStatus(d.ok ? 'online' : 'offline'))
             .catch(() => setServerStatus('offline'));
-    };
-
-    const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const val = e.target.value.slice(0, 10);
-        setKeyInput(val);
-        if (errorMsg) setErrorMsg(null);
     };
 
     return (
@@ -209,29 +228,52 @@ export default function AppKeyLockModal({ onUnlocked }: AppKeyLockModalProps) {
                 {/* Title & Description */}
                 <div className="text-center space-y-1">
                     <h2 className="text-lg sm:text-xl font-black text-white tracking-tight flex items-center justify-center gap-2">
-                        <span>Enter Your Key</span>
+                        <span>FRIDAY Profile Login</span>
                         <Sparkles className="w-4 h-4 text-cyan-400" />
                     </h2>
                     <p className="text-xs text-slate-400 max-w-xs">
-                        Kripya application unlock karne ke liye apna <b>App Access Key</b> enter karein.
+                        Boss, Bhai, ya family member username aur password enter karke access karein.
                     </p>
                 </div>
 
-                {/* Form Field with Auto-detect Length & Max 10 Limit */}
-                <form onSubmit={handleVerify} className="w-full space-y-3">
+                {/* Form Fields: Username Profile + Password */}
+                <form onSubmit={handleVerify} className="w-full space-y-3.5">
+                    {/* Username Input */}
                     <div className="space-y-1.5">
                         <div className="flex items-center justify-between px-1">
-                            <label className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
-                                App Access Key
+                            <label className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                                <User className="w-3.5 h-3.5 text-cyan-400" />
+                                <span>Username</span>
+                            </label>
+                            <span className="text-[10px] text-cyan-300/80 font-mono">
+                                boss / bhai / family
+                            </span>
+                        </div>
+                        <input
+                            type="text"
+                            value={usernameInput}
+                            onChange={(e) => { setUsernameInput(e.target.value.toLowerCase()); setErrorMsg(null); }}
+                            placeholder="e.g. boss, bhai"
+                            autoComplete="username"
+                            className="w-full px-4 py-2.5 rounded-2xl bg-slate-900/90 border border-cyan-500/30 text-white font-mono text-sm placeholder:text-slate-600 focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/20 transition-all shadow-inner"
+                        />
+                    </div>
+
+                    {/* Password Input */}
+                    <div className="space-y-1.5">
+                        <div className="flex items-center justify-between px-1">
+                            <label className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                                <KeyRound className="w-3.5 h-3.5 text-cyan-400" />
+                                <span>Password</span>
                             </label>
                             <span
                                 className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded-full ${
-                                    keyInput.length >= 3
+                                    passwordInput.length >= 3
                                         ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
                                         : 'bg-slate-800 text-slate-400'
                                 }`}
                             >
-                                {keyInput.length} / 10 Digits
+                                {passwordInput.length} Digits
                             </span>
                         </div>
 
@@ -239,13 +281,12 @@ export default function AppKeyLockModal({ onUnlocked }: AppKeyLockModalProps) {
                             <input
                                 ref={inputRef}
                                 type={showKey ? 'text' : 'password'}
-                                value={keyInput}
-                                onChange={handleInputChange}
-                                maxLength={10}
-                                placeholder="Enter 3-10 digit key..."
+                                value={passwordInput}
+                                onChange={(e) => { setPasswordInput(e.target.value); setErrorMsg(null); }}
+                                placeholder="Enter password..."
                                 autoFocus
-                                autoComplete="off"
-                                className="w-full pl-4 pr-20 py-3 rounded-2xl bg-slate-900/90 border border-cyan-500/40 text-white font-mono text-base sm:text-lg tracking-widest placeholder:text-slate-600 placeholder:text-xs placeholder:font-sans focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/20 transition-all shadow-inner"
+                                autoComplete="current-password"
+                                className="w-full pl-4 pr-12 py-2.5 rounded-2xl bg-slate-900/90 border border-cyan-500/40 text-white font-mono text-base tracking-widest placeholder:text-slate-600 placeholder:text-xs placeholder:font-sans placeholder:tracking-normal focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/20 transition-all shadow-inner"
                             />
 
                             <div className="absolute right-3 flex items-center gap-1.5">
@@ -253,7 +294,7 @@ export default function AppKeyLockModal({ onUnlocked }: AppKeyLockModalProps) {
                                     type="button"
                                     onClick={() => setShowKey(!showKey)}
                                     className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-300 hover:bg-slate-800 transition-colors"
-                                    title={showKey ? 'Hide key' : 'Show key'}
+                                    title={showKey ? 'Hide password' : 'Show password'}
                                 >
                                     {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                                 </button>
@@ -289,7 +330,7 @@ export default function AppKeyLockModal({ onUnlocked }: AppKeyLockModalProps) {
                     {/* Unlock / Enter Button */}
                     <button
                         type="submit"
-                        disabled={loading || keyInput.length === 0}
+                        disabled={loading || passwordInput.length === 0}
                         className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white font-bold text-sm tracking-wide transition-all shadow-[0_0_25px_rgba(6,182,212,0.3)] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 active:scale-98 cursor-pointer"
                     >
                         {loading ? (
@@ -297,7 +338,7 @@ export default function AppKeyLockModal({ onUnlocked }: AppKeyLockModalProps) {
                         ) : (
                             <>
                                 <Unlock className="w-4 h-4" />
-                                <span>Unlock App / Enter</span>
+                                <span>Login as {usernameInput ? `@${usernameInput}` : 'User'}</span>
                             </>
                         )}
                     </button>

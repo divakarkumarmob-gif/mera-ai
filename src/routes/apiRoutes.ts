@@ -1355,11 +1355,16 @@ export function createApiRouter(context: ApiRoutesContext): Router {
 
   app.post("/api/app-key/verify", async (req, res) => {
     try {
-      const { key } = req.body || {};
+      const { key, username, password } = req.body || {};
       const clientIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0].trim() || req.socket.remoteAddress || "127.0.0.1";
       const userAgent = (req.headers["user-agent"] as string) || "Unknown Device";
 
-      const verifyRes = await appSecurityService.verifyAppKey(String(key || ""), clientIp, userAgent);
+      const verifyRes = await appSecurityService.verifyUserLogin(
+        String(username || "").trim(),
+        String(password || key || "").trim(),
+        clientIp,
+        userAgent
+      );
 
       if (verifyRes.blocked) {
         return res.status(403).json(verifyRes);
@@ -3667,5 +3672,70 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     }
   });
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 📍 Family Device Live Location Tracking APIs
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * POST /api/location/register — Register a new device for live tracking
+   * Body: { deviceId, label, ownerName? }
+   */
+  app.post("/api/location/register", async (req, res) => {
+    try {
+      const { deviceLocationTrackerService } = await import("../services/deviceLocationTrackerService");
+      const { deviceId, label, ownerName } = req.body || {};
+      if (!deviceId || !label) {
+        return res.status(400).json({ success: false, message: "deviceId and label are required." });
+      }
+      const result = await deviceLocationTrackerService.registerDevice(
+        String(deviceId), String(label), ownerName ? String(ownerName) : undefined
+      );
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err?.message || "Registration failed" });
+    }
+  });
+
+  /**
+   * POST /api/location/ping — Receive GPS ping from a tracked device (every 60s)
+   * Body: { deviceId, lat, lon, accuracy?, altitude?, speed?, heading?, batteryLevel?, isCharging?, networkType? }
+   */
+  app.post("/api/location/ping", async (req, res) => {
+    try {
+      const { deviceLocationTrackerService } = await import("../services/deviceLocationTrackerService");
+      const result = await deviceLocationTrackerService.receivePing(req.body || {});
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err?.message || "Ping failed" });
+    }
+  });
+
+  /**
+   * GET /api/location/devices — List all registered tracked devices
+   */
+  app.get("/api/location/devices", async (_req, res) => {
+    try {
+      const { deviceLocationTrackerService } = await import("../services/deviceLocationTrackerService");
+      const result = await deviceLocationTrackerService.listAllDevices();
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err?.message || "List failed" });
+    }
+  });
+
+  /**
+   * GET /api/location/track/:labelOrId — Get latest location of a specific device
+   */
+  app.get("/api/location/track/:labelOrId", async (req, res) => {
+    try {
+      const { deviceLocationTrackerService } = await import("../services/deviceLocationTrackerService");
+      const result = await deviceLocationTrackerService.getDeviceLocation(req.params.labelOrId || "");
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err?.message || "Track failed" });
+    }
+  });
+
   return router;
 }
+

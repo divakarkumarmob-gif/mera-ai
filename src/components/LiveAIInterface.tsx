@@ -20,6 +20,7 @@ import { getWsUrl, getApiUrl } from '@/utils/api';
 import { wakeWordManager } from '@/utils/wakeWord';
 import { getAppToken, clearAppSession } from '@/utils/appSecurityClient';
 import { screenWakeLock } from '@/utils/screenWakeLock';
+import { backgroundLocationService } from '@/utils/backgroundLocationService';
 import { mobileNotificationService } from '@/utils/mobileNotificationService';
 import { MusicCapsule } from './MusicCapsule';
 import { LearningCapsule } from './LearningCapsule';
@@ -1637,6 +1638,8 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
     // Keep screen awake while in Friday Live AI Interface / Web URL
     useEffect(() => {
         screenWakeLock.requestLock().catch(() => {});
+        // Auto-resume background GPS tracking if previously enabled
+        backgroundLocationService.autoResumeIfEnabled();
     }, []);
 
     // ── Music Player State & References ─────────────────────────────────────

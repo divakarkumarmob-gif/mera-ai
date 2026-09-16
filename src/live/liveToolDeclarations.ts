@@ -3994,6 +3994,29 @@ const rawFunctionDeclarations: any[] = [
       },
       "required": ["mode"]
     }
+  },
+  {
+    "name": "get_family_device_location",
+    "description": "Get real-time live GPS location of any registered family member's device (phone). Use when Boss says 'bhai kahan hai?', 'bhai ki location batao', 'papa kahan pahuche?', 'meri live location kya hai?', 'family kahan hai?', 'bhai abhi kahan hai?', 'mummy ki location bhejo', 'sister ki location track karo', 'device location check karo'. Returns exact address, Google Maps link, coordinates, battery level, and last updated time.",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {
+        "personNameOrLabel": {
+          "type": "STRING",
+          "description": "Name or label of the family member/device to track (e.g., 'bhai', 'papa', 'mummy', 'behen', 'my phone', 'didi')"
+        }
+      },
+      "required": ["personNameOrLabel"]
+    }
+  },
+  {
+    "name": "list_tracked_family_devices",
+    "description": "List all family devices that are registered for live GPS location tracking. Use when Boss says 'kitne devices tracked hain?', 'sab ki location batao', 'tracked devices dikha', 'location list', 'family location summary'.",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {},
+      "required": []
+    }
   }
 ];
 

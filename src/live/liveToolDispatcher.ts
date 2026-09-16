@@ -3116,6 +3116,40 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                   } catch (e: any) {
                     result = { success: false, error: e?.message };
                   }
+                } else if (call.name === "get_family_device_location") {
+                  try {
+                    const { deviceLocationTrackerService } = await import("../services/deviceLocationTrackerService");
+                    const { personNameOrLabel } = call.args || {};
+                    if (!personNameOrLabel) {
+                      result = { success: false, message: "Kis person ya device ki location chahiye? Name ya label batao (e.g., bhai, papa, mummy)." };
+                    } else {
+                      const locationResult = await deviceLocationTrackerService.getDeviceLocation(String(personNameOrLabel));
+                      result = locationResult;
+                      // Send location data to client dashboard
+                      if (locationResult.success && locationResult.lat && locationResult.lon) {
+                        clientWs.send(JSON.stringify({
+                          type: "family_device_location",
+                          label: locationResult.label,
+                          lat: locationResult.lat,
+                          lon: locationResult.lon,
+                          address: locationResult.address,
+                          googleMapsUrl: locationResult.googleMapsUrl,
+                          lastUpdatedAgo: locationResult.lastUpdatedAgo,
+                          batteryLevel: locationResult.batteryLevel,
+                        }));
+                      }
+                    }
+                  } catch (e: any) {
+                    result = { success: false, message: `Location fetch failed: ${e?.message || e}` };
+                  }
+                } else if (call.name === "list_tracked_family_devices") {
+                  try {
+                    const { deviceLocationTrackerService } = await import("../services/deviceLocationTrackerService");
+                    const listResult = await deviceLocationTrackerService.listAllDevices();
+                    result = listResult;
+                  } catch (e: any) {
+                    result = { success: false, message: `Device list failed: ${e?.message || e}` };
+                  }
                 }
 
   } catch (err: any) {

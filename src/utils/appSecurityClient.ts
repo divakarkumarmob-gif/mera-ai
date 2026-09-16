@@ -5,6 +5,9 @@ const STORAGE_KEY = 'app_access_session';
 export interface AppSession {
     unlockedAt: number;
     token: string;
+    username?: string;
+    displayName?: string;
+    role?: string;
 }
 
 export function getStoredAppSession(): AppSession | null {
@@ -27,10 +30,26 @@ export function getAppToken(): string | null {
     return session ? session.token : null;
 }
 
-export function saveAppSession(token: string) {
+export function getStoredUser(): { username: string; displayName: string; role: string } | null {
+    const session = getStoredAppSession();
+    if (!session || !session.username) return null;
+    return {
+        username: session.username,
+        displayName: session.displayName || session.username,
+        role: session.role || "member",
+    };
+}
+
+export function saveAppSession(
+    token: string,
+    user?: { username: string; displayName?: string; role?: string }
+) {
     const session: AppSession = {
         unlockedAt: Date.now(),
         token,
+        username: user?.username,
+        displayName: user?.displayName,
+        role: user?.role,
     };
     try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(session));

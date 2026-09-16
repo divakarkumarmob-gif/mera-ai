@@ -16,8 +16,26 @@ export interface BlockedClientData {
   attempts: number;
 }
 
+export interface UserProfile {
+  username: string; // unique lowercase identifier (e.g. "boss", "bhai")
+  displayName: string;
+  password: string;
+  role: "boss" | "member";
+  createdAt: number;
+  updatedAt: number;
+  createdBy?: string;
+  updatedBy?: string;
+  source: "whatsapp" | "telegram" | "system";
+  isActive: boolean;
+  lastLoginAt?: number;
+  lastLoginIp?: string;
+  lastLoginDevice?: string;
+}
+
 export interface ActiveSessionDevice {
   sessionId: string;
+  username?: string;
+  role?: string;
   ip: string;
   userAgent: string;
   deviceName: string;
@@ -38,6 +56,10 @@ class AppSecurityService {
   // Active Sessions & Devices Registry
   private activeSessions = new Map<string, ActiveSessionDevice>();
   private broadcastCallback: ((event: any) => void) | null = null;
+
+  // User Profiles Registry (created/managed exclusively by Boss via WhatsApp/Telegram)
+  private userProfiles = new Map<string, UserProfile>();
+  private isProfilesSynced = false;
 
   // Rate limiting: max 2 verification attempts per 60 seconds per IP
   private readonly rateLimitWindowMs = 60 * 1000; // 60s
@@ -185,6 +207,9 @@ class AppSecurityService {
         }
       }
 
+      // 4. Sync User Profiles
+      await this.syncProfilesFromFirestore();
+
       this.isFirestoreSynced = true;
     } catch (e) {
       console.warn("[AppSecurity] Failed to sync security state from Firestore:", e);
@@ -199,11 +224,70 @@ class AppSecurityService {
   }
 
   /**
-   * Generates a tamper-proof cryptographically signed session token (HMAC-SHA256).
-   * Embeds keyUpdatedAt and unique sessionId so changing the App Key or calling Logout All
-   * instantly invalidates all active tokens.
+   * Syncs user profiles from Firestore collection app_user_profiles.
+   * If empty, auto-seeds default 'boss' profile using current App Key.
    */
-  public generateSessionToken(keyUpdatedAt: number = Date.now(), sessionId?: string): { token: string; sessionId: string } {
+  public async syncProfilesFromFirestore(force = false): Promise<void> {
+    if (this.isProfilesSynced && !force) return;
+    try {
+      const snap = await db.collection("app_user_profiles").get();
+      if (!snap.empty) {
+        this.userProfiles.clear();
+        snap.forEach((doc) => {
+          const data = doc.data() as UserProfile;
+          if (data && data.username) {
+            this.userProfiles.set(data.username.toLowerCase(), data);
+          }
+        });
+      }
+
+      // Ensure primary 'boss' profile is present
+      if (!this.userProfiles.has("boss")) {
+        await this.ensureDefaultBossProfile();
+      }
+      this.isProfilesSynced = true;
+    } catch (e) {
+      console.warn("[AppSecurity] Failed to sync user profiles from Firestore:", e);
+      if (!this.userProfiles.has("boss")) {
+        await this.ensureDefaultBossProfile();
+      }
+    }
+  }
+
+  /**
+   * Ensures default 'boss' profile is seeded into memory and Firestore.
+   */
+  private async ensureDefaultBossProfile(): Promise<UserProfile> {
+    const keyData = await this.getAppKeyData();
+    const defaultPass = keyData?.appKey || "boss123";
+    const bossProfile: UserProfile = {
+      username: "boss",
+      displayName: "DK Boss",
+      password: defaultPass,
+      role: "boss",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      createdBy: "system",
+      source: "system",
+      isActive: true,
+    };
+    this.userProfiles.set("boss", bossProfile);
+    try {
+      await db.collection("app_user_profiles").doc("boss").set(bossProfile, { merge: true });
+    } catch {}
+    return bossProfile;
+  }
+
+  /**
+   * Generates a tamper-proof cryptographically signed session token (HMAC-SHA256).
+   * Embeds keyUpdatedAt, unique sessionId, username, and role.
+   */
+  public generateSessionToken(
+    keyUpdatedAt: number = Date.now(),
+    sessionId?: string,
+    username: string = "boss",
+    role: string = "boss"
+  ): { token: string; sessionId: string } {
     const sid = sessionId || `sess_${crypto.randomBytes(8).toString("hex")}`;
     const payload = {
       v: 2,
@@ -211,6 +295,8 @@ class AppSecurityService {
       exp: Date.now() + SESSION_TTL, // 48 Hours
       keyUpdatedAt,
       sid,
+      username,
+      role,
       nonce: crypto.randomBytes(8).toString("hex"),
     };
     const dataStr = Buffer.from(JSON.stringify(payload)).toString("base64url");
@@ -225,12 +311,16 @@ class AppSecurityService {
     sessionId: string,
     clientIp: string,
     userAgent: string,
-    tokenIssuedAt: number = Date.now()
+    tokenIssuedAt: number = Date.now(),
+    username: string = "boss",
+    role: string = "boss"
   ): Promise<ActiveSessionDevice> {
     const cleanIp = this.cleanIp(clientIp);
     const parsed = this.parseDeviceName(userAgent);
     const device: ActiveSessionDevice = {
       sessionId,
+      username,
+      role,
       ip: cleanIp,
       userAgent: (userAgent || "Unknown Device").substring(0, 200),
       deviceName: parsed.name,
@@ -245,6 +335,270 @@ class AppSecurityService {
     // Persist to Firestore asynchronously
     this.persistActiveSessions().catch(() => {});
     return device;
+  }
+
+  /**
+   * Creates or updates a User Profile. Only Boss can invoke this.
+   */
+  public async createUserProfile(
+    username: string,
+    password: string,
+    displayName?: string,
+    role: "boss" | "member" = "member",
+    createdBy = "Boss",
+    source: "whatsapp" | "telegram" = "whatsapp"
+  ): Promise<{ success: boolean; message: string; profile?: UserProfile }> {
+    const cleanUser = String(username || "").trim().toLowerCase();
+    const cleanPass = String(password || "").trim();
+    if (!cleanUser || cleanUser.length < 2) {
+      return { success: false, message: "⚠️ Username kam se kam 2 characters ka hona chahiye." };
+    }
+    if (!cleanPass || cleanPass.length < 3) {
+      return { success: false, message: "⚠️ Password kam se kam 3 characters ka hona chahiye." };
+    }
+
+    await this.syncProfilesFromFirestore();
+    const cleanName = displayName?.trim() || (cleanUser.charAt(0).toUpperCase() + cleanUser.slice(1));
+    const now = Date.now();
+    const profile: UserProfile = {
+      username: cleanUser,
+      displayName: cleanName,
+      password: cleanPass,
+      role: cleanUser === "boss" ? "boss" : role,
+      createdAt: now,
+      updatedAt: now,
+      createdBy,
+      source,
+      isActive: true,
+    };
+
+    this.userProfiles.set(cleanUser, profile);
+    try {
+      await db.collection("app_user_profiles").doc(cleanUser).set(profile, { merge: true });
+      if (cleanUser === "boss") {
+        this.cachedKey = cleanPass;
+        this.cachedUpdatedAt = now;
+        await db.collection("systemSecurity").doc("appAccessKey").set({
+          appKey: cleanPass,
+          updatedAt: now,
+          updatedBy: createdBy,
+          source,
+        }, { merge: true });
+      }
+    } catch (e: any) {
+      console.warn("[AppSecurity] Error saving user profile to Firestore:", e);
+    }
+
+    return {
+      success: true,
+      profile,
+      message: `✅ *User Profile Successfully Created/Updated!*\n\n` +
+        `👤 *Username:* \`${cleanUser}\`\n` +
+        `🔑 *Password:* \`${cleanPass}\`\n` +
+        `🏷️ *Name:* ${cleanName}\n` +
+        `👑 *Role:* ${profile.role.toUpperCase()}\n` +
+        `📱 User ab FRIDAY APK / Web me username \`${cleanUser}\` aur password se login kar sakta hai. Background GPS location bhi is profile se link rahegi. 📍`,
+    };
+  }
+
+  /**
+   * Resets password for a User Profile. Only Boss can invoke this.
+   */
+  public async resetUserPassword(
+    username: string,
+    newPassword: string,
+    updatedBy = "Boss",
+    source: "whatsapp" | "telegram" = "whatsapp"
+  ): Promise<{ success: boolean; message: string }> {
+    const cleanUser = String(username || "").trim().toLowerCase();
+    const cleanPass = String(newPassword || "").trim();
+    if (!cleanUser) return { success: false, message: "⚠️ Username specify karein." };
+    if (!cleanPass || cleanPass.length < 3) return { success: false, message: "⚠️ Naya password kam se kam 3 characters ka hona chahiye." };
+
+    await this.syncProfilesFromFirestore();
+    let profile = this.userProfiles.get(cleanUser);
+    if (!profile) {
+      if (cleanUser === "boss") {
+        profile = await this.ensureDefaultBossProfile();
+      } else {
+        return {
+          success: false,
+          message: `❌ User \`${cleanUser}\` nahi mila. Naya profile banane ke liye send karein:\n👉 \`user- ${cleanUser}, pass- ${cleanPass}\``,
+        };
+      }
+    }
+
+    profile.password = cleanPass;
+    profile.updatedAt = Date.now();
+    this.userProfiles.set(cleanUser, profile);
+
+    try {
+      await db.collection("app_user_profiles").doc(cleanUser).set(profile, { merge: true });
+      if (cleanUser === "boss") {
+        this.cachedKey = cleanPass;
+        this.cachedUpdatedAt = profile.updatedAt;
+        await db.collection("systemSecurity").doc("appAccessKey").set({
+          appKey: cleanPass,
+          updatedAt: profile.updatedAt,
+          updatedBy,
+          source,
+        }, { merge: true });
+      }
+    } catch (e: any) {
+      console.warn("[AppSecurity] Error resetting password in Firestore:", e);
+    }
+
+    // Terminate old sessions for this user so they must login with new password
+    const revoked = this.revokeUserSessions(cleanUser);
+
+    return {
+      success: true,
+      message: `🔑 *Password Reset Successful!*\n\n` +
+        `👤 *User:* \`${cleanUser}\` (${profile.displayName})\n` +
+        `🆕 *New Password:* \`${cleanPass}\`\n` +
+        `🔒 *Security Notice:* User ke ${revoked} active session(s) invalidate kar diye gaye hain. Re-login zaroori hai.`,
+    };
+  }
+
+  /**
+   * Deletes a User Profile. Boss cannot delete the primary 'boss' profile.
+   */
+  public async deleteUserProfile(
+    username: string,
+    deletedBy = "Boss"
+  ): Promise<{ success: boolean; message: string }> {
+    const cleanUser = String(username || "").trim().toLowerCase();
+    if (!cleanUser) return { success: false, message: "⚠️ Username specify karein." };
+    if (cleanUser === "boss") {
+      return { success: false, message: "⛔ *Action Denied:* Primary 'boss' profile ko delete nahi kiya ja sakta." };
+    }
+
+    await this.syncProfilesFromFirestore();
+    if (!this.userProfiles.has(cleanUser)) {
+      return { success: false, message: `❌ User \`${cleanUser}\` exist nahi karta.` };
+    }
+
+    this.userProfiles.delete(cleanUser);
+    try {
+      await db.collection("app_user_profiles").doc(cleanUser).delete();
+    } catch (e: any) {
+      console.warn("[AppSecurity] Error deleting user profile from Firestore:", e);
+    }
+
+    const revoked = this.revokeUserSessions(cleanUser);
+
+    return {
+      success: true,
+      message: `🗑️ *User Profile Deleted!*\n\nUser \`${cleanUser}\` ko permanently delete kar diya gaya hai aur ${revoked} active session(s) terminate ho chuke hain.`,
+    };
+  }
+
+  /**
+   * Lists all registered user profiles.
+   */
+  public async listUserProfiles(): Promise<UserProfile[]> {
+    await this.syncProfilesFromFirestore();
+    return Array.from(this.userProfiles.values());
+  }
+
+  /**
+   * Gets a specific user profile by username.
+   */
+  public async getUserProfile(username: string): Promise<UserProfile | null> {
+    await this.syncProfilesFromFirestore();
+    return this.userProfiles.get(String(username || "").toLowerCase().trim()) || null;
+  }
+
+  /**
+   * Revokes active sessions for a specific username.
+   */
+  public revokeUserSessions(username: string): number {
+    const clean = username.toLowerCase();
+    let count = 0;
+    for (const [sid, sess] of this.activeSessions.entries()) {
+      if ((sess.username || "boss").toLowerCase() === clean) {
+        this.activeSessions.delete(sid);
+        count++;
+      }
+    }
+    if (count > 0) {
+      this.persistActiveSessions().catch(() => {});
+      if (this.broadcastCallback) {
+        this.broadcastCallback({
+          type: "SECURITY_USER_REVOKED",
+          username: clean,
+          timestamp: Date.now(),
+        });
+      }
+    }
+    return count;
+  }
+
+  /**
+   * Dispatches instant login notification to Boss on WhatsApp and Telegram when ANY user logs in.
+   */
+  public async dispatchLoginAlert(
+    profile: UserProfile,
+    clientIp: string,
+    userAgent: string
+  ): Promise<void> {
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: true });
+    const dateStr = now.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" });
+    const parsed = this.parseDeviceName(userAgent);
+
+    const alertMessage =
+`🔐 *FRIDAY LOGIN NOTIFICATION* 🚀
+
+👤 *User:* ${profile.displayName} (\`@${profile.username}\`)
+👑 *Role:* ${profile.role.toUpperCase()}
+📱 *Device:* ${parsed.name}
+🌐 *IP Address:* \`${clientIp}\`
+⏰ *Time:* ${timeStr}, ${dateStr} (IST)
+🛡️ *Status:* Login Successful ✅
+
+💡 *Remotely logout karne ke liye:*
+👉 \`logout all\` ya \`user- ${profile.username}, new pass- <pass>\``;
+
+    console.log(`[AppSecurity] 🚀 User @${profile.username} logged in from IP ${clientIp}. Dispatching instant WhatsApp & Telegram alerts...`);
+
+    // 1. Send to WhatsApp Owner
+    try {
+      const ownerPhone = (
+        process.env.OWNER_WHATSAPP_NUMBER ||
+        process.env.BOSS_WHATSAPP_PHONE ||
+        process.env.WHATSAPP_OWNER_NUMBER ||
+        process.env.WHATSAPP_BOSS_PHONE ||
+        ""
+      ).replace(/\D/g, "");
+      if (ownerPhone) {
+        const { whatsappBotService } = await import("./whatsappBotService");
+        if (whatsappBotService.getStatus().isConnected) {
+          await whatsappBotService.sendMessage(ownerPhone, alertMessage);
+          console.log(`[AppSecurity] Login notification delivered to WhatsApp (+${ownerPhone}).`);
+        } else {
+          const { whatsappCloudService } = await import("./whatsappCloudService");
+          await whatsappCloudService.sendMessage(ownerPhone, alertMessage);
+          console.log(`[AppSecurity] Login notification delivered via WhatsApp Cloud API.`);
+        }
+      }
+    } catch (e) {
+      console.warn("[AppSecurity] WhatsApp login alert dispatch error:", e);
+    }
+
+    // 2. Send to Telegram Owner
+    try {
+      const { telegramBotService } = await import("./telegramBotService");
+      if (telegramBotService.isConfigured) {
+        const chatId = await telegramBotService.getOwnerOrLatestChatId();
+        if (chatId) {
+          await telegramBotService.sendMessage(chatId, alertMessage);
+          console.log(`[AppSecurity] Login notification delivered to Telegram chatId (${chatId}).`);
+        }
+      }
+    } catch (e) {
+      console.warn("[AppSecurity] Telegram login alert dispatch error:", e);
+    }
   }
 
   /**
@@ -662,14 +1016,25 @@ ya
    * 2. Rate limit (max 2 attempts per minute)
    * 3. Failed attempt counting and auto-lockout on 3rd failure
    */
-  public async verifyAppKey(
-    inputKey: string,
+  /**
+   * Verifies user credentials (username and password) against registered User Profiles.
+   * Also supports legacy single-key login if only password/key is supplied.
+   * Enforces:
+   * 1. Block check (3 failed attempts -> auto-lockout with WhatsApp + Telegram alert)
+   * 2. Rate limit (max 2 attempts per minute per IP)
+   * 3. Failed attempt counting and auto-lockout on 3rd failure
+   * 4. INSTANT WhatsApp + Telegram notification to Boss on successful login!
+   */
+  public async verifyUserLogin(
+    usernameInput: string,
+    passwordInput: string,
     clientIp: string = "127.0.0.1",
     userAgent: string = "Unknown Device"
   ): Promise<{
     success: boolean;
     message: string;
     token?: string;
+    user?: { username: string; displayName: string; role: string };
     blocked?: boolean;
     rateLimited?: boolean;
     remainingSeconds?: number;
@@ -698,30 +1063,88 @@ ya
       };
     }
 
-    const raw = String(inputKey || "").trim();
-    if (!raw) {
-      return { success: false, message: "Kripya App Key enter karein." };
+    let cleanUser = String(usernameInput || "").trim().toLowerCase();
+    const cleanPass = String(passwordInput || "").trim();
+
+    if (!cleanPass) {
+      return { success: false, message: "Kripya Password enter karein." };
     }
 
-    const keyData = await this.getAppKeyData();
-    if (!keyData || !keyData.appKey) {
+    await this.syncProfilesFromFirestore();
+
+    // If no username is provided, try finding matching profile by password or check boss
+    if (!cleanUser) {
+      const bossProfile = this.userProfiles.get("boss");
+      const keyData = await this.getAppKeyData();
+      if ((bossProfile && bossProfile.password === cleanPass) || (keyData && keyData.appKey === cleanPass)) {
+        cleanUser = "boss";
+      } else {
+        // Search if any active profile has this password
+        for (const [uname, prof] of this.userProfiles.entries()) {
+          if (prof.isActive && prof.password === cleanPass) {
+            cleanUser = uname;
+            break;
+          }
+        }
+      }
+      if (!cleanUser) {
+        cleanUser = "boss";
+      }
+    }
+
+    const profile = this.userProfiles.get(cleanUser);
+
+    // 3. Verify user profile and password
+    if (profile && profile.isActive && profile.password === cleanPass) {
+      // SUCCESS!
+      this.failedAttempts.delete(cleanIp);
+      this.verifyAttemptTimestamps.delete(cleanIp);
+
+      const { token, sessionId } = this.generateSessionToken(
+        profile.updatedAt,
+        undefined,
+        profile.username,
+        profile.role
+      );
+
+      await this.registerActiveSession(
+        sessionId,
+        cleanIp,
+        userAgent,
+        Date.now(),
+        profile.username,
+        profile.role
+      );
+
+      // Record last login in profile
+      profile.lastLoginAt = Date.now();
+      profile.lastLoginIp = cleanIp;
+      profile.lastLoginDevice = this.parseDeviceName(userAgent).name;
+      db.collection("app_user_profiles").doc(profile.username).set(
+        {
+          lastLoginAt: profile.lastLoginAt,
+          lastLoginIp: profile.lastLoginIp,
+          lastLoginDevice: profile.lastLoginDevice,
+        },
+        { merge: true }
+      ).catch(() => {});
+
+      // Dispatch instant login notification to Boss via WhatsApp & Telegram
+      this.dispatchLoginAlert(profile, cleanIp, userAgent).catch(() => {});
+
       return {
-        success: false,
-        message: "App Access Key abhi Firestore me set nahi hai. WhatsApp ya Telegram par Boss se 'app key <password>' bhej kar set karein.",
+        success: true,
+        token,
+        user: {
+          username: profile.username,
+          displayName: profile.displayName,
+          role: profile.role,
+        },
+        message: `Welcome back, ${profile.displayName}! ✅`,
       };
     }
 
-    // 3. Verify Key
-    if (raw === keyData.appKey) {
-      // SUCCESS -> Reset failed attempts & rate limits
-      this.failedAttempts.delete(cleanIp);
-      this.verifyAttemptTimestamps.delete(cleanIp);
-      const { token, sessionId } = this.generateSessionToken(keyData.updatedAt);
-      await this.registerActiveSession(sessionId, cleanIp, userAgent, Date.now());
-      return { success: true, token, message: "App Access Granted! ✅" };
-    }
-
-    // 4. FAILURE -> Increment failed attempts
+    // 4. FAILURE -> Increment failed attempts for this IP
     const currentFail = this.failedAttempts.get(cleanIp) || { count: 0, lastFailed: 0, userAgent };
     currentFail.count += 1;
     currentFail.lastFailed = Date.now();
@@ -732,7 +1155,11 @@ ya
 
     if (currentFail.count >= this.maxFailedAttempts) {
       // Automatically block IP & trigger instant alerts
-      await this.blockClient(cleanIp, userAgent, "3 consecutive incorrect password attempts");
+      await this.blockClient(
+        cleanIp,
+        userAgent,
+        `3 consecutive incorrect login attempts (Target user: ${cleanUser})`
+      );
       return {
         success: false,
         blocked: true,
@@ -744,8 +1171,28 @@ ya
     return {
       success: false,
       failedAttempts: currentFail.count,
-      message: `Galat App Key! Access Denied ❌ (${attemptsLeft} attempt${attemptsLeft === 1 ? "" : "s"} bache hain)`,
+      message: `Galat Username ya Password! Access Denied ❌ (${attemptsLeft} attempt${attemptsLeft === 1 ? "" : "s"} bache hain)`,
     };
+  }
+
+  /**
+   * Backwards-compatible verifyAppKey that delegates to verifyUserLogin.
+   */
+  public async verifyAppKey(
+    inputKey: string,
+    clientIp: string = "127.0.0.1",
+    userAgent: string = "Unknown Device"
+  ): Promise<{
+    success: boolean;
+    message: string;
+    token?: string;
+    user?: { username: string; displayName: string; role: string };
+    blocked?: boolean;
+    rateLimited?: boolean;
+    remainingSeconds?: number;
+    failedAttempts?: number;
+  }> {
+    return this.verifyUserLogin("", inputKey, clientIp, userAgent);
   }
 
   /**
@@ -925,7 +1372,94 @@ ya
       };
     }
 
-    // 3. App Key Update Command (e.g. "app key - 123456", "app pass 987654", "set app key 1234")
+    // 3. User Password Reset Command (e.g. "user-boss , new pass- 12345", "user- bhai, new pass- 9999", "reset pass bhai 1234")
+    const resetPassPattern = /^(?:user[\s\:\-\=]+([^\s\,]+)[\s\,]+(?:new\s*pass|newpass|reset\s*pass)[\s\:\-\=]+([^\s]+)|(?:reset\s+pass|change\s+pass)\s+(?:for\s+)?([^\s]+)\s+([^\s]+)|user\s+([^\s]+)\s+new\s+pass\s+([^\s]+))/i;
+    const resetPassMatch = trimmed.match(resetPassPattern);
+    if (resetPassMatch) {
+      if (!isOwner) {
+        return {
+          handled: true,
+          replyText: "⛔ *Permission Denied:* Sirf DK Boss (Owner) hi kisi bhi profile ka password reset kar sakte hain.",
+        };
+      }
+      const targetUser = (resetPassMatch[1] || resetPassMatch[3] || resetPassMatch[5]).trim();
+      const newPassword = (resetPassMatch[2] || resetPassMatch[4] || resetPassMatch[6]).trim();
+      const res = await this.resetUserPassword(targetUser, newPassword, senderName, source);
+      return {
+        handled: true,
+        replyText: res.message,
+      };
+    }
+
+    // 4. User Profile Creation / Update Command (e.g. "user- boss , pass- xxxxx", "user- bhai , pass- 12345", "create user bhai pass 12345")
+    const createUserPattern = /^(?:user[\s\:\-\=]+([^\s\,]+)[\s\,]+pass(?:word)?[\s\:\-\=]+([^\s\,]+)(?:[\s\,]+(?:name|display)[\s\:\-\=]+([^\n\r]+))?|(?:create|add|new)\s+user\s+([^\s]+)\s+(?:pass|password)\s+([^\s]+)(?:\s+(?:name|role)\s+([^\n\r]+))?)/i;
+    const createUserMatch = trimmed.match(createUserPattern);
+    if (createUserMatch) {
+      if (!isOwner) {
+        return {
+          handled: true,
+          replyText: "⛔ *Permission Denied:* Sirf DK Boss (Owner) hi naya user profile aur password create kar sakte hain.",
+        };
+      }
+      const targetUser = (createUserMatch[1] || createUserMatch[4]).trim();
+      const targetPass = (createUserMatch[2] || createUserMatch[5]).trim();
+      const rawName = (createUserMatch[3] || createUserMatch[6])?.trim();
+      const res = await this.createUserProfile(targetUser, targetPass, rawName, targetUser.toLowerCase() === "boss" ? "boss" : "member", senderName, source);
+      return {
+        handled: true,
+        replyText: res.message,
+      };
+    }
+
+    // 5. User Profile Delete Command (e.g. "delete user bhai", "remove user bhai", "user delete bhai")
+    const deleteUserPattern = /^(?:delete\s+user|remove\s+user|user\s+delete)[\s\:\-\=]+([^\s]+)/i;
+    const deleteUserMatch = trimmed.match(deleteUserPattern);
+    if (deleteUserMatch) {
+      if (!isOwner) {
+        return {
+          handled: true,
+          replyText: "⛔ *Permission Denied:* Sirf DK Boss (Owner) hi user profile delete kar sakte hain.",
+        };
+      }
+      const targetUser = deleteUserMatch[1].trim();
+      const res = await this.deleteUserProfile(targetUser, senderName);
+      return {
+        handled: true,
+        replyText: res.message,
+      };
+    }
+
+    // 6. List All User Profiles Command (e.g. "all users", "list users", "users list", "profiles")
+    const isListUsers = /^\/?(?:all\s*users|list\s*users|users\s*list|show\s*users|profiles|all\s*profiles)/i.test(trimmed);
+    if (isListUsers) {
+      if (!isOwner) {
+        return {
+          handled: true,
+          replyText: "⛔ *Permission Denied:* Sirf DK Boss (Owner) hi user profiles dekh sakte hain.",
+        };
+      }
+      const profiles = await this.listUserProfiles();
+      if (profiles.length === 0) {
+        return {
+          handled: true,
+          replyText: "👥 *User Profiles (0):*\n\nAbhi koi bhi profiles registered nahi hain. 'boss' profile create karne ke liye type karein:\n👉 `user- boss , pass- <password>`",
+        };
+      }
+
+      const formatted = profiles.map((p, idx) => {
+        const lastLogin = p.lastLoginAt
+          ? new Date(p.lastLoginAt).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: true })
+          : "Never";
+        return `${idx + 1}. ${p.role === "boss" ? "👑" : "👤"} *${p.username}* (${p.displayName})\n   🏷️ Role: \`${p.role.toUpperCase()}\` | Pass: \`${p.password}\`\n   ⏰ Last Login: \`${lastLogin}\`${p.lastLoginDevice ? ` on ${p.lastLoginDevice}` : ""}`;
+      }).join("\n\n");
+
+      return {
+        handled: true,
+        replyText: `👥 *REGISTERED USER PROFILES (${profiles.length})* 🛡️\n\n${formatted}\n\n📝 *Boss Commands:*\n👉 \`user- <name> , pass- <pass>\` (Create / Update)\n👉 \`user- <name> , new pass- <newpass>\` (Reset Password)\n👉 \`delete user <name>\` (Delete Profile)`,
+      };
+    }
+
+    // 7. Legacy App Key Update Command (e.g. "app key - 123456", "app pass 987654", "set app key 1234")
     const keyPattern = /^(?:set\s+)?(?:app\s*key|app\s*pass|app\s*password|access\s*key|app\s*lock)[\s\:\-\=]+([^\s]{1,15})/i;
     const keyMatch = trimmed.match(keyPattern);
 

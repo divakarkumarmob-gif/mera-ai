@@ -92,6 +92,7 @@ async function startServer() {
       reqPath.startsWith("/api/whatsapp/cloud/webhook") ||
       reqPath.startsWith("/api/telegram/webhook") ||
       reqPath.startsWith("/api/exotel/") ||
+      reqPath.startsWith("/api/location/") ||
       reqPath === "/health" ||
       !reqPath.startsWith("/api/")
     ) {
