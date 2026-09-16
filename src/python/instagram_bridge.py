@@ -183,18 +183,57 @@ cl = Client()
 # Increase default timeout to prevent dropping slow requests
 cl.request_timeout = 25
 
-# Force requests transport and verify=False
+# ──────────────────────────────────────────────────────────────────────────
+# FORCE REQUESTS TRANSPORT: Aggressively disable curl_cffi which breaks
+# on Render/datacenter servers with "ConnectionError curl private transport failed"
+# ──────────────────────────────────────────────────────────────────────────
+
+# 1. Block curl_cffi at module level to prevent instagrapi from using it
+try:
+    import sys as _sys
+    # Create a fake curl_cffi module that raises ImportError on use
+    import types
+    _fake_curl = types.ModuleType("curl_cffi")
+    _fake_curl_requests = types.ModuleType("curl_cffi.requests")
+    class _FakeSession:
+        def __init__(self, *a, **kw):
+            raise ImportError("curl_cffi disabled — using requests transport")
+    _fake_curl_requests.Session = _FakeSession
+    _fake_curl.requests = _fake_curl_requests
+    # Only override if curl_cffi is not already working
+    try:
+        import curl_cffi as _test_curl
+        _test_curl.requests.Session()
+    except Exception:
+        _sys.modules["curl_cffi"] = _fake_curl
+        _sys.modules["curl_cffi.requests"] = _fake_curl_requests
+        sys.stderr.write("[InstagrapiBridge] 🔧 curl_cffi blocked — forcing requests transport\n")
+except Exception as _e:
+    sys.stderr.write(f"[InstagrapiBridge] curl_cffi block attempt: {_e}\n")
+
+# 2. Set Client transport attributes
 try:
     cl.private_transport = "requests"
     cl.public_transport = "requests"
 except Exception:
     pass
 
+# 3. Monkeypatch Client._send_private_request to force verify=False
 try:
     if hasattr(cl, "private"):
         cl.private.verify = False
     if hasattr(cl, "public"):
         cl.public.verify = False
+except Exception:
+    pass
+
+# 4. Force the Client to use requests.Session if it has a private session attribute
+try:
+    if hasattr(cl, '_session') or not hasattr(cl, 'private'):
+        import requests as _req
+        cl.private = _req.Session()
+        cl.private.verify = False
+        sys.stderr.write("[InstagrapiBridge] 🔧 Forced cl.private to requests.Session()\n")
 except Exception:
     pass
 
@@ -1199,19 +1238,24 @@ class BridgeHandler(BaseHTTPRequestHandler):
 
                 sys.stderr.write(f"[InstagrapiBridge] Attempting login_by_sessionid for uid={uid}...\n")
 
-                # ── Use instagrapi's built-in login_by_sessionid() ──
-                # This properly: 1) sets cookies, 2) calls init() to rebuild headers,
-                # 3) sets Authorization Bearer header, 4) sets should_use_header_over_cookies=True
-                # 5) verifies session via user_info_v1() instead of fragile account_info()
+                # ── STRATEGY 1: Use instagrapi's built-in login_by_sessionid() ──
+                # This: sets cookies, calls init(), rebuilds headers, verifies via user_info_v1()
+                account_verified = False
+                u_name = f"user_{uid}"
+                f_name = u_name
+                p_pic = None
+
                 try:
                     cl.login_by_sessionid(session_id)
                     account_verified = True
-                    sys.stderr.write(f"[InstagrapiBridge] login_by_sessionid succeeded! username={cl.username}\n")
+                    u_name = getattr(cl, 'username', None) or f"user_{uid}"
+                    f_name = u_name
+                    current_status["pk"] = str(uid)
+                    sys.stderr.write(f"[InstagrapiBridge] ✅ login_by_sessionid succeeded! username={u_name}\n")
                 except Exception as login_err:
                     sys.stderr.write(f"[InstagrapiBridge] login_by_sessionid failed: {login_err}\n")
-                    account_verified = False
 
-                    # Fallback: manual injection for older/broken instagrapi versions
+                    # ── STRATEGY 2: Manual session injection ──
                     sys.stderr.write(f"[InstagrapiBridge] Trying manual session injection fallback...\n")
                     settings = cl.get_settings()
                     if not isinstance(settings, dict):
@@ -1240,47 +1284,59 @@ class BridgeHandler(BaseHTTPRequestHandler):
                     except Exception as hdr_err:
                         sys.stderr.write(f"[InstagrapiBridge] Header update warning: {hdr_err}\n")
 
-                # Get user info
-                u_name = getattr(cl, 'username', None) or f"user_{uid}"
-                f_name = u_name
-                p_pic = None
-
-                if account_verified:
-                    # login_by_sessionid sets cl.username, try to get full info
+                    # Also ensure sessionid cookie is in the private session
                     try:
+                        if hasattr(cl, 'private') and hasattr(cl.private, 'cookies'):
+                            cl.private.cookies.set("sessionid", session_id, domain=".instagram.com")
+                            cl.private.cookies.set("ds_user_id", str(uid), domain=".instagram.com")
+                            sys.stderr.write(f"[InstagrapiBridge] 🍪 Cookies injected into private session\n")
+                    except Exception:
+                        pass
+
+                # ── MULTI-TIER VERIFICATION (avoid account_info which triggers 400 on datacenter IPs) ──
+                if not account_verified:
+                    # Tier 1: Try user_info_v1(uid) — lighter than account_info
+                    try:
+                        sys.stderr.write(f"[InstagrapiBridge] 🔍 Verify Tier 1: user_info_v1({uid})...\n")
+                        time.sleep(random.uniform(1.0, 2.0))
+                        user_info = cl.user_info_v1(int(uid))
+                        u_name = getattr(user_info, 'username', u_name)
+                        f_name = getattr(user_info, 'full_name', u_name) or u_name
+                        p_pic = str(getattr(user_info, 'profile_pic_url', '')) if getattr(user_info, 'profile_pic_url', None) else None
+                        current_status["pk"] = str(uid)
+                        account_verified = True
+                        sys.stderr.write(f"[InstagrapiBridge] ✅ Tier 1 verified: @{u_name}\n")
+                    except Exception as t1_err:
+                        sys.stderr.write(f"[InstagrapiBridge] ⚠️ Tier 1 failed: {t1_err}\n")
+
+                if not account_verified:
+                    # Tier 2: Try direct_threads(amount=1) — lightest API, just checks inbox access
+                    try:
+                        sys.stderr.write(f"[InstagrapiBridge] 🔍 Verify Tier 2: direct_threads(1)...\n")
+                        time.sleep(random.uniform(1.5, 3.0))
+                        threads = cl.direct_threads(amount=1)
+                        account_verified = True
+                        sys.stderr.write(f"[InstagrapiBridge] ✅ Tier 2 verified: DM inbox accessible ({len(threads)} threads)\n")
+                    except Exception as t2_err:
+                        sys.stderr.write(f"[InstagrapiBridge] ⚠️ Tier 2 failed: {t2_err}\n")
+
+                if not account_verified:
+                    # Tier 3 (last resort): Try account_info — most likely to 400 on datacenter
+                    try:
+                        sys.stderr.write(f"[InstagrapiBridge] 🔍 Verify Tier 3 (fallback): account_info()...\n")
+                        time.sleep(random.uniform(2.0, 4.0))
                         info = cl.account_info()
                         u_name = info.username
                         f_name = info.full_name or u_name
                         p_pic = str(info.profile_pic_url) if info.profile_pic_url else None
                         current_status["pk"] = str(info.pk)
-                    except Exception as info_err:
-                        sys.stderr.write(f"[InstagrapiBridge] account_info after login: {info_err} (non-fatal)\n")
-                else:
-                    # Manual fallback — try account_info with retry
-                    for attempt in range(2):
-                        try:
-                            info = cl.account_info()
-                            u_name = info.username
-                            f_name = info.full_name or u_name
-                            p_pic = str(info.profile_pic_url) if info.profile_pic_url else None
-                            current_status["pk"] = str(info.pk)
-                            account_verified = True
-                            break
-                        except Exception as acc_err:
-                            err_str = str(acc_err)
-                            sys.stderr.write(f"[InstagrapiBridge] account_info attempt {attempt+1} failed: {err_str}\n")
-                            if attempt == 0:
-                                time.sleep(2.0)
-                                continue
-                            if "400" in err_str:
-                                current_status["isLoggedIn"] = False
-                                current_status["lastError"] = "Session ID expired or invalid."
-                                self._send_json(401, {
-                                    "ok": False,
-                                    "error": f"Session ID is expired or invalid (Instagram returned 400). Get a fresh session ID from your browser. Error: {err_str}",
-                                    "sessionExpired": True,
-                                })
-                                return
+                        account_verified = True
+                        sys.stderr.write(f"[InstagrapiBridge] ✅ Tier 3 verified: @{u_name}\n")
+                    except Exception as t3_err:
+                        sys.stderr.write(f"[InstagrapiBridge] ⚠️ Tier 3 also failed: {t3_err}\n")
+                        # ── DO NOT REJECT SESSION ── Accept as unverified
+                        # The session may still work for DMs even if account_info is blocked
+                        sys.stderr.write(f"[InstagrapiBridge] 🟡 Accepting session as UNVERIFIED — DM functionality may still work\n")
 
                 if not account_verified:
                     current_status["isLoggedIn"] = True
