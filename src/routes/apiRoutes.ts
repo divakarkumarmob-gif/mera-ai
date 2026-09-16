@@ -1434,6 +1434,12 @@ export function createApiRouter(context: ApiRoutesContext): Router {
     res.json({ ok: result.success, ...result });
   });
 
+  // Deep purge ALL stored Instagram sessions (Firestore, local file, bridge memory)
+  app.post("/api/instagram/purge-sessions", async (_req, res) => {
+    const result = await instagramBotService.purgeAllSessions();
+    res.json({ ok: result.success, ...result });
+  });
+
   app.post("/api/instagram/toggle-auto-reply", (req, res) => {
     const { enabled } = req.body || {};
     if (typeof enabled === "boolean") {

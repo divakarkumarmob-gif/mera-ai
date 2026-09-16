@@ -628,6 +628,26 @@ function InstagramBotCard() {
         }
     };
 
+    const handlePurgeSessions = async () => {
+        if (!confirm('⚠️ Kya aap SABHI purane Instagram sessions delete karna chahte hain?\n\n• Firestore saved session\n• Local cache file\n• Bridge memory session\n\nIske baad naya Session ID daalna padega.')) return;
+        setIsLoading(true);
+        setFeedback({ type: 'info', message: '🗑️ Purane sessions delete ho rahe hain...' });
+        try {
+            const res = await fetch('/api/instagram/purge-sessions', { method: 'POST' });
+            const data = await res.json();
+            if (data.ok) {
+                setFeedback({ type: 'success', message: data.message || 'Sabhi purane sessions delete ho gaye! Naya Session ID enter karein.' });
+            } else {
+                setFeedback({ type: 'error', message: data.message || 'Session purge mein error aaya.' });
+            }
+            await fetchStatus();
+        } catch (err: any) {
+            setFeedback({ type: 'error', message: err?.message || 'Purge request fail hua.' });
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
     const handleToggleAutoReply = async () => {
         if (!status) return;
         try {
@@ -713,12 +733,21 @@ function InstagramBotCard() {
                             </div>
                         </div>
 
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
                             <button
                                 onClick={() => setShowChangeSession(!showChangeSession)}
                                 className="px-2 py-1 rounded-lg bg-pink-500/15 hover:bg-pink-500/25 text-pink-300 border border-pink-500/30 text-[10px] font-semibold transition-colors cursor-pointer"
                             >
                                 {showChangeSession ? 'Close Input' : 'Update Session'}
+                            </button>
+                            <button
+                                onClick={handlePurgeSessions}
+                                disabled={isLoading}
+                                className="px-2 py-1 rounded-lg bg-amber-950/60 hover:bg-amber-900/60 text-amber-300 hover:text-amber-200 border border-amber-500/30 hover:border-amber-400/50 text-[10px] font-semibold transition-all cursor-pointer flex items-center gap-1"
+                                title="Sabhi purane sessions delete karo (Firestore + cache + memory)"
+                            >
+                                <Trash2 className="w-3 h-3" />
+                                <span>Delete Old Session</span>
                             </button>
                             <button
                                 onClick={handleLogout}
@@ -882,6 +911,18 @@ function InstagramBotCard() {
                             )}
                         </button>
                     </form>
+
+                    {/* Delete Old Session Button */}
+                    <button
+                        type="button"
+                        onClick={handlePurgeSessions}
+                        disabled={isLoading}
+                        className="w-full py-2 rounded-xl bg-amber-950/40 hover:bg-amber-900/50 text-amber-300 hover:text-amber-200 font-semibold text-xs border border-amber-500/25 hover:border-amber-400/40 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                        title="Sabhi purane sessions delete karo — Firestore, cache, bridge memory sab saaf"
+                    >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>🗑️ Delete Old Session (Purge All Cache)</span>
+                    </button>
 
                     {/* Step-by-step Help Accordion */}
                     <div className="pt-2 border-t border-white/5 flex flex-col gap-1.5">

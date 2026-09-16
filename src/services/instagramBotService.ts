@@ -488,6 +488,82 @@ class InstagramBotService {
     }
   }
 
+  /**
+   * DEEP PURGE: Aggressively delete ALL stored/cached sessions everywhere.
+   * Use before entering a new session ID to ensure no stale data interferes.
+   * Clears: Firestore, local JSON file, Python bridge memory, in-memory state.
+   */
+  public async purgeAllSessions(): Promise<{ success: boolean; message: string }> {
+    try {
+      console.log("[InstagramBot] 🗑️ DEEP PURGE: Clearing ALL stored Instagram sessions...");
+
+      // 1. Stop any active polling
+      if (this.pollInterval) {
+        clearTimeout(this.pollInterval);
+        this.pollInterval = null;
+      }
+
+      // 2. Clear in-memory state
+      this.isLoggedIn = false;
+      this.currentUsername = null;
+      this.currentFullName = null;
+      this.currentProfilePicUrl = null;
+      this.activeSessionId = null;
+      this.lastError = null;
+      this.pendingTwoFactor = null;
+      this.processedItemIds.clear();
+      this.sleepQueue = [];
+
+      // 3. Logout from Python bridge (clears its in-memory session + last_working_session_id)
+      await this.bridgeCall("/logout", "POST", {}).catch(() => {});
+
+      // 4. Delete from Firestore
+      try {
+        await db.collection("instagram_auth").doc("session").delete();
+        console.log("[InstagramBot] 🗑️ Firestore session deleted.");
+      } catch (e: any) {
+        console.warn("[InstagramBot] Firestore delete warning:", e?.message || e);
+      }
+
+      // 5. Delete local session file
+      try {
+        if (fs.existsSync(LOCAL_SESSION_FILE)) {
+          fs.unlinkSync(LOCAL_SESSION_FILE);
+          console.log("[InstagramBot] 🗑️ Local session file deleted.");
+        }
+      } catch (e: any) {
+        console.warn("[InstagramBot] Local file delete warning:", e?.message || e);
+      }
+
+      // 6. Delete data directory contents (any other cached session files)
+      try {
+        const dataDir = path.dirname(LOCAL_SESSION_FILE);
+        if (fs.existsSync(dataDir)) {
+          const files = fs.readdirSync(dataDir);
+          for (const file of files) {
+            if (file.includes("instagram") || file.includes("session")) {
+              const filePath = path.join(dataDir, file);
+              try { fs.unlinkSync(filePath); } catch {}
+            }
+          }
+          console.log("[InstagramBot] 🗑️ Data directory cleaned.");
+        }
+      } catch {}
+
+      console.log("[InstagramBot] ✅ DEEP PURGE complete! All old sessions destroyed. Ready for new session ID.");
+      return {
+        success: true,
+        message: "Sabhi purane sessions delete ho gaye! Ab naya Session ID enter karein. 🧹✅",
+      };
+    } catch (e: any) {
+      console.error("[InstagramBot] Purge error:", e?.message || e);
+      return {
+        success: false,
+        message: e?.message || "Session purge failed.",
+      };
+    }
+  }
+
   public getStatus(): InstagramStatus {
     const hasEnvCreds = !!(process.env.INSTAGRAM_USERNAME && process.env.INSTAGRAM_PASSWORD);
     const hasSavedSession = !!this.activeSessionId || this.isLoggedIn;
