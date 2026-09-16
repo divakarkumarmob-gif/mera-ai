@@ -224,15 +224,7 @@ class InstagramBotService {
   }
 
   public getActiveSessionId(): string | null {
-    if (this.activeSessionId) return this.activeSessionId;
-    const envSession = (process.env.INSTAGRAM_SESSION_ID || process.env.INSTAGRAM_SESSIONID || process.env.INSTAGRAM_COOKIE || "").trim();
-    if (envSession) {
-      let clean = envSession;
-      if (clean.startsWith("sessionid=")) clean = clean.substring("sessionid=".length).trim();
-      clean = clean.replace(/^["']|["']$/g, "");
-      if (clean) return clean;
-    }
-    return null;
+    return this.activeSessionId || null;
   }
 
   private ensureDataDir() {
@@ -243,7 +235,8 @@ class InstagramBotService {
   }
 
   /**
-   * Initializes session from .env Session ID or Firestore or Local JSON or .env credentials
+   * Initializes session from Firestore or Local JSON cache (dashboard-saved sessions)
+   * No env dependency — session comes only from dashboard login
    */
   public async initSession() {
     try {
@@ -253,55 +246,9 @@ class InstagramBotService {
         return;
       }
 
-      // 1. Priority 1: Check .env INSTAGRAM_SESSION_ID or INSTAGRAM_SESSIONID or INSTAGRAM_COOKIE
-      const envSession = (process.env.INSTAGRAM_SESSION_ID || process.env.INSTAGRAM_SESSIONID || process.env.INSTAGRAM_COOKIE || "").trim();
       const envUser = (process.env.INSTAGRAM_USERNAME || "").trim();
 
-      if (envSession) {
-        console.log("[InstagramBot] Auto-logging in via .env INSTAGRAM_SESSION_ID...");
-
-        // ── CRITICAL: Purge old cached sessions so they don't interfere with new session ID ──
-        // Old Firestore/local sessions contain stale authorization_data that would overwrite
-        // the new session ID if env login fails and fallback kicks in.
-        try {
-          await db.collection("instagram_auth").doc("session").delete().catch(() => {});
-          console.log("[InstagramBot] Cleared old Firestore session cache (new env session takes priority).");
-        } catch {}
-        try {
-          if (fs.existsSync(LOCAL_SESSION_FILE)) {
-            fs.unlinkSync(LOCAL_SESSION_FILE);
-            console.log("[InstagramBot] Cleared old local session cache.");
-          }
-        } catch {}
-
-        const res = await this.loginWithSessionId(envSession, envUser || undefined);
-        if (res.success) {
-          this.lastError = null;
-          return;
-        } else {
-          this.lastError = res.message;
-          console.warn("[InstagramBot] .env session login failed:", res.message);
-          // ── DO NOT fall through to Firestore/local restore when env session is set ──
-          // The user explicitly set a new session ID — restoring old cached session would
-          // overwrite the new one and cause confusion.
-          console.warn("[InstagramBot] Skipping Firestore/local session restore (env session ID is set, old cache already purged).");
-
-          // Still try username/password fallback if available
-          const envPass = (process.env.INSTAGRAM_PASSWORD || "").trim();
-          if (envUser && envPass) {
-            console.log(`[InstagramBot] Trying .env credentials fallback for @${envUser}...`);
-            const credRes = await this.login(envUser, envPass);
-            if (credRes.success) {
-              this.lastError = null;
-            } else {
-              this.lastError = credRes.message;
-            }
-          }
-          return;
-        }
-      }
-
-      // 2. Priority 2: Try restore from Firestore (only when NO env session ID is configured)
+      // 1. Priority 1: Try restore from Firestore (dashboard-saved session)
       const sessionDoc = await db.collection("instagram_auth").doc("session").get().catch(() => null);
       if (sessionDoc && sessionDoc.exists) {
         const data = sessionDoc.data() as any;
@@ -318,7 +265,7 @@ class InstagramBotService {
         }
       }
 
-      // 3. Priority 3: Try restore from Local File
+      // 2. Priority 2: Try restore from Local File
       if (fs.existsSync(LOCAL_SESSION_FILE)) {
         try {
           const raw = fs.readFileSync(LOCAL_SESSION_FILE, "utf-8");
@@ -334,7 +281,7 @@ class InstagramBotService {
         } catch {}
       }
 
-      // 4. Priority 4: Fallback auto-login with .env username/password if provided
+      // 3. Priority 3: Fallback auto-login with .env username/password if provided
       const envPass = (process.env.INSTAGRAM_PASSWORD || "").trim();
       if (envUser && envPass) {
         console.log(`[InstagramBot] Auto-logging in via .env credentials for @${envUser}...`);
@@ -542,8 +489,8 @@ class InstagramBotService {
   }
 
   public getStatus(): InstagramStatus {
-    const hasEnvSession = !!(process.env.INSTAGRAM_SESSION_ID || process.env.INSTAGRAM_SESSIONID || process.env.INSTAGRAM_COOKIE);
     const hasEnvCreds = !!(process.env.INSTAGRAM_USERNAME && process.env.INSTAGRAM_PASSWORD);
+    const hasSavedSession = !!this.activeSessionId || this.isLoggedIn;
 
     return {
       isLoggedIn: this.isLoggedIn,
@@ -555,7 +502,7 @@ class InstagramBotService {
       autoReplyEnabled: this.autoReplyEnabled,
       requiresTwoFactor: !!this.pendingTwoFactor,
       lastError: this.lastError,
-      isEnvConfigured: hasEnvSession || hasEnvCreds,
+      isEnvConfigured: hasSavedSession || hasEnvCreds,
       bridgeRunning: this.isBridgeReady,
     };
   }

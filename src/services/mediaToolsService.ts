@@ -61,7 +61,8 @@ export class MediaToolsService {
     };
 
     if (platform === "Instagram") {
-      const igCookies = customCookies || process.env.INSTAGRAM_COOKIES || (process.env.INSTAGRAM_SESSION_ID ? `sessionid=${process.env.INSTAGRAM_SESSION_ID};` : "");
+      // Session ID comes from dashboard login (instagramBotService), not env
+      const igCookies = customCookies || process.env.INSTAGRAM_COOKIES || "";
       if (igCookies) {
         headers["Cookie"] = igCookies;
       }

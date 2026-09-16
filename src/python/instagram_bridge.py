@@ -574,6 +574,123 @@ current_status = {
     "lastError": None,
 }
 
+# ──────────────────────────────────────────────────────────────────────────
+# AUTO RE-LOGIN: When 400 errors hit (expired session), auto-recover
+# Uses the last working session ID (set by dashboard/login-session/restore)
+# NOT dependent on env vars — works purely from runtime memory
+# ──────────────────────────────────────────────────────────────────────────
+_relogin_in_progress = False
+_last_relogin_attempt: float = 0.0
+_RELOGIN_COOLDOWN_SEC = 120  # Don't retry re-login more than once every 2 min
+_last_working_session_id: str = ""  # Stored when any successful login happens
+
+def set_last_working_session(session_id: str):
+    """Store the last session ID that successfully authenticated."""
+    global _last_working_session_id
+    if session_id:
+        clean = session_id.strip()
+        if clean.startswith("sessionid="):
+            clean = clean[len("sessionid="):].strip()
+        clean = clean.strip("\"'")
+        if clean:
+            _last_working_session_id = clean
+            sys.stderr.write(f"[AutoRelogin] 💾 Last working session ID saved (len={len(clean)}).\n")
+
+def attempt_auto_relogin() -> bool:
+    """Try to re-login using the last working session ID (from dashboard login). No env dependency."""
+    global _relogin_in_progress, _last_relogin_attempt
+
+    # Prevent concurrent re-login and enforce cooldown
+    if _relogin_in_progress:
+        sys.stderr.write("[AutoRelogin] ⏳ Re-login already in progress, skipping...\n")
+        return False
+    now = time.time()
+    if now - _last_relogin_attempt < _RELOGIN_COOLDOWN_SEC:
+        wait_sec = int(_RELOGIN_COOLDOWN_SEC - (now - _last_relogin_attempt))
+        sys.stderr.write(f"[AutoRelogin] ⏳ Re-login cooldown active, retry in {wait_sec}s\n")
+        return False
+
+    # Use last working session ID (from dashboard login), NOT env var
+    clean_sid = _last_working_session_id
+    if not clean_sid:
+        # Last resort: try extracting from current client settings
+        try:
+            settings = cl.get_settings()
+            if isinstance(settings, dict):
+                cookies = settings.get("cookies", {})
+                if isinstance(cookies, dict) and cookies.get("sessionid"):
+                    clean_sid = cookies["sessionid"]
+                    sys.stderr.write("[AutoRelogin] 🔍 Extracted session ID from client settings cookies.\n")
+        except Exception:
+            pass
+
+    if not clean_sid:
+        sys.stderr.write("[AutoRelogin] ❌ No working session ID available. Login via dashboard first.\n")
+        return False
+
+    _relogin_in_progress = True
+    _last_relogin_attempt = time.time()
+
+    try:
+        sys.stderr.write("[AutoRelogin] 🔄 Session expired! Attempting auto re-login with last working session...\n")
+
+        # Try login_by_sessionid
+        try:
+            cl.login_by_sessionid(clean_sid)
+            sys.stderr.write(f"[AutoRelogin] ✅ login_by_sessionid succeeded! username={cl.username}\n")
+            update_logged_in_user()
+            return True
+        except Exception as e1:
+            sys.stderr.write(f"[AutoRelogin] ⚠️ login_by_sessionid failed: {e1}\n")
+
+            # Fallback: manual session injection
+            try:
+                if "%3A" in clean_sid:
+                    uid = clean_sid.split("%3A")[0]
+                elif ":" in clean_sid:
+                    uid = clean_sid.split(":")[0]
+                else:
+                    uid = clean_sid
+
+                settings = cl.get_settings()
+                if not isinstance(settings, dict):
+                    settings = {}
+                settings["cookies"] = {"sessionid": clean_sid}
+                settings["authorization_data"] = {
+                    "sessionid": clean_sid,
+                    "ds_user_id": str(uid),
+                    "should_use_header_over_cookies": True,
+                }
+                cl.set_settings(settings)
+
+                try:
+                    cl.init()
+                except Exception:
+                    pass
+
+                # Verify with account_info
+                info = cl.account_info()
+                update_logged_in_user(info)
+                sys.stderr.write(f"[AutoRelogin] ✅ Manual session injection succeeded for @{info.username}\n")
+                return True
+            except Exception as e2:
+                sys.stderr.write(f"[AutoRelogin] ❌ Manual session injection also failed: {e2}\n")
+                current_status["isLoggedIn"] = False
+                current_status["lastError"] = f"Auto re-login failed: {e2}"
+                return False
+    finally:
+        _relogin_in_progress = False
+
+
+def is_session_expired_error(error: Exception) -> bool:
+    """Check if an exception indicates an expired/invalid session (400 errors)."""
+    err_str = str(error).lower()
+    return any(indicator in err_str for indicator in [
+        "400", "bad request", "login_required", "empty response",
+        "two-factor", "challenge_required", "not authorized",
+        "please wait", "checkpoint_required",
+    ])
+
 def get_status():
     return {
         "ok": True,
@@ -716,7 +833,51 @@ class BridgeHandler(BaseHTTPRequestHandler):
 
                 self._send_json(200, {"ok": True, "threads": threads_data})
             except Exception as e:
-                self._send_json(500, {"ok": False, "error": str(e), "threads": []})
+                err_str = str(e)
+                sys.stderr.write(f"[InstagrapiBridge] ❌ Inbox error: {err_str}\n")
+
+                # ── AUTO-RELOGIN: If 400/session expired, try re-login then retry once ──
+                if is_session_expired_error(e):
+                    sys.stderr.write("[InstagrapiBridge] 🔄 Inbox 400 detected — attempting auto re-login...\n")
+                    if attempt_auto_relogin():
+                        try:
+                            sys.stderr.write("[InstagrapiBridge] 🔄 Re-login succeeded, retrying inbox...\n")
+                            time.sleep(random.uniform(2.0, 4.0))
+                            threads_raw = cl.direct_threads(amount=15)
+                            threads_data = []
+                            for t in threads_raw:
+                                users_list = []
+                                for u in getattr(t, "users", []):
+                                    users_list.append({
+                                        "pk": str(getattr(u, "pk", "")),
+                                        "username": getattr(u, "username", ""),
+                                        "full_name": getattr(u, "full_name", ""),
+                                        "profile_pic_url": str(getattr(u, "profile_pic_url", "")),
+                                    })
+                                messages_list = []
+                                for m in getattr(t, "messages", []):
+                                    messages_list.append({
+                                        "id": str(getattr(m, "id", "")),
+                                        "user_id": str(getattr(m, "user_id", "")),
+                                        "text": getattr(m, "text", "") or "",
+                                        "timestamp": int(getattr(m, "timestamp", 0).timestamp() * 1000) if hasattr(getattr(m, "timestamp", None), "timestamp") else int(getattr(m, "timestamp", 0)),
+                                        "item_type": getattr(m, "item_type", "text"),
+                                    })
+                                threads_data.append({
+                                    "id": str(getattr(t, "id", "")),
+                                    "thread_id": str(getattr(t, "id", "")),
+                                    "title": getattr(t, "thread_title", "") or (users_list[0]["username"] if users_list else "Thread"),
+                                    "users": users_list,
+                                    "messages": messages_list,
+                                    "muted": getattr(t, "muted", False),
+                                    "is_group": getattr(t, "is_group", False),
+                                })
+                            self._send_json(200, {"ok": True, "threads": threads_data, "reloginRecovered": True})
+                            return
+                        except Exception as retry_err:
+                            sys.stderr.write(f"[InstagrapiBridge] ❌ Inbox retry after re-login also failed: {retry_err}\n")
+
+                self._send_json(500, {"ok": False, "error": err_str, "threads": [], "sessionExpired": is_session_expired_error(e)})
             return
 
         if path == "/pending_inbox":
@@ -1003,6 +1164,14 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 # ── ANTI-DETECTION: Warm-up after session restore ──
                 import threading
                 threading.Thread(target=warm_up_session, daemon=True).start()
+                # ── Save session ID for auto-relogin (extract from session settings) ──
+                try:
+                    if isinstance(session_data, dict):
+                        cookies = session_data.get("cookies", {})
+                        if isinstance(cookies, dict) and cookies.get("sessionid"):
+                            set_last_working_session(cookies["sessionid"])
+                except Exception:
+                    pass
                 self._send_json(200, {"ok": True, "message": f"Session restored for @{uname}", "status": get_status()})
             except Exception as e:
                 current_status["isLoggedIn"] = False
@@ -1122,6 +1291,9 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 current_status["username"] = u_name
                 current_status["fullName"] = f_name
                 current_status["lastError"] = None
+
+                # ── Save session ID for auto-relogin (no env dependency) ──
+                set_last_working_session(session_id)
 
                 # ── ANTI-DETECTION: Warm-up after session login (background) ──
                 import threading
@@ -1260,7 +1432,32 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 _last_dm_sent_time = time.time()
                 self._send_json(200, {"ok": True, "message": "Message sent successfully", "result": str(res)})
             except Exception as e:
-                self._send_json(500, {"ok": False, "error": f"Failed to send direct message: {str(e)}"})
+                err_str = str(e)
+                sys.stderr.write(f"[InstagrapiBridge] ❌ DM send error: {err_str}\n")
+
+                # ── AUTO-RELOGIN: If 400/session expired, try re-login then retry DM once ──
+                if is_session_expired_error(e):
+                    sys.stderr.write("[InstagrapiBridge] 🔄 DM send 400 detected — attempting auto re-login...\n")
+                    if attempt_auto_relogin():
+                        try:
+                            sys.stderr.write("[InstagrapiBridge] 🔄 Re-login succeeded, retrying DM send...\n")
+                            time.sleep(random.uniform(2.0, 4.0))
+                            retry_res = None
+                            if thread_id:
+                                retry_res = cl.direct_send(text, thread_ids=[str(thread_id)])
+                            elif recipient:
+                                if recipient.isdigit():
+                                    retry_res = cl.direct_send(text, user_ids=[int(recipient)])
+                                else:
+                                    u_obj = safe_resolve_user(recipient)
+                                    retry_res = cl.direct_send(text, user_ids=[int(u_obj.pk)])
+                            _last_dm_sent_time = time.time()
+                            self._send_json(200, {"ok": True, "message": "Message sent successfully (after re-login)", "result": str(retry_res), "reloginRecovered": True})
+                            return
+                        except Exception as retry_err:
+                            sys.stderr.write(f"[InstagrapiBridge] ❌ DM retry after re-login also failed: {retry_err}\n")
+
+                self._send_json(500, {"ok": False, "error": f"Failed to send direct message: {err_str}", "sessionExpired": is_session_expired_error(e)})
             return
 
         if path == "/like":
