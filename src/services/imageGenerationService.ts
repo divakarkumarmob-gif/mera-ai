@@ -411,7 +411,7 @@ class ImageGenerationService {
    */
   public async generateUncensoredImage(
     prompt: string,
-    options: { aspectRatio?: "1:1" | "16:9" | "9:16" | "4:3" | "3:4" } = {}
+    options: { aspectRatio?: "1:1" | "16:9" | "9:16" | "4:3" | "3:4"; seed?: number } = {}
   ): Promise<GeneratedImageResult> {
     const rawPrompt = (prompt || "").trim();
     if (!rawPrompt) {
@@ -419,11 +419,13 @@ class ImageGenerationService {
     }
     const width = options.aspectRatio === "16:9" ? 1280 : options.aspectRatio === "9:16" ? 720 : 1024;
     const height = options.aspectRatio === "16:9" ? 720 : options.aspectRatio === "9:16" ? 1280 : 1024;
+    // Locked seed = same face every time (face consistency). Random only if not provided.
+    const lockedSeed = typeof options.seed === "number" ? options.seed : Math.floor(Math.random() * 1000000);
 
     // Tier 1: Pollinations Flux (NSFW-capable, safe=false)
     for (const model of ["flux", "turbo"]) {
       try {
-        const seed = Math.floor(Math.random() * 1000000);
+        const seed = lockedSeed;
         const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(rawPrompt)}?width=${width}&height=${height}&seed=${seed}&model=${model}&nologo=true&safe=false&nofilter=true`;
         console.log(`[ImageGen-Uncensored] Trying Pollinations ${model}...`);
         const resp = await Promise.race([

@@ -43,6 +43,11 @@ export interface GirlfriendSession {
   healthTracker?: { issue: string; timestamp: number } | null;
   sessionCount?: number;
   isClingy?: boolean;
+  // Sext-state (Mode B, in-memory per session)
+  tempo?: "slow" | "fast" | null;
+  worship?: { part: string; turnsLeft: number } | null;
+  fight?: { level: number; since: number } | null;
+  afterglowUntil?: number;
 }
 
 export interface ChatPhotoRecord {

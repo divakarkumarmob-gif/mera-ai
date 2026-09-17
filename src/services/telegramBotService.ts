@@ -139,13 +139,30 @@ class TelegramBotService {
   }
 
   public async generateGirlfriendReply(chatId: number, senderName: string, text: string): Promise<string> {
+    // Remember every GF turn for context-aware photo prompts ("photo bhejo" → last 2 msgs)
+    try {
+      const { whatsappGirlfriendEngine: wge } = await import("./whatsapp/whatsappGirlfriendEngine");
+      wge.rememberChatText(String(chatId), text);
+    } catch {}
     const activeProfile = await girlfriendProfileService.getActiveProfile(String(chatId));
-    const prompt = girlfriendProfileService.buildDynamicModeBPrompt(activeProfile, senderName || "Mere Handsome");
+    const prompt = await girlfriendProfileService.getModeBPromptWithMemory(activeProfile, senderName || "Mere Handsome", String(chatId));
+
+    const learnIntimate = (reply: string) => {
+      try {
+        const { whatsappGirlfriendEngine } = require("./whatsapp/whatsappGirlfriendEngine");
+        if (whatsappGirlfriendEngine?.isIntimateMoment?.(text, reply)) {
+          girlfriendProfileService.recordIntimateTurn(String(chatId), text, reply).catch(() => {});
+        }
+      } catch {}
+    };
 
     try {
       const { whatsappGirlfriendEngine } = await import("./whatsapp/whatsappGirlfriendEngine");
       const openReply = await whatsappGirlfriendEngine.queryUncensoredGfEngine(prompt, text, []);
-      if (openReply) return openReply;
+      if (openReply) {
+        learnIntimate(openReply);
+        return openReply;
+      }
     } catch (e) {
       console.warn("[TelegramBot] Girlfriend Open model query failed, falling back to Gemini:", e);
     }
@@ -167,7 +184,10 @@ class TelegramBotService {
               },
             });
             const t = resp.text?.trim();
-            if (t) return t;
+            if (t) {
+              learnIntimate(t);
+              return t;
+            }
           } catch {}
         }
       } catch {}
@@ -2584,6 +2604,27 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
 
     if (chatId && this.isGirlfriendModeActive(chatId)) {
       const { whatsappGirlfriendEngine } = await import("./whatsapp/whatsappGirlfriendEngine");
+      if (whatsappGirlfriendEngine.isStripRequest(text)) {
+        await this.sendChatAction(chatId, "upload_photo");
+        const series = await whatsappGirlfriendEngine.generateGirlfriendStripSeries(text, String(chatId));
+        if (series.length > 0) {
+          for (const item of series) {
+            await this.sendPhoto(chatId, item.buffer, item.caption);
+          }
+          TelegramBotService.recordChatTurn(chatId, "Friday (Girlfriend)", "Strip series bheji (3 photos)");
+          return;
+        }
+      }
+      if (whatsappGirlfriendEngine.isNsfwVideoRequest(text)) {
+        await this.sendChatAction(chatId, "upload_video");
+        const clip = await whatsappGirlfriendEngine.getNsfwVideoClip(text);
+        if (clip && clip.buffer) {
+          await this.sendVideo(chatId, clip.buffer, clip.caption);
+          TelegramBotService.recordChatTurn(chatId, "Friday (Girlfriend)", clip.caption);
+          return;
+        }
+        // Fetch failed → fall through (she'll tease + offer photo instead)
+      }
       if (whatsappGirlfriendEngine.isPhotoOrGiftRequest(text) || whatsappGirlfriendEngine.isNudeOrExplicitImageRequest(text)) {
         await this.sendChatAction(chatId, "upload_photo");
         const photoRes = await whatsappGirlfriendEngine.generateGirlfriendPhotoOrGift(text, String(chatId));
@@ -2597,6 +2638,31 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
       await this.sendChatAction(chatId, "typing");
       const gfReply = await this.generateGirlfriendReply(chatId, senderName, text);
       await this.sendMessage(chatId, gfReply);
+      // Intimate moments: voice note + text BOTH arrive (never text-only here either)
+      try {
+        if (whatsappGirlfriendEngine.isIntimateMoment(text, gfReply)) {
+          const { voiceBridgeService, VoiceBridgeService } = await import("./voiceBridgeService");
+          const speakText = gfReply.replace(/[*_~]/g, "").slice(0, 250).trim();
+          if (speakText) {
+            const speechRes = await voiceBridgeService.generateSpeech(speakText, VoiceBridgeService.FEMALE_VOICE);
+            if (speechRes && speechRes.buffer.length > 0) {
+              await this.sendVoice(chatId, speechRes.buffer, `🔊 "${speakText.slice(0, 80)}"`);
+            }
+          }
+          // Mid-chat auto photo drop at scene peak (~35%, no asking needed)
+          const peakHit = /\b(jhad|climax|aa\s*rah[ai]|nikal\s*do|bhar\s*do|cum|orgasm|HAAAN)\b/i.test(gfReply);
+          if (peakHit && Math.random() < 0.35) {
+            try {
+              const peakPhoto = await whatsappGirlfriendEngine.generateGirlfriendPhotoOrGift("nude photo bed par full body", String(chatId));
+              if (peakPhoto && peakPhoto.buffer) {
+                await this.sendPhoto(chatId, peakPhoto.buffer, "rukho... ye dekho abhi ki photo 🙈🔥");
+              }
+            } catch {}
+          }
+        }
+      } catch (vErr) {
+        console.warn("[TelegramBot] GF intimate voice note failed:", (vErr as any)?.message || vErr);
+      }
       return;
     }
 

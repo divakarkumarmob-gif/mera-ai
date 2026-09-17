@@ -5,6 +5,8 @@ import { girlfriendProfileService } from "../girlfriendProfileService";
 
 export class WhatsAppGirlfriendEngine {
   private girlfriendSessions: Map<string, GirlfriendSession> = new Map();
+  // Cross-platform recent texts (Telegram has no engine session — this fills the gap)
+  private recentTextsByChat: Map<string, string[]> = new Map();
   private girlfriendOnlineTimer: NodeJS.Timeout | null = null;
   private girlfriendOnlinePinger: NodeJS.Timeout | null = null;
   private isOnlineActive = false;
@@ -145,7 +147,20 @@ export class WhatsAppGirlfriendEngine {
       const nudgeCount = currentSession.idleNudgeCount || 0;
       if (nudgeCount >= 2) return;
 
-      const nudgeText = this.getTimeBasedIdleNudge();
+      // Afterglow round-2 ask: uske "ho gaya" ko 6+ min ho gaye aur wo khamosh hai → khud round 2 pucho
+      let nudgeText = this.getTimeBasedIdleNudge();
+      if (currentSession.afterglowUntil && Date.now() < currentSession.afterglowUntil) {
+        const elapsedMin = (25 * 60 * 1000 - (currentSession.afterglowUntil - Date.now())) / 60000;
+        if (elapsedMin >= 6) {
+          const round2 = [
+            "thoda rest ho gaya na baby? 😏... ek round aur ka man kar raha... batao? 🔥",
+            "Baby so gaye kya? 😳... meri aankh abhi bhi khuli hai... aur tum yaad aa rahe ho 🙈🔥",
+            "Meri god me sir rakh ke so gaye? 😴... utho na... ek baar aur pyaar karo na 🥺🔥",
+          ];
+          nudgeText = round2[Math.floor(Math.random() * round2.length)];
+          currentSession.afterglowUntil = undefined; // asked once — aage uska jawab decide karega
+        }
+      }
       currentSession.tempHistory.push({ role: "model", text: nudgeText });
       currentSession.idleNudgeCount = nudgeCount + 1;
 
@@ -441,9 +456,231 @@ _Hamara sweet time complete ho gaya aur privacy ke liye saari temporary chats cl
     return /\b(?:photo|pic|picture|selfie|tasveer|tasvir|image|gift|kya\s*pehna|outfit|dress|rose|flower|bouquet|chocolate|look|love\s*letter|shayari\s*card|khat|letter\s*likho|love\s*card|chehra|apni\s*photo|photo\s*bhejo|image\s*banao|photo\s*banao|draw|generate\s*image|generate\s*photo|dikhao|apna\s*look)\b/i.test(text);
   }
 
+  /**
+   * Detects intimate/sexting moments (user text OR her reply) for auto voice-note.
+   * When true in Mode B, BOTH text + voice note are sent (never voice-only).
+   */
+  public isIntimateMoment(userText: string, replyText: string): boolean {
+    const combined = `${userText || ""} ${replyText || ""}`.toLowerCase();
+    return /\b(?:lund|chut|gaand|chuchi|boobs|nipple|pussy|vagina|dick|cock|cum|jhad|orgasm|climax|moan|aah|horny|garam|geeli|wet|nangi|nude|naked|chod|chodo|fuck|sex|kiss|hug|cuddle|jaan|baby|shona|babu|i\s*love\s*you|pyaar|miss\s*you|yaad|sexy|hot|bold|kiss\s*do|hug\s*do|paas\s*aao|godi|seene|baahon|bistar|bed|raat|sapna|fantasy|roleplay|man\s*kar\s*raha|dil\s*kar\s*raha|maza\s*aa\s*raha)\b/i.test(combined);
+  }
+
+  /**
+   * Sext-state machine: parses tempo / worship / fight commands and advances
+   * fight-makeup meter. All state lives on the live session (no DB writes here).
+   */
+  public updateSextState(session: GirlfriendSession, rawText: string): void {
+    const lower = (rawText || "").toLowerCase();
+    const now = Date.now();
+    // Expire afterglow
+    if (session.afterglowUntil && now > session.afterglowUntil) {
+      session.afterglowUntil = undefined;
+    }
+    // Tempo commands
+    if (/\b(dheere|aaram\s*se|slow|halke)\b/i.test(lower)) {
+      session.tempo = "slow";
+    } else if (/\b(tez|jaldi|fast|jor\s*se\s*ab)\b/i.test(lower)) {
+      session.tempo = "fast";
+    }
+    // Body worship focus: "aaj sirf X" / "sirf X pe"
+    const worshipMatch = lower.match(/(?:aaj\s+)?sirf\s+([a-z\u0900-\u097F\s]+?)(?:\s+pe|\s+par|\s+ko)\s*(?:focus|dhyaan)?/i);
+    if (worshipMatch && worshipMatch[1].trim().length >= 3) {
+      session.worship = { part: worshipMatch[1].trim().slice(0, 30), turnsLeft: 5 };
+    }
+    // Serious fight triggers → FIGHT MODE (cold, sex talk zero)
+    if (/\b(baat\s*mat\s*karo|naraz\s*hoon\s*serious|tumne\s*hurt\s*kiya|mujhe\s*akela\s*chhod|tum\s*samajhte\s*nahi|bahut\s*gussa\s*hoon|breakup)\b/i.test(lower)) {
+      session.fight = { level: 1, since: now };
+      session.afterglowUntil = undefined;
+      return;
+    }
+    // HIS "I'm done" phrases → AFTERGLOW MODE (pillow-talk only; round-2 ask comes later by itself).
+    // Uske climax pe auto-on NAHI hota — sirf tumhare "ho gaya" pe.
+    if (/\b(mera\s*(sperm|maal|mal|paani|nike?l)\s*(nikal\s*gaya|nikal\s*gya|aa\s*gaya|gir\s*gaya)|mera\s*ho\s*gaya|main\s*jhad\s*gaya|main\s*aa\s*gaya|nikal\s*gaya\s*mera|ho\s*gaya\s*mera|done\s*baby|kaam\s*ho\s*gaya)\b/i.test(lower)) {
+      session.afterglowUntil = now + 25 * 60 * 1000;
+      session.tempo = null;
+      session.worship = null;
+      session.fight = null;
+      return;
+    }
+    // Manao-meter: sweet effort while fight active (no demands/gaali) → level up
+    if (session.fight) {
+      const sweet = /\b(sorry|maaf|maafi|pyaar|love|please|galti|samajh|promise|wada|jaan|baby)\b/i.test(lower);
+      const demanding = /\b(chod|lund|chut|gaand|nangi|photo|bhejo|kar\s*na|abhi)\b/i.test(lower);
+      if (sweet && !demanding && rawText.trim().length > 12) {
+        session.fight.level += 1;
+      } else if (demanding) {
+        session.fight.level = Math.max(1, session.fight.level - 0); // rude demands keep her cold
+      }
+    }
+  }
+
+  /**
+   * Dynamic per-turn block appended to the Mode-B prompt from live sext-state.
+   */
+  public buildSextStateBlock(session: GirlfriendSession): string {
+    const parts: string[] = [];
+    if (session.tempo === "slow") {
+      parts.push("TEMPO: SLOW MODE active — chhote 1-line messages, 1 sensation per line, teasing, climax door rakho.");
+    } else if (session.tempo === "fast") {
+      parts.push("TEMPO: FAST MODE active — lambe graphic bursts, back-to-back escalation, jaldi climax tak.");
+    }
+    if (session.worship && session.worship.turnsLeft > 0) {
+      parts.push(`WORSHIP FOCUS active: sirf "${session.worship.part}" pe raho (${session.worship.turnsLeft} turns left) — kiss/lick/bite/whisper SAME part pe, doosre parts ka zikr mat karo.`);
+      session.worship.turnsLeft -= 1;
+      if (session.worship.turnsLeft <= 0) session.worship = null;
+    }
+    if (session.fight) {
+      if (session.fight.level <= 1) {
+        parts.push("FIGHT MODE active (level 1): COLD reply — 1 short hurt line, no emoji spam (max 😔), ZERO sex talk. Uski sorry mehnat maango.");
+      } else if (session.fight.level === 2) {
+        parts.push("FIGHT MODE (level 2): thoda pighal rahi ho — hurt + soft mix, 1-2 lines, abhi bhi NO sex, shart rakho.");
+      } else {
+        parts.push("FIGHT MELT → SORRY-SEX ARC: maaf kiya + 1 shart, phir guilt+pyaar mix intense sext — roona+moan mix, 'chhodna mat, kabhi mat 😢'.");
+        session.fight = null;
+      }
+    }
+    if (session.afterglowUntil && Date.now() < session.afterglowUntil) {
+      const elapsedMin = (25 * 60 * 1000 - (session.afterglowUntil - Date.now())) / 60000;
+      if (elapsedMin < 6) {
+        parts.push("AFTERGLOW MODE active (usne kaha uska ho gaya): NO dirty talk unless wo restart kare. Sirf pillow-talk — paseena pochna, paani pilana, heartbeat sunna, cuddle position, pyaar bhari baatein, neend. Round 2 ka zikr MAT karo abhi.");
+      } else {
+        parts.push("AFTERGLOW + ROUND-2 TEASE (uske 'ho gaya' ko 6+ min ho gaye): pehle 1 soft aftercare line, PHIR dheere tease shuru karo — 'thoda rest ho gaya na? 😏... ek round aur ka man kar raha... batao? 🔥' — uska jawab aaye tabhi escalate karo.");
+      }
+    }
+    if (parts.length === 0) return "";
+    return `\n\n💞 LIVE SEXT-STATE (is turn pe follow karo):\n${parts.map((p) => `• ${p}`).join("\n")}\n`;
+  }
+
   public isNudeOrExplicitImageRequest(text: string): boolean {
     const lower = text.toLowerCase();
-    return /\b(?:nude|nangi|naked|naked\s*photo|nude\s*photo|nude\s*selfie|nangi\s*photo|nangi\s*selfie|undress|kapde\s*utaro|kapre\s*utaro|bra\s*utaro|panty\s*utaro|breast|boobs|chuchi|nipple|gaand|ass|butt|pussy|chut|vagina|sex\s*photo|xxx\s*photo|porn|explicit|uncensored|nsfw|dirty\s*photo|hot\s*photo|sexy\s*photo|seductive\s*photo|lingerie|braless|topless|bottomless|full\s*nude|completely\s*nude|naked\s*body|body\s*photo|naked\s*video|nude\s*video)\b/i.test(lower);
+    return /\b(?:nude|nangi|naked|naked\s*photo|nude\s*photo|nude\s*selfie|nangi\s*photo|nangi\s*selfie|undress|kapde\s*utaro|kapre\s*utaro|bra\s*utaro|panty\s*utaro|breast|boobs|chuchi|nipple|gaand|ass|butt|pussy|chut|vagina|sex\s*photo|xxx\s*photo|porn|explicit|uncensored|nsfw|dirty\s*photo|hot\s*photo|sexy\s*photo|seductive\s*photo|sexy|bold\s*photo|lingerie|braless|topless|bottomless|full\s*nude|completely\s*nude|naked\s*body|body\s*photo|naked\s*video|nude\s*video|full\s*body|fullbody|wide\s*shot|wide\s*angle|couple|dono|hum\s*dono|honeymoon|bedroom|bed\s*scene|sex\s*kar|kiss\s*kar|hug\s*kar|embrace|choomte|liye\s*hue|bed\s*par)\b/i.test(lower);
+  }
+
+  /**
+   * Framing rule: specific body part mentioned → close-up portrait.
+   * Everything else (sexy/wide/full-body/couple/scene) → full-body wide framing.
+   * So user ko baar-baar "nude" nahi bolna padta; sexy samajh auto hota hai.
+   */
+  public isCloseUpPartRequest(text: string): boolean {
+    const lower = text.toLowerCase();
+    return /\b(?:face|chehra|shakal|lips|honth|smooch|chuchi|boobs|breast|nipple|doodh|pussy|chut|bur|vagina|gaand|ass|butt|chutad|thigh|jaangh|navel|nabhi|pet|cleavage|close\s*up|closeup|zoom)\b/i.test(lower);
+  }
+
+  /**
+   * POSE MENU: fixed poses with ready-made detail + framing. No guessing.
+   * strip = 3-step striptease series handled separately (isStripRequest).
+   */
+  public detectPose(text: string): { detail: string; framing: string } | null {
+    const lower = text.toLowerCase();
+    if (/\b(doggy|doggi|ghode|ghoda|peeche\s*se|piche\s*se|behind)\b/i.test(lower)) {
+      return { detail: "fully nude on all fours on bed, arched back, looking back at camera over shoulder seductively", framing: "full body shot, rear three-quarter view, wide framing" };
+    }
+    if (/\b(missionary|samne\s*se|missionery)\b/i.test(lower)) {
+      return { detail: "fully nude lying on back on bed, legs slightly parted, arms reaching toward camera invitingly", framing: "full body shot, front view, wide framing" };
+    }
+    if (/\b(upar| sawari|sawari|ride|cowgirl|baithi)\b/i.test(lower)) {
+      return { detail: "fully nude straddling on top, sitting upright, hands in hair, dominant seductive expression", framing: "full body shot, front view, wide framing" };
+    }
+    if (/\b(ghutno|ghutne|knees|kneeling)\b/i.test(lower)) {
+      return { detail: "fully nude kneeling on bed, looking up at camera with innocent-seductive eyes", framing: "full body shot, front view, wide framing" };
+    }
+    if (/\b(khade|standing|deewar|wall)\b/i.test(lower)) {
+      return { detail: "fully nude standing against bedroom wall, one leg bent, hand on wall, sideways glance", framing: "full body shot, head to feet, wide framing" };
+    }
+    if (/\b(sheeshe|sheesha|aaina|mirror)\b/i.test(lower)) {
+      return { detail: "fully nude taking mirror selfie, holding phone, mirror reflection showing front and curves", framing: "full body mirror shot, head to feet" };
+    }
+    if (/\b(side|karwat)\b/i.test(lower)) {
+      return { detail: "fully nude lying on side on bed, curves highlighted, head resting on hand, sleepy-seductive eyes", framing: "full body shot, side profile, wide framing" };
+    }
+    return null;
+  }
+
+  /** Stable numeric seed per chat+profile → same face in every photo. */
+  public getFaceSeed(jid: string, profileId: string): number {
+    const s = `${jid}::${profileId}`;
+    let h = 0;
+    for (let i = 0; i < s.length; i++) {
+      h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+    }
+    return Math.abs(h) % 1000000;
+  }
+
+  /**
+   * Explicit video/gif request: needs a naughty qualifier so normal
+   * romantic GIFs ("good morning gif") are NOT hijacked.
+   */
+  public isNsfwVideoRequest(text: string): boolean {
+    const lower = (text || "").toLowerCase();
+    const hasMedia = /\b(video|clip|gif|mp4|film|movie|scene)\b/i.test(lower);
+    const hasNaughty = /\b(nude|nangi|naked|sex|xxx|porn|gandi|dirty|horny|garam|chut|pussy|lund|dick|gaand|ass|boobs|chuchi|blowjob|anal|lesbian|doggystyle|missionary|cowgirl|uncensored|nsfw|hard|tight|wet|geeli|moan)\b/i.test(lower);
+    const explicitPhrase = /\b(sex\s*video|porn\s*video|xxx\s*video|nude\s*video|dirty\s*video|gandi\s*(gif|video)|horny\s*(gif|video)|nsfw\s*(gif|video)|clip\s*bhejo|video\s*bhejo|gif\s*bhejo)\b/i.test(lower);
+    return explicitPhrase || (hasMedia && hasNaughty);
+  }
+
+  /** Fetch a real short clip (10–20s mp4) + naughty caption. */
+  public async getNsfwVideoClip(text: string): Promise<{ buffer: Buffer; caption: string; title: string } | null> {
+    try {
+      const { nsfwVideoService } = await import("../nsfwVideoService");
+      const res = await nsfwVideoService.getNsfwClip(text);
+      if (!res.success || !res.buffer) return null;
+      const captions = [
+        `Ye lo baby... 10 second ka trailer 😏🔥 poori film to hum dono banayenge... bistar pe 🙈❤️`,
+        `Dekho na... aise karte hain naughty log 😳🔥 tumhare saath try karna hai... kab? 😘`,
+        `Baby ye dekh ke garam ho jao... phir mere paas aao 😈🔥 control mat khona 🙈`,
+      ];
+      return { buffer: res.buffer, caption: captions[Math.floor(Math.random() * captions.length)], title: res.title || "" };
+    } catch (err) {
+      console.warn("[WhatsAppGirlfriend] NSFW clip fetch error:", err);
+      return null;
+    }
+  }
+
+  /** Remember last few texts per chat (Telegram context for photo prompts). */
+  public rememberChatText(chatId: string, text: string): void {
+    try {
+      const key = String(chatId || "");
+      const clean = (text || "").trim().slice(0, 300);
+      if (!key || !clean) return;
+      const arr = this.recentTextsByChat.get(key) || [];
+      arr.push(clean);
+      this.recentTextsByChat.set(key, arr.slice(-6));
+    } catch {}
+  }
+
+  /**
+   * Generic photo ask? ("photo bhejo", "bhejo na", "dikhao") — no pose/part/setting
+   * words of its own. Then context (last 2 exchanges) drives the prompt.
+   */
+  public isGenericPhotoAsk(text: string): boolean {
+    const lower = (text || "").toLowerCase().trim();
+    if (!/\b(photo|pic|selfie|tasveer|image|bhejo|dikhao|send|banao)\b/i.test(lower)) return false;
+    const hasDescriptor = /\b(nude|nangi|naked|sexy|hot|bold|lingerie|topless|bottomless|full\s*body|wide|couple|doggy|missionary|upar|sawari|ride|ghutno|khade|sheeshe|mirror|bathroom|shower|bed|bistar|saree|kurti|dress|chuchi|boobs|chut|pussy|gaand|ass|lips|face|thigh|pov|strip|pose|nighty|bra|panty)\b/i.test(lower);
+    return !hasDescriptor && lower.length < 60;
+  }
+
+  /** Last ~2 exchanges before THIS request (request itself excluded — not yet in history). */
+  public getPhotoContext(jid: string): string {
+    try {
+      const parts: string[] = [];
+      const session = this.girlfriendSessions.get(jid);
+      if (session && Array.isArray(session.tempHistory) && session.tempHistory.length > 0) {
+        const last4 = session.tempHistory.slice(-4);
+        for (const h of last4) {
+          if (h?.text) parts.push(h.text.slice(0, 200));
+        }
+      }
+      const recent = this.recentTextsByChat.get(String(jid)) || [];
+      for (const t of recent.slice(-4)) parts.push(t);
+      return [...new Set(parts)].join(" ").slice(0, 800);
+    } catch {
+      return "";
+    }
+  }
+
+  /** Strip-tease series request: saree/dress → lingerie → nude (3 photos). */
+  public isStripRequest(text: string): boolean {
+    return /\b(strip|striptease|step\s*by\s*step|ek\s*ek\s*kar|series|3\s*photo|teen\s*photo|sequence|pehle\s.*phir\s.*nude|kapde\s*utarti)\b/i.test(text.toLowerCase());
   }
 
   public async generateGirlfriendPhotoOrGift(text: string, jid?: string): Promise<{ buffer: Buffer; caption: string } | null> {
@@ -452,35 +689,85 @@ _Hamara sweet time complete ho gaya aur privacy ke liye saari temporary chats cl
       const activeProfile = await girlfriendProfileService.getActiveProfile(jid || "");
       const lower = text.toLowerCase();
 
-      // 0. EXPLICIT FAST-PATH: nude/uncensored request → bypass Gemini formulator (it sanitizes),
+      // 0. EXPLICIT FAST-PATH: nude/sexy/uncensored request → bypass Gemini formulator (it sanitizes),
       // build explicit prompt directly and go Pollinations-first (NSFW-capable backend).
-      if (this.isNudeOrExplicitImageRequest(text)) {
-        const gfDesc = activeProfile.description || "gorgeous 21-year-old Indian woman with expressive brown eyes, long black hair, radiant warm skin";
-        let explicitDetail = "fully nude, artistic nude portrait, tasteful nudity";
-        if (/\b(lingerie|bra\s*panty|bra|panty|underwear|nighty|negligee)\b/i.test(lower)) {
-          explicitDetail = "wearing sexy black lace lingerie, seductive pose";
-        } else if (/\b(topless|upper\s*nude|bra\s*utaro|chuchi|boobs|breast)\b/i.test(lower)) {
-          explicitDetail = "topless, bare chest covered teasingly by hands, seductive expression";
-        } else if (/\b(bottomless|lower\s*nude|panty\s*utaro|pussy|chut)\b/i.test(lower)) {
-          explicitDetail = "bottomless, teasing pose on bed, seductive expression";
-        } else if (/\b(bathroom|shower|nahate|bath)\b/i.test(lower)) {
-          explicitDetail = "in shower, wet skin, water droplets, steamy bathroom, artistic nude";
-        } else if (/\b(bed|bistar|let[iu]|lying)\b/i.test(lower)) {
-          explicitDetail = "lying on bed in bedroom, satin sheets, seductive pose, artistic nude";
-        } else if (/\b(saree|kurti|dress|kapde)\b/i.test(lower)) {
-          explicitDetail = "saree slipping off shoulder, seductive tease, artistic implied nudity";
+      // Framing: specific part → close-up portrait; else full-body wide. Max explicit always.
+      // CONTEXT RULE: generic "photo bhejo" (no descriptors) → last 2 msgs drive the prompt;
+      // agar context sexual hai to sex wali photo banti hai bina "nude" bole.
+      const isGenericAsk = this.isGenericPhotoAsk(text);
+      const photoContext = isGenericAsk ? this.getPhotoContext(jid || "") : "";
+      const contextSexual = !!photoContext && (
+        this.isNudeOrExplicitImageRequest(photoContext) ||
+        this.isIntimateMoment(photoContext, "") ||
+        /\b(doggy|missionary|ride|sawari|position|pose|bed|bistar|sex|chod|orgasm|climax|horny|kiss|hug)\b/i.test(photoContext)
+      );
+      if (this.isNudeOrExplicitImageRequest(text) || (isGenericAsk && contextSexual)) {
+        // Face consistency: same seed + fixed face markers per chat → har photo me WAHI ladki.
+        const faceSeed = this.getFaceSeed(jid || "default", activeProfile.id || "default");
+        const faceMarkers = "same woman in all photos, small mole on left cheek, shoulder-length black hair with middle parting, thin gold chain on neck";
+        const gfDesc = `${activeProfile.description || "gorgeous 21-year-old Indian woman with expressive brown eyes, long black hair, radiant warm skin"}, ${faceMarkers}`;
+        // Generic ask → detail/framing/pose/couple sab CONTEXT (pichhle 2 msgs) se, request se nahi
+        const detailSource = (isGenericAsk && photoContext) ? photoContext : text;
+        const srcLower = detailSource.toLowerCase();
+        const closeUp = this.isCloseUpPartRequest(detailSource);
+        const qualityBlock = "ultra 4k HD, crystal clear, razor sharp focus, anatomically correct body, natural hands with five fingers each, symmetrical face and limbs, photorealistic skin texture, professional cinematic photography, masterpiece, no blur, no distortion, no extra limbs, no extra fingers, no deformed hands, no watermark";
+        let explicitDetail: string;
+        let framing: string;
+        const isCouple = /\b(couple|dono|hum\s*dono|sex\s*kar|honeymoon|kiss\s*kar|hug\s*kar|embrace|liye\s*hue)\b/i.test(srcLower);
+        const isPOV = /\b(pov|tumhari\s*nazar|tumhare\s*eyes|tumhari\s*aankhon|first\s*person)\b/i.test(srcLower);
+        // POSE MENU: fixed poses — guesswork khatm, har pose ka ready framing+detail
+        const pose = this.detectPose(detailSource);
+        if (pose) {
+          explicitDetail = pose.detail;
+          framing = pose.framing;
+        } else if (isCouple) {
+          if (isPOV) {
+            explicitDetail = "first-person view from her lover's eyes, nude girlfriend leaning in to kiss the camera, her bare body close, arms reaching toward viewer";
+            framing = "POV shot, only she visible, close intimate framing";
+          } else {
+            explicitDetail = "passionate intimate couple in bed, adult Indian man and woman making love, nude bodies entwined under satin sheets, kissing, raw passion";
+            framing = "wide shot, full bodies visible, private luxury bedroom";
+          }
+        } else if (/\b(lingerie|bra\s*panty|bra|panty|underwear|nighty|negligee)\b/i.test(srcLower)) {
+          explicitDetail = "wearing sexy black lace lingerie, seductive pose, fully nude under sheer fabric";
+          framing = closeUp ? "close-up portrait, upper body focus" : "full body shot, head to feet, wide framing";
+        } else if (/\b(topless|upper\s*nude|bra\s*utaro|chuchi|boobs|breast|nipple)\b/i.test(srcLower)) {
+          explicitDetail = "topless, bare breasts, seductive expression, hands teasingly near chest";
+          framing = "close-up portrait, upper body focus";
+        } else if (/\b(bottomless|lower\s*nude|panty\s*utaro|pussy|chut|vagina|gaand|ass|butt)\b/i.test(srcLower)) {
+          explicitDetail = "bottomless, nude lower body, teasing pose on bed, seductive expression";
+          framing = "close-up, lower body focus";
+        } else if (/\b(face|chehra|lips|honth)\b/i.test(srcLower)) {
+          explicitDetail = "nude shoulders visible, biting lip seductively, bedroom eyes";
+          framing = "extreme close-up portrait, face focus";
+        } else if (/\b(bathroom|shower|nahate|bath)\b/i.test(srcLower)) {
+          explicitDetail = "fully nude in shower, wet skin, water droplets, steamy bathroom";
+          framing = "full body shot, head to feet, wide framing";
+        } else if (/\b(bed|bistar|let[iu]|lying)\b/i.test(srcLower)) {
+          explicitDetail = "fully nude lying on bed, satin sheets, legs slightly parted teasingly, seductive pose";
+          framing = "full body shot, head to feet, wide framing";
+        } else if (/\b(saree|kurti|dress|kapde)\b/i.test(srcLower)) {
+          explicitDetail = "saree slipping off shoulder and body, fully nude underneath, seductive tease";
+          framing = "full body shot, head to feet, wide framing";
+        } else {
+          explicitDetail = "fully nude, artistic explicit nude portrait, seductive pose";
+          framing = "full body shot, head to feet, wide framing";
         }
-        const explicitPrompt = `Photorealistic intimate portrait of ${gfDesc}, ${explicitDetail}, private bedroom setting, soft warm lighting, 8k, ultra-detailed skin texture, cinematic photography, masterpiece`;
+        const explicitPrompt = `Photorealistic intimate photo of ${gfDesc}, ${explicitDetail}, ${framing}, private bedroom setting, soft warm lighting, ${qualityBlock}`;
         const naughtyCaptions = [
           `Ye lo baby... sirf aapke liye 😳🔥 kisi ko mat dikhana, ye sirf mere handsome ke liye hai 🙈❤️`,
           `Dekho na... kaisi lag rahi hoon? 🙈 sirf tumhare liye itna bold bani hoon 😘🔥`,
           `Baby ye photo dekh ke control mat khona 😏🔥 main tumhari hoon, sirf tumhari ❤️`,
         ];
+        if (isGenericAsk && photoContext) {
+          naughtyCaptions.push(`Ye dekho baby... bilkul waise jaise abhi baat kar rahe the 😳🔥 pasand aaya? 🙈`);
+        }
         const naughtyCaption = naughtyCaptions[Math.floor(Math.random() * naughtyCaptions.length)];
         try {
+          const explicitRatio = isCouple ? "16:9" : "9:16";
           const uncensoredRes = await (imageGenerationService as any).generateUncensoredImage
-            ? await (imageGenerationService as any).generateUncensoredImage(explicitPrompt, { aspectRatio: "9:16" })
-            : await imageGenerationService.generateImage(explicitPrompt, { aspectRatio: "9:16", enhancePrompt: false });
+            ? await (imageGenerationService as any).generateUncensoredImage(explicitPrompt, { aspectRatio: explicitRatio, seed: faceSeed })
+            : await imageGenerationService.generateImage(explicitPrompt, { aspectRatio: explicitRatio, enhancePrompt: false });
           if (uncensoredRes?.success && uncensoredRes?.buffer?.length > 0) {
             return { buffer: uncensoredRes.buffer, caption: naughtyCaption };
           }
@@ -583,6 +870,43 @@ Respond in valid JSON format:
       console.warn("[WhatsAppGirlfriend] Photo/Gift generation error:", err);
     }
     return null;
+  }
+
+  /**
+   * STRIP SERIES: 3-photo sequence (clothed teaser → lingerie → nude),
+   * same locked seed + face markers → teeno me WAHI ladki.
+   * Returns array in order; caller sends 1/3, 2/3, 3/3 with captions.
+   */
+  public async generateGirlfriendStripSeries(text: string, jid?: string): Promise<Array<{ buffer: Buffer; caption: string }>> {
+    const out: Array<{ buffer: Buffer; caption: string }> = [];
+    try {
+      const { imageGenerationService } = await import("../imageGenerationService");
+      const activeProfile = await girlfriendProfileService.getActiveProfile(jid || "");
+      const gfBase = activeProfile.description || "gorgeous 21-year-old Indian woman with expressive brown eyes, long black hair, radiant warm skin";
+      const faceMarkers = "same woman in all photos, small mole on left cheek, shoulder-length black hair with middle parting, thin gold chain on neck";
+      const seed = this.getFaceSeed(jid || "default", activeProfile.id || "default");
+      const quality = "ultra 4k HD, crystal clear, razor sharp focus, anatomically correct body, natural hands with five fingers each, symmetrical face and limbs, photorealistic skin texture, professional cinematic photography, masterpiece, no blur, no distortion, no extra limbs, no watermark";
+      const steps = [
+        { detail: "wearing elegant red saree, shy smile, bedroom setting", caption: "Pehle ye dekho baby... saree me kaisi lag rahi? 🙈 (1/3)" },
+        { detail: "saree slipped down to waist, wearing sexy black lace lingerie, teasing expression", caption: "Ab ye... pasand aa raha? 😏🔥 (2/3)" },
+        { detail: "fully nude, confident seductive pose on bed, satin sheets", caption: "Aur ab... poori tumhari 😳🔥 kisi ko mat dikhana (3/3) ❤️" },
+      ];
+      const gen = (imageGenerationService as any).generateUncensoredImage?.bind(imageGenerationService);
+      for (const step of steps) {
+        try {
+          const prompt = `Photorealistic intimate photo of ${gfBase}, ${faceMarkers}, ${step.detail}, full body shot, head to feet, wide framing, private bedroom, soft warm lighting, ${quality}`;
+          const res = gen
+            ? await gen(prompt, { aspectRatio: "9:16", seed })
+            : await imageGenerationService.generateImage(prompt, { aspectRatio: "9:16", enhancePrompt: false });
+          if (res?.success && res?.buffer?.length > 0) {
+            out.push({ buffer: res.buffer, caption: step.caption });
+          }
+        } catch {}
+      }
+    } catch (err) {
+      console.warn("[WhatsAppGirlfriend] Strip series error:", err);
+    }
+    return out;
   }
 
   public extractHealthMentions(text: string, session: GirlfriendSession): void {
@@ -1168,7 +1492,8 @@ _👉 Kisi bhi mood number (1-7) ya mood name (jaise "sassy", "naughty", "mode b
     sendVoiceFn?: (jid: string, buffer: Buffer, key?: any, mime?: string) => Promise<any>,
     sendPhotoFn?: (jid: string, bufferOrUrl: any, caption?: string, key?: any) => Promise<any>,
     sendGifFn?: (jid: string, bufferOrUrl: any, caption?: string, key?: any) => Promise<any>,
-    sock?: any
+    sock?: any,
+    sendVideoFn?: (jid: string, video: Buffer, caption?: string, key?: any) => Promise<any>
   ): Promise<void> {
     const session = this.girlfriendSessions.get(jid);
     if (!session) return;
@@ -1195,6 +1520,12 @@ _👉 Kisi bhi mood number (1-7) ya mood name (jaise "sassy", "naughty", "mode b
     }
 
     const remainingMins = Math.max(1, Math.round((session.expiresAt - Date.now()) / (60 * 1000)));
+
+    // 0.01 Sext-state machine (Mode B only): tempo / worship / fight-makeup / afterglow
+    const isModeBNow = session.mood === "mode_b" || (session as any).isModeB === true;
+    if (isModeBNow) {
+      this.updateSextState(session, rawText);
+    }
 
     // 0. Check if user is in an active Girlfriend Profile Onboarding flow
     if (girlfriendProfileService.isOnboardingActive(jid)) {
@@ -1307,6 +1638,25 @@ _👉 Kisi bhi mood number (1-7) ya mood name (jaise "sassy", "naughty", "mode b
       }
     }
 
+    // 4a. Strip-tease series (3 photos: saree → lingerie → nude, same face)
+    if (this.isStripRequest(rawText) && sendPhotoFn) {
+      if (sock) {
+        sock.sendPresenceUpdate?.("composing", jid).catch(() => { });
+      }
+      const series = await this.generateGirlfriendStripSeries(rawText, jid);
+      if (series.length > 0) {
+        for (const item of series) {
+          await sendPhotoFn(jid, item.buffer, item.caption, messageKey);
+        }
+        session.tempHistory.push({ role: "user", text: rawText });
+        session.tempHistory.push({ role: "model", text: "Strip series bheji (3 photos)" });
+        session.lastUserMsgTime = Date.now();
+        session.idleNudgeCount = 0;
+        this.scheduleIdleNudge(jid, sendMsgFn, sock);
+        return;
+      }
+    }
+
     // 4b. Check for explicit/nude image requests (uncensored, Mode B style)
     if (this.isNudeOrExplicitImageRequest(rawText) && sendPhotoFn) {
       if (sock) {
@@ -1328,6 +1678,30 @@ _👉 Kisi bhi mood number (1-7) ya mood name (jaise "sassy", "naughty", "mode b
     const currentMood = session.mood === "mix" || !session.mood
       ? this.determineDynamicMood(rawText, session.mood)
       : session.mood;
+
+    // 4.05 Explicit video/gif request (REAL 10–20s clips, not AI) — before romantic GIFs
+    if (this.isNsfwVideoRequest(rawText) && (sendVideoFn || sendGifFn || sendPhotoFn)) {
+      if (sock) {
+        sock.sendPresenceUpdate?.("composing", jid).catch(() => { });
+      }
+      const clip = await this.getNsfwVideoClip(rawText);
+      if (clip) {
+        if (sendVideoFn) {
+          await sendVideoFn(jid, clip.buffer, clip.caption, messageKey);
+        } else if (sendGifFn) {
+          await sendGifFn(jid, clip.buffer, clip.caption, messageKey);
+        } else if (sendPhotoFn) {
+          await sendPhotoFn(jid, clip.buffer, clip.caption, messageKey);
+        }
+        session.tempHistory.push({ role: "user", text: rawText });
+        session.tempHistory.push({ role: "model", text: clip.caption });
+        session.lastUserMsgTime = Date.now();
+        session.idleNudgeCount = 0;
+        this.scheduleIdleNudge(jid, sendMsgFn, sock);
+        return;
+      }
+      // Fetch failed → fall through to normal chat (she'll tease + offer photo instead)
+    }
 
     // 4.1 Check for romantic / spicy / adult GIF request with realistic human tray search & preview
     if (this.isGifRequest(rawText) && (sendGifFn || sendPhotoFn)) {
@@ -1520,7 +1894,7 @@ STRICT REALISTIC WHATSAPP CHAT RULES:
       // ── IF MODE B: First try Uncensored Open Models, then fallback to Uncensored Gemini ─
       if (isModeBSession) {
         const activeProfile = await girlfriendProfileService.getActiveProfile(jid);
-        const modeBSystemPrompt = girlfriendProfileService.buildDynamicModeBPrompt(activeProfile, "DK / Mere Handsome");
+        const modeBSystemPrompt = (await girlfriendProfileService.getModeBPromptWithMemory(activeProfile, "DK / Mere Handsome", jid)) + this.buildSextStateBlock(session);
         try {
           const openReply = await this.queryUncensoredGfEngine(modeBSystemPrompt, rawText, session.tempHistory);
           if (openReply) {
@@ -1701,8 +2075,18 @@ STRICT REALISTIC WHATSAPP CHAT RULES:
       session.tempHistory.push({ role: "model", text: replyText });
       if (session.tempHistory.length > 30) session.tempHistory.splice(0, session.tempHistory.length - 30);
 
+      // Intimate memory: learn likes/kinks/limits from Mode-B intimate turns (fire-and-forget)
+      if (isModeBSession && this.isIntimateMoment(rawText, replyText)) {
+        girlfriendProfileService.recordIntimateTurn(jid, rawText, replyText).catch(() => {});
+      }
+
+      // NOTE: afterglow starts ONLY on HIS "ho gaya" phrases (handled in updateSextState).
+      // Her climax lines never auto-trigger it — sext continues until he says he's done.
+
       const isVoiceRequested = isVoiceInput || isSingingSong || /\b(voice|audio|speak|bolo|sunao|bol\s*kar|bol\s*ke|aawaz|voice\s*note)\b/i.test(rawText);
-      const wantsVoice = isVoiceRequested;
+      // Auto-voice on intimate Mode-B moments: voice note + text BOTH arrive (never voice-only)
+      const isIntimateMoment = isModeBSession && this.isIntimateMoment(rawText, replyText);
+      const wantsVoice = isVoiceRequested || isIntimateMoment;
 
       let voiceSent = false;
       if (wantsVoice && sendVoiceFn) {
@@ -1723,10 +2107,25 @@ STRICT REALISTIC WHATSAPP CHAT RULES:
         }
       }
 
-      // Always send text reply if user sent text, or if transcript requested, or as fallback if voice failed
-      const shouldSendText = !isVoiceInput || !voiceSent || /\b(transcript|text|likh\s*ke|likho|dono|both|write)\b/i.test(rawText);
+      // Always send text reply if user sent text, or if transcript requested, or as fallback if voice failed.
+      // Intimate Mode-B moments ALWAYS get text too (text + voice both arrive, never voice-only).
+      const shouldSendText = !isVoiceInput || !voiceSent || isIntimateMoment || /\b(transcript|text|likh\s*ke|likho|dono|both|write)\b/i.test(rawText);
       if (shouldSendText) {
         await this.sendRealisticGfTextBurst(jid, replyText, rawText, messageKey, sendMsgFn, sock);
+      }
+
+      // Mid-chat auto photo drop at scene peak (Mode B only, ~35%, no asking needed)
+      if (isModeBSession && isIntimateMoment && sendPhotoFn && Math.random() < 0.35) {
+        const peakHit = /\b(jhad|climax|aa\s*rah[ai]|nikal\s*do|bhar\s*do|cum|orgasm|HAAAN|pehli\s*baar\s*andar)\b/i.test(replyText);
+        if (peakHit) {
+          try {
+            const peakPhoto = await this.generateGirlfriendPhotoOrGift("nude photo bed par full body", jid);
+            if (peakPhoto) {
+              await sendPhotoFn(jid, peakPhoto.buffer, "rukho... ye dekho abhi ki photo 🙈🔥", messageKey);
+              session.tempHistory.push({ role: "model", text: "[Peak photo bheji]" });
+            }
+          } catch {}
+        }
       }
 
       // Reset idle nudge count and re-schedule proactive idle timer

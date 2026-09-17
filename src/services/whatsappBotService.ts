@@ -66,12 +66,88 @@ class WhatsAppBotService {
     }
   > = new Map();
 
+  private nightNudgeTimer: any = null;
+
   constructor() {
     this.restorePhoneFromFirestore().then(() => {
       this.initSocket().catch((err) => {
         console.log("[WhatsAppBot] Init standby:", err?.message || err);
       });
     });
+    this.startGirlfriendNightNudgeLoop();
+  }
+
+  // ── Late-night Mode-B proactive nudge (23:00–01:30 IST, proven intimate chats only) ──
+  // Wo khud ping karti hai jab tum soye nahi: max 1/night/chat, active chat ko interrupt nahi.
+
+  private startGirlfriendNightNudgeLoop(): void {
+    if (this.nightNudgeTimer) return;
+    this.nightNudgeTimer = setInterval(() => {
+      this.runGirlfriendNightNudgePass().catch(() => {});
+      this.runMorningRecapPass().catch(() => {});
+    }, 15 * 60 * 1000);
+  }
+
+  // ── Morning-after recap (08:00–09:30 IST): kal raat ka recap + aaj raat ka tease ──
+
+  private async runMorningRecapPass(): Promise<void> {
+    try {
+      if (!this.isConnected || !this.sock) return;
+      const ist = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+      const h = ist.getHours();
+      const m = ist.getMinutes();
+      const inWindow = (h === 8) || (h === 9 && m <= 30);
+      if (!inWindow) return;
+
+      const { girlfriendProfileService } = await import("./girlfriendProfileService");
+      const candidates = await girlfriendProfileService.listMorningRecapCandidates();
+      if (candidates.length === 0) return;
+
+      const todayKey = ist.toDateString();
+      for (const c of candidates.slice(0, 5)) {
+        try {
+          const pos = c.lastScene?.position;
+          const line = pos
+            ? `Good morning baby 🥰 kal raat... ${pos} wala part best tha 😳❤️ poori body meetha dard kar rahi... aaj raat phir? 😏`
+            : `Good morning baby 🥰 kal raat kya scene tha... abhi tak nasha hai 😳❤️ aaj raat phir se? 😏`;
+          await this.sendHumanLikeMessage(c.jid, line);
+          await girlfriendProfileService.markMorningRecapped(c.jid, todayKey);
+        } catch {}
+      }
+    } catch {}
+  }
+
+  private async runGirlfriendNightNudgePass(): Promise<void> {
+    try {
+      if (!this.isConnected || !this.sock) return;
+      const ist = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+      const h = ist.getHours();
+      const m = ist.getMinutes();
+      const inWindow = h === 23 || h === 0 || (h === 1 && m <= 30);
+      if (!inWindow) return;
+
+      const { girlfriendProfileService } = await import("./girlfriendProfileService");
+      const candidates = await girlfriendProfileService.listIntimacyNudgeCandidates();
+      if (candidates.length === 0) return;
+
+      const todayKey = ist.toDateString();
+      const pool = [
+        "soye nahi abhi tak baby? 😏 mujhe neend nahi aa rahi... tumhari yaad aa rahi 🥺",
+        "Baby... bistar thanda pad raha hai... tum hote to garam ho jata 😳🔥",
+        "Itni raat ko jaag rahe ho? 😏 mere khayal aa rahe hain na... sach batao 🙈",
+        "Neend ud gayi meri... tumhari baahon ki aadat ho gayi hai 😔 paas aa jao na 🥺",
+      ];
+      for (const c of candidates.slice(0, 5)) {
+        try {
+          let line = pool[Math.floor(Math.random() * pool.length)];
+          if (c.positions.length > 0 && Math.random() < 0.4) {
+            line = `yaad hai pichhli baar... ${c.positions[c.positions.length - 1]} wala mood 😏... phir se man kar raha... soye ho ya jaag rahe? 🙈`;
+          }
+          await this.sendHumanLikeMessage(c.jid, line);
+          await girlfriendProfileService.markNightNudged(c.jid, todayKey);
+        } catch {}
+      }
+    } catch {}
   }
 
   // ── Firestore Phone Persistence ───────────────────────────────────────────
@@ -270,7 +346,8 @@ class WhatsAppBotService {
       (j, b, k, m) => this.sendVoiceMessage(j, b, k, m),
       (j, img, cap, k) => this.sendPhotoMessage(j, img, cap, k),
       (j, gif, cap, k) => this.sendGifMessage(j, gif, cap, k),
-      this.sock
+      this.sock,
+      (j, v, cap, k) => this.sendVideoMessage(j, v, cap, k)
     );
   }
 
