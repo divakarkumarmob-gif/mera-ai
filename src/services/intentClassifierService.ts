@@ -285,7 +285,7 @@ const INTENT_FUNCTION_DECLARATIONS = [
     parameters: {
       type: Type.OBJECT,
       properties: {
-        slots: { type: "ARRAY", description: "Array of routine slots with title, startTimeStr, endTimeStr, activity" },
+        slots: { type: Type.ARRAY, description: "Array of routine slots with title, startTimeStr, endTimeStr, activity", items: { type: Type.OBJECT, properties: { title: { type: Type.STRING, description: "Title of the slot" }, startTimeStr: { type: Type.STRING, description: "Start time" }, endTimeStr: { type: Type.STRING, description: "End time" }, activity: { type: Type.STRING, description: "Activity description" } } } },
         slotQuery: { type: Type.STRING, description: "Which slot to update (for single updates)" },
         startTimeStr: { type: Type.STRING, description: "New start time" },
         endTimeStr: { type: Type.STRING, description: "New end time" },
@@ -480,7 +480,7 @@ class IntentClassifierService {
         contents: [{ role: "user", parts: [{ text: userText }] }],
         config: {
           systemInstruction: systemPrompt,
-          tools: [{ functionDeclarations: INTENT_FUNCTION_DECLARATIONS }],
+          tools: [{ functionDeclarations: INTENT_FUNCTION_DECLARATIONS as any }],
           toolConfig: { functionCallingConfig: { mode: "ANY" as any } },
           temperature: 0.1,
           maxOutputTokens: 1024,

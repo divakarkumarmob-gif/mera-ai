@@ -2640,9 +2640,13 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
 
     // ── LLM-Driven Intent Classification for Owner Messages (Replaces Hardcoded Regex) ──
     if (isOwner && text && text.trim().length >= 3) {
-      const intentResult = await this.classifyAndExecuteTelegramIntent(text, chatId, senderName, from.id || 0, isGroup, msg.chat?.title, msg.reply_to_message);
-      if (intentResult.handled) {
-        return;
+      try {
+        const intentResult = await this.classifyAndExecuteTelegramIntent(text, chatId, senderName, from.id || 0, isGroup, msg.chat?.title, msg.reply_to_message);
+        if (intentResult.handled) {
+          return;
+        }
+      } catch (intentErr: any) {
+        console.warn("[TelegramBot] Intent classifier failed, falling through to legacy handlers:", intentErr?.message || intentErr);
       }
     }
 
@@ -3827,14 +3831,25 @@ INSTRUCTIONS:
       userTimezone: "Asia/Kolkata"
     };
 
-    const classified = await intentClassifierService.classifyIntent(rawText, context);
+    let classified;
+    try {
+      classified = await intentClassifierService.classifyIntent(rawText, context);
+    } catch (classifyErr: any) {
+      console.warn("[TelegramBot] classifyIntent threw, falling through:", classifyErr?.message || classifyErr);
+      return { handled: false };
+    }
     
-    if (classified.action === "general_chat") {
+    if (!classified || classified.action === "general_chat") {
       return { handled: false }; // Fall through to existing conversation handler
     }
 
     // Execute the classified intent
-    return await this.executeTelegramIntent(classified, { chatId, senderName, senderId, isGroup, groupTitle });
+    try {
+      return await this.executeTelegramIntent(classified, { chatId, senderName, senderId, isGroup, groupTitle });
+    } catch (execErr: any) {
+      console.warn("[TelegramBot] executeTelegramIntent failed, falling through:", execErr?.message || execErr);
+      return { handled: false };
+    }
   }
 
   private async executeTelegramIntent(
@@ -4060,14 +4075,14 @@ INSTRUCTIONS:
         }
 
         case "check_session_health": {
-          const { whatsappSessionHealthEngine } = await import("./whatsappSessionHealthEngine");
+          const { whatsappSessionHealthEngine } = await import("./whatsapp/whatsappSessionHealthEngine");
           const replyText = whatsappSessionHealthEngine.getFormattedBossReport();
           await this.sendMessage(chatId, replyText);
           return { handled: true, replyText };
         }
 
         case "unpause_bot": {
-          const { whatsappSessionHealthEngine: wshe } = await import("./whatsappSessionHealthEngine");
+          const { whatsappSessionHealthEngine: wshe } = await import("./whatsapp/whatsappSessionHealthEngine");
           const unpauseRes = parameters.password ? wshe.manualUnpause(parameters.password) : wshe.manualUnpause("");
           await this.sendMessage(chatId, unpauseRes.message);
           return { handled: true, replyText: unpauseRes.message };

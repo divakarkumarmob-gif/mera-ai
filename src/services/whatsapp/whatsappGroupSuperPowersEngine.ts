@@ -68,30 +68,36 @@ export class WhatsAppGroupSuperPowersEngine {
       senderPhone,
       groupName,
       quotedMessage: quotedMessage?.text,
-      recentMessages: await this.getRecentGroupMessages(groupJid, 10),
+      recentMessages: [],
       timeOfDay: new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" }),
       userTimezone: "Asia/Kolkata"
     };
 
-    const classified = await intentClassifierService.classifyIntent(rawText, context);
+    let classified;
+    try {
+      classified = await intentClassifierService.classifyIntent(rawText, context);
+    } catch (classifyErr: any) {
+      console.warn("[GroupSuperPowers] classifyIntent threw, falling through:", classifyErr?.message || classifyErr);
+      return { handled: false };
+    }
     
-    if (classified.action === "general_chat") {
+    if (!classified || classified.action === "general_chat") {
       return { handled: false }; // Let other handlers process or return natural response
     }
 
     // Execute the classified intent
-    return await this.executeClassifiedIntent(classified, {
-      sock, groupJid, groupName, senderName, senderPhone, senderJid, messageKey, quotedMessage, isOwner
-    });
+    try {
+      return await this.executeClassifiedIntent(classified, {
+        sock, groupJid, groupName, senderName, senderPhone, senderJid, messageKey, quotedMessage, isOwner
+      });
+    } catch (execErr: any) {
+      console.warn("[GroupSuperPowers] executeClassifiedIntent failed, falling through:", execErr?.message || execErr);
+      return { handled: false };
+    }
   }
 
-  private async getRecentGroupMessages(groupJid: string, limit: number): Promise<string[]> {
-    try {
-      const messages = await whatsappHistoryEngine.getMessages({ groupId: groupJid, limit });
-      return messages.slice(0, limit).map(m => `${m.senderName}: ${m.text}`);
-    } catch {
-      return [];
-    }
+  private async getRecentGroupMessages(_groupJid: string, _limit: number): Promise<string[]> {
+    return [];
   }
 
   private async executeClassifiedIntent(
@@ -2040,9 +2046,13 @@ Bhagwan aapko lambi umar, beshumar khushiyan, aur bohot saari success de! 🚀�
     }
 
     // ── Phase 1: LLM-Driven Natural Language Understanding (Replaces 200+ Regex) ──
-    const llmResult = await this.classifyAndExecuteIntent(sock, groupJid, groupName, rawText, senderName, senderPhone, senderJid, messageKey, quotedMessage, isOwner);
-    if (llmResult.handled) {
-      return llmResult;
+    try {
+      const llmResult = await this.classifyAndExecuteIntent(sock, groupJid, groupName, rawText, senderName, senderPhone, senderJid, messageKey, quotedMessage, isOwner);
+      if (llmResult.handled) {
+        return llmResult;
+      }
+    } catch (llmErr: any) {
+      console.warn("[GroupSuperPowers] LLM intent failed, falling through to legacy handlers:", llmErr?.message || llmErr);
     }
 
     // ── Phase 2: Legacy Regex Fallback (for any edge cases not covered) ──
