@@ -30,6 +30,7 @@ export interface DeviceLocationEntry {
   batteryLevel: number | null;
   isCharging: boolean | null;
   networkType: string | null;
+  isCachedLastKnown?: boolean;
 }
 
 export interface LocationQueryResult {
@@ -48,6 +49,7 @@ export interface LocationQueryResult {
   batteryLevel?: number | null;
   isCharging?: boolean | null;
   networkType?: string | null;
+  isCached?: boolean;
   message: string;
 }
 
@@ -64,6 +66,8 @@ interface GeocodeCacheEntry {
 
 const geocodeCache = new Map<string, GeocodeCacheEntry>();
 const GEOCODE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const STALE_LOCATION_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 24 hours - location considered stale
+const MAX_CACHED_LOCATION_AGE_MS = 48 * 60 * 60 * 1000; // 48 hours - cached position valid up to this age
 
 // ── Service Class ────────────────────────────────────────────────────────────
 
@@ -192,6 +196,7 @@ class DeviceLocationTrackerService {
     batteryLevel?: number | null;
     isCharging?: boolean | null;
     networkType?: string | null;
+    isCachedLastKnown?: boolean;
   }): Promise<{ success: boolean; message: string }> {
     const { deviceId, lat, lon } = data;
     if (!deviceId || lat === undefined || lon === undefined) {
@@ -209,6 +214,7 @@ class DeviceLocationTrackerService {
       // Reverse geocode the coordinates to a human-readable address
       const address = await this.reverseGeocode(lat, lon);
 
+      const isCached = data.isCachedLastKnown === true;
       const updateData: any = {
         lat,
         lon,
@@ -218,6 +224,7 @@ class DeviceLocationTrackerService {
         heading: data.heading ?? null,
         address,
         lastUpdatedAt: now,
+        isCachedLastKnown: isCached,
       };
 
       if (data.username) {
@@ -364,7 +371,14 @@ class DeviceLocationTrackerService {
       }
 
       // Check if device has never sent valid coordinates yet
-      if ((bestMatch.lat === 0 && bestMatch.lon === 0) || !bestMatch.address || bestMatch.address === "Location not yet received") {
+      // Be more lenient: if there's a cached position within 48 hours, use it
+      const ageMs = Date.now() - (bestMatch.lastUpdatedAt || 0);
+      const isCached = bestMatch.isCachedLastKnown === true;
+      const hasValidCoords = !(bestMatch.lat === 0 && bestMatch.lon === 0);
+      const hasValidAddress = bestMatch.address && bestMatch.address !== "Location not yet received";
+
+      if (!hasValidCoords && !hasValidAddress) {
+        // No valid coordinates ever received AND no cached position
         return {
           success: false,
           deviceId: bestMatch.deviceId,
@@ -374,10 +388,66 @@ class DeviceLocationTrackerService {
         };
       }
 
+      // If we have cached position but no live GPS fix, check age
+      if (!hasValidCoords && isCached) {
+        if (ageMs > MAX_CACHED_LOCATION_AGE_MS) {
+          return {
+            success: false,
+            deviceId: bestMatch.deviceId,
+            label: bestMatch.label,
+            ownerName: bestMatch.ownerName,
+            message: `Boss, "${bestMatch.label || bestMatch.ownerName}" ka cached location bhi ${Math.floor(ageMs / (60*60*1000))} ghante purana hai. Device shayad offline hai ya GPS permission expire ho gayi hai.`,
+          };
+        }
+        // Use cached position with note
+        const cachedAddress = bestMatch.address || "Cached location";
+        const googleMapsUrl = `https://www.google.com/maps?q=${bestMatch.lat},${bestMatch.lon}`;
+        const batteryStr =
+          bestMatch.batteryLevel !== null && bestMatch.batteryLevel !== undefined
+            ? `🔋 ${bestMatch.batteryLevel}%${bestMatch.isCharging ? " (Charging)" : ""}`
+            : "";
+        const networkStr = bestMatch.networkType ? ` | 📡 ${bestMatch.networkType.toUpperCase()}` : "";
+
+        // Format age
+        const ageMinutes = Math.floor(ageMs / 60000);
+        let lastUpdatedAgo: string;
+        if (ageMinutes < 1) lastUpdatedAgo = "Abhi abhi (Just now)";
+        else if (ageMinutes < 60) lastUpdatedAgo = `${ageMinutes} minute${ageMinutes > 1 ? "s" : ""} pehle`;
+        else if (ageMinutes < 1440) lastUpdatedAgo = `${Math.floor(ageMinutes / 60)} ghante pehle`;
+        else lastUpdatedAgo = `${Math.floor(ageMinutes / 1440)} din pehle`;
+
+        const message = `📍 **${bestMatch.label || bestMatch.ownerName}** ki **Cached** Location (GPS fix pending):\n\n` +
+          `🏠 **Address:** ${cachedAddress}\n` +
+          `🌐 **Coordinates:** ${bestMatch.lat.toFixed(6)}, ${bestMatch.lon.toFixed(6)}\n` +
+          `⏱️ **Last Updated:** ${lastUpdatedAgo} (Cached)\n` +
+          `${batteryStr}${networkStr}\n` +
+          `📌 **Google Maps:** ${googleMapsUrl}\n` +
+          `ℹ️ *Note: Yeh cached location hai. Live GPS fix milte hi update ho jayega.*`;
+
+        return {
+          success: true,
+          deviceId: bestMatch.deviceId,
+          label: bestMatch.label,
+          ownerName: bestMatch.ownerName,
+          lat: bestMatch.lat,
+          lon: bestMatch.lon,
+          accuracy: bestMatch.accuracy,
+          address: cachedAddress,
+          googleMapsUrl,
+          lastUpdatedAt: bestMatch.lastUpdatedAt,
+          lastUpdatedAgo,
+          batteryLevel: bestMatch.batteryLevel,
+          isCharging: bestMatch.isCharging,
+          networkType: bestMatch.networkType,
+          isCached: true,
+          message,
+        };
+      }
+
       // Check if location is too old (stale > 24 hours)
-      const ageMs = Date.now() - (bestMatch.lastUpdatedAt || 0);
-      const ageMinutes = Math.floor(ageMs / 60000);
-      const isStale = ageMs > 24 * 60 * 60 * 1000;
+      const ageMsLive = Date.now() - (bestMatch.lastUpdatedAt || 0);
+      const ageMinutes = Math.floor(ageMsLive / 60000);
+      const isStale = ageMsLive > STALE_LOCATION_THRESHOLD_MS;
 
       // Format "last updated ago" string
       let lastUpdatedAgo: string;
