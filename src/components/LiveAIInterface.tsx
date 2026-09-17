@@ -4804,12 +4804,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
             <ExotelTelephonyModal isOpen={showExotelModal} onClose={() => setShowExotelModal(false)} />
             <ModelTesterCapsule isOpen={showModelTester} onClose={() => setShowModelTester(false)} />
             {showLearningCapsule && <LearningCapsule onClose={() => setShowLearningCapsule(false)} />}
-            {!showLearningCapsule && (
-                <LearningCapsule
-                    isFloatingWidgetOnly
-                    onExpandToStudio={() => setShowLearningCapsule(true)}
-                />
-            )}
+
 
             {/* Deep Research Report Modal */}
             <AnimatePresence>
