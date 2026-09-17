@@ -212,10 +212,12 @@ class DeviceLocationTrackerService {
    * This is the main method called when Boss asks "bhai kahan hai?"
    */
   public async getDeviceLocation(personNameOrLabel: string): Promise<LocationQueryResult> {
-    const query = (personNameOrLabel || "").trim().toLowerCase();
-    if (!query) {
-      return { success: false, message: "Person name or device label is required." };
-    }
+    const rawQuery = (personNameOrLabel || "").trim().toLowerCase();
+    const isSelfOrBoss =
+      !rawQuery ||
+      ["boss", "dk", "divakar", "mera", "meri", "me", "my", "khud", "self", "apna", "apni", "current", "admin", "owner", "location", "boss location", "live location"].some(
+        (term) => rawQuery === term || rawQuery.includes(term)
+      );
 
     try {
       // Search all tracked devices
@@ -223,58 +225,99 @@ class DeviceLocationTrackerService {
       if (allDocs.empty) {
         return {
           success: false,
-          message: "Abhi koi bhi device registered nahi hai live tracking के लिए. Pehle family member ke phone me FRIDAY APK kholo aur register karo.",
+          message: "Abhi koi bhi device live tracking ke liye connect ya register nahi hai. Friday app ya web open karte hi GPS auto-start ho jata hai.",
         };
       }
 
-      // Find matching device by username, label or owner name (fuzzy match)
+      // If only 1 device registered, or if Boss/Self query, prioritize Boss device or single device
       let bestMatch: DeviceLocationEntry | null = null;
       let bestScore = 0;
 
-      for (const doc of allDocs.docs) {
-        const data = doc.data() as DeviceLocationEntry;
-        const username = (data.username || "").toLowerCase();
-        const label = (data.label || "").toLowerCase();
-        const owner = (data.ownerName || "").toLowerCase();
-        const deviceId = (data.deviceId || "").toLowerCase();
+      // Single device auto-resolve
+      if (allDocs.size === 1 && isSelfOrBoss) {
+        bestMatch = allDocs.docs[0].data() as DeviceLocationEntry;
+        bestScore = 100;
+      }
 
-        // Exact match
-        if (username === query || label === query || owner === query || deviceId === query) {
-          bestMatch = data;
-          bestScore = 100;
-          break;
-        }
+      if (!bestMatch) {
+        for (const doc of allDocs.docs) {
+          const data = doc.data() as DeviceLocationEntry;
+          const username = (data.username || "").toLowerCase();
+          const label = (data.label || "").toLowerCase();
+          const owner = (data.ownerName || "").toLowerCase();
+          const deviceId = (data.deviceId || "").toLowerCase();
 
-        // Partial/fuzzy match
-        let score = 0;
-        if (username.includes(query) || query.includes(username)) score = 95;
-        else if (label.includes(query) || query.includes(label)) score = 80;
-        else if (owner.includes(query) || query.includes(owner)) score = 70;
-        
-        // Common Hindi terms mapping
-        const hindiAliases: Record<string, string[]> = {
-          bhai: ["bhai", "brother", "bro", "bhaiya", "bhaiyya"],
-          papa: ["papa", "father", "dad", "daddy", "pitaji", "abba", "abbu"],
-          mummy: ["mummy", "mother", "mom", "maa", "amma", "ammi"],
-          behen: ["behen", "sister", "sis", "didi", "behan"],
-          wife: ["wife", "biwi", "patni", "mrs"],
-          husband: ["husband", "pati", "hubby"],
-        };
+          // If query is for Boss / Self
+          if (isSelfOrBoss) {
+            if (
+              username.includes("boss") ||
+              username.includes("dk") ||
+              username.includes("divakar") ||
+              label.includes("boss") ||
+              label.includes("dk") ||
+              label.includes("divakar") ||
+              owner.includes("boss") ||
+              owner.includes("dk") ||
+              owner.includes("divakar")
+            ) {
+              bestMatch = data;
+              bestScore = 100;
+              break;
+            }
+          }
 
-        for (const [, aliases] of Object.entries(hindiAliases)) {
-          const queryMatchesAlias = aliases.some((a) => query.includes(a) || a.includes(query));
-          const userMatchesAlias = username && aliases.some((a) => username.includes(a) || a.includes(username));
-          const labelMatchesAlias = aliases.some((a) => label.includes(a) || a.includes(label));
-          const ownerMatchesAlias = aliases.some((a) => owner.includes(a) || a.includes(owner));
-          if (queryMatchesAlias && (userMatchesAlias || labelMatchesAlias || ownerMatchesAlias)) {
-            score = Math.max(score, 85);
+          // Exact match
+          if (username === rawQuery || label === rawQuery || owner === rawQuery || deviceId === rawQuery) {
+            bestMatch = data;
+            bestScore = 100;
+            break;
+          }
+
+          // Partial/fuzzy match
+          let score = 0;
+          if (username.includes(rawQuery) || rawQuery.includes(username)) score = 95;
+          else if (label.includes(rawQuery) || rawQuery.includes(label)) score = 80;
+          else if (owner.includes(rawQuery) || rawQuery.includes(owner)) score = 70;
+
+          // Common Hindi terms mapping
+          const hindiAliases: Record<string, string[]> = {
+            boss: ["boss", "dk", "divakar", "mera", "meri", "me", "my", "khud", "self", "apna", "apni", "current", "admin", "owner", "location"],
+            bhai: ["bhai", "brother", "bro", "bhaiya", "bhaiyya"],
+            papa: ["papa", "father", "dad", "daddy", "pitaji", "abba", "abbu"],
+            mummy: ["mummy", "mother", "mom", "maa", "amma", "ammi"],
+            behen: ["behen", "sister", "sis", "didi", "behan"],
+            wife: ["wife", "biwi", "patni", "mrs"],
+            husband: ["husband", "pati", "hubby"],
+          };
+
+          for (const [, aliases] of Object.entries(hindiAliases)) {
+            const queryMatchesAlias = aliases.some((a) => rawQuery.includes(a) || a.includes(rawQuery));
+            const userMatchesAlias = username && aliases.some((a) => username.includes(a) || a.includes(username));
+            const labelMatchesAlias = aliases.some((a) => label.includes(a) || a.includes(label));
+            const ownerMatchesAlias = aliases.some((a) => owner.includes(a) || a.includes(owner));
+            if (queryMatchesAlias && (userMatchesAlias || labelMatchesAlias || ownerMatchesAlias)) {
+              score = Math.max(score, 85);
+            }
+          }
+
+          if (score > bestScore) {
+            bestScore = score;
+            bestMatch = data;
           }
         }
+      }
 
-        if (score > bestScore) {
-          bestScore = score;
-          bestMatch = data;
+      // If query was Boss/Self and still no explicit match, pick the most recently active device
+      if ((!bestMatch || bestScore < 50) && isSelfOrBoss && allDocs.size > 0) {
+        let mostRecent = allDocs.docs[0].data() as DeviceLocationEntry;
+        for (const doc of allDocs.docs) {
+          const d = doc.data() as DeviceLocationEntry;
+          if ((d.lastUpdatedAt || 0) > (mostRecent.lastUpdatedAt || 0)) {
+            mostRecent = d;
+          }
         }
+        bestMatch = mostRecent;
+        bestScore = 90;
       }
 
       if (!bestMatch || bestScore < 50) {

@@ -610,39 +610,203 @@ class PublicApisService {
     return { success: true, joke: data.value };
   }
 
-  // 24. Public holidays — Nager.Date (free, no key)
-  // Defaults to India ("IN") if DK doesn't specify a country.
+  // 24. Public holidays & Comprehensive Indian Festivals Engine (Accurate Multi-Year & Lunar/Solar Calendar)
+  public async getUpcomingFestivalsAndHolidays(festivalQuery?: string, year?: number): Promise<any> {
+    const today = new Date();
+    const currentYear = year || today.getFullYear();
+    const q = (festivalQuery || "").trim().toLowerCase();
+
+    // Multi-Year Verified Indian Festivals Master Database (2025 - 2027)
+    const festivalDatabase: Record<number, Array<{
+      date: string;
+      name: string;
+      hindiName: string;
+      aliases: string[];
+      category: "Hindu" | "Islamic" | "National" | "Christian" | "Sikh" | "Jain" | "Buddhist";
+      description: string;
+    }>> = {
+      2025: [
+        { date: "2025-01-14", name: "Makar Sankranti / Pongal / Lohri", hindiName: "मकर संक्रांति / पोंगल", aliases: ["makar sankranti", "sankranti", "pongal", "lohri", "khichdi"], category: "Hindu", description: "Harvest festival celebrating Surya Dev entering Makar Rashi." },
+        { date: "2025-01-26", name: "Republic Day", hindiName: "गणतंत्र दिवस", aliases: ["republic day", "26 january", "gantantra diwas"], category: "National", description: "76th Republic Day of India." },
+        { date: "2025-02-26", name: "Maha Shivratri", hindiName: "महाशिवरात्रि", aliases: ["maha shivratri", "shivratri", "bholenath", "shiv ji"], category: "Hindu", description: "Great night of Lord Shiva." },
+        { date: "2025-03-14", name: "Holi (Rangwali Holi)", hindiName: "होली", aliases: ["holi", "rangwali holi", "dhulandi", "chhoti holi", "holika dahan"], category: "Hindu", description: "Festival of Colors (Holika Dahan on March 13)." },
+        { date: "2025-03-31", name: "Eid-ul-Fitr (Ramadan Eid)", hindiName: "ईद-उल-फ़ितर (मीठी ईद)", aliases: ["eid", "eid ul fitr", "meethi eid", "ramadan eid", "ramzan"], category: "Islamic", description: "Festival marking the end of holy month of Ramadan." },
+        { date: "2025-04-06", name: "Ram Navami", hindiName: "राम नवमी", aliases: ["ram navami", "ramnavami", "shri ram janmotsav"], category: "Hindu", description: "Birth celebration of Bhagwan Shri Ram." },
+        { date: "2025-04-10", name: "Mahavir Jayanti", hindiName: "महावीर जयंती", aliases: ["mahavir jayanti", "mahavira"], category: "Jain", description: "Birth anniversary of 24th Tirthankara Lord Mahavira." },
+        { date: "2025-04-18", name: "Good Friday", hindiName: "गुड फ्राइडे", aliases: ["good friday", "easter"], category: "Christian", description: "Christian holy day commemorating the crucifixion of Jesus." },
+        { date: "2025-05-12", name: "Buddha Purnima", hindiName: "बुद्ध पूर्णिमा", aliases: ["buddha purnima", "buddha jayanti"], category: "Buddhist", description: "Birth, enlightenment and Mahaparinirvana of Gautama Buddha." },
+        { date: "2025-06-07", name: "Bakrid / Eid-ul-Adha", hindiName: "बकरीद (ईद-उल-अज़हा)", aliases: ["bakrid", "eid ul adha", "bakr eid", "qurbani eid"], category: "Islamic", description: "Feast of the Sacrifice." },
+        { date: "2025-07-06", name: "Muharram (Ashura)", hindiName: "मोहर्रम (आशूरा)", aliases: ["muharram", "ashura"], category: "Islamic", description: "Day of Ashura commemorating Imam Hussain." },
+        { date: "2025-08-09", name: "Raksha Bandhan (Rakhi)", hindiName: "रक्षाबंधन", aliases: ["raksha bandhan", "rakhi", "rakhi bandhan"], category: "Hindu", description: "Celebration of bond between brothers and sisters." },
+        { date: "2025-08-15", name: "Independence Day", hindiName: "स्वतंत्रता दिवस", aliases: ["independence day", "15 august", "azadi diwas"], category: "National", description: "79th Independence Day of India." },
+        { date: "2025-08-16", name: "Krishna Janmashtami", hindiName: "श्रीकृष्ण जन्माष्टमी", aliases: ["janmashtami", "krishna janmashtami", "gokulashtami", "dahi handi"], category: "Hindu", description: "Birth celebration of Lord Krishna." },
+        { date: "2025-08-27", name: "Ganesh Chaturthi", hindiName: "गणेश चतुर्थी", aliases: ["ganesh chaturthi", "vinayaka chavithi", "ganpati bappa"], category: "Hindu", description: "Arrival of Lord Ganesha on earth." },
+        { date: "2025-09-05", name: "Milad-un-Nabi (Eid-e-Milad)", hindiName: "ईद-ए-मिलाद", aliases: ["eid e milad", "milad un nabi", "mawlid"], category: "Islamic", description: "Prophet Muhammad's birth anniversary." },
+        { date: "2025-10-02", name: "Mahatma Gandhi Jayanti & Dussehra", hindiName: "गांधी जयंती व दशहरा", aliases: ["gandhi jayanti", "2 october", "dussehra", "vijayadashami"], category: "National", description: "Gandhi Jayanti & Vijayadashami." },
+        { date: "2025-10-10", name: "Karwa Chauth", hindiName: "करवा चौथ", aliases: ["karwa chauth", "karva chauth"], category: "Hindu", description: "Fasting ritual observed by married women for husbands' long life." },
+        { date: "2025-10-18", name: "Dhanteras", hindiName: "धनतेरस", aliases: ["dhanteras", "dhantrayodashi"], category: "Hindu", description: "Auspicious day to buy gold, silver, and utensils." },
+        { date: "2025-10-20", name: "Diwali (Deepavali)", hindiName: "दीपावली / दीवाली", aliases: ["diwali", "deepavali", "deepawali", "lakshmi puja"], category: "Hindu", description: "Grand Festival of Lights & Lakshmi-Ganesh Puja." },
+        { date: "2025-10-22", name: "Govardhan Puja / Annakut", hindiName: "गोवर्धन पूजा", aliases: ["govardhan puja", "annakut"], category: "Hindu", description: "Worship of Mount Govardhan & Lord Krishna." },
+        { date: "2025-10-23", name: "Bhai Dooj", hindiName: "भाई दूज", aliases: ["bhai dooj", "bhaiya dooj", "yama dwitiya"], category: "Hindu", description: "Celebration of sibling affection." },
+        { date: "2025-10-28", name: "Chhath Puja (Sandhya Arghya)", hindiName: "छठ पूजा (संध्या अर्घ्य)", aliases: ["chhath", "chhath puja", "surya shashthi", "dala chhath"], category: "Hindu", description: "Maha Parv of Sun God Surya & Chhathi Maiya (Morning Arghya on Oct 29)." },
+        { date: "2025-11-05", name: "Guru Nanak Jayanti (Gurpurab)", hindiName: "गुरु नानक जयंती", aliases: ["guru nanak jayanti", "gurpurab", "prakash utsav"], category: "Sikh", description: "Birth anniversary of Guru Nanak Dev Ji." },
+        { date: "2025-12-25", name: "Christmas Day", hindiName: "क्रिसमस", aliases: ["christmas", "xmas", "bada din"], category: "Christian", description: "Birth of Jesus Christ." },
+      ],
+      2026: [
+        { date: "2026-01-14", name: "Makar Sankranti / Pongal / Lohri", hindiName: "मकर संक्रांति / पोंगल", aliases: ["makar sankranti", "sankranti", "pongal", "lohri", "khichdi"], category: "Hindu", description: "Harvest festival celebrating Surya Dev entering Capricorn (Makar Rashi)." },
+        { date: "2026-01-26", name: "Republic Day", hindiName: "गणतंत्र दिवस", aliases: ["republic day", "26 january", "gantantra diwas"], category: "National", description: "77th Republic Day of India." },
+        { date: "2026-02-15", name: "Maha Shivratri", hindiName: "महाशिवरात्रि", aliases: ["maha shivratri", "shivratri", "bholenath", "shiv ji"], category: "Hindu", description: "Great night of Lord Shiva." },
+        { date: "2026-03-04", name: "Holi (Rangwali Holi)", hindiName: "होली", aliases: ["holi", "rangwali holi", "dhulandi", "chhoti holi", "holika dahan"], category: "Hindu", description: "Festival of Colors (Holika Dahan on March 3)." },
+        { date: "2026-03-20", name: "Eid-ul-Fitr (Ramadan Eid)", hindiName: "ईद-उल-फ़ितर (मीठी ईद)", aliases: ["eid", "eid ul fitr", "meethi eid", "ramadan eid", "ramzan"], category: "Islamic", description: "Celebration marking the conclusion of Ramadan fasting." },
+        { date: "2026-03-27", name: "Ram Navami", hindiName: "राम नवमी", aliases: ["ram navami", "ramnavami", "shri ram janmotsav"], category: "Hindu", description: "Birth celebration of Lord Rama." },
+        { date: "2026-03-31", name: "Mahavir Jayanti", hindiName: "महावीर जयंती", aliases: ["mahavir jayanti", "mahavira"], category: "Jain", description: "Birth anniversary of Lord Mahavira." },
+        { date: "2026-04-03", name: "Good Friday", hindiName: "गुड फ्राइडे", aliases: ["good friday", "easter"], category: "Christian", description: "Crucifixion and passion of Jesus Christ." },
+        { date: "2026-05-01", name: "Buddha Purnima", hindiName: "बुद्ध पूर्णिमा", aliases: ["buddha purnima", "buddha jayanti"], category: "Buddhist", description: "Enlightenment & Purnima of Gautama Buddha." },
+        { date: "2026-05-27", name: "Bakrid / Eid-ul-Adha", hindiName: "बकरीद (ईद-उल-अज़हा)", aliases: ["bakrid", "eid ul adha", "bakr eid", "qurbani eid"], category: "Islamic", description: "Islamic Feast of Sacrifice." },
+        { date: "2026-06-26", name: "Muharram (Ashura)", hindiName: "मोहर्रम (आशूरा)", aliases: ["muharram", "ashura"], category: "Islamic", description: "Day of Ashura commemorating Hazrat Imam Hussain." },
+        { date: "2026-08-15", name: "Independence Day", hindiName: "स्वतंत्रता दिवस", aliases: ["independence day", "15 august", "azadi diwas"], category: "National", description: "80th Independence Day of India." },
+        { date: "2026-08-28", name: "Raksha Bandhan (Rakhi)", hindiName: "रक्षाबंधन", aliases: ["raksha bandhan", "rakhi", "rakhi bandhan"], category: "Hindu", description: "Celebration of sacred brother-sister bonding." },
+        { date: "2026-09-04", name: "Krishna Janmashtami & Milad-un-Nabi", hindiName: "श्रीकृष्ण जन्माष्टमी व मिलाद-उन-नबी", aliases: ["janmashtami", "krishna janmashtami", "gokulashtami", "dahi handi", "milad un nabi", "eid e milad"], category: "Hindu", description: "Janmashtami celebration of Bhagwan Krishna & Eid-e-Milad." },
+        { date: "2026-09-14", name: "Ganesh Chaturthi", hindiName: "गणेश चतुर्थी", aliases: ["ganesh chaturthi", "vinayaka chavithi", "ganpati bappa"], category: "Hindu", description: "Ganesh Sthapana & 10-day Vinayaka Mahotsav." },
+        { date: "2026-10-02", name: "Mahatma Gandhi Jayanti", hindiName: "गांधी जयंती", aliases: ["gandhi jayanti", "2 october", "bapu"], category: "National", description: "Birth anniversary of Mahatma Gandhi." },
+        { date: "2026-10-11", name: "Shardiya Navratri Starts (Ghatasthapana)", hindiName: "शारदीय नवरात्रि प्रारंभ", aliases: ["navratri", "navratri start", "ghatasthapana", "durga puja start"], category: "Hindu", description: "First day of 9-day Navratri festival." },
+        { date: "2026-10-19", name: "Maha Ashtami / Durga Ashtami", hindiName: "महाअष्टमी / दुर्गा अष्टमी", aliases: ["maha ashtami", "durga ashtami", "ashtami"], category: "Hindu", description: "Grand Durga Ashtami Puja and Sandhi Puja." },
+        { date: "2026-10-20", name: "Dussehra (Vijayadashami)", hindiName: "दशहरा (विजयादशमी)", aliases: ["dussehra", "vijayadashami", "dasara", "ravan dahan"], category: "Hindu", description: "Victory of Good over Evil, Ravan Dahan." },
+        { date: "2026-10-29", name: "Karwa Chauth", hindiName: "करवा चौथ", aliases: ["karwa chauth", "karva chauth"], category: "Hindu", description: "Fasting ritual observed by married women for husbands." },
+        { date: "2026-11-06", name: "Dhanteras", hindiName: "धनतेरस", aliases: ["dhanteras", "dhantrayodashi", "dhanvantari jayanti"], category: "Hindu", description: "Auspicious day to buy gold, silver, and worship Lord Dhanvantari." },
+        { date: "2026-11-08", name: "Diwali (Deepavali / Lakshmi Puja)", hindiName: "दीपावली / दीवाली (लक्ष्मी पूजा)", aliases: ["diwali", "deepavali", "deepawali", "lakshmi puja", "badi diwali"], category: "Hindu", description: "Grand Festival of Lights, Lakshmi-Ganesh Puja & fireworks." },
+        { date: "2026-11-09", name: "Govardhan Puja / Annakut", hindiName: "गोवर्धन पूजा", aliases: ["govardhan puja", "annakut"], category: "Hindu", description: "Worship of Mount Govardhan & Gau Mata." },
+        { date: "2026-11-10", name: "Bhai Dooj", hindiName: "भाई दूज", aliases: ["bhai dooj", "bhaiya dooj", "yama dwitiya"], category: "Hindu", description: "Celebration of sibling affection." },
+        { date: "2026-11-15", name: "Chhath Puja (Sandhya Arghya)", hindiName: "छठ पूजा (संध्या अर्घ्य)", aliases: ["chhath", "chhath puja", "surya shashthi", "dala chhath", "chhathi maiya"], category: "Hindu", description: "Maha Parv of Sun God Surya & Chhathi Maiya (Evening Arghya on Nov 15, Morning Arghya on Nov 16)." },
+        { date: "2026-11-24", name: "Guru Nanak Jayanti (Gurpurab)", hindiName: "गुरु नानक जयंती", aliases: ["guru nanak jayanti", "gurpurab", "prakash utsav"], category: "Sikh", description: "Birth anniversary of Guru Nanak Dev Ji." },
+        { date: "2026-12-25", name: "Christmas Day", hindiName: "क्रिसमस", aliases: ["christmas", "xmas", "bada din"], category: "Christian", description: "Celebration of the Nativity of Jesus Christ." },
+      ],
+      2027: [
+        { date: "2027-01-14", name: "Makar Sankranti / Pongal", hindiName: "मकर संक्रांति", aliases: ["makar sankranti", "pongal", "lohri"], category: "Hindu", description: "Harvest Festival & Sun Transit." },
+        { date: "2027-01-26", name: "Republic Day", hindiName: "गणतंत्र दिवस", aliases: ["republic day", "26 january"], category: "National", description: "78th Republic Day of India." },
+        { date: "2027-03-06", name: "Maha Shivratri", hindiName: "महाशिवरात्रि", aliases: ["maha shivratri", "shivratri"], category: "Hindu", description: "Great night of Lord Shiva." },
+        { date: "2027-03-23", name: "Holi (Rangwali Holi)", hindiName: "होली", aliases: ["holi", "rangwali holi"], category: "Hindu", description: "Festival of Colors." },
+        { date: "2027-08-17", name: "Raksha Bandhan", hindiName: "रक्षाबंधन", aliases: ["raksha bandhan", "rakhi"], category: "Hindu", description: "Brother and sister festival." },
+        { date: "2027-10-29", name: "Diwali (Deepavali)", hindiName: "दीपावली", aliases: ["diwali", "deepavali"], category: "Hindu", description: "Festival of Lights." },
+        { date: "2027-11-04", name: "Chhath Puja", hindiName: "छठ पूजा", aliases: ["chhath", "chhath puja"], category: "Hindu", description: "Maha Parv of Sun God Surya." },
+        { date: "2027-12-25", name: "Christmas Day", hindiName: "क्रिसमस", aliases: ["christmas"], category: "Christian", description: "Birth of Jesus Christ." },
+      ],
+    };
+
+    const targetYear = festivalDatabase[currentYear] ? currentYear : 2026;
+    const yearList = festivalDatabase[targetYear] || festivalDatabase[2026];
+
+    // Helper: calculate days remaining and formatted date
+    const enrichFestival = (fest: any) => {
+      const festDate = new Date(`${fest.date}T00:00:00+05:30`);
+      const todayIST = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+      todayIST.setHours(0, 0, 0, 0);
+
+      const diffMs = festDate.getTime() - todayIST.getTime();
+      const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+      
+      const dayNames = ["Sunday (रविवार)", "Monday (सोमवार)", "Tuesday (मंगलवार)", "Wednesday (बुधवार)", "Thursday (गुरुवार)", "Friday (शुक्रवार)", "Saturday (शनिवार)"];
+      const dayOfWeek = dayNames[festDate.getDay()];
+      const dateFormatted = festDate.toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" });
+
+      let timingLabel = "";
+      if (diffDays === 0) timingLabel = "🎉 Aaj hi hai! (Today)";
+      else if (diffDays === 1) timingLabel = "⚡ Kal hai! (Tomorrow)";
+      else if (diffDays > 1) timingLabel = `⏳ ${diffDays} din baad (${diffDays} days remaining)`;
+      else timingLabel = `✅ Ho gaya (${Math.abs(diffDays)} din pehle)`;
+
+      return {
+        ...fest,
+        formattedDate: dateFormatted,
+        dayOfWeek,
+        daysRemaining: diffDays,
+        timingLabel,
+        isPast: diffDays < 0,
+        isToday: diffDays === 0,
+        isUpcoming: diffDays >= 0,
+      };
+    };
+
+    const enrichedList = yearList.map(enrichFestival);
+
+    // If a specific festival query was requested (e.g., "diwali", "holi", "chhath")
+    if (q && q !== "list" && q !== "upcoming" && q !== "all") {
+      // Find matching festival
+      let match = enrichedList.find((f) =>
+        f.aliases.some((alias) => q.includes(alias) || alias.includes(q)) ||
+        f.name.toLowerCase().includes(q) ||
+        f.hindiName.includes(q)
+      );
+
+      // If matched festival has already passed in current year, check next year's date
+      if (match && match.isPast && festivalDatabase[targetYear + 1]) {
+        const nextYearList = festivalDatabase[targetYear + 1].map(enrichFestival);
+        const nextYearMatch = nextYearList.find((f) =>
+          f.aliases.some((alias) => q.includes(alias) || alias.includes(q)) ||
+          f.name.toLowerCase().includes(q)
+        );
+        if (nextYearMatch) {
+          const message = `✨ **${nextYearMatch.name}** (${nextYearMatch.hindiName}):\n` +
+            `📅 **Date:** ${nextYearMatch.formattedDate} (${nextYearMatch.dayOfWeek})\n` +
+            `⏳ **Status:** ${nextYearMatch.timingLabel}\n` +
+            `ℹ️ **Significance:** ${nextYearMatch.description}\n` +
+            `*(Note: ${targetYear} ki ${match.name} ${match.formattedDate} ko ho chuki hai, isliye agle saal ${targetYear + 1} ki date di gayi hai.)*`;
+
+          return {
+            success: true,
+            query: q,
+            festival: nextYearMatch,
+            message,
+          };
+        }
+      }
+
+      if (match) {
+        const message = `✨ **${match.name}** (${match.hindiName}):\n` +
+          `📅 **Date:** ${match.formattedDate} (${match.dayOfWeek})\n` +
+          `⏳ **Status:** ${match.timingLabel}\n` +
+          `ℹ️ **Significance:** ${match.description}`;
+
+        return {
+          success: true,
+          query: q,
+          festival: match,
+          message,
+        };
+      }
+    }
+
+    // Default: Return upcoming festivals from today onwards
+    const upcomingOnly = enrichedList.filter((f) => f.daysRemaining >= 0).slice(0, 8);
+    const nextFest = upcomingOnly[0];
+
+    const lines = upcomingOnly.map(
+      (f, idx) => `${idx + 1}. **${f.name}** — 📅 ${f.formattedDate} (${f.timingLabel})`
+    );
+
+    const message = nextFest
+      ? `🎉 **Agla Bada Tyohar:** **${nextFest.name}** (${nextFest.formattedDate}, ${nextFest.timingLabel})\n\n` +
+        `📋 **Upcoming Indian Festivals (${targetYear}):**\n` +
+        lines.join("\n")
+      : `Boss, ${targetYear} ke sabhi pramukh tyohar ho chuke hain. Agle saal ki dates check karne ke liye saal mention karein.`;
+
+    return {
+      success: true,
+      year: targetYear,
+      nextFestival: nextFest,
+      count: upcomingOnly.length,
+      upcomingFestivals: upcomingOnly,
+      message,
+    };
+  }
+
+  // 24b. Public holidays — Nager.Date + Comprehensive Indian Festivals fallback
   public async getPublicHolidays(countryCode?: string, year?: number): Promise<any> {
     const yr = year || new Date().getFullYear();
     const code = (countryCode || "IN").toUpperCase();
 
-    // India Gazetted Public Holidays Calendar (Official Government of India Schedule)
     if (code === "IN") {
-      const indianGazettedHolidays = [
-        { date: `${yr}-01-26`, name: "Republic Day (Gantantra Diwas)" },
-        { date: `${yr}-03-14`, name: "Holi (Festival of Colors)" },
-        { date: `${yr}-03-31`, name: "Eid-ul-Fitr (Ramadan)" },
-        { date: `${yr}-04-10`, name: "Mahavir Jayanti" },
-        { date: `${yr}-04-18`, name: "Good Friday" },
-        { date: `${yr}-05-12`, name: "Buddha Purnima" },
-        { date: `${yr}-06-07`, name: "Bakrid / Eid-ul-Adha" },
-        { date: `${yr}-07-06`, name: "Muharram" },
-        { date: `${yr}-08-15`, name: "Independence Day (Swatantrata Diwas)" },
-        { date: `${yr}-09-05`, name: "Milad-un-Nabi (Id-e-Milad)" },
-        { date: `${yr}-10-02`, name: "Mahatma Gandhi Jayanti" },
-        { date: `${yr}-10-20`, name: "Dussehra (Vijayadashami)" },
-        { date: `${yr}-11-08`, name: "Diwali (Deepavali)" },
-        { date: `${yr}-11-24`, name: "Guru Nanak Jayanti" },
-        { date: `${yr}-12-25`, name: "Christmas Day" },
-      ];
-      return {
-        success: true,
-        countryCode: "IN",
-        year: yr,
-        count: indianGazettedHolidays.length,
-        holidays: indianGazettedHolidays,
-        message: `Boss, ${yr} ke liye India ke total ${indianGazettedHolidays.length} gazetted national holidays ready hain.`,
-      };
+      return this.getUpcomingFestivalsAndHolidays(undefined, yr);
     }
 
     try {

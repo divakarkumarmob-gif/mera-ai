@@ -195,9 +195,9 @@ class BackgroundLocationService {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           deviceId,
-          label: this.deviceLabel,
-          ownerName: ownerName || this.deviceLabel,
-          username: user?.username,
+          label: this.deviceLabel || 'Boss Phone',
+          ownerName: ownerName || this.deviceLabel || 'DK (Boss)',
+          username: user?.username || 'boss',
         }),
       });
 

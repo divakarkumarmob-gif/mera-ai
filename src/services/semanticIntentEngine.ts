@@ -566,6 +566,38 @@ export class SemanticIntentEngine {
           required: ["username"]
         }
       },
+      {
+        name: "get_device_location",
+        description: "Get real-time live GPS device location of Boss DK ('boss location', 'meri location', 'current location', 'main kahan hoon') or any registered family member ('bhai kahan hai', 'papa kahan hain'). Returns exact address, Google Maps link, coordinates, battery level, and last updated time.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            personNameOrLabel: {
+              type: "STRING",
+              description: "Target person or device name e.g. 'boss', 'bhai', 'papa', 'mummy'. Defaults to 'boss' for Boss's own location."
+            }
+          },
+          required: []
+        }
+      },
+      {
+        name: "get_upcoming_festivals_and_holidays",
+        description: "Get accurate dates, countdown, and details for Indian festivals and holidays (Diwali, Holi, Chhath Puja, Raksha Bandhan, Eid-ul-Fitr, Eid-ul-Adha, Navratri, Dussehra, Maha Shivratri, Krishna Janmashtami, Ganesh Chaturthi, Christmas, Republic Day, Independence Day). Use when Boss asks 'Diwali kab hai?', 'Holi kab hai?', 'Chhath puja kab hai?', 'agla tyohar kab hai', 'upcoming holidays', 'aaj koi tyohar hai'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            festivalQuery: {
+              type: "STRING",
+              description: "Specific festival or holiday name (e.g. 'diwali', 'holi', 'chhath', 'rakhi', 'eid', 'navratri', 'dussehra') or omit for upcoming list"
+            },
+            year: {
+              type: "NUMBER",
+              description: "Target year (defaults to current year e.g. 2026)"
+            }
+          },
+          required: []
+        }
+      },
     ];
   }
 
@@ -1044,6 +1076,22 @@ export class SemanticIntentEngine {
       if (toolName === "instagram_view_user_feed") {
         const { instagramBotService } = await import("./instagramBotService");
         const res = await instagramBotService.getUserFeedAndPostsHumanPaced(args.username, args.maxPosts || 6);
+        return res;
+      }
+
+      if (toolName === "get_device_location" || toolName === "get_family_device_location") {
+        const { deviceLocationTrackerService } = await import("./deviceLocationTrackerService");
+        const queryTarget = String(args?.personNameOrLabel || "boss").trim();
+        const res = await deviceLocationTrackerService.getDeviceLocation(queryTarget);
+        return res;
+      }
+
+      if (toolName === "get_upcoming_festivals_and_holidays" || toolName === "get_public_holidays") {
+        const { publicApisService } = await import("./publicApisService");
+        const res = await publicApisService.getUpcomingFestivalsAndHolidays(
+          args?.festivalQuery ? String(args.festivalQuery) : undefined,
+          args?.year ? Number(args.year) : undefined
+        );
         return res;
       }
     } catch (err: any) {

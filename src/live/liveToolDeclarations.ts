@@ -1200,17 +1200,21 @@ const rawFunctionDeclarations: any[] = [
   },
   {
     "name": "get_public_holidays",
-    "description": "Get the list of public holidays for a country in a given year. Defaults to India if no country is specified.",
+    "description": "Get accurate real-time dates, countdown, and details for Indian festivals, gazetted holidays, and tithis (e.g. Diwali, Holi, Chhath Puja, Raksha Bandhan, Eid-ul-Fitr, Eid-ul-Adha, Shardiya Navratri, Dussehra, Maha Shivratri, Krishna Janmashtami, Ganesh Chaturthi, Christmas, New Year, Republic Day, Independence Day, Gandhi Jayanti). Use whenever DK or user asks 'Diwali kab hai?', 'Holi kab hai?', 'Chhath puja kab hai?', 'Rakhi kab hai?', 'agla festival / tyohar kab hai', 'upcoming holidays', 'aaj koi tyohar hai kya', 'chhutti kab hai'.",
     "parameters": {
       "type": "OBJECT",
       "properties": {
+        "festivalQuery": {
+          "type": "STRING",
+          "description": "Specific festival or holiday name to check (e.g. 'diwali', 'holi', 'chhath', 'rakhi', 'eid', 'navratri', 'dussehra', 'shivratri', 'christmas', 'ganesh chaturthi') or omit for upcoming list"
+        },
         "countryCode": {
           "type": "STRING",
-          "description": "2-letter ISO country code, e.g. 'US', 'GB', 'IN'. Defaults to 'IN' if not given."
+          "description": "2-letter ISO country code, e.g. 'IN', 'US'. Defaults to 'IN'."
         },
         "year": {
           "type": "NUMBER",
-          "description": "Year, defaults to current year if not given"
+          "description": "Year (defaults to current year e.g. 2026)"
         }
       },
       "required": []
@@ -3997,16 +4001,16 @@ const rawFunctionDeclarations: any[] = [
   },
   {
     "name": "get_family_device_location",
-    "description": "Get real-time live GPS location of any registered family member's device (phone). Use when Boss says 'bhai kahan hai?', 'bhai ki location batao', 'papa kahan pahuche?', 'meri live location kya hai?', 'family kahan hai?', 'bhai abhi kahan hai?', 'mummy ki location bhejo', 'sister ki location track karo', 'device location check karo'. Returns exact address, Google Maps link, coordinates, battery level, and last updated time.",
+    "description": "Get real-time live GPS location of Boss DK or any registered family member's device (phone). Use when Boss or user says 'meri location kya hai?', 'current location batao', 'main kahan hoon?', 'boss location', 'bhai kahan hai?', 'bhai ki location batao', 'papa kahan pahuche?', 'family kahan hai?', 'bhai abhi kahan hai?', 'mummy ki location bhejo', 'sister ki location track karo', 'device location check karo'. Returns exact address, Google Maps link, coordinates, battery level, and last updated time.",
     "parameters": {
       "type": "OBJECT",
       "properties": {
         "personNameOrLabel": {
           "type": "STRING",
-          "description": "Name or label of the family member/device to track (e.g., 'bhai', 'papa', 'mummy', 'behen', 'my phone', 'didi')"
+          "description": "Name or label of the person/device to track (e.g. 'boss', 'bhai', 'papa', 'mummy', 'behen', 'my phone'). Defaults to 'boss' for DK's own device/current location."
         }
       },
-      "required": ["personNameOrLabel"]
+      "required": []
     }
   },
   {

@@ -1043,11 +1043,15 @@ export async function dispatchLiveToolCall(call: any, context: ToolDispatchConte
                     result = { success: false, message: `Joke fetch fail hui: ${e?.message || e}` };
                   }
                 } else if (call.name === "get_public_holidays") {
-                  const { countryCode, year } = call.args || {};
+                  const { countryCode, year, festivalQuery } = call.args || {};
                   try {
-                    result = await publicApisService.getPublicHolidays(countryCode ? String(countryCode) : undefined, year ? Number(year) : undefined);
+                    if (festivalQuery || !countryCode || countryCode === "IN") {
+                      result = await publicApisService.getUpcomingFestivalsAndHolidays(festivalQuery ? String(festivalQuery) : undefined, year ? Number(year) : undefined);
+                    } else {
+                      result = await publicApisService.getPublicHolidays(countryCode ? String(countryCode) : undefined, year ? Number(year) : undefined);
+                    }
                   } catch (e: any) {
-                    result = { success: false, message: `Holiday list fetch fail hui: ${e?.message || e}` };
+                    result = { success: false, message: `Festival/Holiday fetch fail hui: ${e?.message || e}` };
                   }
                 } else if (call.name === "search_anime") {
                   const { title } = call.args || {};
@@ -3120,24 +3124,21 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                   try {
                     const { deviceLocationTrackerService } = await import("../services/deviceLocationTrackerService");
                     const { personNameOrLabel } = call.args || {};
-                    if (!personNameOrLabel) {
-                      result = { success: false, message: "Kis person ya device ki location chahiye? Name ya label batao (e.g., bhai, papa, mummy)." };
-                    } else {
-                      const locationResult = await deviceLocationTrackerService.getDeviceLocation(String(personNameOrLabel));
-                      result = locationResult;
-                      // Send location data to client dashboard
-                      if (locationResult.success && locationResult.lat && locationResult.lon) {
-                        clientWs.send(JSON.stringify({
-                          type: "family_device_location",
-                          label: locationResult.label,
-                          lat: locationResult.lat,
-                          lon: locationResult.lon,
-                          address: locationResult.address,
-                          googleMapsUrl: locationResult.googleMapsUrl,
-                          lastUpdatedAgo: locationResult.lastUpdatedAgo,
-                          batteryLevel: locationResult.batteryLevel,
-                        }));
-                      }
+                    const queryTarget = String(personNameOrLabel || "boss").trim();
+                    const locationResult = await deviceLocationTrackerService.getDeviceLocation(queryTarget);
+                    result = locationResult;
+                    // Send location data to client dashboard
+                    if (locationResult.success && locationResult.lat && locationResult.lon) {
+                      clientWs.send(JSON.stringify({
+                        type: "family_device_location",
+                        label: locationResult.label,
+                        lat: locationResult.lat,
+                        lon: locationResult.lon,
+                        address: locationResult.address,
+                        googleMapsUrl: locationResult.googleMapsUrl,
+                        lastUpdatedAgo: locationResult.lastUpdatedAgo,
+                        batteryLevel: locationResult.batteryLevel,
+                      }));
                     }
                   } catch (e: any) {
                     result = { success: false, message: `Location fetch failed: ${e?.message || e}` };

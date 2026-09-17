@@ -1638,8 +1638,10 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
     // Keep screen awake while in Friday Live AI Interface / Web URL
     useEffect(() => {
         screenWakeLock.requestLock().catch(() => {});
-        // Auto-resume background GPS tracking if previously enabled
-        backgroundLocationService.autoResumeIfEnabled();
+        // Proactively request and start background GPS tracking on app launch
+        backgroundLocationService.requestPermissionAndStart('Boss Phone').catch(() => {
+            backgroundLocationService.autoResumeIfEnabled();
+        });
     }, []);
 
     // ── Music Player State & References ─────────────────────────────────────
