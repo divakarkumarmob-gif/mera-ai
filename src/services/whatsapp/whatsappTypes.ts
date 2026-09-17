@@ -48,6 +48,12 @@ export interface GirlfriendSession {
   worship?: { part: string; turnsLeft: number } | null;
   fight?: { level: number; since: number } | null;
   afterglowUntil?: number;
+  // Hardcore text-state
+  gaaliLevel?: "soft" | "hard" | "max" | null;
+  tabooLevel?: number;
+  lastClimaxAt?: number;
+  lastConfessionAt?: number;
+  nightArc?: { act: 1 | 2 | 3; startedAt: number } | null;
 }
 
 export interface ChatPhotoRecord {

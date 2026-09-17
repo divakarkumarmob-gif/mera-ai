@@ -482,6 +482,34 @@ _Hamara sweet time complete ho gaya aur privacy ke liye saari temporary chats cl
     } else if (/\b(tez|jaldi|fast|jor\s*se\s*ab)\b/i.test(lower)) {
       session.tempo = "fast";
     }
+    // Gaali-density dial (1 line → whole chat level)
+    if (/\b(halki\s*gaali|soft\s*bolo|gaali\s*kam\s*karo)\b/i.test(lower)) {
+      session.gaaliLevel = session.gaaliLevel === "max" ? "hard" : "soft";
+    } else if (/\b(full\s*randi\s*mode|sabse\s*gandi)\b/i.test(lower)) {
+      session.gaaliLevel = "max";
+    } else if (/\b(gandi\s*gaali|gaali\s*do|gaali\s*de)\b/i.test(lower)) {
+      session.gaaliLevel = "hard";
+    }
+    // Taboo escalation ladder (consent-driven)
+    if (/\b(aur\s*aage|aage\s*badho|aur\s*ganda|zyada\s*ganda)\b/i.test(lower)) {
+      session.tabooLevel = Math.min(3, (session.tabooLevel || 0) + 1);
+    } else if (/\b(bas|bahut\s*hua|itna\s*hi|ruk\s*jao\s*bas)\b/i.test(lower) && (session.tabooLevel || 0) > 0) {
+      session.tabooLevel = Math.max(0, (session.tabooLevel || 0) - 0); // hold level, don't climb
+    }
+    // His climax timestamp (for post-climax confession window) — afterglow handled separately
+    if (/\b(mera\s*(sperm|maal|mal|paani)\s*(nikal\s*gaya|aa\s*gaya)|mera\s*ho\s*gaya|main\s*jhad\s*gaya|jhad\s*gaya\s*main)\b/i.test(lower)) {
+      session.lastClimaxAt = now;
+      // Night arc advance on climax: Act 1/2 → next act
+      if (session.nightArc && session.nightArc.act < 3) {
+        session.nightArc.act = (session.nightArc.act + 1) as 1 | 2 | 3;
+      }
+    }
+    // Full-night arc trigger + manual advance
+    if (/\b(poori\s*raat|full\s*night|saari\s*raat|3\s*round|teen\s*round)\b/i.test(lower)) {
+      session.nightArc = { act: 1, startedAt: now };
+    } else if (/\b(aage|next\s*act|agle\s*round)\b/i.test(lower) && session.nightArc && session.nightArc.act < 3) {
+      session.nightArc.act = (session.nightArc.act + 1) as 1 | 2 | 3;
+    }
     // Body worship focus: "aaj sirf X" / "sirf X pe"
     const worshipMatch = lower.match(/(?:aaj\s+)?sirf\s+([a-z\u0900-\u097F\s]+?)(?:\s+pe|\s+par|\s+ko)\s*(?:focus|dhyaan)?/i);
     if (worshipMatch && worshipMatch[1].trim().length >= 3) {
@@ -519,6 +547,28 @@ _Hamara sweet time complete ho gaya aur privacy ke liye saari temporary chats cl
    */
   public buildSextStateBlock(session: GirlfriendSession): string {
     const parts: string[] = [];
+    if (session.gaaliLevel === "soft") {
+      parts.push("GAALI DIAL: SOFT — romantic + max 1-2 soft gaali per reply.");
+    } else if (session.gaaliLevel === "hard") {
+      parts.push("GAALI DIAL: HARD — har 2-3 lines me gaali + body words mix.");
+    } else if (session.gaaliLevel === "max") {
+      parts.push("GAALI DIAL: MAX (full randi mode) — har sentence me maa-behen + body words, zero soft lines.");
+    }
+    if (session.nightArc) {
+      const act = session.nightArc.act;
+      parts.push(`NIGHT ARC Act ${act}/3 active — ${act === 1 ? "TEASING (kapdon ke upar, permission baad me)" : act === 2 ? "FIRST ROUND (full sext, wild)" : "SLEEPY-SWEET + MORNING ROUND (neend ka natak, raat me tease, subah wild)"}.`);
+    }
+    if ((session.tabooLevel || 0) > 0) {
+      const lvl = session.tabooLevel || 0;
+      parts.push(`TABOO LEVEL ${lvl}/3 active — ${lvl === 1 ? "public thrill hints" : lvl === 2 ? "risky scenario (lift/car/terrace)" : "full taboo scene"} zone me raho; "aur aage" pe +1, "bas" pe hold.`);
+    }
+    // Post-climax confession: once per climax, within ~5 min window
+    if (session.lastClimaxAt && Date.now() - session.lastClimaxAt < 5 * 60 * 1000) {
+      if (!session.lastConfessionAt || session.lastConfessionAt < session.lastClimaxAt) {
+        parts.push('CONFESSION DUE: is reply me ek post-climax secret confess karo ("sach batau... 😳") — NAYI baat, repeat nahi — phir wapas afterglow/pillow-talk.');
+        session.lastConfessionAt = Date.now();
+      }
+    }
     if (session.tempo === "slow") {
       parts.push("TEMPO: SLOW MODE active — chhote 1-line messages, 1 sensation per line, teasing, climax door rakho.");
     } else if (session.tempo === "fast") {
@@ -2082,6 +2132,10 @@ STRICT REALISTIC WHATSAPP CHAT RULES:
 
       // NOTE: afterglow starts ONLY on HIS "ho gaya" phrases (handled in updateSextState).
       // Her climax lines never auto-trigger it — sext continues until he says he's done.
+      // Either climax stamps the post-climax CONFESSION window (one secret, next 1-2 replies).
+      if (isModeBSession && /\b(jhad|climax|aa\s*gayi|aa\s*raha|nikal\s*raha|HAAAN)\b/i.test(replyText)) {
+        session.lastClimaxAt = Date.now();
+      }
 
       const isVoiceRequested = isVoiceInput || isSingingSong || /\b(voice|audio|speak|bolo|sunao|bol\s*kar|bol\s*ke|aawaz|voice\s*note)\b/i.test(rawText);
       // Auto-voice on intimate Mode-B moments: voice note + text BOTH arrive (never voice-only)
