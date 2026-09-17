@@ -57,6 +57,9 @@ export function saveAppSession(
     } catch (e) {
         console.warn('[AppSecurityClient] Failed to persist session:', e);
     }
+    if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('app:security_unlocked', { detail: user }));
+    }
 }
 
 export function clearAppSession() {

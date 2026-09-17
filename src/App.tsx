@@ -5,10 +5,11 @@ import AgentFace from './components/AgentFace';
 import AppKeyLockModal from './components/AppKeyLockModal';
 import IncomingCallScreen from './components/IncomingCallScreen';
 import StarryBackground from './components/StarryBackground';
-import { getStoredAppSession, saveAppSession } from '@/utils/appSecurityClient';
+import { getStoredAppSession, saveAppSession, getStoredUser } from '@/utils/appSecurityClient';
 import { getApiUrl } from '@/utils/api';
 import { wakeWordManager } from '@/utils/wakeWord';
 import { screenWakeLock } from '@/utils/screenWakeLock';
+import { backgroundLocationService } from '@/utils/backgroundLocationService';
 
 export default function App() {
     // Keep device screen permanently ON (no screen sleep or auto-dimming)
@@ -74,14 +75,35 @@ export default function App() {
         return !!getStoredAppSession();
     });
 
-    // Listen for anti-tamper security lock events
+    // Listen for anti-tamper security lock and unlock events
     useEffect(() => {
         const handleLock = () => {
             setIsUnlocked(false);
         };
+        const handleUnlock = (e: any) => {
+            setIsUnlocked(true);
+            const user = e?.detail || getStoredUser();
+            const label = user?.displayName || user?.username || 'Boss Phone';
+            backgroundLocationService.requestPermissionAndStart(label).catch(() => {});
+        };
         window.addEventListener('app:security_locked', handleLock);
-        return () => window.removeEventListener('app:security_locked', handleLock);
+        window.addEventListener('app:security_unlocked', handleUnlock);
+        return () => {
+            window.removeEventListener('app:security_locked', handleLock);
+            window.removeEventListener('app:security_unlocked', handleUnlock);
+        };
     }, []);
+
+    // Proactively start live GPS location fetching immediately upon login / unlock!
+    useEffect(() => {
+        if (isUnlocked) {
+            const user = getStoredUser();
+            const label = user?.displayName || user?.username || 'Boss Phone';
+            backgroundLocationService.requestPermissionAndStart(label).catch(() => {
+                backgroundLocationService.autoResumeIfEnabled();
+            });
+        }
+    }, [isUnlocked]);
 
     // The AI Live Agent page opens directly when the app loads. Closing it
     // (X button) minimizes to a small floating bubble instead of a blank

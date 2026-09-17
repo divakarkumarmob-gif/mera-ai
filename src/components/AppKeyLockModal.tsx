@@ -98,10 +98,12 @@ export default function AppKeyLockModal({ onUnlocked }: AppKeyLockModalProps) {
                     localStorage.setItem('friday_last_login_username', data.user?.username || trimmedUser || 'boss');
                 } catch {}
 
-                // Automatically link background GPS location to this logged-in user profile!
+                // Automatically request permission and start live background GPS tracking from this moment!
                 try {
-                    const label = data.user?.displayName || data.user?.username || trimmedUser || 'User';
-                    backgroundLocationService.registerAndStart(label, label);
+                    const label = data.user?.displayName || data.user?.username || trimmedUser || 'Boss Phone';
+                    backgroundLocationService.requestPermissionAndStart(label).catch((e) => {
+                        console.warn('[AppKeyLock] Location auto-start warning:', e);
+                    });
                 } catch (e) {
                     console.warn('[AppKeyLock] Location auto-start warning:', e);
                 }
