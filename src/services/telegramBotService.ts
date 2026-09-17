@@ -11,6 +11,7 @@ import { railRadarService } from "./railRadarService";
 import { fridayModeService, UNCENSORED_SAFETY_SETTINGS } from "./fridayModeService";
 import { sensitiveActionGatekeeper } from "./sensitiveActionGatekeeper";
 import { girlfriendProfileService } from "./girlfriendProfileService";
+import { intentClassifierService, ClassifiedIntent, IntentContext } from "./intentClassifierService";
 
 export interface TelegramStatus {
   isConfigured: boolean;
@@ -2637,6 +2638,14 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
       return;
     }
 
+    // ── LLM-Driven Intent Classification for Owner Messages (Replaces Hardcoded Regex) ──
+    if (isOwner && text && text.trim().length >= 3) {
+      const intentResult = await this.classifyAndExecuteTelegramIntent(text, chatId, senderName, from.id || 0, isGroup, msg.chat?.title, msg.reply_to_message);
+      if (intentResult.handled) {
+        return;
+      }
+    }
+
     // 2.0B Handle Natural Language Media Search (e.g. "media search invoice", "search media 24 august video", "kahan hai file ...")
     const mediaSearchMatch = text.match(/^(?:media\s*search|search\s*media|vault\s*search|\/media_search)\s*(.*)/i);
     if (mediaSearchMatch) {
@@ -3792,6 +3801,318 @@ INSTRUCTIONS:
       }
     } catch (e: any) {
       console.error("[TelegramBot] Callback query error:", e?.message);
+    }
+  }
+
+  // ── LLM-Driven Intent Classification for Owner Messages (Replaces Hardcoded Regex) ─────
+
+  private async classifyAndExecuteTelegramIntent(
+    rawText: string,
+    chatId: number,
+    senderName: string,
+    senderId: number,
+    isGroup: boolean,
+    groupTitle?: string,
+    repliedMsg?: any
+  ): Promise<{ handled: boolean; replyText?: string }> {
+    const context: IntentContext = {
+      platform: "telegram",
+      isGroup,
+      isOwner: true,
+      senderName,
+      senderPhone: String(senderId),
+      groupName: groupTitle,
+      quotedMessage: repliedMsg?.text,
+      timeOfDay: new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" }),
+      userTimezone: "Asia/Kolkata"
+    };
+
+    const classified = await intentClassifierService.classifyIntent(rawText, context);
+    
+    if (classified.action === "general_chat") {
+      return { handled: false }; // Fall through to existing conversation handler
+    }
+
+    // Execute the classified intent
+    return await this.executeTelegramIntent(classified, { chatId, senderName, senderId, isGroup, groupTitle });
+  }
+
+  private async executeTelegramIntent(
+    classified: ClassifiedIntent,
+    ctx: { chatId: number; senderName: string; senderId: number; isGroup: boolean; groupTitle?: string }
+  ): Promise<{ handled: boolean; replyText?: string }> {
+    const { chatId, senderName, senderId, isGroup, groupTitle } = ctx;
+    const { action, parameters } = classified;
+
+    try {
+      switch (action) {
+        case "make_phone_call": {
+          const { exotelService } = await import("./exotelService");
+          const config = exotelService.getConfig();
+          const targetPhone = parameters.targetPhone || config.bossNotificationNumber || process.env.BOSS_WHATSAPP_NUMBER || "919315570187";
+          const callRes = await exotelService.makeOutboundCall({ to: targetPhone, customMessage: parameters.reason || "Telegram se call request" });
+          
+          const replyText = callRes.success 
+            ? `📞 *Ji Boss! Main abhi aapko (+${targetPhone}) par Exotel Telephony se call laga rahi hoon... Phone uthaiye!* ⚡`
+            : `⚠️ *Call connect nahi ho paayi:* ${callRes.message}\n_Kripya Exotel settings me API keys aur Virtual number check karein._`;
+          
+          await this.sendMessage(chatId, replyText);
+          return { handled: true, replyText };
+        }
+
+        case "send_whatsapp_message": {
+          const { sendWhatsAppUnified } = await import("./whatsappService");
+          const { contactsService } = await import("./contactsService");
+          const contact = await contactsService.findContact(parameters.contactNameOrPhone);
+          const targetNum = contact ? contact.phone : String(parameters.contactNameOrPhone).replace(/[\s\-\(\)\+]/g, "");
+          const sendRes = await sendWhatsAppUnified(targetNum, parameters.messageText);
+          
+          const replyText = sendRes.success ? "✅ WhatsApp message bhej diya!" : `❌ ${sendRes.message}`;
+          await this.sendMessage(chatId, replyText);
+          return { handled: true, replyText };
+        }
+
+        case "save_contact": {
+          const { contactsService: cs } = await import("./contactsService");
+          const entry = await cs.saveContact(parameters.contactName, parameters.phoneNumber, parameters.relation);
+          const replyText = `📇 Contact "${entry.name}" (+${entry.phone}) save kar diya!`;
+          await this.sendMessage(chatId, replyText);
+          return { handled: true, replyText };
+        }
+
+        case "lookup_phone_details": {
+          const { phoneIntelligenceService } = await import("./phoneIntelligenceService");
+          const report = await phoneIntelligenceService.lookup(parameters.phoneNumber);
+          const replyText = phoneIntelligenceService.formatReportMarkdown(report, "telegram");
+          await this.sendMessage(chatId, replyText);
+          return { handled: true, replyText };
+        }
+
+        case "play_music": {
+          const { whatsappFeatureEngine } = await import("./whatsappFeatureEngine");
+          const musicRes = await whatsappFeatureEngine.searchAndPlayMusic(String(chatId), parameters.songQuery, senderName);
+          if (musicRes.audioBuffer) {
+            await this.sendAudio(chatId, musicRes.audioBuffer, musicRes.replyText);
+          } else {
+            await this.sendMessage(chatId, musicRes.replyText || "🎵 Music baj raha hai!");
+          }
+          return { handled: true, replyText: musicRes.replyText };
+        }
+
+        case "get_weather": {
+          const { weatherService } = await import("./weatherService");
+          const weather = await weatherService.getWeather(parameters.place);
+          await this.sendMessage(chatId, weather || "Weather fetch nahi ho paya.");
+          return { handled: true, replyText: weather };
+        }
+
+        case "get_news": {
+          const { newsService } = await import("./newsService");
+          const news = await newsService.getNews(parameters.topic, "in", parameters.count || 10);
+          await this.sendMessage(chatId, news || "News fetch nahi ho payi.");
+          return { handled: true, replyText: news };
+        }
+
+        case "set_reminder": {
+          const { reminderScheduler } = await import("./reminderScheduler");
+          await reminderScheduler.addReminder(parameters.title, parameters.timeString);
+          const replyText = `⏰ Reminder set: "${parameters.title}" for ${parameters.timeString}`;
+          await this.sendMessage(chatId, replyText);
+          return { handled: true, replyText };
+        }
+
+        case "save_daily_update": {
+          const { dailyUpdateService } = await import("./dailyUpdateService");
+          await dailyUpdateService.appendUpdate(parameters.updateText);
+          const replyText = "📝 Aaj ka update save kar diya!";
+          await this.sendMessage(chatId, replyText);
+          return { handled: true, replyText };
+        }
+
+        case "get_daily_update": {
+          const { dailyUpdateService: dus, resolveRelativeDateIST } = await import("./dailyUpdateService");
+          const date = resolveRelativeDateIST(parameters.dateWord);
+          const update = await dus.getUpdateForDate(date);
+          const replyText = update?.text || `📅 ${date} ke liye koi update nahi hai.`;
+          await this.sendMessage(chatId, replyText);
+          return { handled: true, replyText };
+        }
+
+        case "search_memory": {
+          const { vectorMemoryService } = await import("./vectorMemoryService");
+          const results = await vectorMemoryService.searchSemanticMemory(parameters.searchQuery, 5, 0.15, parameters.filterDate ? { exactDate: parameters.filterDate } : undefined);
+          const replyText = results.results.length === 0 ? "🔍 Koi purani memory nahi mili." : results.results.map(r => `📅 ${r.dateRange}: ${r.summary}`).join("\n\n");
+          await this.sendMessage(chatId, replyText);
+          return { handled: true, replyText };
+        }
+
+        case "remember_fact": {
+          const { memoryEngine } = await import("./memoryEngine");
+          await memoryEngine.addPersonalVaultFact(parameters.category || "general_personal_info", parameters.factText);
+          const replyText = "🔒 Fact permanent memory me save kar diya!";
+          await this.sendMessage(chatId, replyText);
+          return { handled: true, replyText };
+        }
+
+        case "translate_text": {
+          const { toolsEngine } = await import("./toolsEngine");
+          const translated = await toolsEngine.translateText(parameters.text, parameters.targetLanguage);
+          const replyText = `🌐 *Translation (${parameters.targetLanguage}):*\n${translated}`;
+          await this.sendMessage(chatId, replyText);
+          return { handled: true, replyText };
+        }
+
+        case "generate_ai_image": {
+          const { toolsEngine: te } = await import("./toolsEngine");
+          const imgRes = await te.generateAiPhoto(parameters.prompt, { aspectRatio: parameters.aspectRatio || "9:16", sendToWhatsApp: parameters.sendToWhatsApp, targetRecipient: "boss" });
+          const replyText = imgRes.success ? imgRes.message : `❌ ${imgRes.message}`;
+          await this.sendMessage(chatId, replyText);
+          return { handled: true, replyText };
+        }
+
+        case "analyze_youtube_video": {
+          const { youtubeService } = await import("./youtubeService");
+          const videoId = youtubeService.extractVideoId(parameters.videoUrl);
+          if (!videoId) {
+            await this.sendMessage(chatId, "❌ Valid YouTube URL/ID do.");
+            return { handled: true, replyText: "Invalid YouTube URL" };
+          }
+          const analysis = await youtubeService.analyzeVideo(videoId);
+          let card = `🎬 *${analysis.title}*\n👤 ${analysis.channelName}\n\n${analysis.summary}`;
+          if (analysis.chapters?.length) card += "\n\n⏱️ " + analysis.chapters.slice(0,5).map(c => `[${c.startFormatted}] ${c.title}`).join("\n");
+          await this.sendMessage(chatId, card);
+          return { handled: true, replyText: card };
+        }
+
+        case "get_cricket_scores": {
+          const { publicApisService } = await import("./publicApisService");
+          const cricket = await publicApisService.getCricketScores(parameters.team);
+          await this.sendMessage(chatId, cricket || "Cricket score fetch nahi hua.");
+          return { handled: true, replyText: cricket };
+        }
+
+        case "search_web": {
+          const { humanBrowserService } = await import("./humanBrowserService");
+          const browseRes = await humanBrowserService.searchGoogleAndInspect(parameters.query);
+          const replyText = browseRes.success ? browseRes.summary : `❌ ${browseRes.message}`;
+          await this.sendMessage(chatId, replyText);
+          return { handled: true, replyText };
+        }
+
+        case "schedule_message": {
+          const { whatsappFeatureEngine: wfe } = await import("./whatsappFeatureEngine");
+          await wfe.scheduleContactMessage(parameters.contactNameOrPhone, parameters.messageBody, parameters.timeInstruction);
+          const replyText = `📅 Message scheduled for ${parameters.timeInstruction}!`;
+          await this.sendMessage(chatId, replyText);
+          return { handled: true, replyText };
+        }
+
+        case "create_cron_task": {
+          const { scheduledAutomationService } = await import("./scheduledAutomationService");
+          await scheduledAutomationService.createCronTask({
+            title: parameters.title, timeString: parameters.timeString, frequency: parameters.frequency || "daily",
+            actionType: parameters.actionType, city: parameters.city, messageBody: parameters.messageBody
+          });
+          const replyText = `⏰ Cron task "${parameters.title}" bana diya!`;
+          await this.sendMessage(chatId, replyText);
+          return { handled: true, replyText };
+        }
+
+        case "get_whatsapp_messages": {
+          const { whatsappBotService } = await import("./whatsappBotService");
+          const msgs = await whatsappBotService.getMessages({ messageType: parameters.messageType || "all", senderName: parameters.senderName, groupName: parameters.groupName, dateFilter: parameters.dateFilter, limit: parameters.limit });
+          const replyText = msgs.length === 0 ? "📭 Koi message nahi mila." : msgs.slice(0,10).map(m => `[${m.dateStr}] ${m.senderName}: ${m.text}`).join("\n");
+          await this.sendMessage(chatId, replyText);
+          return { handled: true, replyText };
+        }
+
+        case "get_conversation_history": {
+          const { whatsappBotService: wbs } = await import("./whatsappBotService");
+          const conv = await wbs.getConversationSummaryAndHistory(parameters.contactNameOrPhone, parameters.limit || 30, parameters.daysBack || 7);
+          const replyText = conv.summary || "Conversation history nahi mili.";
+          await this.sendMessage(chatId, replyText);
+          return { handled: true, replyText };
+        }
+
+        case "set_routine": {
+          const { bossRoutineService } = await import("./bossRoutineService");
+          if (parameters.slots?.length) {
+            await bossRoutineService.setFullRoutine(parameters.slots);
+            await this.sendMessage(chatId, "📅 Poora routine set kar diya!");
+            return { handled: true, replyText: "Routine set" };
+          }
+          if (parameters.slotQuery) {
+            await bossRoutineService.updateRoutineSlot(parameters.slotQuery, { startTimeStr: parameters.startTimeStr, endTimeStr: parameters.endTimeStr, activity: parameters.activity });
+            await this.sendMessage(chatId, `📅 ${parameters.slotQuery} routine update kar diya!`);
+            return { handled: true, replyText: "Routine updated" };
+          }
+          return { handled: false };
+        }
+
+        case "get_routine": {
+          const { bossRoutineService: brs } = await import("./bossRoutineService");
+          const routine = await brs.getAllRoutineSlots();
+          const current = brs.getCurrentHabit();
+          let routineText = `🕐 Abhi: ${current.currentSlot?.title || "Free"} (${current.istTimeStr})\n📅 Agla: ${current.nextSlot?.title || "Free"}\n\n`;
+          routineText += routine.map(s => `• ${s.timeRangeStr}: ${s.title} - ${s.activity}`).join("\n");
+          await this.sendMessage(chatId, routineText);
+          return { handled: true, replyText: routineText };
+        }
+
+        case "check_session_health": {
+          const { whatsappSessionHealthEngine } = await import("./whatsappSessionHealthEngine");
+          const replyText = whatsappSessionHealthEngine.getFormattedBossReport();
+          await this.sendMessage(chatId, replyText);
+          return { handled: true, replyText };
+        }
+
+        case "unpause_bot": {
+          const { whatsappSessionHealthEngine: wshe } = await import("./whatsappSessionHealthEngine");
+          const unpauseRes = parameters.password ? wshe.manualUnpause(parameters.password) : wshe.manualUnpause("");
+          await this.sendMessage(chatId, unpauseRes.message);
+          return { handled: true, replyText: unpauseRes.message };
+        }
+
+        case "teach_friday": {
+          const { fridayChildTrainingService } = await import("./fridayChildTrainingService");
+          await fridayChildTrainingService.teachLesson(parameters.situationTrigger, parameters.taughtReaction, { category: parameters.category });
+          const replyText = "📚 Lesson sikha diya! Ab main ye yaad rakhungi.";
+          await this.sendMessage(chatId, replyText);
+          return { handled: true, replyText };
+        }
+
+        case "correct_friday": {
+          const { fridayChildTrainingService: fcts } = await import("./fridayChildTrainingService");
+          await fcts.correctPreviousMistake(parameters.correctionText);
+          const replyText = "✅ Correction note kar liya! Dobara nahi hoga.";
+          await this.sendMessage(chatId, replyText);
+          return { handled: true, replyText };
+        }
+
+        case "add_directive": {
+          const { bossDirectivesService } = await import("./bossDirectivesService");
+          await bossDirectivesService.addDirective(parameters.ruleText, { targetWord: parameters.targetWord, replacementWord: parameters.replacementWord, type: parameters.type });
+          const replyText = "📋 Directive save kar diya! Strictly follow karungi.";
+          await this.sendMessage(chatId, replyText);
+          return { handled: true, replyText };
+        }
+
+        case "voice_mode_toggle": {
+          const { voiceBridgeService } = await import("./voiceBridgeService");
+          await voiceBridgeService.setBossGlobalVoice(parameters.voiceTone);
+          const replyText = `🎙️ Voice tone "${parameters.voiceTone}" set kar diya!`;
+          await this.sendMessage(chatId, replyText);
+          return { handled: true, replyText };
+        }
+
+        default:
+          return { handled: false };
+      }
+    } catch (error: any) {
+      console.error(`[TelegramBot] Intent execution error for ${action}:`, error);
+      const errorMsg = `⚠️ ${action} execute karne me dikkat aayi: ${error?.message || error}`;
+      await this.sendMessage(chatId, errorMsg);
+      return { handled: true, replyText: errorMsg };
     }
   }
 }

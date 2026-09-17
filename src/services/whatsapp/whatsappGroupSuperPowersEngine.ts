@@ -2,6 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 import { db } from "../firebaseAdmin";
 import { QuotedMessageContext } from "./whatsappTypes";
 import { whatsappHistoryEngine } from "./whatsappHistoryEngine";
+import { intentClassifierService, ClassifiedIntent, IntentContext } from "../intentClassifierService";
 
 export interface QuizQuestion {
   question: string;
@@ -43,6 +44,311 @@ export class WhatsAppGroupSuperPowersEngine {
 
   constructor() {
     this.preloadBirthdays().catch(() => {});
+  }
+
+  // ── LLM-Driven Intent Classification (Replaces 200+ Regex Patterns) ─────────
+  
+  private async classifyAndExecuteIntent(
+    sock: any,
+    groupJid: string,
+    groupName: string,
+    rawText: string,
+    senderName: string,
+    senderPhone: string,
+    senderJid: string,
+    messageKey: any,
+    quotedMessage?: QuotedMessageContext | null,
+    isOwner = false
+  ): Promise<{ handled: boolean; replyText?: string; mentions?: string[] }> {
+    const context: IntentContext = {
+      platform: "whatsapp",
+      isGroup: true,
+      isOwner,
+      senderName,
+      senderPhone,
+      groupName,
+      quotedMessage: quotedMessage?.text,
+      recentMessages: await this.getRecentGroupMessages(groupJid, 10),
+      timeOfDay: new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" }),
+      userTimezone: "Asia/Kolkata"
+    };
+
+    const classified = await intentClassifierService.classifyIntent(rawText, context);
+    
+    if (classified.action === "general_chat") {
+      return { handled: false }; // Let other handlers process or return natural response
+    }
+
+    // Execute the classified intent
+    return await this.executeClassifiedIntent(classified, {
+      sock, groupJid, groupName, senderName, senderPhone, senderJid, messageKey, quotedMessage, isOwner
+    });
+  }
+
+  private async getRecentGroupMessages(groupJid: string, limit: number): Promise<string[]> {
+    try {
+      const messages = await whatsappHistoryEngine.getMessages({ groupId: groupJid, limit });
+      return messages.slice(0, limit).map(m => `${m.senderName}: ${m.text}`);
+    } catch {
+      return [];
+    }
+  }
+
+  private async executeClassifiedIntent(
+    classified: ClassifiedIntent,
+    ctx: { sock: any; groupJid: string; groupName: string; senderName: string; senderPhone: string; senderJid: string; messageKey: any; quotedMessage?: QuotedMessageContext | null; isOwner: boolean }
+  ): Promise<{ handled: boolean; replyText?: string; mentions?: string[] }> {
+    const { sock, groupJid, groupName, senderName, senderPhone, senderJid, messageKey, quotedMessage, isOwner } = ctx;
+    const { action, parameters } = classified;
+
+    try {
+      switch (action) {
+        case "make_phone_call":
+          if (!isOwner) return { handled: true, replyText: "Sirf Boss call laga sakte hain." };
+          const { exotelService } = await import("../exotelService");
+          const config = exotelService.getConfig();
+          const targetPhone = parameters.targetPhone || config.bossNotificationNumber || process.env.BOSS_WHATSAPP_NUMBER || "919315570187";
+          const callRes = await exotelService.makeOutboundCall({ to: targetPhone, customMessage: parameters.reason || "Group se call request" });
+          return { handled: true, replyText: callRes.success 
+            ? `📞 Ji Boss! Main abhi aapko (+${targetPhone}) par call laga rahi hoon...` 
+            : `⚠️ Call connect nahi ho paayi: ${callRes.message}` };
+
+        case "send_whatsapp_message":
+          if (!isOwner) return { handled: true, replyText: "Sirf Boss message bhej sakte hain." };
+          const { sendWhatsAppUnified } = await import("../whatsappService");
+          const { contactsService } = await import("../contactsService");
+          const contact = await contactsService.findContact(parameters.contactNameOrPhone);
+          const targetNum = contact ? contact.phone : String(parameters.contactNameOrPhone).replace(/[\s\-\(\)\+]/g, "");
+          const sendRes = await sendWhatsAppUnified(targetNum, parameters.messageText);
+          return { handled: true, replyText: sendRes.success ? "✅ Message bhej diya!" : `❌ ${sendRes.message}` };
+
+        case "save_contact":
+          const { contactsService: cs } = await import("../contactsService");
+          const entry = await cs.saveContact(parameters.contactName, parameters.phoneNumber, parameters.relation);
+          return { handled: true, replyText: `📇 Contact "${entry.name}" (+${entry.phone}) save kar diya!` };
+
+        case "lookup_phone_details":
+          const { phoneIntelligenceService } = await import("../phoneIntelligenceService");
+          const report = await phoneIntelligenceService.lookup(parameters.phoneNumber);
+          return { handled: true, replyText: phoneIntelligenceService.formatReportMarkdown(report, "whatsapp") };
+
+        case "play_music":
+          const { whatsappFeatureEngine } = await import("../whatsappFeatureEngine");
+          const musicRes = await whatsappFeatureEngine.searchAndPlayMusic(groupJid, parameters.songQuery, senderName);
+          if (musicRes.audioBuffer && sock) {
+            await sock.sendMessage(groupJid, { audio: musicRes.audioBuffer, mimetype: "audio/mp4", ptt: false });
+          }
+          return { handled: true, replyText: musicRes.replyText || "🎵 Music baj raha hai!" };
+
+        case "get_weather":
+          const { weatherService } = await import("../weatherService");
+          const weather = await weatherService.getWeather(parameters.place);
+          return { handled: true, replyText: weather || "Weather fetch nahi ho paya." };
+
+        case "get_news":
+          const { newsService } = await import("../newsService");
+          const news = await newsService.getNews(parameters.topic, "in", parameters.count || 10);
+          return { handled: true, replyText: news || "News fetch nahi ho payi." };
+
+        case "set_reminder":
+          if (!isOwner) return { handled: true, replyText: "Sirf Boss reminder set kar sakte hain." };
+          const { reminderScheduler } = await import("../reminderScheduler");
+          await reminderScheduler.addReminder(parameters.title, parameters.timeString);
+          return { handled: true, replyText: `⏰ Reminder set: "${parameters.title}" for ${parameters.timeString}` };
+
+        case "save_daily_update":
+          if (!isOwner) return { handled: true, replyText: "Sirf Boss update save kar sakte hain." };
+          const { dailyUpdateService } = await import("../dailyUpdateService");
+          await dailyUpdateService.appendUpdate(parameters.updateText);
+          return { handled: true, replyText: "📝 Aaj ka update save kar diya!" };
+
+        case "get_daily_update":
+          if (!isOwner) return { handled: true, replyText: "Sirf Boss update dekh sakte hain." };
+          const { dailyUpdateService: dus, resolveRelativeDateIST } = await import("../dailyUpdateService");
+          const date = resolveRelativeDateIST(parameters.dateWord);
+          const update = await dus.getUpdateForDate(date);
+          return { handled: true, replyText: update?.text || `📅 ${date} ke liye koi update nahi hai.` };
+
+        case "search_memory":
+          if (!isOwner) return { handled: true, replyText: "Sirf Boss memory search kar sakte hain." };
+          const { vectorMemoryService } = await import("../vectorMemoryService");
+          const results = await vectorMemoryService.searchSemanticMemory(parameters.searchQuery, 5, 0.15, parameters.filterDate ? { exactDate: parameters.filterDate } : undefined);
+          if (results.results.length === 0) return { handled: true, replyText: "🔍 Koi purani memory nahi mili." };
+          return { handled: true, replyText: results.results.map(r => `📅 ${r.dateRange}: ${r.summary}`).join("\n\n") };
+
+        case "remember_fact":
+          if (!isOwner) return { handled: true, replyText: "Sirf Boss fact save kar sakte hain." };
+          const { memoryEngine } = await import("../memoryEngine");
+          await memoryEngine.addPersonalVaultFact(parameters.category || "general_personal_info", parameters.factText);
+          return { handled: true, replyText: "🔒 Fact permanent memory me save kar diya!" };
+
+        case "translate_text":
+          const { toolsEngine } = await import("../toolsEngine");
+          const translated = await toolsEngine.translateText(parameters.text, parameters.targetLanguage);
+          return { handled: true, replyText: `🌐 *Translation (${parameters.targetLanguage}):*\n${translated}` };
+
+        case "generate_ai_image":
+          const { toolsEngine: te } = await import("../toolsEngine");
+          const imgRes = await te.generateAiPhoto(parameters.prompt, { aspectRatio: parameters.aspectRatio || "9:16", sendToWhatsApp: parameters.sendToWhatsApp, targetRecipient: "group" });
+          if (imgRes.success && imgRes.imageUrl && sock) {
+            await sock.sendMessage(groupJid, { image: { url: imgRes.imageUrl }, caption: imgRes.message });
+          }
+          return { handled: true, replyText: imgRes.success ? imgRes.message : `❌ ${imgRes.message}` };
+
+        case "analyze_youtube_video":
+          const { youtubeService } = await import("../youtubeService");
+          const videoId = youtubeService.extractVideoId(parameters.videoUrl);
+          if (!videoId) return { handled: true, replyText: "❌ Valid YouTube URL/ID do." };
+          const analysis = await youtubeService.analyzeVideo(videoId);
+          let card = `🎬 *${analysis.title}*\n👤 ${analysis.channelName}\n\n${analysis.summary}`;
+          if (analysis.chapters?.length) card += "\n\n⏱️ " + analysis.chapters.slice(0,5).map(c => `[${c.startFormatted}] ${c.title}`).join("\n");
+          return { handled: true, replyText: card };
+
+        case "get_cricket_scores":
+          const { publicApisService } = await import("../publicApisService");
+          const cricket = await publicApisService.getCricketScores(parameters.team);
+          return { handled: true, replyText: cricket || "Cricket score fetch nahi hua." };
+
+        case "search_web":
+          const { humanBrowserService } = await import("../humanBrowserService");
+          const browseRes = await humanBrowserService.searchGoogleAndInspect(parameters.query);
+          return { handled: true, replyText: browseRes.success ? browseRes.summary : `❌ ${browseRes.message}` };
+
+        case "schedule_message":
+          const { whatsappFeatureEngine: wfe } = await import("../whatsappFeatureEngine");
+          await wfe.scheduleContactMessage(parameters.contactNameOrPhone, parameters.messageBody, parameters.timeInstruction);
+          return { handled: true, replyText: `📅 Message scheduled for ${parameters.timeInstruction}!` };
+
+        case "create_cron_task":
+          if (!isOwner) return { handled: true, replyText: "Sirf Boss cron task bana sakte hain." };
+          const { scheduledAutomationService } = await import("../scheduledAutomationService");
+          await scheduledAutomationService.createCronTask({
+            title: parameters.title, timeString: parameters.timeString, frequency: parameters.frequency || "daily",
+            actionType: parameters.actionType, city: parameters.city, messageBody: parameters.messageBody
+          });
+          return { handled: true, replyText: `⏰ Cron task "${parameters.title}" bana diya!` };
+
+        case "get_whatsapp_messages":
+          const msgs = await whatsappHistoryEngine.getMessages({ messageType: parameters.messageType || "all", senderName: parameters.senderName, groupName: parameters.groupName, dateFilter: parameters.dateFilter, limit: parameters.limit });
+          if (msgs.length === 0) return { handled: true, replyText: "📭 Koi message nahi mila." };
+          return { handled: true, replyText: msgs.slice(0,10).map(m => `[${m.dateStr}] ${m.senderName}: ${m.text}`).join("\n") };
+
+        case "get_conversation_history":
+          const { whatsappBotService } = await import("../whatsappBotService");
+          const conv = await whatsappBotService.getConversationSummaryAndHistory(parameters.contactNameOrPhone, parameters.limit || 30, parameters.daysBack || 7);
+          return { handled: true, replyText: conv.summary || "Conversation history nahi mili." };
+
+        case "set_routine":
+          if (!isOwner) return { handled: true, replyText: "Sirf Boss routine set kar sakte hain." };
+          const { bossRoutineService } = await import("../bossRoutineService");
+          if (parameters.slots?.length) {
+            await bossRoutineService.setFullRoutine(parameters.slots);
+            return { handled: true, replyText: "📅 Poora routine set kar diya!" };
+          }
+          if (parameters.slotQuery) {
+            await bossRoutineService.updateRoutineSlot(parameters.slotQuery, { startTimeStr: parameters.startTimeStr, endTimeStr: parameters.endTimeStr, activity: parameters.activity });
+            return { handled: true, replyText: `📅 ${parameters.slotQuery} routine update kar diya!` };
+          }
+          return { handled: false };
+
+        case "get_routine":
+          const { bossRoutineService: brs } = await import("../bossRoutineService");
+          const routine = await brs.getAllRoutineSlots();
+          const current = brs.getCurrentHabit();
+          let routineText = `🕐 Abhi: ${current.currentSlot?.title || "Free"} (${current.istTimeStr})\n📅 Agla: ${current.nextSlot?.title || "Free"}\n\n`;
+          routineText += routine.map(s => `• ${s.timeRangeStr}: ${s.title} - ${s.activity}`).join("\n");
+          return { handled: true, replyText: routineText };
+
+        case "group_admin_action":
+          if (!isOwner) return { handled: true, replyText: "Sirf Boss/Admin ye kar sakte hain." };
+          const { whatsappGroupSafetyEngine } = await import("./whatsappGroupSafetyEngine");
+          switch (parameters.action) {
+            case "kick":
+              await whatsappGroupSafetyEngine.kickMember(sock, groupJid, parameters.targetMember);
+              return { handled: true, replyText: `👢 ${parameters.targetMember} ko group se nikaal diya!` };
+            case "delete_message":
+              await whatsappGroupSafetyEngine.deleteMessage(sock, groupJid, parameters.targetMember, senderPhone);
+              return { handled: true, replyText: "🗑️ Message delete kar diya!" };
+            default:
+              return { handled: false };
+          }
+
+        case "group_safety_toggle":
+          if (!isOwner) return { handled: true, replyText: "Sirf Boss/Admin toggle kar sakte hain." };
+          const { whatsappGroupSafetyEngine: wgse } = await import("./whatsappGroupSafetyEngine");
+          switch (parameters.feature) {
+            case "block_safe":
+              if (parameters.enable) await wgse.enableGroupSafety(groupJid, groupName);
+              else await wgse.disableGroupSafety(groupJid);
+              return { handled: true, replyText: `🛡️ @block safe ${parameters.enable ? "ON" : "OFF"} kar diya!` };
+            case "auto_transcribe":
+              await wgse.toggleAutoTranscribeVoice(groupJid, parameters.enable);
+              return { handled: true, replyText: `🎙️ Auto-transcribe ${parameters.enable ? "ON" : "OFF"} kar diya!` };
+            case "quiet_mode":
+              const { whatsappGroupSuperPowersEngine } = await import("./whatsappGroupSuperPowersEngine");
+              await whatsappGroupSuperPowersEngine.toggleGroupQuietMode(groupJid, parameters.enable);
+              return { handled: true, replyText: `🌙 Quiet mode ${parameters.enable ? "ON" : "OFF"} kar diya!` };
+            case "welcome":
+              await whatsappGroupSuperPowersEngine.toggleGroupWelcome(groupJid, parameters.enable);
+              return { handled: true, replyText: `👋 Welcome card ${parameters.enable ? "ON" : "OFF"} kar diya!` };
+          }
+          return { handled: false };
+
+        case "create_poll":
+          const { whatsappGroupSuperPowersEngine: wgsp } = await import("./whatsappGroupSuperPowersEngine");
+          return await wgsp.handlePollCreator(sock, groupJid, parameters.topicOrQuestion, senderName);
+
+        case "generate_quiz":
+          return await this.handleGroupQuiz(groupJid, `@quiz start ${parameters.topic}`, senderName, senderPhone);
+
+        case "identify_song":
+          if (!parameters.hasAudio) return { handled: true, replyText: "🎵 Voice note bhejo taaki main gaana pehchaan sakun!" };
+          return { handled: false }; // Will be handled by voice message handler
+
+        case "analyze_media":
+          const { visionMemoryService } = await import("../visionMemoryService");
+          const mediaRes = await visionMemoryService.getLatestMediaInfo(parameters.query);
+          return { handled: true, replyText: mediaRes.analysis || "Media analyze nahi ho paya." };
+
+        case "voice_mode_toggle":
+          const { voiceBridgeService } = await import("../voiceBridgeService");
+          await voiceBridgeService.setBossGlobalVoice(parameters.voiceTone);
+          return { handled: true, replyText: `🎙️ Voice tone "${parameters.voiceTone}" set kar diya!` };
+
+        case "check_session_health":
+          const { whatsappSessionHealthEngine } = await import("./whatsappSessionHealthEngine");
+          return { handled: true, replyText: whatsappSessionHealthEngine.getFormattedBossReport() };
+
+        case "unpause_bot":
+          const { whatsappSessionHealthEngine: wshe } = await import("./whatsappSessionHealthEngine");
+          const unpauseRes = parameters.password ? wshe.manualUnpause(parameters.password) : wshe.manualUnpause("");
+          return { handled: true, replyText: unpauseRes.message };
+
+        case "teach_friday":
+          if (!isOwner) return { handled: true, replyText: "Sirf Boss Friday ko sikha sakte hain." };
+          const { fridayChildTrainingService } = await import("../fridayChildTrainingService");
+          await fridayChildTrainingService.teachLesson(parameters.situationTrigger, parameters.taughtReaction, { category: parameters.category });
+          return { handled: true, replyText: "📚 Lesson sikha diya! Ab main ye yaad rakhungi." };
+
+        case "correct_friday":
+          if (!isOwner) return { handled: true, replyText: "Sirf Boss correction de sakte hain." };
+          const { fridayChildTrainingService: fcts } = await import("../fridayChildTrainingService");
+          await fcts.correctPreviousMistake(parameters.correctionText);
+          return { handled: true, replyText: "✅ Correction note kar liya! Dobara nahi hoga." };
+
+        case "add_directive":
+          if (!isOwner) return { handled: true, replyText: "Sirf Boss directive de sakte hain." };
+          const { bossDirectivesService } = await import("../bossDirectivesService");
+          await bossDirectivesService.addDirective(parameters.ruleText, { targetWord: parameters.targetWord, replacementWord: parameters.replacementWord, type: parameters.type });
+          return { handled: true, replyText: "📋 Directive save kar diya! Strictly follow karungi." };
+
+        default:
+          return { handled: false };
+      }
+    } catch (error: any) {
+      console.error(`[GroupSuperPowers] Intent execution error for ${action}:`, error);
+      return { handled: true, replyText: `⚠️ ${action} execute karne me dikkat aayi: ${error?.message || error}` };
+    }
   }
 
   private async preloadBirthdays() {
@@ -1656,63 +1962,93 @@ Bhagwan aapko lambi umar, beshumar khushiyan, aur bohot saari success de! 🚀�
     isOwner = false
   ): Promise<{ handled: boolean; replyText?: string; mentions?: string[] }> {
     const clean = (rawText || "").toLowerCase().trim();
-    if (!clean || clean.length < 4) return { handled: false };
+    if (!clean || clean.length < 3) return { handled: false };
 
-    const { whatsappGroupSafetyEngine } = await import("./whatsappGroupSafetyEngine");
-
-    // ── Phase 1: High-Confidence Rule Matchers (Instant 0-Latency Execution) ──
-
-    // 1. Tag All / Everyone Intent
-    if (
-      /(?:sabko|sabhi\s*(?:ko|members?|logon?\s*ko)|everyone|all\s*members?)\s*(?:tag|mention|bata|bol|suchna|message|notif)/i.test(clean) ||
-      /(?:tag|mention)\s*(?:all|everyone|sabko|sabhi)/i.test(clean)
-    ) {
-      const msg = rawText.replace(/^(?:friday|hey\s*friday|hi\s*friday)?\s*(?:sabko|sabhi\s*(?:ko|members?)|tag|mention|everyone|all\s*members?)\s*(?:tag|mention|karke|bol\s*do|batao|bolo)?\s*[:=-]?\s*/i, "").trim();
-      return await this.handleTagAll(sock, groupJid, groupName, msg || rawText, senderName);
+    // ── Phase 0: Explicit @Command Triggers (Fast-path for intentional shortcuts) ──
+    // These are deliberate command syntax that users type explicitly
+    if (clean.startsWith("@tagall") || clean.startsWith("/tagall") || clean.startsWith("@everyone") || clean.startsWith("/everyone")) {
+      const msg = rawText.replace(/^(?:@tagall|\/tagall|@everyone|\/everyone)\s*[:=-]?\s*/i, "").trim();
+      return await this.handleTagAll(sock, groupJid, groupName, msg || "Sabko tag kiya!", senderName);
     }
-
-    // 2. Roast Intent
-    if (/(?:roast|khilli|beizzati|taang\s*khincho|mazaak\s*udao)\s*(?:karo|kar\s*do|karna)?/i.test(clean)) {
-      const target = rawText.replace(/^(?:friday|hey\s*friday)?\s*(?:roast|khilli|beizzati|mazaak)\s*(?:karo|kar\s*do|karna)?\s*(?:ka|ki|ko)?\s*/i, "").trim();
-      return await this.handleRoastAndPraise(`@roast ${target}`, quotedMessage, senderName);
-    }
-
-    // 3. Praise / Hype-man Intent
-    if (/(?:praise|tareef|hype|appreciate|badaai)\s*(?:karo|kar\s*do|karna)?/i.test(clean)) {
-      const target = rawText.replace(/^(?:friday|hey\s*friday)?\s*(?:praise|tareef|hype|appreciate)\s*(?:karo|kar\s*do|karna)?\s*(?:ka|ki|ko)?\s*/i, "").trim();
-      return await this.handleRoastAndPraise(`@praise ${target}`, quotedMessage, senderName);
-    }
-
-    // 4. Group Quiz Intent
-    if (/(?:quiz|trivia|game|sawal\s*jawab)\s*(?:shuru|start|khelo|chalao|karo|lagao)/i.test(clean)) {
-      const topic = rawText.replace(/^(?:friday|hey\s*friday)?\s*(?:quiz|trivia|game)\s*(?:shuru|start|chalao|karo|lagao)?\s*(?:par|topic)?\s*/i, "").trim();
-      return await this.handleGroupQuiz(groupJid, `@quiz start ${topic}`, senderName, senderPhone);
-    }
-
-    // 5. Bill Split / Hisaab Intent
-    if (/(?:hisaab|hisab|bill|kharcha|paisa|rupees?|split)\s*(?:split|baant|calculate|karo|batao|divide)/i.test(clean) || /(?:split|divide)\s*(?:karo|kar\s*do)?\s*\d+/i.test(clean)) {
-      return await this.handleBillSplit(rawText, groupName, senderName);
-    }
-
-    // 6. Fact Check / Judge Intent
-    if (/(?:fact\s*check|sach\s*kya\s*hai|sahi\s*bol\s*raha|faisla|asliyat\s*batao|kya\s*ye\s*sach)/i.test(clean)) {
+    if (clean.startsWith("@judge") || clean.startsWith("/judge") || clean.startsWith("@factcheck") || clean.startsWith("/factcheck")) {
       return await this.handleJudgeFactCheck(rawText, quotedMessage, senderName);
     }
-
-    // 7. Decisions / Notes Intent
-    if (/(?:kya\s*decide\s*hua|decision|meeting\s*notes|to-?do|tasks?|final\s*kya\s*hua|kya\s*faisla)/i.test(clean)) {
+    if (clean.startsWith("@debate") || clean.startsWith("/debate")) {
+      return await this.handleDebate(rawText, quotedMessage, senderName, groupName);
+    }
+    if (clean.startsWith("@roast") || clean.startsWith("/roast")) {
+      const target = rawText.replace(/^(?:@roast|\/roast)\s*/i, "").trim();
+      return await this.handleRoastAndPraise(`@roast ${target}`, quotedMessage, senderName);
+    }
+    if (clean.startsWith("@praise") || clean.startsWith("/praise") || clean.startsWith("@hypeman") || clean.startsWith("/hypeman")) {
+      const target = rawText.replace(/^(?:@praise|\/praise|@hypeman|\/hypeman)\s*/i, "").trim();
+      return await this.handleRoastAndPraise(`@praise ${target}`, quotedMessage, senderName);
+    }
+    if (clean.startsWith("@quiz") || clean.startsWith("/quiz") || clean.startsWith("@trivia") || clean.startsWith("/trivia")) {
+      return await this.handleGroupQuiz(groupJid, rawText, senderName, senderPhone);
+    }
+    if (clean.startsWith("@song") || clean.startsWith("@gaana") || clean.startsWith("@music")) {
+      return await this.handleSongFinder(sock, groupJid, rawText, senderName, messageKey);
+    }
+    if (clean.startsWith("@hum") || clean.startsWith("@shazam")) {
+      return await this.handleHummingShazam(sock, groupJid, rawText, senderName, quotedMessage, messageKey);
+    }
+    if (clean.startsWith("@reel") || clean.startsWith("@bgm")) {
+      return await this.handleReelBgmExtractor(sock, groupJid, rawText, senderName, messageKey);
+    }
+    if (clean.startsWith("@groupchart") || clean.startsWith("@topchart")) {
+      return await this.handleGroupMusicChart(groupJid, groupName, senderName);
+    }
+    if (clean.startsWith("@split") || clean.startsWith("/split") || clean.startsWith("@bill") || clean.startsWith("/bill") || clean.startsWith("@hisab") || clean.startsWith("/hisab")) {
+      return await this.handleBillSplit(rawText, groupName, senderName);
+    }
+    if (clean.startsWith("@decision") || clean.startsWith("/decision") || clean.startsWith("@todo") || clean.startsWith("/todo")) {
       return await this.handleDecisionTracker(groupJid, groupName, rawText, quotedMessage);
     }
-
-    // 8. Birthday Add / List Intent
-    if (/(?:birthday|bday|janamdin)\s*(?:add|save|note|set)\s*(?:karo|kar\s*do)?/i.test(clean) || /(?:ka\s*birthday|ka\s*janamdin)\s*(?:hai|aata|padta)/i.test(clean)) {
-      return await this.handleBirthdayManager(groupJid, groupName, `@birthday add ${rawText}`, senderName, senderPhone, quotedMessage);
+    if (clean.startsWith("@birthday") || clean.startsWith("/birthday") || clean.startsWith("@bday")) {
+      return await this.handleBirthdayManager(groupJid, groupName, rawText, senderName, senderPhone, quotedMessage);
     }
-    if (/(?:birthdays?|janamdin)\s*(?:list|kab\s*hai|upcoming|batao)/i.test(clean)) {
-      return await this.handleBirthdayManager(groupJid, groupName, "@birthday list", senderName, senderPhone, quotedMessage);
+    if (clean.startsWith("@meme") || clean.startsWith("/meme")) {
+      return await this.handleMemeGenerator(sock, groupJid, rawText, senderName, quotedMessage);
+    }
+    if (clean.startsWith("@poll") || clean.startsWith("/poll")) {
+      return await this.handlePollCreator(sock, groupJid, rawText, senderName);
+    }
+    if (clean.startsWith("@commentary") || clean.startsWith("/commentary")) {
+      return await this.handleSportsCommentary(rawText, senderName);
+    }
+    if (clean.startsWith("@rap") || clean.startsWith("/rap") || clean.startsWith("@diss")) {
+      return await this.handleDesiRapGenerator(rawText, quotedMessage, senderName);
+    }
+    if (clean.startsWith("@future") || clean.startsWith("/future") || clean.startsWith("@oracle") || clean.startsWith("/oracle")) {
+      return await this.handleFutureOracle(rawText, quotedMessage, senderName);
+    }
+    if (clean.startsWith("@speakas") || clean.startsWith("/speakas") || clean.startsWith("@celebrity") || clean.startsWith("/celebrity")) {
+      return await this.handleCelebrityClone(rawText, quotedMessage, senderName);
+    }
+    if (clean.startsWith("@mimic") || clean.startsWith("/mimic") || clean.startsWith("@clone") || clean.startsWith("/clone")) {
+      return await this.handleMemberMimic(rawText, quotedMessage, senderName);
+    }
+    if (clean.startsWith("@movie") || clean.startsWith("/movie") || clean.startsWith("@cast") || clean.startsWith("/cast") || clean.startsWith("@poster") || clean.startsWith("/poster")) {
+      return await this.handleMovieCastPoster(sock, groupJid, rawText, senderName);
+    }
+    if (clean.startsWith("@vibe") || clean.startsWith("/vibe") || clean.startsWith("@icebreaker") || clean.startsWith("/icebreaker")) {
+      return await this.handleVibeRadarAndIcebreaker(groupJid, groupName, rawText, senderName);
+    }
+    if (clean.startsWith("@lie") || clean.startsWith("/lie") || clean.startsWith("@polygraph") || clean.startsWith("/polygraph")) {
+      return await this.handleLieDetector(rawText, quotedMessage, senderName);
     }
 
-    // 9. Safety @block safe / @allow all Intent
+    // ── Phase 1: LLM-Driven Natural Language Understanding (Replaces 200+ Regex) ──
+    const llmResult = await this.classifyAndExecuteIntent(sock, groupJid, groupName, rawText, senderName, senderPhone, senderJid, messageKey, quotedMessage, isOwner);
+    if (llmResult.handled) {
+      return llmResult;
+    }
+
+    // ── Phase 2: Legacy Regex Fallback (for any edge cases not covered) ──
+    const { whatsappGroupSafetyEngine } = await import("./whatsappGroupSafetyEngine");
+
+    // Safety toggles
     if (/(?:gaali|abuse|profanity|gandi\s*photo|nsfw|spam)\s*(?:filter|rok|band|delete|hata|guard|block|security)/i.test(clean) || /(?:safety|guard|security)\s*(?:on|chalu|enable|lagao|start)/i.test(clean)) {
       const res = await whatsappGroupSafetyEngine.enableGroupSafety(groupJid, groupName);
       return { handled: true, replyText: res.message };
@@ -1722,100 +2058,19 @@ Bhagwan aapko lambi umar, beshumar khushiyan, aur bohot saari success de! 🚀�
       return { handled: true, replyText: res.message };
     }
 
-    // 10. Voice Note Auto-Transcribe Intent
+    // Voice transcribe toggles
     if (/(?:voice\s*notes?|aawaz|audio)\s*(?:ko\s*)?(?:text|transcribe|likh\s*ke|padh\s*ke)\s*(?:bhejo|on|chalu|enable)/i.test(clean)) {
       const msg = await whatsappGroupSafetyEngine.toggleAutoTranscribeVoice(groupJid, true);
       return { handled: true, replyText: msg };
     }
-    if (/(?:voice\s*notes?|audio)\s*(?:transcription?)\s*(?:band|off|disable)/i.test(clean)) {
+    if (/(?:voice\s*notes?|audio)\s*(?:transcription?)\s*(band|off|disable)/i.test(clean)) {
       const msg = await whatsappGroupSafetyEngine.toggleAutoTranscribeVoice(groupJid, false);
       return { handled: true, replyText: msg };
     }
 
-    // 11. Meme & Sticker Generator Intent
-    if (/(?:meme\s*banao|koi\s*meme|funny\s*meme|meme\s*create|roast\s*meme|meme\s*dikhao)/i.test(clean)) {
-      return await this.handleMemeGenerator(sock, groupJid, rawText, senderName, quotedMessage);
-    }
-
-    // 12. Poll Creator Intent
-    if (/(?:poll\s*banao|voting\s*start|kisi\s*baat\s*ka\s*poll|poll\s*create|poll\s*dalo)/i.test(clean)) {
-      return await this.handlePollCreator(sock, groupJid, rawText, senderName);
-    }
-
-    // 13. Live Translator Intent
-    if (/(?:translate\s*karo|anuvad\s*karo|isko\s*hindi\s*me|isko\s*english\s*me|isko\s*bengali\s*me|isko\s*marathi\s*me|isko\s*tamil\s*me|isko\s*telugu\s*me)/i.test(clean)) {
+    // Translator (if not caught by LLM)
+    if (/(?:translate\s*karo|anuvad\s*karo|isko\s*(?:hindi|english|bengali|marathi|tamil|telugu)\s*me)/i.test(clean)) {
       return await this.handleLiveTranslator(rawText, quotedMessage, senderName);
-    }
-
-    // 13B. Instant Exotel Phone Call Intent ("call karo", "mujhe call karo", "call me", "call boss", "phone karo", etc.)
-    if (
-      /(?:call\s*karo|mujhe\s*call\s*karo|call\s*me|call\s*boss|phone\s*karo|call\s*lagao|phone\s*lagao|call\s*kar\s*do|phone\s*mila|call\s*mila)\b/i.test(clean) ||
-      /^(?:friday|hey\s*friday)?\s*(?:call|phone)\s*(?:karo|lagao|kijiye|kar\s*do)\b/i.test(clean) ||
-      /\bcall\s+(?:\+91[\s-]?)?[6-9]\d{9}\b/i.test(clean)
-    ) {
-      const extractedNumber = rawText.match(/(?:\+91[\s-]?)?[6-9]\d{9}/) || rawText.match(/\b\d{10,12}\b/);
-      const { exotelService } = await import("../exotelService");
-      const config = exotelService.getConfig();
-      const targetPhone = extractedNumber
-        ? extractedNumber[0].replace(/\D/g, "")
-        : (isOwner && senderPhone ? senderPhone : config.bossNotificationNumber || process.env.BOSS_WHATSAPP_NUMBER || "919315570187").replace(/\D/g, "");
-
-      const callRes = await exotelService.makeOutboundCall({
-        to: targetPhone,
-        customMessage: "Boss, aapne WhatsApp par call karne ko bola tha, isliye maine call lagayi hai.",
-      });
-
-      if (callRes.success) {
-        return {
-          handled: true,
-          replyText: `📞 *Ji Boss! Main abhi aapko (+${targetPhone}) par Exotel Telephony se call laga rahi hoon... Phone uthaiye!* ⚡`,
-        };
-      } else {
-        return {
-          handled: true,
-          replyText: `⚠️ *Call connect nahi ho paayi:* ${callRes.message}\n_Kripya Exotel settings me API keys aur Virtual number check karein._`,
-        };
-      }
-    }
-
-    // 14. Vibe Radar, Icebreaker & Joke Intent
-    if (/(?:vibe\s*check|icebreaker|joke\s*sunao|chutkula\s*sunao|group\s*ka\s*mahaul|ladai\s*rok|jhagda\s*rok|bore\s*ho\s*raha)/i.test(clean)) {
-      return await this.handleVibeRadarAndIcebreaker(groupJid, groupName, rawText, senderName);
-    }
-
-    // 15. AI Lie Detector & Cinematic Polygraph Intent
-    if (/(?:sach\s*ya\s*jhooth|jhooth\s*pakdo|jhooth\s*bol\s*raha|lie\s*detector|polygraph|psychology\s*test|stress\s*analysis)/i.test(clean)) {
-      return await this.handleLieDetector(rawText, quotedMessage, senderName);
-    }
-
-    // 16. AI Desi Hip-Hop / Gully Boy Rap Intent
-    if (/(?:rap\s*banao|desi\s*rap|gully\s*rap|cypher\s*banao|rap\s*sunao|diss\s*track)/i.test(clean)) {
-      return await this.handleDesiRapGenerator(rawText, quotedMessage, senderName);
-    }
-
-    // 17. Time-Machine Future Prediction / Oracle Intent
-    if (/(?:future\s*batao|5\s*saal\s*baad|kismat\s*batao|bhavishya\s*batao|future\s*prediction|oracle|kismat\s*khol)/i.test(clean)) {
-      return await this.handleFutureOracle(rawText, quotedMessage, senderName);
-    }
-
-    // 18. Celebrity Clone & SpeakAs Intent
-    if (/(?:srk\s*style|shahrukh\s*style|tony\s*stark\s*style|amitabh\s*style|modi\s*style|speakas|celebrity\s*style)/i.test(clean)) {
-      return await this.handleCelebrityClone(rawText, quotedMessage, senderName);
-    }
-
-    // 19. Member Doppelganger / Ghost Mimic Intent
-    if (/(?:mimic\s*karo|copy\s*karo|iski\s*tarah\s*bolo|clone\s*karo|acting\s*karo|doppelganger)/i.test(clean)) {
-      return await this.handleMemberMimic(rawText, quotedMessage, senderName);
-    }
-
-    // 20. Movie Cast, Script & Poster Intent
-    if (/(?:movie\s*cast|poster\s*banao|filmi\s*poster|film\s*banao|trailer\s*banao|blockbuster\s*movie)/i.test(clean)) {
-      return await this.handleMovieCastPoster(sock, groupJid, rawText, senderName);
-    }
-
-    // 21. High-Energy Cricket / Sports Commentary Intent
-    if (/(?:commentary\s*sunao|bhojpuri\s*commentary|cricket\s*commentary|sidhu\s*commentary|ipl\s*commentary)/i.test(clean)) {
-      return await this.handleSportsCommentary(rawText, senderName);
     }
 
     // 22. Follow-Up "Iska link do" / "Link bhejo" for Songs
