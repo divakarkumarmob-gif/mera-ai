@@ -441,6 +441,11 @@ _Hamara sweet time complete ho gaya aur privacy ke liye saari temporary chats cl
     return /\b(?:photo|pic|picture|selfie|tasveer|tasvir|image|gift|kya\s*pehna|outfit|dress|rose|flower|bouquet|chocolate|look|love\s*letter|shayari\s*card|khat|letter\s*likho|love\s*card|chehra|apni\s*photo|photo\s*bhejo|image\s*banao|photo\s*banao|draw|generate\s*image|generate\s*photo|dikhao|apna\s*look)\b/i.test(text);
   }
 
+  public isNudeOrExplicitImageRequest(text: string): boolean {
+    const lower = text.toLowerCase();
+    return /\b(?:nude|nangi|naked|naked\s*photo|nude\s*photo|nude\s*selfie|nangi\s*photo|nangi\s*selfie|undress|kapde\s*utaro|kapre\s*utaro|bra\s*utaro|panty\s*utaro|breast|boobs|chuchi|nipple|gaand|ass|butt|pussy|chut|vagina|sex\s*photo|xxx\s*photo|porn|explicit|uncensored|nsfw|dirty\s*photo|hot\s*photo|sexy\s*photo|seductive\s*photo|lingerie|braless|topless|bottomless|full\s*nude|completely\s*nude|naked\s*body|body\s*photo|naked\s*video|nude\s*video)\b/i.test(lower);
+  }
+
   public async generateGirlfriendPhotoOrGift(text: string, jid?: string): Promise<{ buffer: Buffer; caption: string } | null> {
     try {
       const { imageGenerationService } = await import("../imageGenerationService");
@@ -1249,6 +1254,23 @@ _👉 Kisi bhi mood number (1-7) ya mood name (jaise "sassy", "naughty", "mode b
 
     // 4. Check for virtual selfie / outfit / romantic gift generation
     if (this.isPhotoOrGiftRequest(rawText) && sendPhotoFn) {
+      if (sock) {
+        sock.sendPresenceUpdate?.("composing", jid).catch(() => { });
+      }
+      const photoResult = await this.generateGirlfriendPhotoOrGift(rawText, jid);
+      if (photoResult) {
+        await sendPhotoFn(jid, photoResult.buffer, photoResult.caption, messageKey);
+        session.tempHistory.push({ role: "user", text: rawText });
+        session.tempHistory.push({ role: "model", text: photoResult.caption });
+        session.lastUserMsgTime = Date.now();
+        session.idleNudgeCount = 0;
+        this.scheduleIdleNudge(jid, sendMsgFn, sock);
+        return;
+      }
+    }
+
+    // 4b. Check for explicit/nude image requests (uncensored, Mode B style)
+    if (this.isNudeOrExplicitImageRequest(rawText) && sendPhotoFn) {
       if (sock) {
         sock.sendPresenceUpdate?.("composing", jid).catch(() => { });
       }

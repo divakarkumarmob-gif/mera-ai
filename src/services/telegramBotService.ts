@@ -2584,7 +2584,7 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
 
     if (chatId && this.isGirlfriendModeActive(chatId)) {
       const { whatsappGirlfriendEngine } = await import("./whatsapp/whatsappGirlfriendEngine");
-      if (whatsappGirlfriendEngine.isPhotoOrGiftRequest(text)) {
+      if (whatsappGirlfriendEngine.isPhotoOrGiftRequest(text) || whatsappGirlfriendEngine.isNudeOrExplicitImageRequest(text)) {
         await this.sendChatAction(chatId, "upload_photo");
         const photoRes = await whatsappGirlfriendEngine.generateGirlfriendPhotoOrGift(text, String(chatId));
         if (photoRes && photoRes.buffer) {
