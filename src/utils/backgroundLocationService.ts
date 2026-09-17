@@ -18,8 +18,19 @@ const PING_INTERVAL_MS = 60 * 1000; // 60 seconds between GPS pings
 const STORAGE_KEY_DEVICE_ID = 'friday_location_device_id';
 const STORAGE_KEY_DEVICE_LABEL = 'friday_location_device_label';
 const STORAGE_KEY_TRACKING_ENABLED = 'friday_location_tracking_enabled';
+const STORAGE_KEY_LAST_KNOWN_LOCATION = 'friday_last_known_location';
 
 // ── Interfaces ───────────────────────────────────────────────────────────────
+
+interface CachedPositionData {
+  lat: number;
+  lon: number;
+  accuracy: number;
+  altitude: number | null;
+  speed: number | null;
+  heading: number | null;
+  timestamp: number;
+}
 
 interface GpsPingPayload {
   deviceId: string;
@@ -34,6 +45,7 @@ interface GpsPingPayload {
   batteryLevel: number | null;
   isCharging: boolean | null;
   networkType: string | null;
+  isCachedLastKnown?: boolean;
 }
 
 // ── Service Class ────────────────────────────────────────────────────────────
@@ -43,6 +55,7 @@ class BackgroundLocationService {
   private watchId: number | null = null;
   private pingInterval: any = null;
   private lastPosition: GeolocationPosition | null = null;
+  private cachedLastKnown: CachedPositionData | null = null;
   private deviceId: string = '';
   private deviceLabel: string = '';
   private isNativeApp = false;
@@ -53,7 +66,43 @@ class BackgroundLocationService {
     if (typeof window !== 'undefined') {
       this.isNativeApp = typeof (window as any).Capacitor !== 'undefined' &&
         (window as any).Capacitor.isNativePlatform?.();
+      this.loadLastKnownPosition();
     }
+  }
+
+  /**
+   * Persist last known GPS location so it is never lost even if GPS goes offline
+   */
+  private saveLastKnownPosition(coords: GeolocationCoordinates): void {
+    const data: CachedPositionData = {
+      lat: coords.latitude,
+      lon: coords.longitude,
+      accuracy: coords.accuracy || 0,
+      altitude: coords.altitude ?? null,
+      speed: coords.speed ?? null,
+      heading: coords.heading ?? null,
+      timestamp: Date.now(),
+    };
+    this.cachedLastKnown = data;
+    try {
+      localStorage.setItem(STORAGE_KEY_LAST_KNOWN_LOCATION, JSON.stringify(data));
+    } catch {}
+  }
+
+  /**
+   * Load last known GPS location from persistent storage
+   */
+  private loadLastKnownPosition(): CachedPositionData | null {
+    if (this.cachedLastKnown) return this.cachedLastKnown;
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY_LAST_KNOWN_LOCATION);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        this.cachedLastKnown = parsed;
+        return parsed;
+      }
+    } catch {}
+    return null;
   }
 
   /**
@@ -179,6 +228,46 @@ class BackgroundLocationService {
   }
 
   /**
+   * Proactively request location permission from the browser/APK and start tracking
+   */
+  public async requestPermissionAndStart(customLabel?: string): Promise<{ success: boolean; message: string }> {
+    if (typeof window === 'undefined' || !('geolocation' in navigator)) {
+      console.warn('[BackgroundLocation] Geolocation not supported on this environment.');
+      return { success: false, message: 'Geolocation is not supported on this browser/device.' };
+    }
+
+    const user = getStoredUser();
+    const label = customLabel || this.getDeviceLabel() || user?.displayName || user?.username || 'Boss Device';
+    this.setDeviceLabel(label);
+
+    return new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          this.lastPosition = position;
+          console.log('[BackgroundLocation] 📍 Location permission granted:', position.coords.latitude, position.coords.longitude);
+          try {
+            localStorage.setItem(STORAGE_KEY_TRACKING_ENABLED, 'true');
+          } catch {}
+          const res = await this.registerAndStart(label, label);
+          resolve(res);
+        },
+        (error) => {
+          console.warn('[BackgroundLocation] ⚠️ Location permission prompt response/error:', error.message);
+          resolve({
+            success: false,
+            message: `Location permission not granted: ${error.message}`,
+          });
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 15000,
+          maximumAge: 0,
+        }
+      );
+    });
+  }
+
+  /**
    * Start background GPS tracking (called on app load if previously enabled)
    */
   public startTracking(): void {
@@ -225,6 +314,7 @@ class BackgroundLocationService {
       this.watchId = navigator.geolocation.watchPosition(
         (position) => {
           this.lastPosition = position;
+          this.saveLastKnownPosition(position.coords);
           this.consecutiveErrors = 0;
         },
         (error) => {
@@ -263,6 +353,7 @@ class BackgroundLocationService {
     this.watchId = navigator.geolocation.watchPosition(
       (position) => {
         this.lastPosition = position;
+        this.saveLastKnownPosition(position.coords);
         this.consecutiveErrors = 0;
       },
       (error) => {
@@ -284,13 +375,13 @@ class BackgroundLocationService {
   }
 
   /**
-   * Send GPS ping to server with latest coordinates
+   * Send GPS ping to server with latest coordinates (or fallback to persistent last known location)
    */
   private async sendPing(): Promise<void> {
     if (!this.lastPosition) {
       // Try to get a fresh position if we don't have one yet
       try {
-        if (this.isNativeApp && 'geolocation' in navigator) {
+        if ('geolocation' in navigator) {
           const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
             navigator.geolocation.getCurrentPosition(resolve, reject, {
               enableHighAccuracy: true,
@@ -298,22 +389,18 @@ class BackgroundLocationService {
             });
           });
           this.lastPosition = pos;
-        } else if ('geolocation' in navigator) {
-          const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-            navigator.geolocation.getCurrentPosition(resolve, reject, {
-              enableHighAccuracy: true,
-              timeout: 15000,
-            });
-          });
-          this.lastPosition = pos;
+          this.saveLastKnownPosition(pos.coords);
         }
       } catch (err: any) {
-        console.warn('[BackgroundLocation] Could not get fresh position for ping:', err?.message);
-        return;
+        console.warn('[BackgroundLocation] Could not get fresh position for ping, checking last known cache:', err?.message);
       }
     }
 
-    if (!this.lastPosition) return;
+    const cached = this.loadLastKnownPosition();
+    const effectiveLat = this.lastPosition?.coords?.latitude ?? cached?.lat;
+    const effectiveLon = this.lastPosition?.coords?.longitude ?? cached?.lon;
+
+    if (effectiveLat === undefined || effectiveLon === undefined) return;
 
     const user = getStoredUser();
     const effectiveLabel = this.getDeviceLabel() || user?.displayName || user?.username || 'FRIDAY Device';
@@ -322,15 +409,16 @@ class BackgroundLocationService {
       deviceId: this.getOrCreateDeviceId(),
       username: user?.username,
       label: effectiveLabel,
-      lat: this.lastPosition.coords.latitude,
-      lon: this.lastPosition.coords.longitude,
-      accuracy: this.lastPosition.coords.accuracy || 0,
-      altitude: this.lastPosition.coords.altitude,
-      speed: this.lastPosition.coords.speed,
-      heading: this.lastPosition.coords.heading,
+      lat: effectiveLat,
+      lon: effectiveLon,
+      accuracy: this.lastPosition?.coords?.accuracy ?? cached?.accuracy ?? 0,
+      altitude: this.lastPosition?.coords?.altitude ?? cached?.altitude ?? null,
+      speed: this.lastPosition?.coords?.speed ?? cached?.speed ?? null,
+      heading: this.lastPosition?.coords?.heading ?? cached?.heading ?? null,
       batteryLevel: this.getBatteryLevel(),
       isCharging: this.getChargingStatus(),
       networkType: this.getNetworkType(),
+      isCachedLastKnown: !this.lastPosition && !!cached,
     };
 
     try {
@@ -381,14 +469,25 @@ class BackgroundLocationService {
   }
 
   /**
-   * Auto-resume tracking on app load if it was previously enabled
+   * Auto-resume tracking or proactively prompt for location permission on app load
    */
-  public autoResumeIfEnabled(): void {
-    if (this.isTrackingEnabled() && !this.isRunning) {
-      const label = this.getDeviceLabel();
-      if (label) {
-        console.log(`[BackgroundLocation] Auto-resuming tracking for "${label}"...`);
-        this.startTracking();
+  public async autoResumeIfEnabled(): Promise<void> {
+    if (typeof window === 'undefined') return;
+
+    if (this.isRunning) return;
+
+    const user = getStoredUser();
+    const label = this.getDeviceLabel() || user?.displayName || user?.username || 'Boss Device';
+
+    if (this.isTrackingEnabled()) {
+      console.log(`[BackgroundLocation] Auto-resuming tracking for "${label}"...`);
+      this.startTracking();
+    } else {
+      // If not yet started, trigger permission prompt so user can allow location
+      try {
+        await this.requestPermissionAndStart(label);
+      } catch (e) {
+        console.warn('[BackgroundLocation] Auto-prompt location error:', e);
       }
     }
   }

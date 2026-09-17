@@ -3396,8 +3396,200 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                         </div>
                     </div>
 
-                    {/* ── Suspended Aerial Rope Capsules (Screen ke Top se Direct Rassi me Latke Hue, Center se Start) ── */}
-                    <div className="w-full flex flex-col gap-2 select-none items-center" style={{ overflow: 'visible' }}>
+                    {/* ── 📱 Mobile Single Horizontal Scrollable Capsule Bar (Phones / APK) ── */}
+                    <div className="flex md:hidden w-full overflow-x-auto no-scrollbar scroll-smooth touch-pan-x py-1.5 px-0.5 select-none shrink-0" style={{ WebkitOverflowScrolling: 'touch' }}>
+                        <div className="flex items-center gap-2 w-max px-1">
+                            {/* 1. Wi-Fi Radar */}
+                            <button
+                                onClick={() => setShowWifiRadar(true)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-300 text-xs font-semibold shadow-[0_0_12px_rgba(6,182,212,0.2)] transition-all shrink-0 whitespace-nowrap active:scale-95"
+                                title="Wi-Fi Radar & Connected Devices"
+                            >
+                                <Radio className="w-3.5 h-3.5 text-cyan-400" />
+                                <span>Wi-Fi Radar</span>
+                            </button>
+
+                            {/* 2. 🔥 Perchance Studio */}
+                            <button
+                                onClick={() => setShowPerchanceStudio(true)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gradient-to-r from-pink-500/25 via-rose-500/25 to-amber-500/25 hover:from-pink-500/40 hover:to-amber-500/40 border border-pink-400/50 text-pink-200 text-xs font-bold shadow-[0_0_12px_rgba(244,63,94,0.3)] transition-all shrink-0 whitespace-nowrap active:scale-95"
+                                title="🔥 Perchance AI Photo Studio"
+                            >
+                                <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-spin" style={{ animationDuration: '4s' }} />
+                                <span>🔥 Perchance</span>
+                            </button>
+
+                            {/* 3. Backup & Vault */}
+                            <button
+                                onClick={() => setShowBackupModal(true)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-xs font-semibold shadow-[0_0_12px_rgba(245,158,11,0.2)] transition-all shrink-0 whitespace-nowrap active:scale-95"
+                                title="Memory Backup Download & Vault"
+                            >
+                                <Download className="w-3.5 h-3.5" />
+                                <span>Backup & Vault</span>
+                            </button>
+
+                            {/* 4. Security Shield */}
+                            <button
+                                onClick={() => setShowBackupModal(true)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-300 text-xs font-semibold shadow-[0_0_12px_rgba(244,63,94,0.2)] transition-all shrink-0 whitespace-nowrap active:scale-95"
+                                title="Security Shield"
+                            >
+                                <Shield className="w-3.5 h-3.5" />
+                                <span>Shield</span>
+                            </button>
+
+                            {/* 5. WhatsApp */}
+                            <button
+                                onClick={() => setShowWhatsAppModal(true)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-xs font-semibold shadow-[0_0_12px_rgba(16,185,129,0.2)] transition-all shrink-0 whitespace-nowrap active:scale-95"
+                                title="WhatsApp Link Assistant"
+                            >
+                                <span>📲</span>
+                                <span>WhatsApp</span>
+                            </button>
+
+                            {/* 6. Crawler */}
+                            <button
+                                onClick={() => setShowWebCrawler(true)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-300 text-xs font-semibold shadow-[0_0_12px_rgba(6,182,212,0.2)] transition-all shrink-0 whitespace-nowrap active:scale-95"
+                                title="Web Crawler Studio"
+                            >
+                                <span>🕷️</span>
+                                <span>Crawler</span>
+                            </button>
+
+                            {/* 7. Music Studio */}
+                            <button
+                                onClick={() => setShowMusicStudio(true)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gradient-to-r from-cyan-500/20 to-fuchsia-500/20 hover:from-cyan-500/30 hover:to-fuchsia-500/30 border border-cyan-400/40 text-cyan-300 text-xs font-semibold shadow-[0_0_12px_rgba(6,182,212,0.2)] transition-all shrink-0 whitespace-nowrap active:scale-95"
+                                title="HD Music Studio"
+                            >
+                                <span>🎵</span>
+                                <span>Music Studio</span>
+                            </button>
+
+                            {/* 8. YouTube AI */}
+                            <button
+                                onClick={() => setShowYouTubeStudio(true)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 text-xs font-semibold shadow-[0_0_12px_rgba(239,68,68,0.2)] transition-all shrink-0 whitespace-nowrap active:scale-95"
+                                title="YouTube AI Studio"
+                            >
+                                <span>🎬</span>
+                                <span>YouTube AI</span>
+                            </button>
+
+                            {/* 9. Screen Vision */}
+                            <button
+                                onClick={toggleScreenShare}
+                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold shrink-0 whitespace-nowrap transition-all active:scale-95 ${
+                                    isScreenSharing
+                                        ? 'bg-red-500/20 border border-red-500/60 text-red-300 shadow-[0_0_12px_rgba(239,68,68,0.3)] animate-pulse'
+                                        : 'bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 shadow-[0_0_12px_rgba(99,102,241,0.2)] hover:bg-indigo-500/30'
+                                }`}
+                                title="Screen Vision"
+                            >
+                                <span>{isScreenSharing ? '🔴 Vision ON' : '🖥️ Vision'}</span>
+                            </button>
+
+                            {/* 10. 🛸 3D Lab */}
+                            <button
+                                onClick={() => setShowHologramLab(true)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/40 text-cyan-300 text-xs font-semibold shadow-[0_0_12px_rgba(6,182,212,0.25)] transition-all shrink-0 whitespace-nowrap active:scale-95"
+                                title="JARVIS Holographic 3D Lab"
+                            >
+                                <Cpu className="w-3.5 h-3.5 animate-pulse text-cyan-300" />
+                                <span>🛸 3D Lab</span>
+                            </button>
+
+                            {/* 11. 🧪 Model Test */}
+                            <button
+                                onClick={() => setShowModelTester(true)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gradient-to-r from-cyan-500/25 via-sky-500/25 to-indigo-500/25 hover:from-cyan-500/35 hover:to-indigo-500/35 border border-cyan-400/50 text-cyan-200 text-xs font-bold shadow-[0_0_15px_rgba(6,182,212,0.35)] transition-all shrink-0 whitespace-nowrap active:scale-95"
+                                title="Model Test"
+                            >
+                                <span className="text-sm">🧪</span>
+                                <span>Model Test</span>
+                            </button>
+
+                            {/* 12. 🧠 Training */}
+                            <button
+                                onClick={() => setShowLearningCapsule(true)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-xs font-semibold shadow-[0_0_12px_rgba(16,185,129,0.25)] transition-all shrink-0 whitespace-nowrap active:scale-95"
+                                title="Cognition & Training"
+                            >
+                                <span className="text-sm">🧠</span>
+                                <span>Training</span>
+                            </button>
+
+                            {/* 13. Code Agent */}
+                            <button
+                                onClick={() => setShowCodeAgent(true)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/40 text-purple-300 text-xs font-semibold shadow-[0_0_12px_rgba(168,85,247,0.2)] transition-all shrink-0 whitespace-nowrap active:scale-95"
+                                title="Code Agent"
+                            >
+                                <Code2 className="w-3.5 h-3.5" />
+                                <span>Code Agent</span>
+                            </button>
+
+                            {/* 14. Chat History */}
+                            <button
+                                onClick={() => setShowChatHistory(true)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/40 text-blue-300 text-xs font-semibold shadow-[0_0_12px_rgba(59,130,246,0.2)] transition-all shrink-0 whitespace-nowrap active:scale-95"
+                                title="Chat History"
+                            >
+                                <MessageSquare className="w-3.5 h-3.5" />
+                                <span>Chat History</span>
+                            </button>
+
+                            {/* 15. Phone Info */}
+                            <button
+                                onClick={() => setShowPhoneIntelligence(true)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gradient-to-r from-cyan-500/25 to-blue-500/25 hover:from-cyan-500/35 hover:to-blue-500/35 border border-cyan-400/50 text-cyan-200 text-xs font-bold shadow-[0_0_15px_rgba(6,182,212,0.3)] transition-all shrink-0 whitespace-nowrap active:scale-95"
+                                title="Phone Info"
+                            >
+                                <Phone className="w-3.5 h-3.5 text-cyan-300 animate-pulse" />
+                                <span>Phone Info</span>
+                            </button>
+
+                            {/* 16. Captions */}
+                            <button
+                                onClick={() => setShowCaptions(!showCaptions)}
+                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold shrink-0 whitespace-nowrap transition-all active:scale-95 ${
+                                    showCaptions
+                                        ? 'bg-emerald-500/25 border border-emerald-500/50 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.2)]'
+                                        : 'bg-slate-800/80 border border-slate-700 text-slate-300 hover:bg-slate-700'
+                                }`}
+                                title={showCaptions ? 'Captions ON' : 'Captions OFF'}
+                            >
+                                <Captions className="w-3.5 h-3.5" />
+                                <span>Captions</span>
+                            </button>
+
+                            {/* 17. Settings */}
+                            <button
+                                onClick={() => setShowSettings(!showSettings)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-800/80 hover:bg-slate-700 border border-slate-600 text-slate-200 text-xs font-semibold transition-all shrink-0 whitespace-nowrap active:scale-95"
+                                title="Settings"
+                            >
+                                <Settings className="w-3.5 h-3.5" />
+                                <span>Settings</span>
+                            </button>
+
+                            {/* 18. Close */}
+                            <button
+                                onClick={handleClose}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/50 text-rose-300 text-xs font-semibold transition-all shrink-0 whitespace-nowrap active:scale-95"
+                                title="Close"
+                            >
+                                <X className="w-3.5 h-3.5" />
+                                <span>Close</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* ── 🖥️ Desktop Suspended Aerial Rope Capsules (Hidden on Mobile) ── */}
+                    <div className="hidden md:flex w-full flex-col gap-2 select-none items-center" style={{ overflow: 'visible' }}>
                         {/* ── TIER 1: Upper 10 Aerial Capsules Hanging Direct from Ceiling, Centered ── */}
                         <div className="relative w-full flex items-center justify-center group/capsules1" style={{ overflow: 'visible' }}>
                             {/* Left Scroll Arrow */}
