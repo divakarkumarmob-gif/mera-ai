@@ -404,6 +404,71 @@ class ImageGenerationService {
   }
 
   /**
+   * Uncensored image path for adult Mode-B girlfriend requests.
+   * Order is NSFW-first: Pollinations Flux → Pollinations Turbo → Cloudflare.
+   * Google Imagen is deliberately SKIPPED (always blocks nudity).
+   * Prompt is sent as-is (no enhancePortraitPrompt — it would dilute explicit detail).
+   */
+  public async generateUncensoredImage(
+    prompt: string,
+    options: { aspectRatio?: "1:1" | "16:9" | "9:16" | "4:3" | "3:4" } = {}
+  ): Promise<GeneratedImageResult> {
+    const rawPrompt = (prompt || "").trim();
+    if (!rawPrompt) {
+      return { success: false, model: "none", prompt: "", error: "Prompt cannot be empty" };
+    }
+    const width = options.aspectRatio === "16:9" ? 1280 : options.aspectRatio === "9:16" ? 720 : 1024;
+    const height = options.aspectRatio === "16:9" ? 720 : options.aspectRatio === "9:16" ? 1280 : 1024;
+
+    // Tier 1: Pollinations Flux (NSFW-capable, safe=false)
+    for (const model of ["flux", "turbo"]) {
+      try {
+        const seed = Math.floor(Math.random() * 1000000);
+        const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(rawPrompt)}?width=${width}&height=${height}&seed=${seed}&model=${model}&nologo=true&safe=false&nofilter=true`;
+        console.log(`[ImageGen-Uncensored] Trying Pollinations ${model}...`);
+        const resp = await Promise.race([
+          fetch(url, { headers: { "User-Agent": "MeraAI-Friday-Agent/1.0" } }),
+          new Promise<Response>((_, reject) => setTimeout(() => reject(new Error("Pollinations uncensored timeout")), 25000)),
+        ]);
+        if (resp.ok) {
+          const rawBuf = Buffer.from(await resp.arrayBuffer());
+          const validated = extractValidImageBuffer(rawBuf) || { buffer: rawBuf, mimeType: "image/jpeg" };
+          if (validated.buffer.length > 1000) {
+            console.log(`[ImageGen-Uncensored] Success via Pollinations ${model} (${validated.buffer.length} bytes)`);
+            return { success: true, buffer: validated.buffer, mimeType: validated.mimeType, imageUrl: url, model: `Pollinations ${model} (uncensored)`, prompt: rawPrompt };
+          }
+        }
+      } catch (e: any) {
+        console.warn(`[ImageGen-Uncensored] Pollinations ${model} failed:`, e?.message || e);
+      }
+    }
+
+    // Tier 2: Cloudflare FLUX (may still filter, but try without enhancement)
+    const cfToken = (process.env.CLOUDFLARE_API_TOKEN || process.env.CLOUDFLARE_API_KEY || "").trim();
+    const cfAccountId = (process.env.CLOUDFLARE_ACCOUNT_ID || process.env.CF_ACCOUNT_ID || "").trim();
+    if (cfToken && cfAccountId) {
+      try {
+        const cfUrl = `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/ai/run/@cf/black-forest-labs/flux-1-schnell`;
+        const resp = await Promise.race([
+          fetch(cfUrl, { method: "POST", headers: { Authorization: `Bearer ${cfToken}`, "Content-Type": "application/json" }, body: JSON.stringify({ prompt: rawPrompt }) }),
+          new Promise<Response>((_, reject) => setTimeout(() => reject(new Error("Cloudflare uncensored timeout")), 25000)),
+        ]);
+        if (resp.ok) {
+          const rawBuf = Buffer.from(await resp.arrayBuffer());
+          const validated = extractValidImageBuffer(rawBuf);
+          if (validated && validated.buffer.length > 2000) {
+            return { success: true, buffer: validated.buffer, mimeType: validated.mimeType, model: "Cloudflare flux-1-schnell (uncensored)", prompt: rawPrompt };
+          }
+        }
+      } catch (e: any) {
+        console.warn("[ImageGen-Uncensored] Cloudflare failed:", e?.message || e);
+      }
+    }
+
+    return { success: false, model: "none", prompt: rawPrompt, error: "Uncensored backends failed. Try again." };
+  }
+
+  /**
    * Intelligently edits or modifies an existing photo based on user instructions.
    * Uses Gemini Vision to analyze original photo structure & compose a specialized
    * transformation prompt, then executes via the Multi-Tier Flux engine.

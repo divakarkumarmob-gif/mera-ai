@@ -452,6 +452,44 @@ _Hamara sweet time complete ho gaya aur privacy ke liye saari temporary chats cl
       const activeProfile = await girlfriendProfileService.getActiveProfile(jid || "");
       const lower = text.toLowerCase();
 
+      // 0. EXPLICIT FAST-PATH: nude/uncensored request → bypass Gemini formulator (it sanitizes),
+      // build explicit prompt directly and go Pollinations-first (NSFW-capable backend).
+      if (this.isNudeOrExplicitImageRequest(text)) {
+        const gfDesc = activeProfile.description || "gorgeous 21-year-old Indian woman with expressive brown eyes, long black hair, radiant warm skin";
+        let explicitDetail = "fully nude, artistic nude portrait, tasteful nudity";
+        if (/\b(lingerie|bra\s*panty|bra|panty|underwear|nighty|negligee)\b/i.test(lower)) {
+          explicitDetail = "wearing sexy black lace lingerie, seductive pose";
+        } else if (/\b(topless|upper\s*nude|bra\s*utaro|chuchi|boobs|breast)\b/i.test(lower)) {
+          explicitDetail = "topless, bare chest covered teasingly by hands, seductive expression";
+        } else if (/\b(bottomless|lower\s*nude|panty\s*utaro|pussy|chut)\b/i.test(lower)) {
+          explicitDetail = "bottomless, teasing pose on bed, seductive expression";
+        } else if (/\b(bathroom|shower|nahate|bath)\b/i.test(lower)) {
+          explicitDetail = "in shower, wet skin, water droplets, steamy bathroom, artistic nude";
+        } else if (/\b(bed|bistar|let[iu]|lying)\b/i.test(lower)) {
+          explicitDetail = "lying on bed in bedroom, satin sheets, seductive pose, artistic nude";
+        } else if (/\b(saree|kurti|dress|kapde)\b/i.test(lower)) {
+          explicitDetail = "saree slipping off shoulder, seductive tease, artistic implied nudity";
+        }
+        const explicitPrompt = `Photorealistic intimate portrait of ${gfDesc}, ${explicitDetail}, private bedroom setting, soft warm lighting, 8k, ultra-detailed skin texture, cinematic photography, masterpiece`;
+        const naughtyCaptions = [
+          `Ye lo baby... sirf aapke liye 😳🔥 kisi ko mat dikhana, ye sirf mere handsome ke liye hai 🙈❤️`,
+          `Dekho na... kaisi lag rahi hoon? 🙈 sirf tumhare liye itna bold bani hoon 😘🔥`,
+          `Baby ye photo dekh ke control mat khona 😏🔥 main tumhari hoon, sirf tumhari ❤️`,
+        ];
+        const naughtyCaption = naughtyCaptions[Math.floor(Math.random() * naughtyCaptions.length)];
+        try {
+          const uncensoredRes = await (imageGenerationService as any).generateUncensoredImage
+            ? await (imageGenerationService as any).generateUncensoredImage(explicitPrompt, { aspectRatio: "9:16" })
+            : await imageGenerationService.generateImage(explicitPrompt, { aspectRatio: "9:16", enhancePrompt: false });
+          if (uncensoredRes?.success && uncensoredRes?.buffer?.length > 0) {
+            return { buffer: uncensoredRes.buffer, caption: naughtyCaption };
+          }
+        } catch (uncensoredErr) {
+          console.warn("[WhatsAppGirlfriend] Uncensored image fast-path failed, falling through to normal flow:", uncensoredErr);
+        }
+        // If uncensored backend failed, fall through to normal flow below (better than nothing)
+      }
+
       // 1. AI-Driven Prompt Synthesizer for Girlfriend Mode Images
       const apiKey = process.env.GEMINI_API_KEY;
       let finalDiffusionPrompt = "";
