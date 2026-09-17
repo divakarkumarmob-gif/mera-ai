@@ -47,6 +47,7 @@ export interface GirlfriendSession {
   tempo?: "slow" | "fast" | null;
   worship?: { part: string; turnsLeft: number } | null;
   fight?: { level: number; since: number } | null;
+  meltedUntil?: number;
   afterglowUntil?: number;
   // Hardcore text-state
   gaaliLevel?: "soft" | "hard" | "max" | null;

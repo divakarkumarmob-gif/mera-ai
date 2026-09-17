@@ -1,5 +1,6 @@
 import { db } from "./firebaseAdmin";
 import { GoogleGenAI } from "@google/genai";
+import { encryptData, decryptData } from "../utils/cryptoVault";
 
 export interface RlhfFeedbackEntry {
   id: string;
@@ -57,8 +58,23 @@ class AiAdvancedLearningService {
           this.getDb().doc(STYLE_DOC).get(),
         ]);
 
-        this.rlhfCache = rlhfSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-        this.goldenCache = goldenSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+        this.rlhfCache = rlhfSnap.docs.map((d) => {
+          const e = { id: d.id, ...(d.data() as any) } as RlhfFeedbackEntry;
+          try {
+            e.targetMessageText = decryptData(String(e.targetMessageText || ""));
+            e.bossFeedbackAnalysis = decryptData(String(e.bossFeedbackAnalysis || ""));
+          } catch {}
+          return e;
+        });
+        this.goldenCache = goldenSnap.docs.map((d) => {
+          const g = { id: d.id, ...(d.data() as any) } as GoldenStandardExample;
+          try {
+            g.userPrompt = decryptData(String((g as any).userPrompt || ""));
+            g.idealResponse = decryptData(String((g as any).idealResponse || ""));
+            (g as any).praiseTrigger = decryptData(String((g as any).praiseTrigger || ""));
+          } catch {}
+          return g;
+        });
 
         if (styleSnap.exists) {
           this.bossStyleCache = styleSnap.data() as BossStyleProfile;
@@ -130,7 +146,11 @@ class AiAdvancedLearningService {
     if (this.rlhfCache.length > 100) this.rlhfCache.pop();
 
     try {
-      await this.getDb().collection(RLHF_COLLECTION).doc(entry.id).set(entry);
+      await this.getDb().collection(RLHF_COLLECTION).doc(entry.id).set({
+        ...entry,
+        targetMessageText: encryptData(entry.targetMessageText),
+        bossFeedbackAnalysis: encryptData(entry.bossFeedbackAnalysis),
+      });
       console.log(`[AdvancedLearning] 🎯 RLHF Reward logged (${cleanEmoji} -> ${sentiment}): ${analysis}`);
     } catch (e: any) {
       console.warn("[AdvancedLearning] Failed to save RLHF entry:", e?.message || e);
@@ -191,7 +211,12 @@ class AiAdvancedLearningService {
       if (this.goldenCache.length > 50) this.goldenCache.pop();
 
       try {
-        await this.getDb().collection(GOLDEN_COLLECTION).doc(example.id).set(example);
+        await this.getDb().collection(GOLDEN_COLLECTION).doc(example.id).set({
+          ...example,
+          userPrompt: encryptData(String(example.userPrompt || "")),
+          idealResponse: encryptData(String(example.idealResponse || "")),
+          praiseTrigger: encryptData(String(example.praiseTrigger || "")),
+        });
         console.log(`[AdvancedLearning] 🏆 Golden Standard auto-curated: Boss praised with "${bossMessageText}"!`);
       } catch (e: any) {
         console.warn("[AdvancedLearning] Failed to save Golden Standard:", e?.message || e);

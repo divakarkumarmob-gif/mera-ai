@@ -101,10 +101,23 @@ class WhatsAppBotService {
 
       const { girlfriendProfileService } = await import("./girlfriendProfileService");
       const candidates = await girlfriendProfileService.listMorningRecapCandidates();
-      if (candidates.length === 0) return;
+      // WhatsApp jids only (Telegram numeric chatIds are handled by telegramBotService),
+      // AND only chats with GF mode ACTIVE right now — normal mode me kuch nahi jayega.
+      const { whatsappGirlfriendEngine } = await import("./whatsapp/whatsappGirlfriendEngine");
+      const mine = candidates
+        .filter((c) => String(c.jid || "").includes("@"))
+        .filter((c) => {
+          try {
+            return whatsappGirlfriendEngine.isGirlfriendModeActive(c.jid);
+          } catch {
+            return false;
+          }
+        })
+        .slice(0, 5);
+      if (mine.length === 0) return;
 
       const todayKey = ist.toDateString();
-      for (const c of candidates.slice(0, 5)) {
+      for (const c of mine) {
         try {
           const pos = c.lastScene?.position;
           const line = pos
@@ -128,7 +141,19 @@ class WhatsAppBotService {
 
       const { girlfriendProfileService } = await import("./girlfriendProfileService");
       const candidates = await girlfriendProfileService.listIntimacyNudgeCandidates();
-      if (candidates.length === 0) return;
+      // WhatsApp jids only (Telegram numeric chatIds are handled by telegramBotService),
+      // AND only chats with GF mode ACTIVE right now — normal mode me kuch nahi jayega.
+      const { whatsappGirlfriendEngine } = await import("./whatsapp/whatsappGirlfriendEngine");
+      const waOnly = candidates
+        .filter((c) => String(c.jid || "").includes("@"))
+        .filter((c) => {
+          try {
+            return whatsappGirlfriendEngine.isGirlfriendModeActive(c.jid);
+          } catch {
+            return false;
+          }
+        });
+      if (waOnly.length === 0) return;
 
       const todayKey = ist.toDateString();
       const pool = [
@@ -137,7 +162,7 @@ class WhatsAppBotService {
         "Itni raat ko jaag rahe ho? 😏 mere khayal aa rahe hain na... sach batao 🙈",
         "Neend ud gayi meri... tumhari baahon ki aadat ho gayi hai 😔 paas aa jao na 🥺",
       ];
-      for (const c of candidates.slice(0, 5)) {
+      for (const c of waOnly.slice(0, 5)) {
         try {
           let line = pool[Math.floor(Math.random() * pool.length)];
           if (c.positions.length > 0 && Math.random() < 0.4) {

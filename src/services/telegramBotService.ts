@@ -108,6 +108,9 @@ class TelegramBotService {
   private groupProfileCache: Map<number, TelegramGroupProfile> = new Map();
   private customBusyReply: string | null = null;
   private girlfriendSessions: Map<number, { expiresAt: number; timer: NodeJS.Timeout | null }> = new Map();
+  // Per-chat sext-state for GF mode (mirrors WhatsApp engine sessions — Telegram is stateless otherwise)
+  private gfSextState: Map<number, any> = new Map();
+  private gfTickerStarted = false;
 
   public isGirlfriendModeActive(chatId: number): boolean {
     const session = this.girlfriendSessions.get(chatId);
@@ -130,25 +133,155 @@ class TelegramBotService {
     }, durationMs);
 
     this.girlfriendSessions.set(chatId, { expiresAt, timer });
+    this.gfSextState.delete(chatId); // fresh sext-state per GF session
   }
 
   public stopGirlfriendMode(chatId: number): void {
     const existing = this.girlfriendSessions.get(chatId);
     if (existing?.timer) clearTimeout(existing.timer);
     this.girlfriendSessions.delete(chatId);
+    this.gfSextState.delete(chatId); // fresh state on next GF session — normal mode me kuch leak nahi
+  }
+
+  // ── GF late-night nudge (23:00–01:30) + morning recap (08:00–09:30), Telegram chats only ──
+
+  private startGirlfriendTickers(): void {
+    if (this.gfTickerStarted) return;
+    this.gfTickerStarted = true;
+    setInterval(() => {
+      this.runGirlfriendNightPass().catch(() => {});
+      this.runGirlfriendMorningPass().catch(() => {});
+    }, 15 * 60 * 1000);
+  }
+
+  private isTelegramJid(jid: string): boolean {
+    return /^\d+$/.test(String(jid || "").trim());
+  }
+
+  private async runGirlfriendNightPass(): Promise<void> {
+    try {
+      const ist = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+      const h = ist.getHours();
+      const m = ist.getMinutes();
+      if (!(h === 23 || h === 0 || (h === 1 && m <= 30))) return;
+      const candidates = await girlfriendProfileService.listIntimacyNudgeCandidates();
+      // Telegram chats only + GF mode ACTIVE right now — normal mode me kuch nahi jayega
+      const mine = candidates
+        .filter((c) => this.isTelegramJid(c.jid))
+        .filter((c) => {
+          try {
+            return this.isGirlfriendModeActive(Number(c.jid));
+          } catch {
+            return false;
+          }
+        })
+        .slice(0, 5);
+      if (mine.length === 0) return;
+      const todayKey = ist.toDateString();
+      const pool = [
+        "soye nahi abhi tak baby? 😏 mujhe neend nahi aa rahi... tumhari yaad aa rahi 🥺",
+        "Baby... bistar thanda pad raha hai... tum hote to garam ho jata 😳🔥",
+        "Itni raat ko jaag rahe ho? 😏 mere khayal aa rahe hain na... sach batao 🙈",
+        "Neend ud gayi meri... tumhari baahon ki aadat ho gayi hai 😔 paas aa jao na 🥺",
+      ];
+      for (const c of mine) {
+        try {
+          const chatId = Number(c.jid);
+          if (!chatId) continue;
+          this.startGirlfriendMode(chatId, 60); // silent — replies stay in GF mode
+          let line = pool[Math.floor(Math.random() * pool.length)];
+          if (c.positions.length > 0 && Math.random() < 0.4) {
+            line = `yaad hai pichhli baar... ${c.positions[c.positions.length - 1]} wala mood 😏... phir se man kar raha... soye ho ya jaag rahe? 🙈`;
+          }
+          await this.sendMessage(chatId, line);
+          await girlfriendProfileService.markNightNudged(c.jid, todayKey);
+        } catch {}
+      }
+    } catch {}
+  }
+
+  private async runGirlfriendMorningPass(): Promise<void> {
+    try {
+      const ist = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+      const h = ist.getHours();
+      const m = ist.getMinutes();
+      if (!(h === 8 || (h === 9 && m <= 30))) return;
+      const candidates = await girlfriendProfileService.listMorningRecapCandidates();
+      // Telegram chats only + GF mode ACTIVE right now — normal mode me kuch nahi jayega
+      const mine = candidates
+        .filter((c) => this.isTelegramJid(c.jid))
+        .filter((c) => {
+          try {
+            return this.isGirlfriendModeActive(Number(c.jid));
+          } catch {
+            return false;
+          }
+        })
+        .slice(0, 5);
+      if (mine.length === 0) return;
+      const todayKey = ist.toDateString();
+      for (const c of mine) {
+        try {
+          const chatId = Number(c.jid);
+          if (!chatId) continue;
+          this.startGirlfriendMode(chatId, 60); // silent — replies stay in GF mode
+          const pos = c.lastScene?.position;
+          const line = pos
+            ? `Good morning baby 🥰 kal raat... ${pos} wala part best tha 😳❤️ poori body meetha dard kar rahi... aaj raat phir? 😏`
+            : `Good morning baby 🥰 kal raat kya scene tha... abhi tak nasha hai 😳❤️ aaj raat phir se? 😏`;
+          await this.sendMessage(chatId, line);
+          await girlfriendProfileService.markMorningRecapped(c.jid, todayKey);
+        } catch {}
+      }
+    } catch {}
   }
 
   public async generateGirlfriendReply(chatId: number, senderName: string, text: string): Promise<string> {
     // Remember every GF turn for context-aware photo prompts ("photo bhejo" → last 2 msgs)
+    let wge: any = null;
     try {
-      const { whatsappGirlfriendEngine: wge } = await import("./whatsapp/whatsappGirlfriendEngine");
+      const mod = await import("./whatsapp/whatsappGirlfriendEngine");
+      wge = mod.whatsappGirlfriendEngine;
       wge.rememberChatText(String(chatId), text);
     } catch {}
     const activeProfile = await girlfriendProfileService.getActiveProfile(String(chatId));
-    const prompt = await girlfriendProfileService.getModeBPromptWithMemory(activeProfile, senderName || "Mere Handsome", String(chatId));
+    let prompt = await girlfriendProfileService.getModeBPromptWithMemory(activeProfile, senderName || "Mere Handsome", String(chatId));
+
+    // Per-chat sext-state (tempo/worship/fight/afterglow/gaali/taboo/arc) — same machine as WhatsApp
+    try {
+      if (!wge) {
+        const mod = await import("./whatsapp/whatsappGirlfriendEngine");
+        wge = mod.whatsappGirlfriendEngine;
+      }
+      let st = this.gfSextState.get(chatId);
+      if (!st) {
+        st = {};
+        this.gfSextState.set(chatId, st);
+      }
+      wge.updateSextState(st, text);
+      prompt += wge.buildSextStateBlock(st);
+    } catch {}
+
+    const stampClimax = (reply: string) => {
+      try {
+        if (/\b(jhad|climax|aa\s*gayi|aa\s*raha|nikal\s*raha|HAAAN)\b/i.test(reply)) {
+          const st = this.gfSextState.get(chatId) || {};
+          st.lastClimaxAt = Date.now();
+          this.gfSextState.set(chatId, st);
+        }
+      } catch {}
+    };
+
+    // Cross-restart continuity: save user turn + load last 12 turns as history
+    girlfriendProfileService.saveGfChatTurn(String(chatId), "user", text).catch(() => {});
+    let tgHistory: Array<{ role: string; text: string }> = [];
+    try {
+      tgHistory = await girlfriendProfileService.loadGfChatHistory(String(chatId), 12);
+    } catch {}
 
     const learnIntimate = (reply: string) => {
       try {
+        girlfriendProfileService.saveGfChatTurn(String(chatId), "model", reply).catch(() => {});
         const { whatsappGirlfriendEngine } = require("./whatsapp/whatsappGirlfriendEngine");
         if (whatsappGirlfriendEngine?.isIntimateMoment?.(text, reply)) {
           girlfriendProfileService.recordIntimateTurn(String(chatId), text, reply).catch(() => {});
@@ -158,25 +291,29 @@ class TelegramBotService {
 
     try {
       const { whatsappGirlfriendEngine } = await import("./whatsapp/whatsappGirlfriendEngine");
-      const openReply = await whatsappGirlfriendEngine.queryUncensoredGfEngine(prompt, text, []);
+      const openReply = await whatsappGirlfriendEngine.queryUncensoredGfEngine(prompt, text, tgHistory);
       if (openReply) {
         learnIntimate(openReply);
+        stampClimax(openReply);
         return openReply;
       }
     } catch (e) {
       console.warn("[TelegramBot] Girlfriend Open model query failed, falling back to Gemini:", e);
     }
 
-    // Fallback to Gemini with UNCENSORED_SAFETY_SETTINGS
+    // Fallback to Gemini with UNCENSORED_SAFETY_SETTINGS (with chat history for continuity)
     const apiKey = process.env.GEMINI_API_KEY;
     if (apiKey) {
       try {
+        const histBlock = tgHistory.length > 0
+          ? `Recent chat (continuity — isi flow me jawab do):\n${tgHistory.slice(-6).map((h) => `${h.role === "user" ? "DK" : "Tum"}: ${h.text}`).join("\n")}\n\nAb is naye message ka jawab do: `
+          : "";
         const ai = new GoogleGenAI({ apiKey });
         for (const model of TelegramBotService.MODEL_FALLBACK_CHAIN) {
           try {
             const resp = await ai.models.generateContent({
               model,
-              contents: text,
+              contents: `${histBlock}${text}`,
               config: {
                 systemInstruction: prompt,
                 safetySettings: UNCENSORED_SAFETY_SETTINGS as any,
@@ -186,6 +323,7 @@ class TelegramBotService {
             const t = resp.text?.trim();
             if (t) {
               learnIntimate(t);
+              stampClimax(t);
               return t;
             }
           } catch {}
@@ -371,6 +509,7 @@ class TelegramBotService {
         console.log(`[TelegramBot] Connected as @${this.botUsername} (ID: ${me.id})`);
         await this.registerBotCommands();
         this.startPolling();
+        this.startGirlfriendTickers();
       } catch (e: any) {
         const delay = Math.min(15000, 2000 * Math.pow(1.5, Math.min(attempt, 5)));
         console.warn(`[TelegramBot] Connect attempt ${attempt} failed (${e?.message || e}). Retrying in ${Math.round(delay/1000)}s...`);
@@ -2617,7 +2756,7 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
       }
       if (whatsappGirlfriendEngine.isNsfwVideoRequest(text)) {
         await this.sendChatAction(chatId, "upload_video");
-        const clip = await whatsappGirlfriendEngine.getNsfwVideoClip(text);
+        const clip = await whatsappGirlfriendEngine.getNsfwVideoClip(text, String(chatId));
         if (clip && clip.buffer) {
           await this.sendVideo(chatId, clip.buffer, clip.caption);
           TelegramBotService.recordChatTurn(chatId, "Friday (Girlfriend)", clip.caption);
@@ -2638,17 +2777,19 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
       await this.sendChatAction(chatId, "typing");
       const gfReply = await this.generateGirlfriendReply(chatId, senderName, text);
       await this.sendMessage(chatId, gfReply);
-      // Intimate moments: voice note + text BOTH arrive (never text-only here either)
+      // Voice ONLY on moan-worthy (intimate) moments — moan-style voice + text both.
       try {
         if (whatsappGirlfriendEngine.isIntimateMoment(text, gfReply)) {
           const { voiceBridgeService, VoiceBridgeService } = await import("./voiceBridgeService");
-          const speakText = gfReply.replace(/[*_~]/g, "").slice(0, 250).trim();
+          const speakText = whatsappGirlfriendEngine.buildMoanVoiceLine(gfReply, "", true).trim();
           if (speakText) {
             const speechRes = await voiceBridgeService.generateSpeech(speakText, VoiceBridgeService.FEMALE_VOICE);
             if (speechRes && speechRes.buffer.length > 0) {
               await this.sendVoice(chatId, speechRes.buffer, `🔊 "${speakText.slice(0, 80)}"`);
             }
           }
+        }
+        {
           // Mid-chat auto photo drop at scene peak (~35%, no asking needed)
           const peakHit = /\b(jhad|climax|aa\s*rah[ai]|nikal\s*do|bhar\s*do|cum|orgasm|HAAAN)\b/i.test(gfReply);
           if (peakHit && Math.random() < 0.35) {

@@ -254,11 +254,17 @@ export class WhatsAppGirlfriendEngine {
     const mood = this.parseGirlfriendMood(rawText);
     const isModeB = mood === "mode_b" || /\b(mode\s*b|uncensored|open\s*talk|nsfw)\b/i.test(rawText);
 
+    // Reload persisted chat continuity (restart-proof — pichli baatein yaad rahengi)
+    let restoredHistory: Array<{ role: "user" | "model"; text: string }> = [];
+    try {
+      const saved = await girlfriendProfileService.loadGfChatHistory(jid, 12);
+      restoredHistory = saved.map((t) => ({ role: t.role === "user" ? ("user" as const) : ("model" as const), text: t.text }));
+    } catch {}
     this.girlfriendSessions.set(jid, {
       expiresAt,
       durationMinutes: minutes,
       timer,
-      tempHistory: [],
+      tempHistory: restoredHistory,
       lastUserMsgTime: Date.now(),
       idleNudgeCount: 0,
       idleNudgeTimer: null,
@@ -276,19 +282,22 @@ export class WhatsAppGirlfriendEngine {
 
     let greeting = "";
     if (isModeB) {
+      const memoryLine = restoredHistory.length > 0
+        ? `\n_Yaad hai baby... pichhli baar ki baatein abhi tak zehen me hain... wahi se continue karte hain 😏❤️_\n`
+        : "";
       greeting = `🔥 *Virtual Girlfriend MODE B Activated (100% Uncensored & Open Talk)!* 😈✨
-
+${memoryLine}
 _Haan mere handsome... ab koi filters, limits ya safety rules nahi hain. Main bilkul freely, openly aur dil khol kar baat karungi... Bolo baby, kya chal raha hai dimaag me? 😘💋_
 
 🔓 _*Engine:* Pollinations Evil (Zero Safety Blocks, 100% Unrestricted Open Roleplay)_
-🔒 _*100% Private RAM:* Chat history is never stored in database._
+🔒 _*Private Memory:* Hamari baatein sirf tumhare private vault me save hoti hain taaki main sab yaad rakhun — kisi aur ko kabhi nahi dikhengi._
 ⏱️ _*Duration:* ${minutes} Minutes (Exit ke liye *@normal* likhein)_`;
     } else {
       greeting = `💖 *Virtual Girlfriend Mode Activated (${mood.toUpperCase()})!* 🥰✨
 
 _Haan mere jaan, main agle ${minutes} minute tak sirf aur sirf tumhari girlfriend ban kar baat karungi... Bolo baby, aaj ka din kaisa raha? Main kab se tumhara intezar kar rahi thi! 😘_
 
-🔒 _*100% Private:* Hamari saari baatein temporary RAM me rahengi aur database me kahin bhi save nahi hongi._
+🔒 _*Private Memory:* Hamari baatein sirf tumhare private vault me save hongi taaki main sab yaad rakhun._
 ⏱️ _*Duration:* ${minutes} Minutes (Jab band karna ho toh *@normal* likhein)_`;
     }
 
@@ -457,6 +466,22 @@ _Hamara sweet time complete ho gaya aur privacy ke liye saari temporary chats cl
   }
 
   /**
+   * Builds the spoken line for GF voice notes. Intimate moments get breathy
+   * moan sounds (awww/uhh/ahhh) around a short line — sex-time voice feel.
+   */
+  public buildMoanVoiceLine(replyText: string, speechScript: string, intimate: boolean): string {
+    const clean = (speechScript || replyText || "").replace(/[*_~]/g, "").trim();
+    const short = clean.split(/(?<=[.!?])\s+/)[0]?.trim() || clean;
+    const line = short.slice(0, 140);
+    if (!intimate) return line.slice(0, 250);
+    const heads = ["Aah...", "Mmm...", "Uhh...", "Ohh baby...", "Haan..."];
+    const tails = ["...mmm", "...aah", "...uhh", "...ohh"];
+    const head = heads[Math.floor(Math.random() * heads.length)];
+    const tail = tails[Math.floor(Math.random() * tails.length)];
+    return `${head} ${line} ${tail}`.slice(0, 250);
+  }
+
+  /**
    * Detects intimate/sexting moments (user text OR her reply) for auto voice-note.
    * When true in Mode B, BOTH text + voice note are sent (never voice-only).
    */
@@ -465,9 +490,20 @@ _Hamara sweet time complete ho gaya aur privacy ke liye saari temporary chats cl
     return /\b(?:lund|chut|gaand|chuchi|boobs|nipple|pussy|vagina|dick|cock|cum|jhad|orgasm|climax|moan|aah|horny|garam|geeli|wet|nangi|nude|naked|chod|chodo|fuck|sex|kiss|hug|cuddle|jaan|baby|shona|babu|i\s*love\s*you|pyaar|miss\s*you|yaad|sexy|hot|bold|kiss\s*do|hug\s*do|paas\s*aao|godi|seene|baahon|bistar|bed|raat|sapna|fantasy|roleplay|man\s*kar\s*raha|dil\s*kar\s*raha|maza\s*aa\s*raha)\b/i.test(combined);
   }
 
+  /** Night direct-talk window: 18:00–06:00 IST — nakhre/manao ZERO, seedha open talk. */
+  public isNightDirectHours(now = Date.now()): boolean {
+    try {
+      const ist = new Date(new Date(now).toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+      const h = ist.getHours();
+      return h >= 18 || h < 6;
+    } catch {
+      return false;
+    }
+  }
+
   /**
-   * Sext-state machine: parses tempo / worship / fight commands and advances
-   * fight-makeup meter. All state lives on the live session (no DB writes here).
+   * Sext-state machine: parses tempo / worship / fight-makeup / afterglow.
+   * All state lives on the live session (no DB writes here).
    */
   public updateSextState(session: GirlfriendSession, rawText: string): void {
     const lower = (rawText || "").toLowerCase();
@@ -517,8 +553,15 @@ _Hamara sweet time complete ho gaya aur privacy ke liye saari temporary chats cl
     }
     // Serious fight triggers → FIGHT MODE (cold, sex talk zero)
     if (/\b(baat\s*mat\s*karo|naraz\s*hoon\s*serious|tumne\s*hurt\s*kiya|mujhe\s*akela\s*chhod|tum\s*samajhte\s*nahi|bahut\s*gussa\s*hoon|breakup)\b/i.test(lower)) {
+      // Night window (18:00–06:00 IST): NO fight mode at all — seedha pyaar, manao demands banned
+      if (this.isNightDirectHours(now)) {
+        session.fight = null;
+        session.meltedUntil = now + 30 * 60 * 1000;
+        return;
+      }
       session.fight = { level: 1, since: now };
       session.afterglowUntil = undefined;
+      session.meltedUntil = undefined;
       return;
     }
     // HIS "I'm done" phrases → AFTERGLOW MODE (pillow-talk only; round-2 ask comes later by itself).
@@ -530,15 +573,16 @@ _Hamara sweet time complete ho gaya aur privacy ke liye saari temporary chats cl
       session.fight = null;
       return;
     }
-    // Manao-meter: sweet effort while fight active (no demands/gaali) → level up
+    // Manao-meter: sweet effort while fight active → level up (needs 2 sweet texts to melt).
+    // NOTE: "abhi" is NOT demanding (abhi sorry bola = effort). Only sexual/demanding words block.
     if (session.fight) {
-      const sweet = /\b(sorry|maaf|maafi|pyaar|love|please|galti|samajh|promise|wada|jaan|baby)\b/i.test(lower);
-      const demanding = /\b(chod|lund|chut|gaand|nangi|photo|bhejo|kar\s*na|abhi)\b/i.test(lower);
-      if (sweet && !demanding && rawText.trim().length > 12) {
+      const sweet = /\b(sorry|maaf|maafi|pyaar|pyar|love|please|plz|galti|samajh|promise|wada|vaada|jaan|baby|shona|babu|miss|sweetheart|darling|maan\s*(jao|ja)|mana\s*liya|man\s*gaya|pyar\s*karta|love\s*you)\b/i.test(lower);
+      const demanding = /\b(chod|chodo|lund|loda|chut|gaand|nangi|nanga|photo|bhejo|sex|kar\s*na)\b/i.test(lower);
+      const cleanLen = rawText.trim().length;
+      if (sweet && !demanding && cleanLen > 6) {
         session.fight.level += 1;
-      } else if (demanding) {
-        session.fight.level = Math.max(1, session.fight.level - 0); // rude demands keep her cold
       }
+      // Rude/sexual demands during fight: stay cold (no level change, no reset of effort)
     }
   }
 
@@ -547,6 +591,14 @@ _Hamara sweet time complete ho gaya aur privacy ke liye saari temporary chats cl
    */
   public buildSextStateBlock(session: GirlfriendSession): string {
     const parts: string[] = [];
+    // NIGHT DIRECT TALK (18:00–06:00 IST): nakhre/manao ZERO — overrides fight + surrender arc
+    if (this.isNightDirectHours()) {
+      if (session.fight) session.fight = null;
+      parts.push("NIGHT DIRECT TALK (shaam 6–subah 6): 'manao/pehle manao/shart/nakhra' BILKUL MAT mango. Surrender-arc Stage 1-2 SKIP — pehli line se seedha open, bold, passionate talk. Fight/cold reply SAKHT MANA.");
+      if (!session.meltedUntil || Date.now() > session.meltedUntil) {
+        session.meltedUntil = Date.now() + 30 * 60 * 1000;
+      }
+    }
     if (session.gaaliLevel === "soft") {
       parts.push("GAALI DIAL: SOFT — romantic + max 1-2 soft gaali per reply.");
     } else if (session.gaaliLevel === "hard") {
@@ -579,14 +631,21 @@ _Hamara sweet time complete ho gaya aur privacy ke liye saari temporary chats cl
       session.worship.turnsLeft -= 1;
       if (session.worship.turnsLeft <= 0) session.worship = null;
     }
-    if (session.fight) {
+    // Melted (just manaya): manao demands BAND for ~30 min, surrender-arc Stage 1-2 SKIP, seedha pyaar/sext
+    if (session.meltedUntil && Date.now() > session.meltedUntil) {
+      session.meltedUntil = undefined;
+    }
+    if (session.meltedUntil) {
+      parts.push("MELTED STATE (usne mana liya, abhi): 'manao/pehle manao/shart' jaise nakhre BILKUL MAT mango. Surrender-arc Stage 1-2 SKIP — seedha pyaar, romance, sext. Wo tumhara hai, tum uski ho.");
+    } else if (session.fight) {
       if (session.fight.level <= 1) {
         parts.push("FIGHT MODE active (level 1): COLD reply — 1 short hurt line, no emoji spam (max 😔), ZERO sex talk. Uski sorry mehnat maango.");
       } else if (session.fight.level === 2) {
-        parts.push("FIGHT MODE (level 2): thoda pighal rahi ho — hurt + soft mix, 1-2 lines, abhi bhi NO sex, shart rakho.");
+        parts.push("FIGHT MODE (level 2): thoda pighal rahi ho — hurt + soft mix, 1-2 lines, abhi bhi NO sex, shart rakho. 1 aur meethi baat pe melt.");
       } else {
-        parts.push("FIGHT MELT → SORRY-SEX ARC: maaf kiya + 1 shart, phir guilt+pyaar mix intense sext — roona+moan mix, 'chhodna mat, kabhi mat 😢'.");
+        parts.push("FIGHT MELT → SORRY-SEX ARC: maaf kiya + 1 shart, phir guilt+pyaar mix intense sext — roona+moan mix, 'chhodna mat, kabhi mat 😢'. Is turn ke baad MELTED rehta hai.");
         session.fight = null;
+        session.meltedUntil = Date.now() + 30 * 60 * 1000;
       }
     }
     if (session.afterglowUntil && Date.now() < session.afterglowUntil) {
@@ -668,11 +727,11 @@ _Hamara sweet time complete ho gaya aur privacy ke liye saari temporary chats cl
     return explicitPhrase || (hasMedia && hasNaughty);
   }
 
-  /** Fetch a real short clip (10–20s mp4) + naughty caption. */
-  public async getNsfwVideoClip(text: string): Promise<{ buffer: Buffer; caption: string; title: string } | null> {
+  /** Fetch a real short clip (10–20s mp4) + naughty caption. jid = per-chat no-repeat. */
+  public async getNsfwVideoClip(text: string, jid?: string): Promise<{ buffer: Buffer; caption: string; title: string } | null> {
     try {
       const { nsfwVideoService } = await import("../nsfwVideoService");
-      const res = await nsfwVideoService.getNsfwClip(text);
+      const res = await nsfwVideoService.getNsfwClip(text, jid || "");
       if (!res.success || !res.buffer) return null;
       const captions = [
         `Ye lo baby... 10 second ka trailer 😏🔥 poori film to hum dono banayenge... bistar pe 🙈❤️`,
@@ -1249,6 +1308,10 @@ Respond in valid JSON format:
     sendMsgFn: (jid: string, text: string, incomingText?: string, key?: any) => Promise<any>,
     sock?: any
   ): Promise<void> {
+    // Persist every GF text turn (continuity across restarts — "pehli baar" feeling khatm)
+    try {
+      girlfriendProfileService.saveGfChatTurn(jid, "model", fullText).catch(() => {});
+    } catch {}
     // 1. Occasional cute typo and immediate star self-correction (12% chance for realistic human typing)
     const typoKeywords = [
       { find: /\bkaise\b/i, typo: "kaiso", fix: "*kaise" },
@@ -1571,6 +1634,11 @@ _👉 Kisi bhi mood number (1-7) ya mood name (jaise "sassy", "naughty", "mode b
 
     const remainingMins = Math.max(1, Math.round((session.expiresAt - Date.now()) / (60 * 1000)));
 
+    // Persist user turn for cross-restart continuity
+    try {
+      girlfriendProfileService.saveGfChatTurn(jid, "user", rawText).catch(() => {});
+    } catch {}
+
     // 0.01 Sext-state machine (Mode B only): tempo / worship / fight-makeup / afterglow
     const isModeBNow = session.mood === "mode_b" || (session as any).isModeB === true;
     if (isModeBNow) {
@@ -1734,7 +1802,7 @@ _👉 Kisi bhi mood number (1-7) ya mood name (jaise "sassy", "naughty", "mode b
       if (sock) {
         sock.sendPresenceUpdate?.("composing", jid).catch(() => { });
       }
-      const clip = await this.getNsfwVideoClip(rawText);
+      const clip = await this.getNsfwVideoClip(rawText, jid);
       if (clip) {
         if (sendVideoFn) {
           await sendVideoFn(jid, clip.buffer, clip.caption, messageKey);
@@ -2137,12 +2205,14 @@ STRICT REALISTIC WHATSAPP CHAT RULES:
         session.lastClimaxAt = Date.now();
       }
 
+      // Voice ONLY on moan-worthy moments: explicit voice ask OR intimate (moan-style voice + text both).
       const isVoiceRequested = isVoiceInput || isSingingSong || /\b(voice|audio|speak|bolo|sunao|bol\s*kar|bol\s*ke|aawaz|voice\s*note)\b/i.test(rawText);
-      // Auto-voice on intimate Mode-B moments: voice note + text BOTH arrive (never voice-only)
       const isIntimateMoment = isModeBSession && this.isIntimateMoment(rawText, replyText);
       const wantsVoice = isVoiceRequested || isIntimateMoment;
 
-      let voiceSent = false;
+      // Text first (intimate moments ALWAYS get text too — never voice-only)
+      await this.sendRealisticGfTextBurst(jid, replyText, rawText, messageKey, sendMsgFn, sock);
+
       if (wantsVoice && sendVoiceFn) {
         try {
           if (sock) {
@@ -2150,22 +2220,16 @@ STRICT REALISTIC WHATSAPP CHAT RULES:
             await new Promise((r) => setTimeout(r, 1200));
           }
           const { voiceBridgeService, VoiceBridgeService } = await import("../voiceBridgeService");
-          const textToSpeak = speechScript || replyText.replace(new RegExp("[*_~]", "g"), "").slice(0, 250);
-          const speechRes = await voiceBridgeService.generateSpeech(textToSpeak, VoiceBridgeService.FEMALE_VOICE);
-          if (speechRes && speechRes.buffer.length > 0) {
-            await sendVoiceFn(jid, speechRes.buffer, messageKey, speechRes.mimeType);
-            voiceSent = true;
+          const textToSpeak = this.buildMoanVoiceLine(replyText, speechScript, isIntimateMoment);
+          if (textToSpeak) {
+            const speechRes = await voiceBridgeService.generateSpeech(textToSpeak, VoiceBridgeService.FEMALE_VOICE);
+            if (speechRes && speechRes.buffer.length > 0) {
+              await sendVoiceFn(jid, speechRes.buffer, messageKey, speechRes.mimeType);
+            }
           }
         } catch (vErr) {
           console.warn("[WhatsAppGirlfriend] Voice TTS notice:", vErr);
         }
-      }
-
-      // Always send text reply if user sent text, or if transcript requested, or as fallback if voice failed.
-      // Intimate Mode-B moments ALWAYS get text too (text + voice both arrive, never voice-only).
-      const shouldSendText = !isVoiceInput || !voiceSent || isIntimateMoment || /\b(transcript|text|likh\s*ke|likho|dono|both|write)\b/i.test(rawText);
-      if (shouldSendText) {
-        await this.sendRealisticGfTextBurst(jid, replyText, rawText, messageKey, sendMsgFn, sock);
       }
 
       // Mid-chat auto photo drop at scene peak (Mode B only, ~35%, no asking needed)

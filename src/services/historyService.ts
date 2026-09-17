@@ -9,10 +9,13 @@ import { db, FieldValue } from "./firebaseAdmin";
 
 function resolveEncryptionKey(): Buffer {
   const raw = process.env.ENCRYPTION_KEY;
-  if (raw && raw.length >= 32) {
-    return crypto.createHash("sha256").update(raw).digest();
+  if (!raw || raw.length < 32) {
+    throw new Error(
+      "[historyService] FATAL: ENCRYPTION_KEY env is missing or shorter than 32 chars. " +
+      "Set a 32+ character ENCRYPTION_KEY in .env / Render Environment. No fallback key is used."
+    );
   }
-  return crypto.createHash("sha256").update(raw || "friday_default_memory_master_key_2026").digest();
+  return crypto.createHash("sha256").update(raw).digest();
 }
 
 const ENCRYPTION_KEY = resolveEncryptionKey();

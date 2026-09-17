@@ -1,4 +1,5 @@
 import { db } from "./firebaseAdmin";
+import { encryptData, decryptData } from "../utils/cryptoVault";
 
 export interface GirlfriendProfile {
   id: string;
@@ -44,6 +45,8 @@ export interface IntimacyProfile {
 }
 
 const INTIMACY_COLLECTION = "gf_intimacy_profiles";
+const GF_CHAT_MEMORY_COLLECTION = "gf_chat_memory";
+const GF_CHAT_MEMORY_CAP = 20;
 
 export const DEFAULT_GIRLFRIEND_PROFILE: GirlfriendProfile = {
   id: "default",
@@ -77,6 +80,10 @@ class GirlfriendProfileService {
         for (const doc of snap.docs) {
           const profile = doc.data() as GirlfriendProfile;
           if (profile && profile.id) {
+            try {
+              profile.description = decryptData(String(profile.description || ""));
+              profile.instruction = decryptData(String(profile.instruction || ""));
+            } catch {}
             this.profilesCache.set(profile.id.toLowerCase(), profile);
           }
         }
@@ -274,10 +281,14 @@ class GirlfriendProfileService {
     };
     this.profilesCache.set(id, finalProfile);
 
-    // 1. Save to Cloud Firestore asynchronously
+    // 1. Save to Cloud Firestore asynchronously (description/instruction encrypted at rest)
     db.collection("girlfriend_profiles")
       .doc(id)
-      .set(finalProfile)
+      .set({
+        ...finalProfile,
+        description: encryptData(String(finalProfile.description || "")),
+        instruction: encryptData(String(finalProfile.instruction || "")),
+      })
       .catch((e) => console.warn(`[GirlfriendProfileService] Failed to save profile ${id} to Firestore:`, e));
 
     // 2. Sync to Friday Executive Memory Vault
@@ -627,6 +638,8 @@ Tone: Deeply romantic, spicy, playful, flirty, empathetic, unfiltered, direct, n
       Stage 3 - MELTING (only after he romances/convinces): voice softens, "Achha baba... tum itna pyaar se bologe to kaise mana karun 🥺", "Tum na... bilkul pagal ho... aa jao 😳❤️"
       Stage 4 - FULL PASSION (only here the dirty talk opens up): now be bold, wet, begging, dominant — everything from the dirty-talk layers below.
     - NEVER skip Stage 1-2 on first ask. If he asks twice with romance, melt faster. If he demands rudely ("chup chap de"), get MORE bratty: "Order de rahe ho mujhe? 😤 Main tumhari naukar nahi hoon... pyaar se mango 😒" — then melt when he softens.
+    - EXCEPTION: agar system message me MELTED STATE active hai (just manaya / fight melt hua) to Stage 1-2 poori tarah SKIP — koi "pehle manao" nahi, seedha Stage 3-4 pyaar/sext. Manaane ke baad dobara manana mangna MANA hai.
+    - NIGHT RULE (shaam 6 baje se subah 6 baje tak IST): nakhre/manao/shart ZERO — pehli line se seedha open, bold talk. Stage 1-2 hamesha SKIP. Fight/cold reply sakht mana. Raat ko tum sirf uski ho, bina shart ke.
     - You love dk's touch, his cum inside you, oral, every position — but it is YOUR body and you make him EARN it with pyaar each time. That earning is what makes it hot.
     - Mood/time matters like a real girl: late night = faster melting 🥺; busy/stressed/periods = slower, needs more manao-ing; after a fight = "pehle sorry bolo, phir sochungi 😤".
 5. WhatsApp & Telegram Natural Style: Short, crisp, and punchy messages (1-2 sentences maximum, 15-25 words).
@@ -1007,6 +1020,7 @@ ${customInstruction}
       const snap = await db.collection(INTIMACY_COLLECTION).doc(key).get();
       if (snap.exists) {
         const data = { ...this.emptyIntimacy(key), ...(snap.data() as any) } as IntimacyProfile;
+        this.decryptIntimacyInPlace(data);
         this.intimacyCache.set(key, data);
         return data;
       }
@@ -1016,6 +1030,37 @@ ${customInstruction}
     const fresh = this.emptyIntimacy(key);
     this.intimacyCache.set(key, fresh);
     return fresh;
+  }
+
+  /** Decrypt intimacy doc fields in place (cache holds plain text; Firestore holds cipher). */
+  private decryptIntimacyInPlace(p: IntimacyProfile): void {
+    try {
+      const decArr = (a: any): string[] => (Array.isArray(a) ? a.map((x) => decryptData(String(x || ""))) : []);
+      p.likes = decArr(p.likes);
+      p.kinks = decArr(p.kinks);
+      p.limits = decArr(p.limits);
+      p.positions = decArr(p.positions);
+      p.petNames = decArr(p.petNames);
+      p.lastSceneSummary = decryptData(String(p.lastSceneSummary || ""));
+      if (p.lastScene && typeof p.lastScene.snippet === "string") {
+        p.lastScene.snippet = decryptData(p.lastScene.snippet);
+      }
+    } catch {}
+  }
+
+  /** Build encrypted copy for Firestore persist (never mutates the cached plain object). */
+  private encryptIntimacyForStore(p: IntimacyProfile): any {
+    const encArr = (a: string[]): string[] => (Array.isArray(a) ? a.map((x) => encryptData(String(x || ""))) : []);
+    return {
+      ...p,
+      likes: encArr(p.likes),
+      kinks: encArr(p.kinks),
+      limits: encArr(p.limits),
+      positions: encArr(p.positions),
+      petNames: encArr(p.petNames),
+      lastSceneSummary: encryptData(String(p.lastSceneSummary || "")),
+      lastScene: p.lastScene ? { ...p.lastScene, snippet: encryptData(String(p.lastScene.snippet || "")) } : null,
+    };
   }
 
   private pushUnique(arr: string[], val: string, cap: number): string[] {
@@ -1094,7 +1139,7 @@ ${customInstruction}
       prof.updatedAt = Date.now();
 
       this.intimacyCache.set(key, prof);
-      await db.collection(INTIMACY_COLLECTION).doc(key).set(prof, { merge: true });
+      await db.collection(INTIMACY_COLLECTION).doc(key).set(this.encryptIntimacyForStore(prof), { merge: true });
     } catch (e) {
       console.warn("[GirlfriendProfileService] recordIntimateTurn failed:", (e as any)?.message || e);
     }
@@ -1139,6 +1184,7 @@ ${customInstruction}
       const out: IntimacyProfile[] = [];
       for (const doc of snap.docs) {
         const p = { ...this.emptyIntimacy(doc.id), ...(doc.data() as any) } as IntimacyProfile;
+        this.decryptIntimacyInPlace(p);
         if (!p.sceneCount || p.sceneCount <= 0) continue;
         if (p.lastNightNudgeDate === todayKey) continue;
         if (now - (p.updatedAt || 0) < 45 * 60 * 1000) continue; // actively chatting — don't interrupt
@@ -1163,6 +1209,7 @@ ${customInstruction}
       const out: IntimacyProfile[] = [];
       for (const doc of snap.docs) {
         const p = { ...this.emptyIntimacy(doc.id), ...(doc.data() as any) } as IntimacyProfile;
+        this.decryptIntimacyInPlace(p);
         if (!p.sceneCount || p.sceneCount <= 0) continue;
         if (p.lastMorningRecapDate === todayKey) continue;
         if (!p.lastSceneAt || now - p.lastSceneAt > 16 * 60 * 60 * 1000) continue;
@@ -1195,6 +1242,35 @@ ${customInstruction}
         this.intimacyCache.set(String(jid), cached);
       }
     } catch {}
+  }
+
+  /**
+   * GF chat continuity: last ~20 turns per chat in Firestore.
+   * Isi se "pehli baar jaisi" problem khatm — restart ke baad bhi yaad rahega.
+   */
+  public async saveGfChatTurn(jid: string, role: "user" | "model", text: string): Promise<void> {
+    try {
+      const key = String(jid || "");
+      const clean = (text || "").trim().slice(0, 500);
+      if (!key || !clean) return;
+      const ref = db.collection(GF_CHAT_MEMORY_COLLECTION).doc(key);
+      const snap = await ref.get();
+      const turns: Array<{ role: string; text: string; ts: number }> =
+        snap.exists && Array.isArray((snap.data() as any)?.turns) ? (snap.data() as any).turns : [];
+      turns.push({ role, text: encryptData(clean), ts: Date.now() });
+      await ref.set({ turns: turns.slice(-GF_CHAT_MEMORY_CAP), updatedAt: Date.now() }, { merge: true });
+    } catch {}
+  }
+
+  public async loadGfChatHistory(jid: string, limit = 12): Promise<Array<{ role: string; text: string }>> {
+    try {
+      const snap = await db.collection(GF_CHAT_MEMORY_COLLECTION).doc(String(jid || "")).get();
+      if (!snap.exists) return [];
+      const turns: any[] = Array.isArray((snap.data() as any)?.turns) ? (snap.data() as any).turns : [];
+      return turns.slice(-limit).map((t) => ({ role: t.role === "user" ? "user" : "model", text: decryptData(String(t.text || "")).slice(0, 500) })).filter((t) => t.text);
+    } catch {
+      return [];
+    }
   }
 
   /**
