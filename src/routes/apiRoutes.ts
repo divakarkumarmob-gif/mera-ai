@@ -3683,12 +3683,16 @@ export function createApiRouter(context: ApiRoutesContext): Router {
   app.post("/api/location/register", async (req, res) => {
     try {
       const { deviceLocationTrackerService } = await import("../services/deviceLocationTrackerService");
-      const { deviceId, label, ownerName } = req.body || {};
+      const { deviceId, label, ownerName, username, lat, lon, accuracy, altitude, speed, heading, batteryLevel, isCharging, networkType } = req.body || {};
       if (!deviceId || !label) {
         return res.status(400).json({ success: false, message: "deviceId and label are required." });
       }
       const result = await deviceLocationTrackerService.registerDevice(
-        String(deviceId), String(label), ownerName ? String(ownerName) : undefined
+        String(deviceId),
+        String(label),
+        ownerName ? String(ownerName) : undefined,
+        username ? String(username) : undefined,
+        lat !== undefined && lon !== undefined ? { lat: Number(lat), lon: Number(lon), accuracy, altitude, speed, heading, batteryLevel, isCharging, networkType } : undefined
       );
       res.json(result);
     } catch (err: any) {

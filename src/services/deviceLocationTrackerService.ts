@@ -77,7 +77,18 @@ class DeviceLocationTrackerService {
     deviceId: string,
     label: string,
     ownerName?: string,
-    username?: string
+    username?: string,
+    initialCoords?: {
+      lat: number;
+      lon: number;
+      accuracy?: number;
+      altitude?: number | null;
+      speed?: number | null;
+      heading?: number | null;
+      batteryLevel?: number | null;
+      isCharging?: boolean | null;
+      networkType?: string | null;
+    }
   ): Promise<{ success: boolean; message: string; deviceId: string }> {
     const cleanLabel = (label || "Unknown Device").trim();
     const cleanOwner = (ownerName || cleanLabel).trim();
@@ -85,21 +96,44 @@ class DeviceLocationTrackerService {
     const now = Date.now();
 
     try {
+      let initialAddress = "Location not yet received";
+      let hasValidCoords = false;
+
+      if (initialCoords && initialCoords.lat !== undefined && initialCoords.lon !== undefined && (initialCoords.lat !== 0 || initialCoords.lon !== 0)) {
+        try {
+          initialAddress = await this.reverseGeocode(initialCoords.lat, initialCoords.lon);
+          hasValidCoords = true;
+        } catch {}
+      }
+
       // Check if device already registered
       const existingDoc = await locationsCollection().doc(deviceId).get();
       if (existingDoc.exists) {
-        // Update label/owner/username if changed
+        // Update label/owner/username/coords if changed
         const updatePayload: any = {
           label: cleanLabel,
           ownerName: cleanOwner,
         };
         if (cleanUser) updatePayload.username = cleanUser;
+        if (hasValidCoords && initialCoords) {
+          updatePayload.lat = initialCoords.lat;
+          updatePayload.lon = initialCoords.lon;
+          updatePayload.accuracy = initialCoords.accuracy || 0;
+          updatePayload.address = initialAddress;
+          updatePayload.lastUpdatedAt = now;
+          if (initialCoords.altitude !== undefined) updatePayload.altitude = initialCoords.altitude;
+          if (initialCoords.speed !== undefined) updatePayload.speed = initialCoords.speed;
+          if (initialCoords.heading !== undefined) updatePayload.heading = initialCoords.heading;
+          if (initialCoords.batteryLevel !== undefined) updatePayload.batteryLevel = initialCoords.batteryLevel;
+          if (initialCoords.isCharging !== undefined) updatePayload.isCharging = initialCoords.isCharging;
+          if (initialCoords.networkType !== undefined) updatePayload.networkType = initialCoords.networkType;
+        }
         await locationsCollection().doc(deviceId).update(updatePayload);
-        console.log(`[LocationTracker] Device "${deviceId}" re-registered as "${cleanLabel}" (User: ${cleanUser || "none"})`);
+        console.log(`[LocationTracker] Device "${deviceId}" re-registered as "${cleanLabel}" (Coords: ${hasValidCoords ? "Updated" : "Preserved"})`);
         return {
           success: true,
           deviceId,
-          message: `Device "${cleanLabel}" already registered, label updated.`,
+          message: `Device "${cleanLabel}" already registered, info updated.`,
         };
       }
 
@@ -108,24 +142,24 @@ class DeviceLocationTrackerService {
         deviceId,
         label: cleanLabel,
         ownerName: cleanOwner,
-        lat: 0,
-        lon: 0,
-        accuracy: 0,
-        altitude: null,
-        speed: null,
-        heading: null,
-        address: "Location not yet received",
-        lastUpdatedAt: now,
+        lat: hasValidCoords && initialCoords ? initialCoords.lat : 0,
+        lon: hasValidCoords && initialCoords ? initialCoords.lon : 0,
+        accuracy: hasValidCoords && initialCoords ? initialCoords.accuracy || 0 : 0,
+        altitude: initialCoords?.altitude ?? null,
+        speed: initialCoords?.speed ?? null,
+        heading: initialCoords?.heading ?? null,
+        address: initialAddress,
+        lastUpdatedAt: hasValidCoords ? now : now,
         registeredAt: now,
-        batteryLevel: null,
-        isCharging: null,
-        networkType: null,
+        batteryLevel: initialCoords?.batteryLevel ?? null,
+        isCharging: initialCoords?.isCharging ?? null,
+        networkType: initialCoords?.networkType ?? null,
       };
       if (cleanUser) newDeviceData.username = cleanUser;
 
       await locationsCollection().doc(deviceId).set(newDeviceData);
 
-      console.log(`[LocationTracker] Device "${deviceId}" registered as "${cleanLabel}" (User: ${cleanUser || "none"})`);
+      console.log(`[LocationTracker] Device "${deviceId}" registered as "${cleanLabel}" (Address: ${initialAddress})`);
       return {
         success: true,
         deviceId,
@@ -326,6 +360,17 @@ class DeviceLocationTrackerService {
         return {
           success: false,
           message: `"${personNameOrLabel}" naam ka koi device registered nahi mila. Registered devices: ${deviceLabels}`,
+        };
+      }
+
+      // Check if device has never sent valid coordinates yet
+      if ((bestMatch.lat === 0 && bestMatch.lon === 0) || !bestMatch.address || bestMatch.address === "Location not yet received") {
+        return {
+          success: false,
+          deviceId: bestMatch.deviceId,
+          label: bestMatch.label,
+          ownerName: bestMatch.ownerName,
+          message: `Boss, "${bestMatch.label || bestMatch.ownerName}" phone system me registered hai, lekin abhi tak live GPS coordinates sync nahi hue hain. Kripya phone me Location (GPS) ON karke FRIDAY app/web open karein, live address turant update ho jayega.`,
         };
       }
 

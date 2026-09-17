@@ -182,10 +182,35 @@ class BackgroundLocationService {
    * Register this device with the server and start background location tracking.
    * Call this once when user grants location permission and sets a label.
    */
-  public async registerAndStart(label: string, ownerName?: string): Promise<{ success: boolean; message: string }> {
+  public async registerAndStart(
+    label: string,
+    ownerName?: string,
+    coords?: { lat: number; lon: number; accuracy?: number }
+  ): Promise<{ success: boolean; message: string }> {
     const deviceId = this.getOrCreateDeviceId();
     this.setDeviceLabel(label);
     const user = getStoredUser();
+
+    const cached = this.loadLastKnownPosition();
+    const lat = coords?.lat ?? this.lastPosition?.coords?.latitude ?? cached?.lat;
+    const lon = coords?.lon ?? this.lastPosition?.coords?.longitude ?? cached?.lon;
+    const accuracy = coords?.accuracy ?? this.lastPosition?.coords?.accuracy ?? cached?.accuracy ?? 0;
+
+    const payload: any = {
+      deviceId,
+      label: this.deviceLabel || 'Boss Phone',
+      ownerName: ownerName || this.deviceLabel || 'DK (Boss)',
+      username: user?.username || 'boss',
+      batteryLevel: this.getBatteryLevel(),
+      isCharging: this.getChargingStatus(),
+      networkType: this.getNetworkType(),
+    };
+
+    if (lat !== undefined && lon !== undefined) {
+      payload.lat = lat;
+      payload.lon = lon;
+      payload.accuracy = accuracy;
+    }
 
     try {
       // Register device with the server
@@ -193,12 +218,7 @@ class BackgroundLocationService {
       const response = await fetch(registerUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          deviceId,
-          label: this.deviceLabel || 'Boss Phone',
-          ownerName: ownerName || this.deviceLabel || 'DK (Boss)',
-          username: user?.username || 'boss',
-        }),
+        body: JSON.stringify(payload),
       });
 
       const data = await response.json();
@@ -213,6 +233,9 @@ class BackgroundLocationService {
 
       // Start background tracking
       this.startTracking();
+
+      // Immediately send fresh ping
+      this.sendPing();
 
       return {
         success: true,
@@ -237,26 +260,42 @@ class BackgroundLocationService {
     }
 
     const user = getStoredUser();
-    const label = customLabel || this.getDeviceLabel() || user?.displayName || user?.username || 'Boss Device';
+    const label = customLabel || this.getDeviceLabel() || user?.displayName || user?.username || 'Boss Phone';
     this.setDeviceLabel(label);
 
     return new Promise((resolve) => {
       navigator.geolocation.getCurrentPosition(
         async (position) => {
           this.lastPosition = position;
+          this.saveLastKnownPosition(position.coords);
           console.log('[BackgroundLocation] 📍 Location permission granted:', position.coords.latitude, position.coords.longitude);
           try {
             localStorage.setItem(STORAGE_KEY_TRACKING_ENABLED, 'true');
           } catch {}
-          const res = await this.registerAndStart(label, label);
+          const res = await this.registerAndStart(label, label, {
+            lat: position.coords.latitude,
+            lon: position.coords.longitude,
+            accuracy: position.coords.accuracy,
+          });
           resolve(res);
         },
-        (error) => {
+        async (error) => {
           console.warn('[BackgroundLocation] ⚠️ Location permission prompt response/error:', error.message);
-          resolve({
-            success: false,
-            message: `Location permission not granted: ${error.message}`,
-          });
+          // If cached last known location exists, still try to register
+          const cached = this.loadLastKnownPosition();
+          if (cached) {
+            const res = await this.registerAndStart(label, label, {
+              lat: cached.lat,
+              lon: cached.lon,
+              accuracy: cached.accuracy,
+            });
+            resolve(res);
+          } else {
+            resolve({
+              success: false,
+              message: `Location permission not granted: ${error.message}`,
+            });
+          }
         },
         {
           enableHighAccuracy: true,

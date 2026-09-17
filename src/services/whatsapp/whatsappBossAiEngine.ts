@@ -79,14 +79,12 @@ export class WhatsAppBossAiEngine {
       }
     }
 
-    // ── Chrome Default AI Mode & Google Search Fast-Path ──
+    // ── Chrome Default AI Mode & Google Search Fast-Path (STRICT: Only triggers when Boss explicitly writes 'ai mode' / '/aimode') ──
     const chromeSearchMatch =
-      messageText.match(/^(?:chrome\s+ai\s+mode|ai\s+mode|chrome\s+ai|google\s+ai|chrome|google)[-:\s]+(.+)$/i) ||
-      messageText.match(/^(?:par|pe|kripya|please)?\s*search\s*karo\s*(?:ai\s*mode\s*[-:]?\s*|chrome\s*[-:]?\s*|google\s*[-:]?\s*)?(.+)$/i) ||
-      messageText.match(/(?:chrome|google|browser)\s*(?:pe|par|me)?\s*(?:search|dhundo|dekho|khojo)\s*(?:karo)?\s*[-:]?\s*(.+)$/i) ||
-      messageText.match(/^\/(?:chrome|google|aimode|ai|search)\s+(.+)$/i);
-    if (chromeSearchMatch && (chromeSearchMatch[1]?.trim() || chromeSearchMatch[2]?.trim())) {
-      const rawQuery = (chromeSearchMatch[1] || chromeSearchMatch[2] || "").trim();
+      messageText.match(/^(?:chrome\s+ai\s+mode|ai\s+mode|chrome\s+ai|google\s+ai)[-:\s]+(.+)$/i) ||
+      messageText.match(/^\/(?:aimode|ai-mode|chrome-ai)\s+(.+)$/i);
+    if (chromeSearchMatch && chromeSearchMatch[1]?.trim()) {
+      const rawQuery = chromeSearchMatch[1].trim();
       const { humanBrowserService } = await import("../humanBrowserService");
       const searchRes = await humanBrowserService.searchGoogleAndInspect(rawQuery);
       if (searchRes.success && searchRes.summary) {
@@ -1558,13 +1556,14 @@ You will receive:
 - '💬 BOSS'S SWIPE-REPLY & QUESTION/INSTRUCTION' (What Boss wrote in response).
 RULE: You MUST FIRST read and understand the PREVIOUS QUOTED MESSAGE, and THEN answer or execute Boss's reply instruction in that exact context!
 
-DAILY MESSAGE QUOTA INTENT REASONING:
-When Boss issues instructions regarding message limits, quotas, or rate limiting:
-- "iss no/contact par unlimited msg kar do" / "saved contacts ke liye unlimited kar do" -> Call 'set_contact_message_quota' or 'set_global_message_quota' with dailyLimit: '-1' or 'unlimited'.
-- "Rahul ka limit 20 kar do" / "iss no par limit 15 lga do" -> Call 'set_contact_message_quota'.
-- "unknown logo ke liye limit 5 kar do" / "saved logo ke liye limit 50 kar do" / "sabke liye limit 15 kar do" -> Call 'set_global_message_quota'.
-- "quota status check karo" / "kiska kitna limit bacha hai" -> Call 'get_message_quotas_status'.
-- "limit / count reset kar do" -> Call 'reset_daily_message_counters'.
+4. GPS & LIVE DEVICE LOCATION INTENT MANDATE:
+   - When Boss asks about location ("Boss location", "meri location", "live location", "location check karo", "Location tool se dekho", "Location toll se dekho" [NOTE: "toll" is a common typo for "tool!"]):
+     -> YOU MUST IMMEDIATELY CALL 'get_device_location' (personNameOrLabel: 'boss')!
+     -> NEVER confuse "toll" with highway road toll plaza or toll receipts when Boss is asking to check his location!
+     -> NEVER hallucinate about exams or pretend you lack tools! Always invoke 'get_device_location'!
+5. INDIAN FESTIVALS & HOLIDAYS MANDATE:
+   - When Boss asks about any festival or holiday ("Diwali kab hai?", "Holi kab hai?", "Chhath puja kab hai?", "Agla tyohar kab hai?", "Upcoming holidays"):
+     -> YOU MUST IMMEDIATELY CALL 'get_upcoming_festivals_and_holidays' with festivalQuery!
 
 BOSS IDENTITY & MEMORY:
 ${directivesContext}
