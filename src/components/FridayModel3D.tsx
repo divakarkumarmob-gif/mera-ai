@@ -116,6 +116,13 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
           mixer.clipAction(idle).play();
         }
 
+        // Debug: rig ke bone naam console me (arms/pose fix ke kaam aayega)
+        const boneNames: string[] = [];
+        model.traverse((o) => {
+          if ((o as THREE.Bone).isBone) boneNames.push(o.name);
+        });
+        if (boneNames.length) console.log('[FridayModel3D] bones:', boneNames.slice(0, 60), `...total ${boneNames.length}`);
+
         // Jaw / head bones dhoondo (lip-sync + nod ke liye)
         model.traverse((o) => {
           const n = o.name.toLowerCase();
