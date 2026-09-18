@@ -3567,6 +3567,8 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                                 <span>Code Agent</span>
                             </button>
 
+                            {/* ── Spacer: model ke liye jagah ── */}
+                            <div className="shrink-0" style={{ width: 140 }} />
 
                             {/* 15. Phone Info */}
                             <button
@@ -3855,7 +3857,8 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                                         </button>
                                     </HangingRopeCapsule>
 
-
+                                    {/* ── Spacer: model ke liye jagah (desktop) ── */}
+                                    <div className="shrink-0" style={{ width: 200 }} />
 
                                     {/* 14. 📱 Phone Info (Deep OSINT & Carrier Radar) */}
                                     <HangingRopeCapsule rowTier="lower" ropeHeight={35} swayIndex={14} ropeColor="from-cyan-400/90 via-blue-300 to-cyan-500/90" glowColor="rgba(6,182,212,0.4)">
