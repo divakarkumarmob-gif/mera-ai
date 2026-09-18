@@ -2729,6 +2729,18 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
 
     // ── VIRTUAL GIRLFRIEND MODE ACTIVATION / STOP (TELEGRAM) ──
     if (chatId && isGfActivationIntent) {
+      // Already active → NEVER restart (would wipe timer + sext-state = "mode bhoolna" glitch).
+      // Just extend the timer and continue the chat in-flow.
+      if (this.isGirlfriendModeActive(chatId)) {
+        const s = this.girlfriendSessions.get(chatId);
+        if (s) {
+          if (s.timer) clearTimeout(s.timer);
+          s.expiresAt = Date.now() + 60 * 60 * 1000;
+          s.timer = setTimeout(() => this.stopGirlfriendMode(chatId), 60 * 60 * 1000);
+        }
+        await this.sendMessage(chatId, `Haan baby main yahin hoon... kahin nahi gayi 😘 bolo na, kya keh rahe the? ❤️`);
+        return;
+      }
       const activeProfile = await girlfriendProfileService.getActiveProfile(String(chatId));
       this.startGirlfriendMode(chatId, 60);
       await this.sendMessage(
@@ -2748,6 +2760,15 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
     }
 
     if (chatId && this.isGirlfriendModeActive(chatId)) {
+      // Sliding expiry: chatting extends session so mode never flips mid-conversation
+      try {
+        const gs = this.girlfriendSessions.get(chatId);
+        if (gs && gs.expiresAt - Date.now() < 15 * 60 * 1000) {
+          if (gs.timer) clearTimeout(gs.timer);
+          gs.expiresAt = Date.now() + 30 * 60 * 1000;
+          gs.timer = setTimeout(() => this.stopGirlfriendMode(chatId), 30 * 60 * 1000);
+        }
+      } catch {}
       const { whatsappGirlfriendEngine } = await import("./whatsapp/whatsappGirlfriendEngine");
       if (whatsappGirlfriendEngine.isStripRequest(text)) {
         await this.sendChatAction(chatId, "upload_photo");

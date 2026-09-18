@@ -37,6 +37,8 @@ export interface IntimacyProfile {
   petNames: string[];
   lastSceneSummary: string;
   lastScene: SceneState | null;
+  /** Completed scenes across sessions (cap 5) — 1st, 2nd, 3rd session sab yaad. */
+  sceneHistory: SceneState[];
   lastSceneAt: number;
   sceneCount: number;
   lastNightNudgeDate?: string;
@@ -1009,7 +1011,7 @@ ${customInstruction}
   // ── Intimate memory (per chat): likes, kinks, limits, positions, last scene ──
 
   private emptyIntimacy(jid: string): IntimacyProfile {
-    return { jid, likes: [], kinks: [], limits: [], positions: [], petNames: [], lastSceneSummary: "", lastScene: null, lastSceneAt: 0, sceneCount: 0, updatedAt: Date.now() };
+    return { jid, likes: [], kinks: [], limits: [], positions: [], petNames: [], lastSceneSummary: "", lastScene: null, sceneHistory: [], lastSceneAt: 0, sceneCount: 0, updatedAt: Date.now() };
   }
 
   public async getIntimacyProfile(jid: string): Promise<IntimacyProfile> {
@@ -1036,21 +1038,33 @@ ${customInstruction}
   private decryptIntimacyInPlace(p: IntimacyProfile): void {
     try {
       const decArr = (a: any): string[] => (Array.isArray(a) ? a.map((x) => decryptData(String(x || ""))) : []);
+      const decScene = (s: any): SceneState | null => {
+        if (!s || typeof s !== "object") return null;
+        return {
+          setting: String(s.setting || ""),
+          herRole: String(s.herRole || ""),
+          hisRole: String(s.hisRole || ""),
+          stage: String(s.stage || ""),
+          position: String(s.position || ""),
+          snippet: decryptData(String(s.snippet || "")),
+        };
+      };
       p.likes = decArr(p.likes);
       p.kinks = decArr(p.kinks);
       p.limits = decArr(p.limits);
       p.positions = decArr(p.positions);
       p.petNames = decArr(p.petNames);
       p.lastSceneSummary = decryptData(String(p.lastSceneSummary || ""));
-      if (p.lastScene && typeof p.lastScene.snippet === "string") {
-        p.lastScene.snippet = decryptData(p.lastScene.snippet);
-      }
+      p.lastScene = decScene(p.lastScene);
+      p.sceneHistory = Array.isArray(p.sceneHistory) ? p.sceneHistory.map(decScene).filter((s): s is SceneState => !!s) : [];
     } catch {}
   }
 
   /** Build encrypted copy for Firestore persist (never mutates the cached plain object). */
   private encryptIntimacyForStore(p: IntimacyProfile): any {
     const encArr = (a: string[]): string[] => (Array.isArray(a) ? a.map((x) => encryptData(String(x || ""))) : []);
+    const encScene = (s: SceneState | null): any =>
+      s ? { ...s, snippet: encryptData(String(s.snippet || "")) } : null;
     return {
       ...p,
       likes: encArr(p.likes),
@@ -1059,7 +1073,8 @@ ${customInstruction}
       positions: encArr(p.positions),
       petNames: encArr(p.petNames),
       lastSceneSummary: encryptData(String(p.lastSceneSummary || "")),
-      lastScene: p.lastScene ? { ...p.lastScene, snippet: encryptData(String(p.lastScene.snippet || "")) } : null,
+      lastScene: encScene(p.lastScene),
+      sceneHistory: Array.isArray(p.sceneHistory) ? p.sceneHistory.map(encScene) : [],
     };
   }
 
@@ -1134,6 +1149,18 @@ ${customInstruction}
         position: prof.positions.slice(-1)[0] || "",
         snippet: userSnippet.slice(0, 80),
       };
+      // Completed scene → history (1st/2nd/3rd session sab yaad; cap 5, consecutive dupes skip)
+      if (stage === "climax") {
+        const last = prof.sceneHistory[prof.sceneHistory.length - 1];
+        const sameAsLast = !!last &&
+          last.setting === prof.lastScene.setting &&
+          last.position === prof.lastScene.position &&
+          last.snippet === prof.lastScene.snippet;
+        if (!sameAsLast) {
+          prof.sceneHistory.push({ ...prof.lastScene, stage: "completed" });
+          prof.sceneHistory = prof.sceneHistory.slice(-5);
+        }
+      }
       prof.lastSceneAt = Date.now();
       prof.sceneCount += 1;
       prof.updatedAt = Date.now();
@@ -1157,10 +1184,17 @@ ${customInstruction}
       if (prof.positions.length > 0) parts.push(`Favorite positions: ${prof.positions.join(", ")}`);
       if (prof.petNames.length > 0) parts.push(`Wo tumhe bulata hai: ${prof.petNames.join(", ")}`);
       if (prof.limits.length > 0) parts.push(`⛔ HARD LIMITS (kabhi cross mat karna): ${prof.limits.join(" | ")}`);
+      if (prof.sceneHistory.length > 0) {
+        const lines = prof.sceneHistory.slice(-4).map((sc, i) => {
+          const bits = [`setting: ${sc.setting}`, sc.herRole !== "girlfriend" ? `tum ${sc.herRole} thi` : "", sc.position ? `position: ${sc.position}` : ""].filter(Boolean).join(", ");
+          return `${i + 1}. ${bits}${sc.snippet ? ` (usne kaha tha: "${sc.snippet}")` : ""}`;
+        });
+        parts.push(`PICHhle SCENES (har session yaad — mauka mile to kisi purane scene ka zikr karo, "yaad hai us din ${prof.sceneHistory[prof.sceneHistory.length - 1]?.setting} me... 😏"):\n${lines.join("\n")}`);
+      }
       if (prof.lastScene) {
         const sc = prof.lastScene;
         const resumeBits = [`setting: ${sc.setting}`, sc.herRole !== "girlfriend" ? `tum ${sc.herRole} thi` : "", sc.position ? `position: ${sc.position}` : "", sc.stage ? `stage: ${sc.stage}` : ""].filter(Boolean).join(", ");
-        parts.push(`Pichhla scene (RESUME RULE): ${resumeBits}. Agli baar mauka mile to EXACT wahi se continue karo, fresh start mat karo — bolo "yaad hai kal ${sc.setting} me... 😏 aaj wahi se aage?" ${sc.snippet ? `Usne kaha tha: "${sc.snippet}"` : ""}`);
+        parts.push(`LATEST scene (RESUME RULE): ${resumeBits}. Agli baar mauka mile to EXACT wahi se continue karo, fresh start mat karo — bolo "yaad hai kal ${sc.setting} me... 😏 aaj wahi se aage?" ${sc.snippet ? `Usne kaha tha: "${sc.snippet}"` : ""}`);
       } else if (prof.lastSceneSummary) {
         parts.push(`Pichhli baar: ${prof.lastSceneSummary} — mauka mile to naturally yaad dilao ("yaad hai pichhli baar... 😏")`);
       }

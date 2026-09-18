@@ -43,6 +43,9 @@ export interface GirlfriendSession {
   healthTracker?: { issue: string; timestamp: number } | null;
   sessionCount?: number;
   isClingy?: boolean;
+  // Sender plumbing for timer reschedules (sliding expiry)
+  lastSendMsgFn?: (jid: string, text: string, incomingText?: string, key?: any) => Promise<any>;
+  lastSock?: any;
   // Sext-state (Mode B, in-memory per session)
   tempo?: "slow" | "fast" | null;
   worship?: { part: string; turnsLeft: number } | null;

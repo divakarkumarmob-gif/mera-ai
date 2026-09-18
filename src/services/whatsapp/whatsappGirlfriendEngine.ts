@@ -179,6 +179,47 @@ export class WhatsAppGirlfriendEngine {
     }, delayMs);
   }
 
+  /** Current GF mood without side effects (for no-restart routing). */
+  public getGirlfriendMood(jid: string): string | null {
+    const s = this.girlfriendSessions.get(jid);
+    if (!s || Date.now() > s.expiresAt) return null;
+    return (s as any).isModeB === true || s.mood === "mode_b" ? "mode_b" : (s.mood || null);
+  }
+
+  /** Switch mood in place — no restart, timer/history/sext-state preserved. */
+  public switchGirlfriendMood(jid: string, mood: "romantic" | "sassy" | "caring" | "naughty" | "cute" | "mix" | "mode_b"): boolean {
+    const s = this.girlfriendSessions.get(jid);
+    if (!s || Date.now() > s.expiresAt) return false;
+    s.mood = mood;
+    (s as any).isModeB = mood === "mode_b";
+    return true;
+  }
+
+  /**
+   * Sliding session extension — chatting extends expiry so mode never flips
+   * mid-conversation. Reschedules the stop timer with latest sender fns.
+   */
+  public extendGirlfriendSession(
+    jid: string,
+    extraMs: number,
+    sendMsgFn?: (jid: string, text: string, incomingText?: string, key?: any) => Promise<any>,
+    sock?: any
+  ): void {
+    const s = this.girlfriendSessions.get(jid);
+    if (!s || Date.now() > s.expiresAt) return;
+    const remaining = s.expiresAt - Date.now();
+    if (remaining > 15 * 60 * 1000) return; // plenty left — no-op
+    if (s.timer) clearTimeout(s.timer);
+    s.expiresAt = Date.now() + remaining + extraMs;
+    const fn = sendMsgFn || s.lastSendMsgFn;
+    const sk = sock || s.lastSock;
+    if (fn) s.lastSendMsgFn = fn;
+    if (sk) s.lastSock = sk;
+    s.timer = setTimeout(async () => {
+      await this.stopGirlfriendMode(jid, null, false, s.lastSendMsgFn, s.lastSock);
+    }, s.expiresAt - Date.now());
+  }
+
   public isGirlfriendModeActive(jid: string): boolean {
     const session = this.girlfriendSessions.get(jid);
     if (!session) return false;
@@ -265,6 +306,8 @@ export class WhatsAppGirlfriendEngine {
       durationMinutes: minutes,
       timer,
       tempHistory: restoredHistory,
+      lastSendMsgFn: sendMsgFn,
+      lastSock: sock,
       lastUserMsgTime: Date.now(),
       idleNudgeCount: 0,
       idleNudgeTimer: null,

@@ -1422,6 +1422,19 @@ class WhatsAppBotService {
       /^(?:@normal|\/normal|normal\s*mode|normal|@stop\s*gf|@stop\s*girlfriend|stop\s*girlfriend|stop\s*gf|exit\s*girlfriend|exit\s*gf)$/i.test(rawText);
 
     if (isGfActivationIntent) {
+      // Already in GF mode → NEVER restart (restart wipes mood/timer/sext-state = "mode bhoolna" glitch).
+      // Explicit different mood? Switch in place. Otherwise treat as normal GF chat line.
+      if (this.isGirlfriendModeActive(replyJid)) {
+        const wanted = whatsappGirlfriendEngine.parseExplicitMoodSelection(rawText);
+        const current = whatsappGirlfriendEngine.getGirlfriendMood(replyJid);
+        if (wanted && current && wanted !== current) {
+          whatsappGirlfriendEngine.switchGirlfriendMood(replyJid, wanted);
+          await this.sendHumanLikeMessage(replyJid, `Thik hai baby... ab main ${wanted === "mode_b" ? "poori open wali" : wanted} mood me hoon 😘`, rawText, messageKey);
+          return;
+        }
+        await this.handleGirlfriendChatMessage(replyJid, rawText, messageKey, isVoiceInput);
+        return;
+      }
       await this.startGirlfriendMode(replyJid, rawText, messageKey, senderName);
       return;
     }
@@ -1432,6 +1445,15 @@ class WhatsAppBotService {
     }
 
     if (this.isGirlfriendModeActive(replyJid)) {
+      // Sliding expiry: chatting extends session so mode never flips mid-conversation
+      try {
+        whatsappGirlfriendEngine.extendGirlfriendSession(
+          replyJid,
+          30 * 60 * 1000,
+          (j, t, inT, k) => this.sendHumanLikeMessage(j, t, inT, k),
+          this.sock
+        );
+      } catch {}
       await this.handleGirlfriendChatMessage(replyJid, rawText, messageKey, isVoiceInput);
       return;
     }
