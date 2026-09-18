@@ -708,9 +708,9 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         upR.quaternion.copy(baseQ.get(upR)!)
           .multiply(tmpQ.setFromAxisAngle(X_AXIS, -1.31 * raiseSmooth)); // 75° sideways OUT
 
-        // ── Forearm: 60° elbow + forearm ALSO waves (larger arc) ──
+        // ── Forearm: 107° elbow + forearm ALSO waves (larger arc) ──
         foreR.quaternion.copy(baseQ.get(foreR)!)
-          .multiply(tmpQ.setFromAxisAngle(X_AXIS, -1.05 * raiseSmooth)); // 60° elbow angle
+          .multiply(tmpQ.setFromAxisAngle(X_AXIS, -1.87 * raiseSmooth)); // 107° elbow angle
 
         // ── Forearm waves too — larger arc swing ──
         const foreOsc = Math.sin(t * 5.0) * 0.35 * raiseSmooth;
