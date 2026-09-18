@@ -396,40 +396,56 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         // Kuch na mile to poore model ko head mano (procedural motion ke liye)
         if (!headBone) headBone = model;
 
-        // ── iPhone 14 Pro load karke haath me attach karo ──
+        // ── iPhone 14 Pro load + fallback agar fail ho ──
+        const attachPhone = (phoneFbx: THREE.Object3D) => {
+          if (disposed) return;
+          const phoneBox = new THREE.Box3().setFromObject(phoneFbx);
+          const phoneH = phoneBox.max.y - phoneBox.min.y;
+          const targetPhoneH = 0.18; // thoda bada — 18cm in model units
+          const phoneScale = targetPhoneH / Math.max(phoneH, 0.001);
+          phoneFbx.scale.setScalar(phoneScale);
+          phoneBox.setFromObject(phoneFbx);
+          const phoneCenter = phoneBox.getCenter(new THREE.Vector3());
+          phoneFbx.position.sub(phoneCenter);
+          phoneFbx.rotation.set(0, 0, 0); // reset rotation
+          if (handR) {
+            handR.add(phoneFbx);
+            phoneFbx.position.set(0, 0.08, 0.02); // palm me, thoda aage
+          } else {
+            scene.add(phoneFbx);
+          }
+          phoneModel = phoneFbx;
+          phoneModel.visible = false;
+          console.log('[FridayModel3D] phone attached to hand');
+        };
+
+        // Try loading iPhone FBX — space encoded as %20, + encoded as %2B
+        const phoneUrl = '/iPhone%2B14%2BPro.fbx';
         try {
-          new FBXLoader().load('/iPhone+14+Pro.fbx', (phoneFbx) => {
-            if (disposed) return;
-            // Phone ko chhota karo (haath me fit ho) — scale adjust based on model
-            const phoneBox = new THREE.Box3().setFromObject(phoneFbx);
-            const phoneH = phoneBox.max.y - phoneBox.min.y;
-            const targetPhoneH = 0.12; // ~12cm in model units
-            const phoneScale = targetPhoneH / Math.max(phoneH, 0.001);
-            phoneFbx.scale.setScalar(phoneScale);
-            // Center the phone on its own geometry
-            phoneBox.setFromObject(phoneFbx);
-            const phoneCenter = phoneBox.getCenter(new THREE.Vector3());
-            phoneFbx.position.sub(phoneCenter);
-            // Rotate phone to be held naturally in hand (screen facing user)
-            phoneFbx.rotation.set(Math.PI / 2, 0, 0);
-            // Attach to right hand bone if available
-            if (handR) {
-              handR.add(phoneFbx);
-              // Position relative to hand bone (palm me)
-              phoneFbx.position.set(0, 0.05, 0);
-            } else {
-              // Fallback: scene me add, but hidden
-              scene.add(phoneFbx);
-              phoneFbx.visible = false;
-            }
-            phoneModel = phoneFbx;
-            phoneModel.visible = false; // Start hidden
-            console.log('[FridayModel3D] iPhone 14 Pro loaded and attached to hand');
+          new FBXLoader().load(phoneUrl, (phoneFbx) => {
+            attachPhone(phoneFbx);
           }, undefined, (err) => {
-            console.warn('[FridayModel3D] iPhone model load failed:', err);
+            console.warn('[FridayModel3D] iPhone FBX failed, using fallback box phone:', err);
+            // Fallback: simple sleek black box (phone shaped)
+            const phoneGeo = new THREE.BoxGeometry(0.07, 0.14, 0.008);
+            const phoneMat = new THREE.MeshStandardMaterial({
+              color: 0x111111, metalness: 0.9, roughness: 0.1,
+            });
+            const phoneBox = new THREE.Mesh(phoneGeo, phoneMat);
+            // Screen: blue glow
+            const screenGeo = new THREE.BoxGeometry(0.063, 0.126, 0.001);
+            const screenMat = new THREE.MeshStandardMaterial({
+              color: 0x4488ff, emissive: 0x2244aa, emissiveIntensity: 0.8,
+            });
+            const screen = new THREE.Mesh(screenGeo, screenMat);
+            screen.position.set(0, 0, 0.005);
+            phoneBox.add(screen);
+            const group = new THREE.Group();
+            group.add(phoneBox);
+            attachPhone(group);
           });
         } catch (e) {
-          console.warn('[FridayModel3D] iPhone load error:', e);
+          console.warn('[FridayModel3D] phone load error:', e);
         }
     };
 
@@ -849,37 +865,45 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
               : 1.0 - awaySmooth; // putting away
 
         if (upR && foreR && baseQ.has(upR) && baseQ.has(foreR)) {
-          // Right arm: holds phone at chest/waist level
-          const armX = -0.6 * armProg; // arm forward
-          const armZ = 0.3 * armProg; // arm slightly inward
-          upR.quaternion.copy(baseQ.get(upR)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, armX));
-          // Forearm bends to hold phone at viewing angle
-          const foreX = -0.8 * armProg;
+          // Upper arm: STRONGLY forward + inward (haath seedha saamne aaye)
+          const armX = -1.4 * armProg;  // -1.4 rad = arm well forward (chest level)
+          upR.quaternion.copy(baseQ.get(upR)!)
+            .multiply(tmpQ.setFromAxisAngle(X_AXIS, armX));
+          // Also rotate inward (Z axis) so arm comes to center
+          const Z_AXIS = new THREE.Vector3(0, 0, 1);
+          upR.quaternion.multiply(tmpQ.setFromAxisAngle(Z_AXIS, 0.4 * armProg));
+
+          // Forearm: bends so haath saamne ho (elbow 90deg jaisi position)
+          const foreX = -1.1 * armProg;
           foreR.quaternion.copy(baseQ.get(foreR)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, foreX));
 
-          // Tapping animation on phone (subtle finger motion during hold phase)
+          // Tapping: thumb flick on screen
           if (handR && baseQ.has(handR) && holdPhase > 0) {
-            const tapRhythm = Math.abs(Math.sin(t * 3.5)) > 0.7 ? Math.sin(t * 7) * 0.15 : 0;
-            handR.quaternion.copy(baseQ.get(handR)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, tapRhythm));
+            const tap = Math.abs(Math.sin(t * 3.5)) > 0.75 ? Math.sin(t * 8) * 0.2 : 0;
+            handR.quaternion.copy(baseQ.get(handR)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, tap));
           }
         }
 
-        // Left arm: supports phone (comes to meet right hand)
-        if (upL && foreL && baseQ.has(upL) && baseQ.has(foreL) && armProg > 0.5) {
-          const supportP = (armProg - 0.5) * 2; // 0.5-1 range → 0-1
-          upL.quaternion.copy(baseQ.get(upL)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, -0.4 * supportP));
-          foreL.quaternion.copy(baseQ.get(foreL)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, -0.6 * supportP));
+        // Left arm: supports phone from below
+        if (upL && foreL && baseQ.has(upL) && baseQ.has(foreL) && armProg > 0.4) {
+          const supportP = Math.min((armProg - 0.4) / 0.6, 1);
+          const supportSmooth = supportP * supportP * (3 - 2 * supportP);
+          const Z_AXIS2 = new THREE.Vector3(0, 0, 1);
+          upL.quaternion.copy(baseQ.get(upL)!)
+            .multiply(tmpQ.setFromAxisAngle(X_AXIS, -1.0 * supportSmooth));
+          upL.quaternion.multiply(tmpQ.setFromAxisAngle(Z_AXIS2, -0.35 * supportSmooth));
+          foreL.quaternion.copy(baseQ.get(foreL)!)
+            .multiply(tmpQ.setFromAxisAngle(X_AXIS, -0.9 * supportSmooth));
         }
 
-        // Head: looks down at phone
+        // Head: look down at phone screen
         if (headBone && headBone !== modelRoot) {
-          headBone.rotation.x += 0.25 * armProg; // look down at phone
-          headBone.rotation.y += Math.sin(t * 0.8) * 0.04 * holdPhase; // subtle scan motion
-          headBone.rotation.z += -0.03 * armProg;
+          headBone.rotation.x += 0.35 * armProg;  // more pronounced look-down
+          headBone.rotation.y += Math.sin(t * 0.9) * 0.05 * holdPhase; // reading scan
         }
 
-        // Body: slight forward lean (natural phone posture)
-        modelRoot.rotation.x = 0.06 * armProg;
+        // Body: phone posture lean
+        modelRoot.rotation.x = 0.08 * armProg;
       }
       // Final safety: action overlays ke baad bhi sir limit me rahe
       if (headBone && headBone !== modelRoot) {
