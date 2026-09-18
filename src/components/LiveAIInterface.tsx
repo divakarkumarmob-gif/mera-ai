@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { X, Mic, Plus, Loader2, Settings, ChevronDown, ChevronLeft, ChevronRight, Captions, MessageSquare, Square, Code2, Terminal, Shield, ShieldCheck, Trash2, Key, Check, AlertCircle, Send, Instagram, Download, Radio, Music, Sparkles, Sliders, Volume2, Bot, Layers, Cpu, Phone, Eye, EyeOff, Copy, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import AgentFace from './AgentFace';
+import FridayModel3D from './FridayModel3D';
 import ChatHistoryModal from './ChatHistoryModal';
 import WhatsAppPairModal from './WhatsAppPairModal';
 import CodeAgentPage from './CodeAgentPage';
@@ -4137,7 +4137,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                         </AnimatePresence>
                     </div>
 
-                    <AgentFace status={status} volume={volume} size={160} colorIndex={colorIndex} reaction={faceReaction} onDoubleClick={handleFaceDoubleTap} />
+                    <FridayModel3D status={status} volume={volume} reaction={faceReaction} height={250} onTap={handleFaceDoubleTap} />
                     <p className="text-slate-300 text-sm font-medium">{status}</p>
 
                     {!isRecording && wakeWordActive && (
