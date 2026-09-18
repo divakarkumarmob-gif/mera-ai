@@ -77,6 +77,13 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
     let foreR: THREE.Object3D | null = null;
     let handL: THREE.Object3D | null = null;
     let handR: THREE.Object3D | null = null;
+    // Leg rig: thighs, knees, feet (dance ke liye)
+    let thighL: THREE.Object3D | null = null;
+    let thighR: THREE.Object3D | null = null;
+    let shinL: THREE.Object3D | null = null;
+    let shinR: THREE.Object3D | null = null;
+    let footL: THREE.Object3D | null = null;
+    let footR: THREE.Object3D | null = null;
     // Alive-idle rig: seena (saans), aankhein (saccade)
     let spine: THREE.Object3D | null = null;
     let eyeL: THREE.Object3D | null = null;
@@ -298,13 +305,23 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         modelRoot.updateMatrixWorld(true);
         if (handL) { baseHandL.copy(modelRoot.worldToLocal(handL.getWorldPosition(new THREE.Vector3()))); baseHandsSaved = true; }
         if (handR) { baseHandR.copy(modelRoot.worldToLocal(handR.getWorldPosition(new THREE.Vector3()))); baseHandsSaved = true; }
-        // Alive rig: pehla Spine2 + aankhein pakdo
+        // Alive rig: pehla Spine2 + aankhein + legs pakdo
         model.traverse((o) => {
           const n = o.name.toLowerCase();
           if (!spine && n === 'spine2') spine = o;
           else if (!eyeL && n === 'lefteye') eyeL = o;
           else if (!eyeR && n === 'righteye') eyeR = o;
+          // Leg bones: thigh (upleg), shin (leg), foot
+          else if (!thighL && (n === 'leftupleg' || n === 'lefthip')) thighL = o;
+          else if (!thighR && (n === 'rightupleg' || n === 'righthip')) thighR = o;
+          else if (!shinL && (n === 'leftleg' || n === 'leftshin')) shinL = o;
+          else if (!shinR && (n === 'rightleg' || n === 'rightshin')) shinR = o;
+          else if (!footL && (n === 'leftfoot' || n === 'leftankle')) footL = o;
+          else if (!footR && (n === 'rightfoot' || n === 'rightankle')) footR = o;
         });
+        // Save base quaternions for leg bones
+        [thighL, thighR, shinL, shinR, footL, footR].forEach((b) => { if (b) baseQ.set(b, b.quaternion.clone()); });
+        console.log('[FridayModel3D] leg rig:', { thighL: !!thighL, thighR: !!thighR, shinL: !!shinL, shinR: !!shinR, footL: !!footL, footR: !!footR });
         // Load hote hi friendly wave — "zinda" first impression!
         setTimeout(() => {
           if (disposed || stateRef.current.action || localRef.current) return;
@@ -595,6 +612,27 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         };
         groove(upL, foreL, handL, 1, d);
         groove(upR, foreR, handR, -1, d + Math.PI * 0.7);
+
+        // Legs: alternating weight shift + knee tap + foot lift on beat
+        const legBeat = (thigh: THREE.Object3D | null, shin: THREE.Object3D | null, foot: THREE.Object3D | null, ph: number) => {
+          if (!thigh) return;
+          const liftAmt = Math.max(0, Math.sin(ph)) * easeInSmooth;
+          // Thigh lifts forward (knee raise)
+          if (baseQ.has(thigh)) {
+            thigh.quaternion.copy(baseQ.get(thigh)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, -liftAmt * 0.35));
+          }
+          // Shin bends back when thigh lifts (natural knee bend)
+          if (shin && baseQ.has(shin)) {
+            shin.quaternion.copy(baseQ.get(shin)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, liftAmt * 0.45));
+          }
+          // Foot tap: toe points down on lift
+          if (foot && baseQ.has(foot)) {
+            foot.quaternion.copy(baseQ.get(foot)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, -liftAmt * 0.2));
+          }
+        };
+        // Left and right legs alternate (opposite phase)
+        legBeat(thighL, shinL, footL, d * 0.5);
+        legBeat(thighR, shinR, footR, d * 0.5 + Math.PI);
 
       } else if (act === 'wave' && upR && foreR && baseQ.has(upR) && baseQ.has(foreR)) {
         // ── Natural friendly wave: smooth arm raise, wrist pivot, body lean ──
