@@ -534,49 +534,12 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         modelRoot.rotation.x = 0;
         if (clearTimer) { clearTimeout(clearTimer); clearTimer = null; }
         if (act === 'namaste' || act === 'think') {
-          // Static pose — Node harness me nape hue numbers (hand dist 0.047 = haath milte hain!)
-          try {
-            modelRoot.updateMatrixWorld(true);
-            // Harness-verified targets (Node me asli FBX par nape hue):
-            // namaste: hatheliyan chipki (gap 5cm), ungliyan UPAR (twist Z±90) | think: haath chin par (gap 3cm)
-            const chestL = modelRoot.localToWorld(new THREE.Vector3(0.035, 1.35, 0.27));
-            const chestR = modelRoot.localToWorld(new THREE.Vector3(-0.035, 1.35, 0.27));
-            const chinP = modelRoot.localToWorld(new THREE.Vector3(0, 1.68, 0.15));
-            const Z_AXIS = new THREE.Vector3(0, 0, 1);
-            const aimArm = (up: THREE.Object3D | null, fore: THREE.Object3D | null, hand: THREE.Object3D | null, upTarget: THREE.Vector3, foreTarget: THREE.Vector3) => {
-              if (!up || !fore) return;
-              const sP = up.getWorldPosition(new THREE.Vector3());
-              const eP = fore.getWorldPosition(new THREE.Vector3());
-              const toElbow = eP.clone().sub(sP);
-              if (toElbow.length() < 1e-4) return;
-              aimBone(up, toElbow.normalize(), upTarget.sub(sP).normalize());
-              fore.updateMatrixWorld(true);
-              const eP2 = fore.getWorldPosition(new THREE.Vector3());
-              // End-effector = HAATH (tabhi haath target par pahunchega)
-              const hP = hand ? hand.getWorldPosition(new THREE.Vector3()) : eP2.clone().add(new THREE.Vector3(0, -0.25, 0));
-              const fDir = hP.sub(eP2);
-              if (fDir.length() > 1e-4) aimBone(fore, fDir.normalize(), foreTarget.clone().sub(eP2).normalize());
-            };
-            // Harness-verified: kohni (±0.19) andar, haath (±0.04, gap 8.8cm) = hatheli touch!
-            const namUpL = modelRoot.localToWorld(new THREE.Vector3(0.18, 0.9, 0.15));
-            const namUpR = modelRoot.localToWorld(new THREE.Vector3(-0.18, 0.9, 0.15));
-            if (act === 'namaste') {
-              aimArm(upL, foreL, handL, namUpL, chestL);
-              aimArm(upR, foreR, handR, namUpR, chestR);
-              // Ungliyan UPAR (harness: Z +90 left / -90 right, score 1.00)
-              if (handL && baseQ.has(handL)) handL.quaternion.multiply(tmpQ.setFromAxisAngle(Z_AXIS, Math.PI / 2));
-              if (handR && baseQ.has(handR)) handR.quaternion.multiply(tmpQ.setFromAxisAngle(Z_AXIS, -Math.PI / 2));
-            } else {
-              // think: kohni upar, right hand chin par
-              const thinkUpR = modelRoot.localToWorld(new THREE.Vector3(-0.15, 1.3, 0.2));
-              aimArm(upR, foreR, handR, thinkUpR, chinP);
-            }
-          } catch (e) { console.warn('[FridayModel3D] pose failed', e); }
+          // Static pose — smooth transition hoga animate loop me
+          // IK targets set karo, animate me easing se blend hoga
         }
         prevAction = act;
         actionStart = t;
         if (act && act !== 'dance') {
-          // One-shot: time poora → parent ko batao (woh action=null karega, pose restore hoga)
           const dur = (ONE_SHOT_SECONDS[act] ?? 5) * 1000;
           clearTimer = setTimeout(() => {
             if (disposed) return;
@@ -586,44 +549,187 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         }
       }
       const actT = t - actionStart;
+      // Smooth ease-in/out envelope for all actions
+      const easeIn = Math.min(actT / 0.6, 1); // 0.6s ease in
+      const easeInSmooth = easeIn * easeIn * (3 - 2 * easeIn); // smoothstep
+
       if (act === 'dance') {
-        // World-space groove: haath/konhi HAMESHA saamne (harness: min z 0.10) — peeche kabhi nahi!
-        const d = t * 7;
-        modelRoot.position.y += Math.abs(Math.sin(d)) * 0.07;
-        modelRoot.rotation.z = Math.sin(d * 0.5) * 0.07;
-        const groove = (up: THREE.Object3D | null, fore: THREE.Object3D | null, out: 1 | -1, ph: number) => {
+        // ── Natural groove dance: slower, hip sway, head bob, alternating arms ──
+        const d = t * 4.5; // slower than before (was 7)
+        const bounce = Math.abs(Math.sin(d)) * easeInSmooth;
+        // Body bounce (knees bend feel)
+        modelRoot.position.y += bounce * 0.06;
+        // Hip sway — weight transfer left-right
+        modelRoot.rotation.z = Math.sin(d * 0.5) * 0.08 * easeInSmooth;
+        modelRoot.rotation.y += Math.sin(d * 0.25) * 0.06 * easeInSmooth;
+        // Slight forward lean (dancing posture)
+        modelRoot.rotation.x = 0.04 * easeInSmooth;
+        // Head groove — bob with body, slight look-around
+        if (headBone && headBone !== modelRoot) {
+          headBone.rotation.x += Math.sin(d * 2) * 0.06 * easeInSmooth;
+          headBone.rotation.y += Math.sin(d * 0.7) * 0.08 * easeInSmooth;
+          headBone.rotation.z += Math.sin(d * 1.3) * 0.04 * easeInSmooth;
+        }
+        // Arms: alternating raise-lower, elbows out, wrists loose
+        const groove = (up: THREE.Object3D | null, fore: THREE.Object3D | null, hand: THREE.Object3D | null, out: 1 | -1, ph: number) => {
           if (!up || !fore) return;
           const sP = up.getWorldPosition(new THREE.Vector3());
           const eP = fore.getWorldPosition(new THREE.Vector3());
           const toElbow = eP.clone().sub(sP);
-          if (toElbow.length() > 1e-4) {
-            aimBone(up, toElbow.normalize(), new THREE.Vector3(out * 0.3, -0.5 + 0.3 * Math.sin(ph), 0.6).normalize());
-          }
+          if (toElbow.length() < 1e-4) return;
+          // Arm lifts up on beat, stays forward
+          const lift = 0.3 * Math.sin(ph) * easeInSmooth;
+          aimBone(up, toElbow.normalize(), new THREE.Vector3(out * 0.35, -0.4 + lift, 0.5).normalize());
           fore.updateMatrixWorld(true);
           const eP2 = fore.getWorldPosition(new THREE.Vector3());
           const wrist = fore.children.find((c) => (c as THREE.Bone).isBone);
           const wP = wrist ? (wrist as THREE.Object3D).getWorldPosition(new THREE.Vector3()) : eP2.clone();
           const fDir = wP.sub(eP2);
           if (fDir.length() > 1e-4) {
-            aimBone(fore, fDir.normalize(), new THREE.Vector3(out * 0.1, -0.2 + 0.35 * Math.cos(ph), 0.7).normalize());
+            aimBone(fore, fDir.normalize(), new THREE.Vector3(out * 0.15, -0.15 + 0.3 * Math.cos(ph), 0.65).normalize());
+          }
+          // Wrist loose rotation
+          if (hand && baseQ.has(hand)) {
+            hand.quaternion.copy(baseQ.get(hand)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, Math.sin(ph * 1.5) * 0.3 * easeInSmooth));
           }
         };
-        groove(upL, foreL, 1, d);
-        groove(upR, foreR, -1, d + Math.PI);
-        if (headBone && headBone !== modelRoot) headBone.rotation.x += Math.sin(d * 2) * 0.05;
+        groove(upL, foreL, handL, 1, d);
+        groove(upR, foreR, handR, -1, d + Math.PI * 0.7);
+
       } else if (act === 'wave' && upR && foreR && baseQ.has(upR) && baseQ.has(foreR)) {
-        upR.quaternion.copy(baseQ.get(upR)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, -0.7));
-        foreR.quaternion.copy(baseQ.get(foreR)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, Math.sin(t * 10) * 0.5));
+        // ── Natural friendly wave: smooth arm raise, wrist pivot, body lean ──
+        // Smooth raise: arm goes up over 0.5s, then waves
+        const raiseP = Math.min(actT / 0.5, 1);
+        const raiseSmooth = raiseP * raiseP * (3 - 2 * raiseP);
+        // Upper arm: raise to side-up (like real wave — elbow at ~shoulder height)
+        const armAngle = -1.2 * raiseSmooth; // negative X = arm up
+        upR.quaternion.copy(baseQ.get(upR)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, armAngle));
+        // Forearm: wave oscillation (slower, wider arc)
+        const waveOsc = Math.sin(t * 6) * 0.45 * raiseSmooth;
+        foreR.quaternion.copy(baseQ.get(foreR)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, waveOsc - 0.3 * raiseSmooth));
+        // Hand/wrist twist for natural wave feel
+        if (handR && baseQ.has(handR)) {
+          const Z_AXIS = new THREE.Vector3(0, 0, 1);
+          handR.quaternion.copy(baseQ.get(handR)!).multiply(tmpQ.setFromAxisAngle(Z_AXIS, Math.sin(t * 6 + 0.5) * 0.3 * raiseSmooth));
+        }
+        // Body: slight lean towards waving side + friendly tilt
+        modelRoot.rotation.z = -0.04 * raiseSmooth;
+        modelRoot.rotation.y += 0.06 * raiseSmooth;
+        // Head: look slightly at the person you're waving to
+        if (headBone && headBone !== modelRoot) {
+          headBone.rotation.y += 0.08 * raiseSmooth;
+          headBone.rotation.z += -0.05 * raiseSmooth;
+          // Slight happy nod
+          headBone.rotation.x += Math.sin(t * 3) * 0.03 * raiseSmooth;
+        }
+
+      } else if (act === 'namaste') {
+        // ── Natural Pranam/Namaste: gradual hands-together + forward bow + head tilt ──
+        const poseP = Math.min(actT / 0.8, 1); // 0.8s to reach full pose
+        const poseSmooth = poseP * poseP * (3 - 2 * poseP);
+        // Forward bow (respectful lean)
+        modelRoot.rotation.x = 0.12 * poseSmooth;
+        // Slight weight shift
+        modelRoot.position.y += -0.02 * poseSmooth;
+        try {
+          modelRoot.updateMatrixWorld(true);
+          const Z_AXIS = new THREE.Vector3(0, 0, 1);
+          // Hands converge to chest center (namaste position)
+          const chestL = modelRoot.localToWorld(new THREE.Vector3(0.035, 1.35, 0.27));
+          const chestR = modelRoot.localToWorld(new THREE.Vector3(-0.035, 1.35, 0.27));
+          const namUpL = modelRoot.localToWorld(new THREE.Vector3(0.16, 0.95, 0.18));
+          const namUpR = modelRoot.localToWorld(new THREE.Vector3(-0.16, 0.95, 0.18));
+          const aimArm = (up: THREE.Object3D | null, fore: THREE.Object3D | null, hand: THREE.Object3D | null, upTarget: THREE.Vector3, foreTarget: THREE.Vector3) => {
+            if (!up || !fore) return;
+            const sP = up.getWorldPosition(new THREE.Vector3());
+            const eP = fore.getWorldPosition(new THREE.Vector3());
+            const toElbow = eP.clone().sub(sP);
+            if (toElbow.length() < 1e-4) return;
+            aimBone(up, toElbow.normalize(), upTarget.sub(sP).normalize());
+            fore.updateMatrixWorld(true);
+            const eP2 = fore.getWorldPosition(new THREE.Vector3());
+            const hP = hand ? hand.getWorldPosition(new THREE.Vector3()) : eP2.clone().add(new THREE.Vector3(0, -0.25, 0));
+            const fDir = hP.sub(eP2);
+            if (fDir.length() > 1e-4) aimBone(fore, fDir.normalize(), foreTarget.clone().sub(eP2).normalize());
+          };
+          // Blend from rest to namaste pose smoothly
+          if (poseSmooth > 0.1) {
+            aimArm(upL, foreL, handL, namUpL, chestL);
+            aimArm(upR, foreR, handR, namUpR, chestR);
+            // Fingers point up (palm together) — blend smoothly
+            if (handL && baseQ.has(handL)) handL.quaternion.multiply(tmpQ.setFromAxisAngle(Z_AXIS, (Math.PI / 2) * poseSmooth));
+            if (handR && baseQ.has(handR)) handR.quaternion.multiply(tmpQ.setFromAxisAngle(Z_AXIS, (-Math.PI / 2) * poseSmooth));
+          }
+          // Blend arms with rest pose (for smooth transition)
+          if (poseSmooth < 1) {
+            [upL, upR, foreL, foreR].forEach((b) => {
+              if (b && baseQ.has(b)) {
+                b.quaternion.slerp(b.quaternion.clone(), poseSmooth);
+              }
+            });
+          }
+        } catch (e) { console.warn('[FridayModel3D] namaste pose failed', e); }
+        // Head: respectful downward tilt
+        if (headBone && headBone !== modelRoot) {
+          headBone.rotation.x += 0.15 * poseSmooth; // look down
+          headBone.rotation.z += 0.03 * poseSmooth; // slight tilt
+          // Gentle sway while holding namaste
+          headBone.rotation.y += Math.sin(t * 0.8) * 0.03 * poseSmooth;
+        }
+
+      } else if (act === 'think') {
+        // ── Natural thinking pose: hand on chin, body lean, slow head sway ──
+        const poseP = Math.min(actT / 0.7, 1);
+        const poseSmooth = poseP * poseP * (3 - 2 * poseP);
+        // Body lean: slight tilt (thinking posture)
+        modelRoot.rotation.z = 0.03 * poseSmooth;
+        modelRoot.rotation.x = 0.03 * poseSmooth;
+        try {
+          modelRoot.updateMatrixWorld(true);
+          const chinP = modelRoot.localToWorld(new THREE.Vector3(0.02, 1.68, 0.15));
+          const thinkUpR = modelRoot.localToWorld(new THREE.Vector3(-0.13, 1.25, 0.22));
+          const aimArm = (up: THREE.Object3D | null, fore: THREE.Object3D | null, hand: THREE.Object3D | null, upTarget: THREE.Vector3, foreTarget: THREE.Vector3) => {
+            if (!up || !fore) return;
+            const sP = up.getWorldPosition(new THREE.Vector3());
+            const eP = fore.getWorldPosition(new THREE.Vector3());
+            const toElbow = eP.clone().sub(sP);
+            if (toElbow.length() < 1e-4) return;
+            aimBone(up, toElbow.normalize(), upTarget.sub(sP).normalize());
+            fore.updateMatrixWorld(true);
+            const eP2 = fore.getWorldPosition(new THREE.Vector3());
+            const hP = hand ? hand.getWorldPosition(new THREE.Vector3()) : eP2.clone().add(new THREE.Vector3(0, -0.25, 0));
+            const fDir = hP.sub(eP2);
+            if (fDir.length() > 1e-4) aimBone(fore, fDir.normalize(), foreTarget.clone().sub(eP2).normalize());
+          };
+          if (poseSmooth > 0.1) {
+            aimArm(upR, foreR, handR, thinkUpR, chinP);
+          }
+          // Left arm: cross slightly (natural thinking — left hand rests on right elbow area)
+          if (upL && foreL && poseSmooth > 0.2) {
+            const crossTarget = modelRoot.localToWorld(new THREE.Vector3(0.05, 1.1, 0.2));
+            const crossElbow = modelRoot.localToWorld(new THREE.Vector3(0.2, 0.85, 0.15));
+            aimArm(upL, foreL, handL, crossElbow, crossTarget);
+          }
+        } catch (e) { console.warn('[FridayModel3D] think pose failed', e); }
+        // Head: tilted, slow contemplative sway
+        if (headBone && headBone !== modelRoot) {
+          headBone.rotation.z += 0.12 * poseSmooth;
+          headBone.rotation.x += (0.06 + Math.sin(t * 0.7) * 0.04) * poseSmooth;
+          headBone.rotation.y += Math.sin(t * 0.5) * 0.06 * poseSmooth;
+        }
+
       } else if (act === 'bow') {
         const p = Math.min(actT / (ONE_SHOT_SECONDS.bow ?? 3.2), 1);
-        modelRoot.rotation.x = Math.sin(p * Math.PI) * 0.5;
+        const bowSmooth = Math.sin(p * Math.PI);
+        modelRoot.rotation.x = bowSmooth * 0.45;
+        // Head follows bow
+        if (headBone && headBone !== modelRoot) {
+          headBone.rotation.x += bowSmooth * 0.15;
+        }
       } else if (act === 'nod-yes' && headBone && headBone !== modelRoot) {
         headBone.rotation.x += Math.sin(actT * 10) * 0.12 * Math.max(0, 1 - actT / 2.5);
       } else if (act === 'nod-no' && headBone && headBone !== modelRoot) {
         headBone.rotation.y += Math.sin(actT * 9) * 0.25 * Math.max(0, 1 - actT / 2.5);
-      } else if (act === 'think' && headBone && headBone !== modelRoot) {
-        headBone.rotation.z += 0.1;
-        headBone.rotation.x += 0.05;
       }
       // Final safety: action overlays ke baad bhi sir limit me rahe
       if (headBone && headBone !== modelRoot) {
