@@ -12,9 +12,10 @@ interface AgentFaceProps {
   onDoubleClick?: () => void;
 }
 
-// Photo-real avatar: tumhari 2nd wali photo ko public/friday-avatar.png me save karo.
-// Tab ye component usi photo ko live 3D-style me animate karega.
-const AVATAR_SOURCES = ['/friday-avatar.png', '/friday-avatar.jpg', '/friday-avatar.webp'];
+// Photo-real avatar sources (priority order):
+// 1. friday-avatar-face.png — 1st wali sheet ke "Close Up" se face crop (circle ke liye best)
+// 2. friday-avatar.png — 2nd wali full-body photo (face-focus crop ke saath)
+const AVATAR_SOURCES = ['/friday-avatar-face.png', '/friday-avatar-face.jpg', '/friday-avatar.png', '/friday-avatar.jpg', '/friday-avatar.webp'];
 
 const AgentFace: React.FC<AgentFaceProps> = ({ status, volume, size = 120, colorIndex, reaction, onDoubleClick }) => {
   const isSpeaking = status === 'Speaking...';
