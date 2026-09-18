@@ -708,20 +708,20 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         upR.quaternion.copy(baseQ.get(upR)!)
           .multiply(tmpQ.setFromAxisAngle(X_AXIS, -1.31 * raiseSmooth)); // 75° sideways OUT
 
-        // ── Forearm: FIXED at elbow bend — NO rotation during wave ──
-        // Real wave: elbow stays locked, only wrist moves
+        // ── Forearm: 60° elbow + forearm ALSO waves (larger arc) ──
         foreR.quaternion.copy(baseQ.get(foreR)!)
-          .multiply(tmpQ.setFromAxisAngle(X_AXIS, -1.31 * raiseSmooth)); // 75° elbow — STATIC
+          .multiply(tmpQ.setFromAxisAngle(X_AXIS, -1.05 * raiseSmooth)); // 60° elbow angle
 
-        // ── Hand/Wrist: ALL wave motion here only ──
-        // Y-axis: left-right two-way swing (main wave)
-        // Z-axis: slight wrist flip for personality
+        // ── Forearm waves too — larger arc swing ──
+        const foreOsc = Math.sin(t * 5.0) * 0.35 * raiseSmooth;
+        foreR.quaternion.multiply(tmpQ.setFromAxisAngle(Y_WAVE, foreOsc));
+
+        // ── Hand/Wrist: adds extra wave on top of forearm ──
         if (handR && baseQ.has(handR)) {
-          const waveOsc = Math.sin(t * 5.0) * 0.5 * raiseSmooth; // left-right swing
+          const wristOsc = Math.sin(t * 5.0 + 0.3) * 0.25 * raiseSmooth; // slight phase offset
           handR.quaternion.copy(baseQ.get(handR)!)
-            .multiply(tmpQ.setFromAxisAngle(Y_WAVE, 1.57 * raiseSmooth))           // palm → front
-            .multiply(tmpQ.setFromAxisAngle(Z_WAVE, waveOsc))                       // wave left-right
-            .multiply(tmpQ.setFromAxisAngle(X_AXIS, Math.sin(t * 5.0 + 0.8) * 0.15 * raiseSmooth)); // subtle nod
+            .multiply(tmpQ.setFromAxisAngle(Y_WAVE, 1.57 * raiseSmooth))  // palm → front
+            .multiply(tmpQ.setFromAxisAngle(Z_WAVE, wristOsc));           // wrist extra swing
         }
 
         // Body lean slightly toward wave side
