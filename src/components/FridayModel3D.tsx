@@ -601,12 +601,12 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         // Smooth raise: arm goes up over 0.5s, then waves
         const raiseP = Math.min(actT / 0.5, 1);
         const raiseSmooth = raiseP * raiseP * (3 - 2 * raiseP);
-        // Upper arm: raise to side-up (like real wave — elbow at ~shoulder height)
-        const armAngle = -1.2 * raiseSmooth; // negative X = arm up
+        // Upper arm: raise HIGH above head (real wave — haath sir se upar)
+        const armAngle = -2.2 * raiseSmooth; // much higher = arm well above head
         upR.quaternion.copy(baseQ.get(upR)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, armAngle));
-        // Forearm: wave oscillation (slower, wider arc)
-        const waveOsc = Math.sin(t * 6) * 0.45 * raiseSmooth;
-        foreR.quaternion.copy(baseQ.get(foreR)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, waveOsc - 0.3 * raiseSmooth));
+        // Forearm: wave oscillation (slower, wider arc) — elbow bent, hand waves
+        const waveOsc = Math.sin(t * 6) * 0.5 * raiseSmooth;
+        foreR.quaternion.copy(baseQ.get(foreR)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, waveOsc + 0.6 * raiseSmooth));
         // Hand/wrist twist for natural wave feel
         if (handR && baseQ.has(handR)) {
           const Z_AXIS = new THREE.Vector3(0, 0, 1);
@@ -656,9 +656,7 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
           if (poseSmooth > 0.1) {
             aimArm(upL, foreL, handL, namUpL, chestL);
             aimArm(upR, foreR, handR, namUpR, chestR);
-            // Fingers point up (palm together) — blend smoothly
-            if (handL && baseQ.has(handL)) handL.quaternion.multiply(tmpQ.setFromAxisAngle(Z_AXIS, (Math.PI / 2) * poseSmooth));
-            if (handR && baseQ.has(handR)) handR.quaternion.multiply(tmpQ.setFromAxisAngle(Z_AXIS, (-Math.PI / 2) * poseSmooth));
+          // Namaste: IK already places hands at chest — NO wrist Z rotation (causes unnatural twist)
           }
           // Blend arms with rest pose (for smooth transition)
           if (poseSmooth < 1) {
