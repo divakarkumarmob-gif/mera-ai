@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { X, Mic, Plus, Loader2, Settings, ChevronDown, ChevronLeft, ChevronRight, Captions, MessageSquare, Square, Code2, Terminal, Shield, ShieldCheck, Trash2, Key, Check, AlertCircle, Send, Instagram, Download, Radio, Music, Sparkles, Sliders, Volume2, Bot, Layers, Cpu, Phone, Eye, EyeOff, Copy, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import FridayModel3D from './FridayModel3D';
+import FridayModel3D, { type AvatarAction, AVATAR_ACTION_LIST } from './FridayModel3D';
 import ChatHistoryModal from './ChatHistoryModal';
 import WhatsAppPairModal from './WhatsAppPairModal';
 import CodeAgentPage from './CodeAgentPage';
@@ -1340,6 +1340,8 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
     const statusRef = useRef("Idle");
     const [volume, setVolume] = useState(0);
     const [colorIndex, setColorIndex] = useState(0);
+    // ── 3D avatar body action (dance/namaste/think/wave/bow/nod) — server tool ya window event se trigger ──
+    const [avatarAction, setAvatarAction] = useState<AvatarAction>(null);
     const [selectedImages, setSelectedImages] = useState<{ id: string; file: File; status: 'uploading' | 'uploaded' }[]>([]);
     const [showSettings, setShowSettings] = useState(false);
     const [openSettingsSection, setOpenSettingsSection] = useState<string | null>(null);
@@ -3074,6 +3076,15 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                         }, 300);
                     }
 
+                } else if (msg.type === 'avatar_action') {
+                    // Friday ne body action tool call kiya (dance/namaste/think/wave/bow/nod/stop)
+                    const a = String(msg.action || '').toLowerCase().trim();
+                    if (a === 'stop' || a === '') {
+                        setAvatarAction(null);
+                    } else if ((AVATAR_ACTION_LIST as string[]).includes(a)) {
+                        setAvatarAction(a as AvatarAction);
+                    }
+
                 } else if (msg.type === 'trigger_incoming_call') {
                     console.log('[LiveAIInterface] 📞 Remote incoming call trigger received:', msg);
                     setRemoteIncomingCall({
@@ -4137,7 +4148,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                         </AnimatePresence>
                     </div>
 
-                    <FridayModel3D status={status} volume={volume} reaction={faceReaction} height={250} onTap={handleFaceDoubleTap} />
+                    <FridayModel3D status={status} volume={volume} reaction={faceReaction} height={250} onTap={handleFaceDoubleTap} action={avatarAction} onActionDone={() => setAvatarAction(null)} />
                     <p className="text-slate-300 text-sm font-medium">{status}</p>
 
                     {!isRecording && wakeWordActive && (

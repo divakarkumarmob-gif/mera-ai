@@ -2865,6 +2865,23 @@ const rawFunctionDeclarations: any[] = [
     }
   },
   {
+    "name": "avatar_action",
+    "description": "AVATAR BODY ACTION TOOL: Friday has a visible 3D body on screen. Call this when DK asks her to DO a physical action with her body. 'dance karo / naach ke dikha / thumka lagao' -> dance. 'namaste karo / pranam karo / namaskar karo' -> namaste. 'soch ke dikha / thinking pose banao' -> think. 'bye karo / wave karo / tata karo / hello karo' -> wave. 'sir jhukao / bow karo / salaam karo' -> bow. 'haan me gardan hilao / nod karo' -> nod-yes. 'naa me gardan hilao' -> nod-no. 'ruk jao / ruko / stop karo / bas karo' -> stop. Always call the tool AND speak a matching Hinglish line (e.g. dance par 'Ye lo Boss, thumka ho jaye!').",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {
+        "action": {
+          "type": "STRING",
+          "enum": ["dance", "namaste", "think", "wave", "bow", "nod-yes", "nod-no", "stop"],
+          "description": "Body action to perform on the 3D avatar"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    }
+  },
+  {
     "name": "stop_music",
     "description": "Stop and close the currently playing music immediately when DK says 'stop', 'gana band karo', 'mujhe achha nahi laga', 'band karo gana', 'gana nahi sunna mujhe'.",
     "parameters": {

@@ -221,6 +221,17 @@ export async function dispatchLiveToolCall(call: any, context: ToolDispatchConte
                       );
                     }
                   }
+                } else if (call.name === "avatar_action") {
+                  const allowed = ["dance", "namaste", "think", "wave", "bow", "nod-yes", "nod-no", "stop"];
+                  const act = String((call.args || {}).action || "").toLowerCase().trim();
+                  if (!allowed.includes(act)) {
+                    result = { success: false, error: "Unknown action. Use one of: " + allowed.join(", ") };
+                  } else {
+                    try {
+                      clientWs.send(JSON.stringify({ type: "avatar_action", action: act }));
+                    } catch {}
+                    result = { success: true, action: act, message: "Avatar body action sent to screen." };
+                  }
                 } else if (call.name === "send_photo_to_whatsapp") {
                   const { contactNameOrPhone, caption } = call.args || {};
                   const sendRes = await toolsEngine.sendPhotoToWhatsApp(contactNameOrPhone || "boss", "last_generated", caption);

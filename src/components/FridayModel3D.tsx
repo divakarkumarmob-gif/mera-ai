@@ -6,24 +6,52 @@ import { motion } from 'motion/react';
 import FridayAvatar from './FridayAvatar';
 import type { AgentFaceReaction } from './AgentFace';
 
+// Body actions: voice command ("dance karo", "namaste karo"...) ya window event se trigger.
+// Test: dispatchEvent(new CustomEvent('friday-action', { detail: 'dance' }))
+export type AvatarAction = 'dance' | 'namaste' | 'think' | 'wave' | 'bow' | 'nod-yes' | 'nod-no' | 'stop' | null;
+export const AVATAR_ACTION_LIST = ['dance', 'namaste', 'think', 'wave', 'bow', 'nod-yes', 'nod-no', 'stop'];
+const ONE_SHOT_SECONDS: Record<string, number> = { wave: 4, namaste: 6, think: 6, bow: 3.2, 'nod-yes': 2.5, 'nod-no': 2.5 };
+
 interface FridayModel3DProps {
   status: string;
   volume: number;
   reaction?: AgentFaceReaction;
   height?: number;
   onTap?: () => void;
+  action?: AvatarAction;
+  onActionDone?: () => void;
 }
 
 // Tumhara real 3D model: public/friday.glb (best) ya public/friday.fbx — pehle .glb, phir .fbx try hoga.
 // Koi file na mile to photo wala avatar fallback rahega.
 const MODEL_URLS = ['/friday.glb', '/friday.fbx'];
 
-const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction, height = 340, onTap }) => {
+const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction, height = 340, onTap, action, onActionDone }) => {
   const mountRef = useRef<HTMLDivElement>(null);
-  const stateRef = useRef({ status, volume, reaction });
-  stateRef.current = { status, volume, reaction };
+  const stateRef = useRef({ status, volume, reaction, action });
+  stateRef.current = { status, volume, reaction, action };
+  const doneRef = useRef(onActionDone);
+  doneRef.current = onActionDone;
   const mouseRef = useRef({ x: 0, y: 0 });
   const [modelMissing, setModelMissing] = useState(false);
+  // Manual override (console test / future buttons) — prop action se merge hota hai
+  const [localAction, setLocalAction] = useState<AvatarAction>(null);
+  const localRef = useRef<AvatarAction>(null);
+  useEffect(() => {
+    const h = (e: Event) => {
+      const a = (e as CustomEvent).detail as AvatarAction;
+      if (a === 'stop' || a === null) { localRef.current = null; setLocalAction(null); return; }
+      if (AVATAR_ACTION_LIST.includes(a as string)) {
+        localRef.current = a; setLocalAction(a);
+        const dur = (ONE_SHOT_SECONDS[a as string] ?? 5) * 1000;
+        if (a !== 'dance') setTimeout(() => {
+          if (localRef.current === a) { localRef.current = null; setLocalAction(null); }
+        }, dur + 400);
+      }
+    };
+    window.addEventListener('friday-action', h);
+    return () => window.removeEventListener('friday-action', h);
+  }, []);
 
   const isSpeaking = status === 'Speaking...';
 
@@ -36,6 +64,14 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
     let mixer: THREE.AnimationMixer | null = null;
     let jawBone: THREE.Object3D | null = null;
     let headBone: THREE.Object3D | null = null;
+    // Action rig: upper arms + forearms (LeftArm/RightArm, LeftForeArm/RightForeArm)
+    let upL: THREE.Object3D | null = null;
+    let upR: THREE.Object3D | null = null;
+    let foreL: THREE.Object3D | null = null;
+    let foreR: THREE.Object3D | null = null;
+    const baseQ = new Map<THREE.Object3D, THREE.Quaternion>();
+    let prevAction: AvatarAction = null;
+    let actionStart = 0;
     let mouthMorph: { mesh: THREE.Mesh; index: number } | null = null;
     let blinkMorphs: { mesh: THREE.Mesh; index: number }[] = [];
 
@@ -159,6 +195,17 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         // T-pose haath neeche lao (rigging), phir framing — taaki frame sahi bane
         try { relaxArms(model); } catch (e) { console.warn('[FridayModel3D] arm relax failed', e); }
 
+        // Action bones dhoondo + relaxed base pose yaad rakho (actions isi par overlay honge)
+        model.traverse((o) => {
+          const n = o.name.toLowerCase();
+          if (n === 'leftarm') upL = o;
+          else if (n === 'rightarm') upR = o;
+          else if (!foreL && n.startsWith('leftforearm')) foreL = o;
+          else if (!foreR && n.startsWith('rightforearm')) foreR = o;
+        });
+        [upL, upR, foreL, foreR].forEach((b) => { if (b) baseQ.set(b, b.quaternion.clone()); });
+        console.log('[FridayModel3D] action rig:', { upL: !!upL, upR: !!upR, foreL: !!foreL, foreR: !!foreR });
+
         // Portrait framing: sir se kamar tak closeup — chehra bada dikhe, faile haath frame se bahar
         modelRoot.updateMatrixWorld(true);
         const frame = new THREE.Box3().setFromObject(modelRoot);
@@ -235,6 +282,9 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
 
     const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
     let jawOpen = 0;
+    const tmpQ = new THREE.Quaternion();
+    const X_AXIS = new THREE.Vector3(1, 0, 0);
+    let clearTimer: ReturnType<typeof setTimeout> | null = null;
 
     const animate = () => {
       if (disposed) return;
@@ -286,6 +336,77 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         modelRoot.rotation.x = m.y * 0.06;
       }
 
+      // ── Avatar body actions: dance / namaste / think / wave / bow / nod ──
+      const rawAct: AvatarAction = stateRef.current.action ?? localRef.current;
+      const act = rawAct === 'stop' ? null : rawAct;
+      if (act !== prevAction) {
+        // purana pose wapas, auto-clear timer reset
+        baseQ.forEach((q, b) => b.quaternion.copy(q));
+        modelRoot.rotation.x = 0;
+        if (clearTimer) { clearTimeout(clearTimer); clearTimer = null; }
+        if (act === 'namaste' || act === 'think') {
+          // Static pose — world-space aim, kisi bhi rig par kaam karega
+          try {
+            modelRoot.updateMatrixWorld(true);
+            const chest = modelRoot.localToWorld(new THREE.Vector3(0, 1.32, 0.3));
+            const faceP = modelRoot.localToWorld(new THREE.Vector3(0, 1.52, 0.32));
+            const aimArm = (up: THREE.Object3D | null, fore: THREE.Object3D | null, mirror: 1 | -1) => {
+              if (!up || !fore) return;
+              const sP = up.getWorldPosition(new THREE.Vector3());
+              const eP = fore.getWorldPosition(new THREE.Vector3());
+              const toElbow = eP.clone().sub(sP);
+              if (toElbow.length() < 1e-4) return;
+              aimBone(up, toElbow.normalize(), chest.clone().sub(sP).normalize());
+              fore.updateMatrixWorld(true);
+              const eP2 = fore.getWorldPosition(new THREE.Vector3());
+              const headW = headBone && headBone !== modelRoot ? headBone.getWorldPosition(new THREE.Vector3()) : faceP.clone();
+              const target = act === 'namaste' ? faceP.clone() : headW.add(new THREE.Vector3(0.12 * mirror, 0.02, 0.16));
+              const wrist = fore.children.find((c) => (c as THREE.Bone).isBone);
+              const wP = wrist ? wrist.getWorldPosition(new THREE.Vector3()) : eP2.clone().add(new THREE.Vector3(0, -0.25, 0));
+              const fDir = wP.sub(eP2);
+              if (fDir.length() > 1e-4) aimBone(fore, fDir.normalize(), target.sub(eP2).normalize());
+            };
+            if (act === 'namaste') { aimArm(upL, foreL, 1); aimArm(upR, foreR, -1); }
+            else { aimArm(upR, foreR, -1); } // think: right hand sir ki taraf
+          } catch (e) { console.warn('[FridayModel3D] pose failed', e); }
+        }
+        prevAction = act;
+        actionStart = t;
+        if (act && act !== 'dance') {
+          // One-shot: time poora → parent ko batao (woh action=null karega, pose restore hoga)
+          const dur = (ONE_SHOT_SECONDS[act] ?? 5) * 1000;
+          clearTimer = setTimeout(() => {
+            if (disposed) return;
+            if (localRef.current) { localRef.current = null; setLocalAction(null); }
+            else { try { doneRef.current?.(); } catch { /* noop */ } }
+          }, dur);
+        }
+      }
+      const actT = t - actionStart;
+      if (act === 'dance') {
+        const d = t * 7;
+        modelRoot.position.y += Math.abs(Math.sin(d)) * 0.07;
+        modelRoot.rotation.z = Math.sin(d * 0.5) * 0.07;
+        if (upL && baseQ.has(upL)) upL.quaternion.copy(baseQ.get(upL)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, Math.sin(d) * 0.55));
+        if (upR && baseQ.has(upR)) upR.quaternion.copy(baseQ.get(upR)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, -Math.sin(d) * 0.55));
+        if (foreL && baseQ.has(foreL)) foreL.quaternion.copy(baseQ.get(foreL)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, Math.abs(Math.sin(d)) * 0.5));
+        if (foreR && baseQ.has(foreR)) foreR.quaternion.copy(baseQ.get(foreR)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, Math.abs(Math.cos(d)) * 0.5));
+        if (headBone && headBone !== modelRoot) headBone.rotation.x += Math.sin(d * 2) * 0.05;
+      } else if (act === 'wave' && upR && foreR && baseQ.has(upR) && baseQ.has(foreR)) {
+        upR.quaternion.copy(baseQ.get(upR)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, -0.7));
+        foreR.quaternion.copy(baseQ.get(foreR)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, Math.sin(t * 10) * 0.5));
+      } else if (act === 'bow') {
+        const p = Math.min(actT / (ONE_SHOT_SECONDS.bow ?? 3.2), 1);
+        modelRoot.rotation.x = Math.sin(p * Math.PI) * 0.5;
+      } else if (act === 'nod-yes' && headBone && headBone !== modelRoot) {
+        headBone.rotation.x += Math.sin(actT * 10) * 0.12 * Math.max(0, 1 - actT / 2.5);
+      } else if (act === 'nod-no' && headBone && headBone !== modelRoot) {
+        headBone.rotation.y += Math.sin(actT * 9) * 0.25 * Math.max(0, 1 - actT / 2.5);
+      } else if (act === 'think' && headBone && headBone !== modelRoot) {
+        headBone.rotation.z += 0.1;
+        headBone.rotation.x += 0.05;
+      }
+
       // Rim glow theme pulse
       rim.intensity = 18 + Math.min(volume * 60, 22) + Math.sin(t * 2) * 3;
 
@@ -305,6 +426,7 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
     return () => {
       disposed = true;
       cancelAnimationFrame(raf);
+      if (clearTimer) clearTimeout(clearTimer);
       window.removeEventListener('mousemove', onMouse);
       window.removeEventListener('resize', onResize);
       scene.traverse((o) => {
