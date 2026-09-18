@@ -699,37 +699,35 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         // Smooth raise: arm goes up over 0.5s, then waves
         const raiseP = Math.min(actT / 0.5, 1);
         const raiseSmooth = raiseP * raiseP * (3 - 2 * raiseP);
-        const Z_AXIS_WAVE = new THREE.Vector3(0, 0, 1);
-        const Y_AXIS = new THREE.Vector3(0, 1, 0);
+        const Z_WAVE = new THREE.Vector3(0, 0, 1);
+        const Y_WAVE = new THREE.Vector3(0, 1, 0);
 
-        // ── Step 1: Upper arm raises SIDEWAYS (Z-axis) + slightly forward ──
-        // Real wave: upper arm goes up to shoulder/ear height via side
-        // Z rotation = arm lifts sideways (abduction), X = slight forward lean
+        // ── Upper arm: -X axis = arm raises OUTWARD to the side (abduction) ──
+        // In this FBX rig, local -X = arm goes sideways/up (not Z!)
+        // -1.4 rad = ~80° outward raise (elbow at ear height)
         upR.quaternion.copy(baseQ.get(upR)!)
-          .multiply(tmpQ.setFromAxisAngle(Z_AXIS_WAVE, 1.4 * raiseSmooth))  // sideways raise
-          .multiply(tmpQ.setFromAxisAngle(X_AXIS, -0.3 * raiseSmooth));      // slight forward
+          .multiply(tmpQ.setFromAxisAngle(X_AXIS, -1.4 * raiseSmooth)); // sideways OUT
 
-        // ── Step 2: Forearm 90° bend at elbow — pointing UPWARD ──
-        // X rotation on forearm = elbow bend (forearm comes up perpendicular to upper arm)
+        // ── Forearm: 90° elbow bend so forearm points upward ──
+        // After upper arm is raised sideways, forearm bends inward/up
         foreR.quaternion.copy(baseQ.get(foreR)!)
-          .multiply(tmpQ.setFromAxisAngle(X_AXIS, -1.57 * raiseSmooth)); // 90° = π/2
+          .multiply(tmpQ.setFromAxisAngle(X_AXIS, -1.4 * raiseSmooth)); // elbow ~90° up
 
-        // ── Step 3: Only forearm WAVES — Y-axis oscillation (left-right swing) ──
-        // This only adds on top after elbow is raised
-        const waveOsc = Math.sin(t * 5.5) * 0.5 * raiseSmooth; // left-right swing
-        foreR.quaternion.multiply(tmpQ.setFromAxisAngle(Y_AXIS, waveOsc));
+        // ── Forearm waves: Y-axis left-right oscillation ──
+        const waveOsc = Math.sin(t * 5.5) * 0.55 * raiseSmooth;
+        foreR.quaternion.multiply(tmpQ.setFromAxisAngle(Y_WAVE, waveOsc));
 
-        // ── Step 4: Wrist Z-axis flip adds extra personality ──
+        // ── Wrist: Z-axis adds extra wave personality ──
         if (handR && baseQ.has(handR)) {
           handR.quaternion.copy(baseQ.get(handR)!)
-            .multiply(tmpQ.setFromAxisAngle(Z_AXIS_WAVE, Math.sin(t * 5.5 + 0.4) * 0.25 * raiseSmooth));
+            .multiply(tmpQ.setFromAxisAngle(Z_WAVE, Math.sin(t * 5.5 + 0.5) * 0.3 * raiseSmooth));
         }
 
-        // Body: slight lean toward waving side
-        modelRoot.rotation.z = -0.05 * raiseSmooth;
-        // Head: friendly look forward + happy nod
+        // Body lean slightly toward wave side
+        modelRoot.rotation.z = -0.04 * raiseSmooth;
+        // Head: look forward, friendly nod
         if (headBone && headBone !== modelRoot) {
-          headBone.rotation.y += 0.06 * raiseSmooth;
+          headBone.rotation.y += 0.07 * raiseSmooth;
           headBone.rotation.x += Math.sin(t * 2.5) * 0.03 * raiseSmooth;
         }
 
