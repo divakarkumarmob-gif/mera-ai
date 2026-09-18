@@ -28,6 +28,19 @@ interface FridayModel3DProps {
 // Koi file na mile to photo wala avatar fallback rahega.
 const MODEL_URLS = ['/friday.glb', '/friday.fbx'];
 
+function loadDragPos(): { x: number; y: number } {
+  try {
+    const p = JSON.parse(localStorage.getItem('friday-model-pos-v1') || 'null');
+    if (p && typeof p.x === 'number' && typeof p.y === 'number') {
+      return {
+        x: THREE.MathUtils.clamp(p.x, -1.2, 1.2),
+        y: THREE.MathUtils.clamp(p.y, -1.0, 1.0),
+      };
+    }
+  } catch { /* noop */ }
+  return { x: 0, y: 0 };
+}
+
 const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction, height = 340, onTap, action, onActionDone, fluid }) => {
   const mountRef = useRef<HTMLDivElement>(null);
   const stateRef = useRef({ status, volume, reaction, action });
@@ -44,6 +57,12 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
   const zoomRef = useRef(zoom);
   const camRef = useRef<THREE.PerspectiveCamera | null>(null);
   const fitRef = useRef({ dist: 4, cy: 1 });
+  // ── Drag-to-move: model pakad kar kahin bhi ghaseeto (position yaad rahegi) ──
+  const dragRef = useRef<{ x: number; y: number }>(loadDragPos());
+  const dragState = useRef({ on: false, sx: 0, sy: 0, ox: 0, oy: 0 });
+  const savePos = () => {
+    try { localStorage.setItem('friday-model-pos-v1', JSON.stringify(dragRef.current)); } catch { /* noop */ }
+  };
   const applyZoom = (z: number) => {
     zoomRef.current = z;
     setZoom(z);
@@ -74,6 +93,29 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
   }, []);
 
   const isSpeaking = status === 'Speaking...';
+
+  // Screen pixels -> 3D units (zoom ke hisaab se sensitivity auto)
+  const pxToUnits = () => {
+    const r = mountRef.current?.getBoundingClientRect();
+    if (!r || r.height < 1) return 0.005;
+    return (2 * fitRef.current.dist * Math.tan(THREE.MathUtils.degToRad(14))) / r.height;
+  };
+  const onDragStart = (e: React.PointerEvent) => {
+    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+    dragState.current = { on: true, sx: e.clientX, sy: e.clientY, ox: dragRef.current.x, oy: dragRef.current.y };
+  };
+  const onDragMove = (e: React.PointerEvent) => {
+    const d = dragState.current;
+    if (!d.on) return;
+    const s = pxToUnits();
+    dragRef.current.x = THREE.MathUtils.clamp(d.ox + (e.clientX - d.sx) * s, -1.2, 1.2);
+    dragRef.current.y = THREE.MathUtils.clamp(d.oy - (e.clientY - d.sy) * s, -1.0, 1.0);
+  };
+  const onDragEnd = () => {
+    if (!dragState.current.on) return;
+    dragState.current.on = false;
+    savePos();
+  };
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -413,9 +455,9 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
       // ── Body language ──
       const m = mouseRef.current;
       modelRoot.rotation.y = Math.sin(t * 0.4) * 0.06 + m.x * 0.3;
-      modelRoot.position.y = happy
+      modelRoot.position.y = (happy
         ? Math.abs(Math.sin(t * 2.6)) * 0.04
-        : Math.sin(t * 1.5) * 0.015;
+        : Math.sin(t * 1.5) * 0.015) + dragRef.current.y;
       if (headBone && headBone !== modelRoot.children[0]) {
         headBone.rotation.y = lerp(headBone.rotation.y, m.x * 0.35 + (thinking ? Math.sin(t * 1.6) * 0.2 : 0), 0.08);
         headBone.rotation.x = lerp(headBone.rotation.x, m.y * 0.18 + (listening ? -0.1 : 0) + (speaking ? Math.sin(t * 13) * 0.03 * Math.min(1, volume * 4) : 0), 0.08);
@@ -560,7 +602,7 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         if (upR && baseQ.has(upR)) upR.quaternion.copy(baseQ.get(upR)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, -breath * 0.035));
         // Wazan ek pair se doosre par — zinda khada!
         modelRoot.rotation.z = Math.sin(t * 0.33) * 0.022;
-        modelRoot.position.x = Math.sin(t * 0.23) * 0.02;
+        modelRoot.position.x = Math.sin(t * 0.23) * 0.02 + dragRef.current.x;
         // Kabhi-kabhi khud gardan ghuma kar dekho (mouse ke alava)
         glanceT -= dt;
         if (glanceT <= 0) {
@@ -703,9 +745,13 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
     >
       <div
         ref={mountRef}
+        onPointerDown={onDragStart}
+        onPointerMove={onDragMove}
+        onPointerUp={onDragEnd}
+        onPointerCancel={onDragEnd}
         style={fluid
-          ? { width: '100%', height: '100%', cursor: onTap ? 'pointer' : 'default' }
-          : { width: Math.round(height * 0.75), height, cursor: onTap ? 'pointer' : 'default' }}
+          ? { width: '100%', height: '100%', cursor: 'grab', touchAction: 'none' }
+          : { width: Math.round(height * 0.75), height, cursor: 'grab', touchAction: 'none' }}
       />
       {/* TEMP vertical size scale (right side, value ke saath) — best value batao, lock kar dunga */}
       <div
