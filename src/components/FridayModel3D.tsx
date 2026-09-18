@@ -69,6 +69,8 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
     let upR: THREE.Object3D | null = null;
     let foreL: THREE.Object3D | null = null;
     let foreR: THREE.Object3D | null = null;
+    let handL: THREE.Object3D | null = null;
+    let handR: THREE.Object3D | null = null;
     const baseQ = new Map<THREE.Object3D, THREE.Quaternion>();
     let prevAction: AvatarAction = null;
     let actionStart = 0;
@@ -139,9 +141,13 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
       if (!uppers.length) return false;
       let fixed = 0;
       uppers.forEach((up) => {
-        // Elbow reference: forearm bone (same side) ya upper ka pehla bone-child
-        const sideHint = /left|_l\b|\.l\b|l_/i.test(up.name) ? 1 : /right|_r\b|\.r\b|r_/i.test(up.name) ? -1 : 0;
+        // Elbow reference: SAME-SIDE forearm (doosre side ka pakda to haath tootega!)
+        const nm = up.name.toLowerCase();
+        const side = /left/.test(nm) ? 'L' : /right/.test(nm) ? 'R' : '?';
         const fore = fores.find((f) => {
+          const fn = f.name.toLowerCase();
+          if (side === 'L' && !/left/.test(fn)) return false;
+          if (side === 'R' && !/right/.test(fn)) return false;
           const a = up.getWorldPosition(new THREE.Vector3());
           const b = f.getWorldPosition(new THREE.Vector3());
           return a.distanceTo(b) < 1.5;
@@ -155,8 +161,8 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         curDir.normalize();
         // Sirf tab fix karo jab haath waqai faila ho (sideways), nahi to chhedo mat
         if (Math.abs(curDir.y) > 0.55) return;
-        // Bahar ki taraf = haath abhi jis side faila hai usi ka sign (left/right naam par bharosa nahi)
-        const out = Math.sign(curDir.x) || (sideHint !== 0 ? sideHint : 1);
+        // Bahar ki taraf = haath abhi jis side faila hai usi ka sign
+        const out = Math.sign(curDir.x) || 1;
         aimBone(up, curDir, new THREE.Vector3(out * 0.14, -1, 0.04));
         // Kohni me halka mod (natural look)
         const wristObj = (fore as THREE.Object3D).children.find((c) => (c as THREE.Bone).isBone);
@@ -202,6 +208,11 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
           else if (n === 'rightarm') upR = o;
           else if (!foreL && n.startsWith('leftforearm')) foreL = o;
           else if (!foreR && n.startsWith('rightforearm')) foreR = o;
+        });
+        model.traverse((o) => {
+          const n = o.name.toLowerCase();
+          if (n === 'lefthand') handL = o;
+          else if (n === 'righthand') handR = o;
         });
         [upL, upR, foreL, foreR].forEach((b) => { if (b) baseQ.set(b, b.quaternion.clone()); });
         console.log('[FridayModel3D] action rig:', { upL: !!upL, upR: !!upR, foreL: !!foreL, foreR: !!foreR });
@@ -345,29 +356,37 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         modelRoot.rotation.x = 0;
         if (clearTimer) { clearTimeout(clearTimer); clearTimer = null; }
         if (act === 'namaste' || act === 'think') {
-          // Static pose — world-space aim, kisi bhi rig par kaam karega
+          // Static pose — Node harness me nape hue numbers (hand dist 0.047 = haath milte hain!)
           try {
             modelRoot.updateMatrixWorld(true);
-            const chest = modelRoot.localToWorld(new THREE.Vector3(0, 1.32, 0.3));
-            const faceP = modelRoot.localToWorld(new THREE.Vector3(0, 1.52, 0.32));
-            const aimArm = (up: THREE.Object3D | null, fore: THREE.Object3D | null, mirror: 1 | -1) => {
+            const chestP = modelRoot.localToWorld(new THREE.Vector3(0, 1.34, 0.26));
+            const aimArm = (up: THREE.Object3D | null, fore: THREE.Object3D | null, hand: THREE.Object3D | null, mirror: 1 | -1, foreTarget: THREE.Vector3) => {
               if (!up || !fore) return;
               const sP = up.getWorldPosition(new THREE.Vector3());
               const eP = fore.getWorldPosition(new THREE.Vector3());
               const toElbow = eP.clone().sub(sP);
               if (toElbow.length() < 1e-4) return;
-              aimBone(up, toElbow.normalize(), chest.clone().sub(sP).normalize());
+              // Kohni bahar-neeche (natural flare), haath target par
+              const upT = modelRoot.localToWorld(new THREE.Vector3(0.28 * mirror, 0.9, 0.15));
+              aimBone(up, toElbow.normalize(), upT.sub(sP).normalize());
               fore.updateMatrixWorld(true);
               const eP2 = fore.getWorldPosition(new THREE.Vector3());
-              const headW = headBone && headBone !== modelRoot ? headBone.getWorldPosition(new THREE.Vector3()) : faceP.clone();
-              const target = act === 'namaste' ? faceP.clone() : headW.add(new THREE.Vector3(0.12 * mirror, 0.02, 0.16));
-              const wrist = fore.children.find((c) => (c as THREE.Bone).isBone);
-              const wP = wrist ? wrist.getWorldPosition(new THREE.Vector3()) : eP2.clone().add(new THREE.Vector3(0, -0.25, 0));
-              const fDir = wP.sub(eP2);
-              if (fDir.length() > 1e-4) aimBone(fore, fDir.normalize(), target.sub(eP2).normalize());
+              // End-effector = HAATH (tabhi dono haath milenge)
+              const hP = hand ? hand.getWorldPosition(new THREE.Vector3()) : eP2.clone().add(new THREE.Vector3(0, -0.25, 0));
+              const fDir = hP.sub(eP2);
+              if (fDir.length() > 1e-4) aimBone(fore, fDir.normalize(), foreTarget.clone().sub(eP2).normalize());
             };
-            if (act === 'namaste') { aimArm(upL, foreL, 1); aimArm(upR, foreR, -1); }
-            else { aimArm(upR, foreR, -1); } // think: right hand sir ki taraf
+            if (act === 'namaste') {
+              aimArm(upL, foreL, handL, 1, chestP);
+              aimArm(upR, foreR, handR, -1, chestP);
+            } else {
+              // think: right hand sir ki taraf (temple)
+              const headW = headBone && headBone !== modelRoot
+                ? headBone.getWorldPosition(new THREE.Vector3())
+                : modelRoot.localToWorld(new THREE.Vector3(0, 1.8, 0));
+              headW.add(new THREE.Vector3(-0.12, 0.02, 0.16));
+              aimArm(upR, foreR, handR, -1, headW);
+            }
           } catch (e) { console.warn('[FridayModel3D] pose failed', e); }
         }
         prevAction = act;
