@@ -4106,7 +4106,8 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                     )}
                 </AnimatePresence>
 
-                <div className="flex-1 flex flex-col items-center justify-start gap-1 overflow-hidden relative z-10 pt-1">
+                {/* pointer-events-none taaki neeche fullscreen model/slider tak touch pahunche */}
+                <div className="flex-1 flex flex-col items-center justify-start gap-1 overflow-hidden relative z-10 pt-1 pointer-events-none">
                     <div className="text-center">
                         <span className="text-2xl md:text-3xl font-extrabold bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent tracking-wide">
                             Welcome
@@ -4170,7 +4171,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                                 initial={{ opacity: 0, scale: 0.92, y: 8 }}
                                 animate={{ opacity: 1, scale: 1, y: 0 }}
                                 exit={{ opacity: 0, scale: 0.92, y: 8 }}
-                                className="relative z-20 flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-gradient-to-r from-red-950/80 via-purple-950/70 to-slate-900/90 border border-red-500/40 text-xs shadow-[0_0_20px_rgba(239,68,68,0.25)] backdrop-blur-md max-w-sm w-full cursor-pointer hover:border-red-400 transition-all select-none"
+                                className="relative z-20 pointer-events-auto flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-gradient-to-r from-red-950/80 via-purple-950/70 to-slate-900/90 border border-red-500/40 text-xs shadow-[0_0_20px_rgba(239,68,68,0.25)] backdrop-blur-md max-w-sm w-full cursor-pointer hover:border-red-400 transition-all select-none"
                                 onClick={() => setIsMusicPlayerExpanded(true)}
                                 title="Click title to open full music player"
                             >
@@ -4285,7 +4286,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                     )}
 
                     {selectedImages.length > 0 && (
-                        <div className="flex gap-2 flex-wrap justify-center">
+                        <div className="flex gap-2 flex-wrap justify-center pointer-events-auto">
                             {selectedImages.map(img => (
                                 <div key={img.id} className="relative">
                                     <img
