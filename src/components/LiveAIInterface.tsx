@@ -4148,11 +4148,15 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                         </AnimatePresence>
                     </div>
 
-                    <FridayModel3D status={status} volume={volume} reaction={faceReaction} height={310} onTap={handleFaceDoubleTap} action={avatarAction} onActionDone={() => setAvatarAction(null)} />
-                    <p className="text-slate-300 text-sm font-medium">{status}</p>
+                    <p className="text-slate-300 text-sm font-medium relative z-20">{status}</p>
+
+                    {/* Model canvas neeche buttons tak badhta hai — pair buttons ke PEECHE */}
+                    <div className="relative z-0" style={{ marginBottom: -120 }}>
+                        <FridayModel3D status={status} volume={volume} reaction={faceReaction} height={310} onTap={handleFaceDoubleTap} action={avatarAction} onActionDone={() => setAvatarAction(null)} />
+                    </div>
 
                     {!isRecording && wakeWordActive && (
-                        <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-xs text-cyan-300 shadow-[0_0_15px_rgba(6,182,212,0.15)] animate-pulse">
+                        <div className="relative z-20 flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-xs text-cyan-300 shadow-[0_0_15px_rgba(6,182,212,0.15)] animate-pulse">
                             <span className="w-2 h-2 rounded-full bg-cyan-400" />
                             <span>Say <b>"Hello Friday"</b> to start session</span>
                         </div>
@@ -4165,7 +4169,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                                 initial={{ opacity: 0, scale: 0.92, y: 8 }}
                                 animate={{ opacity: 1, scale: 1, y: 0 }}
                                 exit={{ opacity: 0, scale: 0.92, y: 8 }}
-                                className="flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-gradient-to-r from-red-950/80 via-purple-950/70 to-slate-900/90 border border-red-500/40 text-xs shadow-[0_0_20px_rgba(239,68,68,0.25)] backdrop-blur-md max-w-sm w-full cursor-pointer hover:border-red-400 transition-all select-none"
+                                className="relative z-20 flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-gradient-to-r from-red-950/80 via-purple-950/70 to-slate-900/90 border border-red-500/40 text-xs shadow-[0_0_20px_rgba(239,68,68,0.25)] backdrop-blur-md max-w-sm w-full cursor-pointer hover:border-red-400 transition-all select-none"
                                 onClick={() => setIsMusicPlayerExpanded(true)}
                                 title="Click title to open full music player"
                             >
@@ -4299,7 +4303,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                     )}
                 </div>
 
-                <div className="flex items-center justify-center gap-4 w-full pb-6">
+                <div className="relative z-20 flex items-center justify-center gap-4 w-full pb-6">
                     <button
                         onClick={() => fileInputRef.current?.click()}
                         className="p-3 rounded-full bg-slate-800/80 border border-slate-600 text-white hover:bg-slate-700 transition-colors"
