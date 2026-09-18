@@ -708,22 +708,22 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         upR.quaternion.copy(baseQ.get(upR)!)
           .multiply(tmpQ.setFromAxisAngle(X_AXIS, -1.31 * raiseSmooth)); // 75° sideways OUT
 
-        // ── Forearm: 75° elbow bend + palm faces FRONT (+Z) ──
-        // X-axis: elbow bend (arm comes up)
-        // Y-axis: supination — rotates palm from -X to face +Z (toward viewer)
+        // ── Forearm: ONLY elbow bend on X — no Y twist (elbow joint clean) ──
+        // Keeping forearm rotation pure X avoids "broken elbow" look
         foreR.quaternion.copy(baseQ.get(foreR)!)
-          .multiply(tmpQ.setFromAxisAngle(X_AXIS, -1.31 * raiseSmooth))   // 75° elbow bend
-          .multiply(tmpQ.setFromAxisAngle(Y_WAVE, 1.57 * raiseSmooth));   // palm → +Z front
+          .multiply(tmpQ.setFromAxisAngle(X_AXIS, -0.95 * raiseSmooth)); // ~55° elbow bend only
 
-        // ── Forearm waves: Y-axis left-right oscillation ──
-        const waveOsc = Math.sin(t * 5.5) * 0.55 * raiseSmooth;
-        foreR.quaternion.multiply(tmpQ.setFromAxisAngle(Y_WAVE, waveOsc));
-
-        // ── Wrist: Z-axis adds extra wave personality ──
+        // ── Hand/Wrist: palm faces front + wave oscillation ──
+        // Palm orientation goes on HAND bone — keeps elbow joint natural
         if (handR && baseQ.has(handR)) {
           handR.quaternion.copy(baseQ.get(handR)!)
-            .multiply(tmpQ.setFromAxisAngle(Z_WAVE, Math.sin(t * 5.5 + 0.5) * 0.3 * raiseSmooth));
+            .multiply(tmpQ.setFromAxisAngle(Y_WAVE,  1.57 * raiseSmooth))  // palm → +Z front
+            .multiply(tmpQ.setFromAxisAngle(Z_WAVE, Math.sin(t * 5.5 + 0.5) * 0.35 * raiseSmooth)); // wave flip
         }
+
+        // ── Forearm waves: Y-axis left-right oscillation ──
+        const waveOsc = Math.sin(t * 5.5) * 0.45 * raiseSmooth;
+        foreR.quaternion.multiply(tmpQ.setFromAxisAngle(Y_WAVE, waveOsc));
 
         // Body lean slightly toward wave side
         modelRoot.rotation.z = -0.04 * raiseSmooth;
