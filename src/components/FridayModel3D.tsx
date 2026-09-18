@@ -404,8 +404,9 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
               const fDir = hP.sub(eP2);
               if (fDir.length() > 1e-4) aimBone(fore, fDir.normalize(), foreTarget.clone().sub(eP2).normalize());
             };
-            const namUpL = modelRoot.localToWorld(new THREE.Vector3(0.28, 0.9, 0.15));
-            const namUpR = modelRoot.localToWorld(new THREE.Vector3(-0.28, 0.9, 0.15));
+            // Harness-verified: kohni (±0.19) andar, haath (±0.04, gap 8.8cm) = hatheli touch!
+            const namUpL = modelRoot.localToWorld(new THREE.Vector3(0.18, 0.9, 0.15));
+            const namUpR = modelRoot.localToWorld(new THREE.Vector3(-0.18, 0.9, 0.15));
             if (act === 'namaste') {
               aimArm(upL, foreL, handL, namUpL, chestL);
               aimArm(upR, foreR, handR, namUpR, chestR);
