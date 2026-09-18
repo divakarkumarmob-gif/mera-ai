@@ -60,6 +60,9 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
   // ── Drag-to-move: model pakad kar kahin bhi ghaseeto (position yaad rahegi) ──
   const dragRef = useRef<{ x: number; y: number }>(loadDragPos());
   const dragState = useRef({ on: false, sx: 0, sy: 0, ox: 0, oy: 0 });
+  // TEMP calibration readout (lock ke baad हटेगा)
+  const [, setCalibTick] = useState(0);
+  const [copied, setCopied] = useState(false);
   const savePos = () => {
     try { localStorage.setItem('friday-model-pos-v1', JSON.stringify(dragRef.current)); } catch { /* noop */ }
   };
@@ -115,6 +118,23 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
     if (!dragState.current.on) return;
     dragState.current.on = false;
     savePos();
+    setCalibTick((t) => t + 1);
+  };
+  // TEMP: coordinates copy karo aur bhej do — lock kar dunga
+  const calibText = `zoom=${zoom.toFixed(2)} x=${dragRef.current.x.toFixed(2)} y=${dragRef.current.y.toFixed(2)}`;
+  const copyCalib = async () => {
+    try {
+      await navigator.clipboard.writeText(calibText);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = calibText;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
   };
 
   useEffect(() => {
@@ -186,17 +206,17 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
     rim.position.set(0, 2.5, -3);
     scene.add(rim);
 
-    // Soft floor glow disc
-    const disc = new THREE.Mesh(
-      new THREE.CircleGeometry(0.9, 48),
-      new THREE.MeshBasicMaterial({ color: 0x1d4ed8, transparent: true, opacity: 0.35 })
-    );
-    disc.rotation.x = -Math.PI / 2;
-    disc.position.y = 0.01;
-    scene.add(disc);
-
     const modelRoot = new THREE.Group();
     scene.add(modelRoot);
+
+    // Soft floor glow disc — modelRoot ka hissa (pairon ke neeche chipka, drag ke saath chalega)
+    const disc = new THREE.Mesh(
+      new THREE.CircleGeometry(0.7, 48),
+      new THREE.MeshBasicMaterial({ color: 0x1d4ed8, transparent: true, opacity: 0.4 })
+    );
+    disc.rotation.x = -Math.PI / 2;
+    disc.position.y = 0.02;
+    modelRoot.add(disc);
 
     const clock = new THREE.Clock();
     let blinkTimer = 2;
@@ -779,6 +799,23 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
             cursor: 'ns-resize',
           }}
         />
+      </div>
+      {/* TEMP position box — copy karke bhejo, lock kar dunga */}
+      <div
+        className="absolute left-2 z-20 flex items-center gap-2 bg-slate-900/80 backdrop-blur-md border border-cyan-500/30 rounded-lg px-2 py-1"
+        style={{ bottom: fluid ? 112 : 8 }}
+        onClick={(e) => e.stopPropagation()}
+        onDoubleClick={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        <span className="text-[10px] font-mono text-cyan-200 select-all">{calibText}</span>
+        <button
+          onClick={copyCalib}
+          className="text-[10px] font-bold px-2 py-0.5 rounded bg-cyan-500/30 hover:bg-cyan-500/50 text-cyan-100 border border-cyan-400/40 active:scale-95 transition-all"
+          title="Copy coordinates"
+        >
+          {copied ? '✓' : 'Copy'}
+        </button>
       </div>
       {isSpeaking && (
         <div className={`absolute flex items-end gap-1 pointer-events-none ${fluid ? 'bottom-28' : '-bottom-1'}`}>
