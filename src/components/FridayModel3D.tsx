@@ -709,9 +709,9 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
           .multiply(tmpQ.setFromAxisAngle(X_AXIS, -1.31 * raiseSmooth)); // 75° sideways OUT
 
         // ── Forearm: ONLY elbow bend on X — no Y twist (elbow joint clean) ──
-        // Keeping forearm rotation pure X avoids "broken elbow" look
+        // Elbow joint angle = 75° (1.31 rad) between upper arm and forearm
         foreR.quaternion.copy(baseQ.get(foreR)!)
-          .multiply(tmpQ.setFromAxisAngle(X_AXIS, -0.95 * raiseSmooth)); // ~55° elbow bend only
+          .multiply(tmpQ.setFromAxisAngle(X_AXIS, -1.31 * raiseSmooth)); // 75° elbow joint angle
 
         // ── Hand/Wrist: palm faces front + wave oscillation ──
         // Palm orientation goes on HAND bone — keeps elbow joint natural
