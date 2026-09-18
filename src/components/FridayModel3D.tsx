@@ -726,11 +726,7 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
 
         // Body lean slightly toward wave side
         modelRoot.rotation.z = -0.04 * raiseSmooth;
-        // Head: look forward, friendly nod
-        if (headBone && headBone !== modelRoot) {
-          headBone.rotation.y += 0.07 * raiseSmooth;
-          headBone.rotation.x += Math.sin(t * 2.5) * 0.03 * raiseSmooth;
-        }
+        // Head stays straight — natural wave posture
 
       } else if (act === 'namaste') {
         // ── NAMASTE: Bone-by-bone direct local rotation (NO IK) ──
