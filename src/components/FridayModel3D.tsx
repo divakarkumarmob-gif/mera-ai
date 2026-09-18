@@ -734,55 +734,111 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         }
 
       } else if (act === 'namaste') {
-        // ── Natural Pranam/Namaste: gradual hands-together + forward bow + head tilt ──
-        const poseP = Math.min(actT / 0.8, 1); // 0.8s to reach full pose
-        const poseSmooth = poseP * poseP * (3 - 2 * poseP);
-        // Forward bow (respectful lean)
-        modelRoot.rotation.x = 0.12 * poseSmooth;
-        // Slight weight shift
-        modelRoot.position.y += -0.02 * poseSmooth;
+        // ── NAMASTE: Bone-by-bone direct local rotation (NO IK) ──
+        // Direct quaternion on each bone's LOCAL axis — predictable, anatomically correct
+        const poseP = Math.min(actT / 0.9, 1);
+        const ps = poseP * poseP * (3 - 2 * poseP); // smoothstep
+
+        // Body: slight respectful forward bow
+        modelRoot.rotation.x = 0.08 * ps;
+
+        // Helper: slerp from base to target quaternion
+        const applyRot = (bone: THREE.Object3D | null, axis: THREE.Vector3, angleRad: number) => {
+          if (!bone || !baseQ.has(bone)) return;
+          const target = baseQ.get(bone)!.clone()
+            .multiply(tmpQ.setFromAxisAngle(axis, angleRad));
+          bone.quaternion.copy(baseQ.get(bone)!).slerp(target, ps);
+        };
+
+        // ── Local axis constants ──
+        const LX = new THREE.Vector3(1, 0, 0);
+        const LY = new THREE.Vector3(0, 1, 0);
+        const LZ = new THREE.Vector3(0, 0, 1);
+
+        // ── RIGHT ARM (mirror of left) ──
+        // RIGHT UpperArm:
+        //   Z-axis: adduction — arm moves INWARD toward center chest (negative Z = right arm toward center)
+        //   X-axis: slight forward raise so elbow doesn't go backward
+        //   Result: upper arm ~45° inward, ~30° forward
+        if (upR && baseQ.has(upR)) {
+          const target = baseQ.get(upR)!.clone()
+            .multiply(new THREE.Quaternion().setFromAxisAngle(LZ, -0.72)) // ~-41° inward adduction
+            .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.52)) // ~-30° forward raise
+            .multiply(new THREE.Quaternion().setFromAxisAngle(LY,  0.20)); // slight inward roll
+          upR.quaternion.copy(baseQ.get(upR)!).slerp(target, ps);
+        }
+
+        // RIGHT ForeArm:
+        //   X-axis: elbow flexion ~95° (forearm bends toward chest)
+        //   Y-axis: slight supination so palm faces partner's palm
+        if (foreR && baseQ.has(foreR)) {
+          const target = baseQ.get(foreR)!.clone()
+            .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -1.65)) // ~-95° elbow flex
+            .multiply(new THREE.Quaternion().setFromAxisAngle(LY, -0.25)); // palm faces inward
+          foreR.quaternion.copy(baseQ.get(foreR)!).slerp(target, ps);
+        }
+
+        // RIGHT Hand/Wrist:
+        //   X-axis: wrist slight extension (fingers point upward)
+        //   Z-axis: slight inward tilt so palms face perfectly together
+        if (handR && baseQ.has(handR)) {
+          const target = baseQ.get(handR)!.clone()
+            .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.20)) // wrist slight up
+            .multiply(new THREE.Quaternion().setFromAxisAngle(LZ,  0.12)); // palm face correction
+          handR.quaternion.copy(baseQ.get(handR)!).slerp(target, ps);
+        }
+
+        // ── LEFT ARM (symmetric — all Z signs flipped) ──
+        // LEFT UpperArm:
+        //   Z-axis: adduction inward (positive Z = left arm toward center)
+        //   X-axis: same forward raise
+        if (upL && baseQ.has(upL)) {
+          const target = baseQ.get(upL)!.clone()
+            .multiply(new THREE.Quaternion().setFromAxisAngle(LZ,  0.72)) // +41° inward adduction
+            .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.52)) // -30° forward raise
+            .multiply(new THREE.Quaternion().setFromAxisAngle(LY, -0.20)); // mirror roll
+          upL.quaternion.copy(baseQ.get(upL)!).slerp(target, ps);
+        }
+
+        // LEFT ForeArm:
+        if (foreL && baseQ.has(foreL)) {
+          const target = baseQ.get(foreL)!.clone()
+            .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -1.65)) // ~-95° elbow flex
+            .multiply(new THREE.Quaternion().setFromAxisAngle(LY,  0.25)); // mirror supination
+          foreL.quaternion.copy(baseQ.get(foreL)!).slerp(target, ps);
+        }
+
+        // LEFT Hand/Wrist:
+        if (handL && baseQ.has(handL)) {
+          const target = baseQ.get(handL)!.clone()
+            .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.20))
+            .multiply(new THREE.Quaternion().setFromAxisAngle(LZ, -0.12)); // mirror
+          handL.quaternion.copy(baseQ.get(handL)!).slerp(target, ps);
+        }
+
+        // ── FINGERS: extended with very slight curl (natural, not rigid) ──
+        // Find and apply to all finger bones
         try {
-          modelRoot.updateMatrixWorld(true);
-          const Z_AXIS = new THREE.Vector3(0, 0, 1);
-          // Hands converge to chest center (namaste position)
-          const chestL = modelRoot.localToWorld(new THREE.Vector3(0.035, 1.35, 0.27));
-          const chestR = modelRoot.localToWorld(new THREE.Vector3(-0.035, 1.35, 0.27));
-          const namUpL = modelRoot.localToWorld(new THREE.Vector3(0.16, 0.95, 0.18));
-          const namUpR = modelRoot.localToWorld(new THREE.Vector3(-0.16, 0.95, 0.18));
-          const aimArm = (up: THREE.Object3D | null, fore: THREE.Object3D | null, hand: THREE.Object3D | null, upTarget: THREE.Vector3, foreTarget: THREE.Vector3) => {
-            if (!up || !fore) return;
-            const sP = up.getWorldPosition(new THREE.Vector3());
-            const eP = fore.getWorldPosition(new THREE.Vector3());
-            const toElbow = eP.clone().sub(sP);
-            if (toElbow.length() < 1e-4) return;
-            aimBone(up, toElbow.normalize(), upTarget.sub(sP).normalize());
-            fore.updateMatrixWorld(true);
-            const eP2 = fore.getWorldPosition(new THREE.Vector3());
-            const hP = hand ? hand.getWorldPosition(new THREE.Vector3()) : eP2.clone().add(new THREE.Vector3(0, -0.25, 0));
-            const fDir = hP.sub(eP2);
-            if (fDir.length() > 1e-4) aimBone(fore, fDir.normalize(), foreTarget.clone().sub(eP2).normalize());
-          };
-          // Blend from rest to namaste pose smoothly
-          if (poseSmooth > 0.1) {
-            aimArm(upL, foreL, handL, namUpL, chestL);
-            aimArm(upR, foreR, handR, namUpR, chestR);
-          // Namaste: IK already places hands at chest — NO wrist Z rotation (causes unnatural twist)
-          }
-          // Blend arms with rest pose (for smooth transition)
-          if (poseSmooth < 1) {
-            [upL, upR, foreL, foreR].forEach((b) => {
-              if (b && baseQ.has(b)) {
-                b.quaternion.slerp(b.quaternion.clone(), poseSmooth);
-              }
-            });
-          }
-        } catch (e) { console.warn('[FridayModel3D] namaste pose failed', e); }
-        // Head: respectful downward tilt
+          const fingerPat = /^(left|right)(index|middle|ring|pinky|thumb)(\d|proximal|intermediate|distal)/i;
+          modelRoot.traverse((o) => {
+            if (!(o as THREE.Bone).isBone || !baseQ.has(o)) return;
+            if (!fingerPat.test(o.name)) return;
+            if (/metacarpal/i.test(o.name)) return;
+            const isThumb = /thumb/i.test(o.name);
+            const isDistal = /distal|3$/i.test(o.name);
+            // Namaste: fingers mostly extended (less curl than resting pose)
+            // but slight natural curve — not perfectly flat
+            const extendAmt = isThumb ? -0.05 : isDistal ? -0.08 : -0.06;
+            const target = baseQ.get(o)!.clone()
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, extendAmt));
+            o.quaternion.copy(baseQ.get(o)!).slerp(target, ps);
+          });
+        } catch (_) { /* finger extension optional */ }
+
+        // Head: respectful bow — look slightly downward, gentle sway
         if (headBone && headBone !== modelRoot) {
-          headBone.rotation.x += 0.15 * poseSmooth; // look down
-          headBone.rotation.z += 0.03 * poseSmooth; // slight tilt
-          // Gentle sway while holding namaste
-          headBone.rotation.y += Math.sin(t * 0.8) * 0.03 * poseSmooth;
+          headBone.rotation.x += 0.18 * ps;
+          headBone.rotation.y += Math.sin(t * 0.7) * 0.025 * ps;
         }
 
       } else if (act === 'think') {
