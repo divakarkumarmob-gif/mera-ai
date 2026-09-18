@@ -99,6 +99,16 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         model.scale.setScalar(s);
         modelRoot.add(model);
 
+        // Camera auto-fit: poora model (sir + haath) frame me aaye — chahe T-pose ho ya slim
+        const scaledY = size.y * s;
+        const scaledX = size.x * s;
+        const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
+        const fitH = (scaledY / 2) / Math.tan(halfFov);
+        const fitW = (scaledX / 2) / (Math.tan(halfFov) * Math.max(camera.aspect, 0.3));
+        const fitDist = Math.max(fitH, fitW) * 1.3;
+        camera.position.set(0, scaledY * 0.55, fitDist);
+        camera.lookAt(0, scaledY * 0.48, 0);
+
         // Animations: idle wali clip chalao
         if (animations.length > 0) {
           mixer = new THREE.AnimationMixer(model);
