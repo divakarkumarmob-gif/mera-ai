@@ -285,9 +285,14 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
     tryLoad(0);
 
     const onMouse = (e: MouseEvent) => {
+      // BUG FIX: poori window par mouse track hota hai — canvas se bahar mouse jaane par
+      // value 10x tak jump karke model ko profile/back me ghuma deti thi! Clamp zaroori.
       const r = mount.getBoundingClientRect();
-      mouseRef.current.x = ((e.clientX - r.left) / r.width - 0.5) * 2;
-      mouseRef.current.y = ((e.clientY - r.top) / r.height - 0.5) * 2;
+      if (r.width < 1) return;
+      const cx = THREE.MathUtils.clamp(((e.clientX - r.left) / r.width - 0.5) * 2, -1, 1);
+      const cy = THREE.MathUtils.clamp(((e.clientY - r.top) / r.height - 0.5) * 2, -1, 1);
+      mouseRef.current.x = cx * 0.5;
+      mouseRef.current.y = cy * 0.5;
     };
     window.addEventListener('mousemove', onMouse);
 
@@ -295,6 +300,7 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
     let jawOpen = 0;
     const tmpQ = new THREE.Quaternion();
     const X_AXIS = new THREE.Vector3(1, 0, 0);
+    let actionWarned = false;
     let clearTimer: ReturnType<typeof setTimeout> | null = null;
 
     const animate = () => {
@@ -342,12 +348,17 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         headBone.rotation.y = lerp(headBone.rotation.y, m.x * 0.35 + (thinking ? Math.sin(t * 1.6) * 0.2 : 0), 0.08);
         headBone.rotation.x = lerp(headBone.rotation.x, m.y * 0.18 + (listening ? -0.1 : 0) + (speaking ? Math.sin(t * 13) * 0.03 * Math.min(1, volume * 4) : 0), 0.08);
         headBone.rotation.z = lerp(headBone.rotation.z, thinking ? 0.12 : 0, 0.06);
+        // Safety clamp: sir kabhi profile/exorcist mode me na jaaye
+        headBone.rotation.x = THREE.MathUtils.clamp(headBone.rotation.x, -0.35, 0.35);
+        headBone.rotation.y = THREE.MathUtils.clamp(headBone.rotation.y, -0.45, 0.45);
+        headBone.rotation.z = THREE.MathUtils.clamp(headBone.rotation.z, -0.3, 0.3);
       } else {
         // Bones na mile to poore model par subtle motion
         modelRoot.rotation.x = m.y * 0.06;
       }
 
       // ── Avatar body actions: dance / namaste / think / wave / bow / nod ──
+      try {
       const rawAct: AvatarAction = stateRef.current.action ?? localRef.current;
       const act = rawAct === 'stop' ? null : rawAct;
       if (act !== prevAction) {
@@ -359,33 +370,33 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
           // Static pose — Node harness me nape hue numbers (hand dist 0.047 = haath milte hain!)
           try {
             modelRoot.updateMatrixWorld(true);
+            // Harness-verified targets (Node me asli FBX par nape hue):
+            // namaste: haath seene-par milte hain (gap 4.7cm) | think: haath chin par (gap 3cm)
             const chestP = modelRoot.localToWorld(new THREE.Vector3(0, 1.34, 0.26));
-            const aimArm = (up: THREE.Object3D | null, fore: THREE.Object3D | null, hand: THREE.Object3D | null, mirror: 1 | -1, foreTarget: THREE.Vector3) => {
+            const chinP = modelRoot.localToWorld(new THREE.Vector3(0, 1.68, 0.15));
+            const aimArm = (up: THREE.Object3D | null, fore: THREE.Object3D | null, hand: THREE.Object3D | null, upTarget: THREE.Vector3, foreTarget: THREE.Vector3) => {
               if (!up || !fore) return;
               const sP = up.getWorldPosition(new THREE.Vector3());
               const eP = fore.getWorldPosition(new THREE.Vector3());
               const toElbow = eP.clone().sub(sP);
               if (toElbow.length() < 1e-4) return;
-              // Kohni bahar-neeche (natural flare), haath target par
-              const upT = modelRoot.localToWorld(new THREE.Vector3(0.28 * mirror, 0.9, 0.15));
-              aimBone(up, toElbow.normalize(), upT.sub(sP).normalize());
+              aimBone(up, toElbow.normalize(), upTarget.sub(sP).normalize());
               fore.updateMatrixWorld(true);
               const eP2 = fore.getWorldPosition(new THREE.Vector3());
-              // End-effector = HAATH (tabhi dono haath milenge)
+              // End-effector = HAATH (tabhi haath target par pahunchega)
               const hP = hand ? hand.getWorldPosition(new THREE.Vector3()) : eP2.clone().add(new THREE.Vector3(0, -0.25, 0));
               const fDir = hP.sub(eP2);
               if (fDir.length() > 1e-4) aimBone(fore, fDir.normalize(), foreTarget.clone().sub(eP2).normalize());
             };
+            const namUpL = modelRoot.localToWorld(new THREE.Vector3(0.28, 0.9, 0.15));
+            const namUpR = modelRoot.localToWorld(new THREE.Vector3(-0.28, 0.9, 0.15));
             if (act === 'namaste') {
-              aimArm(upL, foreL, handL, 1, chestP);
-              aimArm(upR, foreR, handR, -1, chestP);
+              aimArm(upL, foreL, handL, namUpL, chestP);
+              aimArm(upR, foreR, handR, namUpR, chestP);
             } else {
-              // think: right hand sir ki taraf (temple)
-              const headW = headBone && headBone !== modelRoot
-                ? headBone.getWorldPosition(new THREE.Vector3())
-                : modelRoot.localToWorld(new THREE.Vector3(0, 1.8, 0));
-              headW.add(new THREE.Vector3(-0.12, 0.02, 0.16));
-              aimArm(upR, foreR, handR, -1, headW);
+              // think: kohni upar, right hand chin par
+              const thinkUpR = modelRoot.localToWorld(new THREE.Vector3(-0.15, 1.3, 0.2));
+              aimArm(upR, foreR, handR, thinkUpR, chinP);
             }
           } catch (e) { console.warn('[FridayModel3D] pose failed', e); }
         }
@@ -424,6 +435,17 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
       } else if (act === 'think' && headBone && headBone !== modelRoot) {
         headBone.rotation.z += 0.1;
         headBone.rotation.x += 0.05;
+      }
+      // Final safety: action overlays ke baad bhi sir limit me rahe
+      if (headBone && headBone !== modelRoot) {
+        headBone.rotation.x = THREE.MathUtils.clamp(headBone.rotation.x, -0.4, 0.4);
+        headBone.rotation.y = THREE.MathUtils.clamp(headBone.rotation.y, -0.5, 0.5);
+        headBone.rotation.z = THREE.MathUtils.clamp(headBone.rotation.z, -0.32, 0.32);
+      }
+      } catch (e) {
+        // Ek action fail = poora avatar freeze NAHO — bas base pose par wapas
+        if (!actionWarned) { actionWarned = true; console.warn('[FridayModel3D] action overlay failed, holding base pose', e); }
+        baseQ.forEach((q, b) => { try { b.quaternion.copy(q); } catch { /* noop */ } });
       }
 
       // Rim glow theme pulse
