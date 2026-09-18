@@ -288,7 +288,7 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         const fitW = (visW / 2) / (Math.tan(halfFov) * Math.max(camera.aspect, 0.3));
         const fitDist = Math.max(fitH, fitW) * 1.12;
         // Camera ko model ke center se UPAR point karo — model screen ke bottom pe dikhega
-        const camOffsetY = fullH * 0.40; // 40% upar = model niche khisak jaayega visually
+        const camOffsetY = fullH * 0.20; // 20% upar = model niche dikhega, pair visible
         camera.position.set(0, centerY + camOffsetY + 0.05, fitDist / LOCKED_ZOOM);
         camera.lookAt(0, centerY + camOffsetY, 0);
 
