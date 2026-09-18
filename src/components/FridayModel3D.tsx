@@ -28,9 +28,9 @@ interface FridayModel3DProps {
 // Koi file na mile to photo wala avatar fallback rahega.
 const MODEL_URLS = ['/friday.glb', '/friday.fbx'];
 
-// 🔒 LOCKED position (user-verified perfect): zoom=0.91 x=-0.03 y=-0.69
+// 🔒 LOCKED position: zoom=0.91 x=-0.03 y=-1.15 (model bottom pe khada — screen end tak)
 const LOCKED_ZOOM = 0.91;
-const LOCKED_POS = { x: -0.03, y: -0.69 };
+const LOCKED_POS = { x: -0.03, y: -1.15 };
 
 const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction, height = 340, onTap, action, onActionDone, fluid }) => {
   const mountRef = useRef<HTMLDivElement>(null);
