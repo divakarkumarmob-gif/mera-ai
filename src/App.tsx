@@ -3,6 +3,7 @@ import { motion } from 'motion/react';
 import LiveAIInterface from './components/LiveAIInterface';
 import AgentFace from './components/AgentFace';
 import FridayAvatar from './components/FridayAvatar';
+import FridayModel3D from './components/FridayModel3D';
 import AppKeyLockModal from './components/AppKeyLockModal';
 import IncomingCallScreen from './components/IncomingCallScreen';
 import StarryBackground from './components/StarryBackground';
@@ -188,7 +189,7 @@ export default function App() {
                 }}
                 className="cursor-pointer relative z-10 flex flex-col items-center group"
             >
-                <FridayAvatar status="" volume={0} height={300} />
+                <FridayModel3D status="" volume={0} height={300} />
                 <span className="mt-2 opacity-70"><AgentFace status="" volume={0} size={58} colorIndex={0} /></span>
             </motion.button>
             <div className="relative z-10 flex items-center gap-2 px-4 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-xs text-cyan-300 shadow-[0_0_20px_rgba(6,182,212,0.2)] animate-pulse">
