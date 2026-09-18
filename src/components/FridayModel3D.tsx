@@ -706,14 +706,14 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         // In this FBX rig, local -X = arm goes sideways/up (not Z!)
         // -1.4 rad = ~80° outward raise (elbow at ear height)
         upR.quaternion.copy(baseQ.get(upR)!)
-          .multiply(tmpQ.setFromAxisAngle(X_AXIS, -1.4 * raiseSmooth)); // sideways OUT
+          .multiply(tmpQ.setFromAxisAngle(X_AXIS, -1.31 * raiseSmooth)); // 75° sideways OUT
 
-        // ── Forearm: 90° elbow bend + palm faces FRONT (+Z) ──
+        // ── Forearm: 75° elbow bend + palm faces FRONT (+Z) ──
         // X-axis: elbow bend (arm comes up)
         // Y-axis: supination — rotates palm from -X to face +Z (toward viewer)
         foreR.quaternion.copy(baseQ.get(foreR)!)
-          .multiply(tmpQ.setFromAxisAngle(X_AXIS, -1.4 * raiseSmooth))   // elbow bend up
-          .multiply(tmpQ.setFromAxisAngle(Y_WAVE, 1.57 * raiseSmooth));  // palm → +Z front (corrected sign)
+          .multiply(tmpQ.setFromAxisAngle(X_AXIS, -1.31 * raiseSmooth))   // 75° elbow bend
+          .multiply(tmpQ.setFromAxisAngle(Y_WAVE, 1.57 * raiseSmooth));   // palm → +Z front
 
         // ── Forearm waves: Y-axis left-right oscillation ──
         const waveOsc = Math.sin(t * 5.5) * 0.55 * raiseSmooth;
