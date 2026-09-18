@@ -28,18 +28,9 @@ interface FridayModel3DProps {
 // Koi file na mile to photo wala avatar fallback rahega.
 const MODEL_URLS = ['/friday.glb', '/friday.fbx'];
 
-function loadDragPos(): { x: number; y: number } {
-  try {
-    const p = JSON.parse(localStorage.getItem('friday-model-pos-v1') || 'null');
-    if (p && typeof p.x === 'number' && typeof p.y === 'number') {
-      return {
-        x: THREE.MathUtils.clamp(p.x, -1.2, 1.2),
-        y: THREE.MathUtils.clamp(p.y, -1.0, 1.0),
-      };
-    }
-  } catch { /* noop */ }
-  return { x: 0, y: 0 };
-}
+// 🔒 LOCKED position (user-verified perfect): zoom=0.91 x=-0.03 y=-0.69
+const LOCKED_ZOOM = 0.91;
+const LOCKED_POS = { x: -0.03, y: -0.69 };
 
 const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction, height = 340, onTap, action, onActionDone, fluid }) => {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -49,33 +40,6 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
   doneRef.current = onActionDone;
   const mouseRef = useRef({ x: 0, y: 0 });
   const [modelMissing, setModelMissing] = useState(false);
-  // ── TEMP size slider (calibration): tum best size batao, mai lock kar dunga ──
-  const [zoom, setZoom] = useState<number>(() => {
-    // v2 key: full-body framing ke hisaab se fresh default (purana portrait wala zoom sir kaat-ta tha)
-    try { return Number(localStorage.getItem('friday-model-zoom-v2')) || 1; } catch { return 1; }
-  });
-  const zoomRef = useRef(zoom);
-  const camRef = useRef<THREE.PerspectiveCamera | null>(null);
-  const fitRef = useRef({ dist: 4, cy: 1 });
-  // ── Drag-to-move: model pakad kar kahin bhi ghaseeto (position yaad rahegi) ──
-  const dragRef = useRef<{ x: number; y: number }>(loadDragPos());
-  const dragState = useRef({ on: false, sx: 0, sy: 0, ox: 0, oy: 0 });
-  // TEMP calibration readout (lock ke baad हटेगा)
-  const [, setCalibTick] = useState(0);
-  const [copied, setCopied] = useState(false);
-  const savePos = () => {
-    try { localStorage.setItem('friday-model-pos-v1', JSON.stringify(dragRef.current)); } catch { /* noop */ }
-  };
-  const applyZoom = (z: number) => {
-    zoomRef.current = z;
-    setZoom(z);
-    try { localStorage.setItem('friday-model-zoom-v2', String(z)); } catch { /* noop */ }
-    const cam = camRef.current;
-    if (cam) {
-      cam.position.set(0, fitRef.current.cy + 0.05, fitRef.current.dist / z);
-      cam.lookAt(0, fitRef.current.cy, 0);
-    }
-  };
   // Manual override (console test / future buttons) — prop action se merge hota hai
   const [localAction, setLocalAction] = useState<AvatarAction>(null);
   const localRef = useRef<AvatarAction>(null);
@@ -96,46 +60,6 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
   }, []);
 
   const isSpeaking = status === 'Speaking...';
-
-  // Screen pixels -> 3D units (zoom ke hisaab se sensitivity auto)
-  const pxToUnits = () => {
-    const r = mountRef.current?.getBoundingClientRect();
-    if (!r || r.height < 1) return 0.005;
-    return (2 * fitRef.current.dist * Math.tan(THREE.MathUtils.degToRad(14))) / r.height;
-  };
-  const onDragStart = (e: React.PointerEvent) => {
-    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
-    dragState.current = { on: true, sx: e.clientX, sy: e.clientY, ox: dragRef.current.x, oy: dragRef.current.y };
-  };
-  const onDragMove = (e: React.PointerEvent) => {
-    const d = dragState.current;
-    if (!d.on) return;
-    const s = pxToUnits();
-    dragRef.current.x = THREE.MathUtils.clamp(d.ox + (e.clientX - d.sx) * s, -1.2, 1.2);
-    dragRef.current.y = THREE.MathUtils.clamp(d.oy - (e.clientY - d.sy) * s, -1.0, 1.0);
-  };
-  const onDragEnd = () => {
-    if (!dragState.current.on) return;
-    dragState.current.on = false;
-    savePos();
-    setCalibTick((t) => t + 1);
-  };
-  // TEMP: coordinates copy karo aur bhej do — lock kar dunga
-  const calibText = `zoom=${zoom.toFixed(2)} x=${dragRef.current.x.toFixed(2)} y=${dragRef.current.y.toFixed(2)}`;
-  const copyCalib = async () => {
-    try {
-      await navigator.clipboard.writeText(calibText);
-    } catch {
-      const ta = document.createElement('textarea');
-      ta.value = calibText;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-    }
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -184,7 +108,7 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
     const camera = new THREE.PerspectiveCamera(28, W / H, 0.1, 100);
     camera.position.set(0, 1.35, 3.4);
     camera.lookAt(0, 1.0, 0);
-    camRef.current = camera;
+
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(W, H);
@@ -363,8 +287,7 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         const fitH = (visH / 2) / Math.tan(halfFov);
         const fitW = (visW / 2) / (Math.tan(halfFov) * Math.max(camera.aspect, 0.3));
         const fitDist = Math.max(fitH, fitW) * 1.12;
-        fitRef.current = { dist: fitDist, cy: centerY };
-        camera.position.set(0, centerY + 0.05, fitDist / zoomRef.current);
+        camera.position.set(0, centerY + 0.05, fitDist / LOCKED_ZOOM);
         camera.lookAt(0, centerY, 0);
 
         // Animations: idle wali clip chalao
@@ -477,7 +400,7 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
       modelRoot.rotation.y = Math.sin(t * 0.4) * 0.06 + m.x * 0.3;
       modelRoot.position.y = (happy
         ? Math.abs(Math.sin(t * 2.6)) * 0.04
-        : Math.sin(t * 1.5) * 0.015) + dragRef.current.y;
+        : Math.sin(t * 1.5) * 0.015) + LOCKED_POS.y;
       if (headBone && headBone !== modelRoot.children[0]) {
         headBone.rotation.y = lerp(headBone.rotation.y, m.x * 0.35 + (thinking ? Math.sin(t * 1.6) * 0.2 : 0), 0.08);
         headBone.rotation.x = lerp(headBone.rotation.x, m.y * 0.18 + (listening ? -0.1 : 0) + (speaking ? Math.sin(t * 13) * 0.03 * Math.min(1, volume * 4) : 0), 0.08);
@@ -622,7 +545,7 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         if (upR && baseQ.has(upR)) upR.quaternion.copy(baseQ.get(upR)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, -breath * 0.035));
         // Wazan ek pair se doosre par — zinda khada!
         modelRoot.rotation.z = Math.sin(t * 0.33) * 0.022;
-        modelRoot.position.x = Math.sin(t * 0.23) * 0.02 + dragRef.current.x;
+        modelRoot.position.x = Math.sin(t * 0.23) * 0.02 + LOCKED_POS.x;
         // Kabhi-kabhi khud gardan ghuma kar dekho (mouse ke alava)
         glanceT -= dt;
         if (glanceT <= 0) {
@@ -736,7 +659,6 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
     return () => {
       disposed = true;
       cancelAnimationFrame(raf);
-      camRef.current = null;
       if (clearTimer) clearTimeout(clearTimer);
       window.removeEventListener('mousemove', onMouse);
       window.removeEventListener('resize', onResize);
@@ -765,58 +687,10 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
     >
       <div
         ref={mountRef}
-        onPointerDown={onDragStart}
-        onPointerMove={onDragMove}
-        onPointerUp={onDragEnd}
-        onPointerCancel={onDragEnd}
         style={fluid
-          ? { width: '100%', height: '100%', cursor: 'grab', touchAction: 'none' }
-          : { width: Math.round(height * 0.75), height, cursor: 'grab', touchAction: 'none' }}
+          ? { width: '100%', height: '100%' }
+          : { width: Math.round(height * 0.75), height }}
       />
-      {/* TEMP vertical size scale (right side, value ke saath) — best value batao, lock kar dunga */}
-      <div
-        className="absolute right-1 top-1/2 -translate-y-1/2 z-20 flex flex-col items-center justify-center gap-1"
-        style={{ width: 34, height: fluid ? 210 : Math.round(height * 0.62) }}
-        onClick={(e) => e.stopPropagation()}
-        onDoubleClick={(e) => e.stopPropagation()}
-        title="Model size (temporary)"
-      >
-        <span className="text-[10px] font-mono text-cyan-300 bg-slate-900/80 px-1.5 py-0.5 rounded border border-cyan-500/30">
-          {zoom.toFixed(2)}
-        </span>
-        <input
-          type="range"
-          min={0.5}
-          max={2.5}
-          step={0.01}
-          value={zoom}
-          onChange={(e) => applyZoom(Number(e.target.value))}
-          aria-label="Model size"
-          style={{
-            width: fluid ? 160 : Math.round(height * 0.5),
-            transform: 'rotate(-90deg)',
-            accentColor: '#38bdf8',
-            cursor: 'ns-resize',
-          }}
-        />
-      </div>
-      {/* TEMP position box — copy karke bhejo, lock kar dunga */}
-      <div
-        className="absolute left-2 z-20 flex items-center gap-2 bg-slate-900/80 backdrop-blur-md border border-cyan-500/30 rounded-lg px-2 py-1"
-        style={{ bottom: fluid ? 112 : 8 }}
-        onClick={(e) => e.stopPropagation()}
-        onDoubleClick={(e) => e.stopPropagation()}
-        onPointerDown={(e) => e.stopPropagation()}
-      >
-        <span className="text-[10px] font-mono text-cyan-200 select-all">{calibText}</span>
-        <button
-          onClick={copyCalib}
-          className="text-[10px] font-bold px-2 py-0.5 rounded bg-cyan-500/30 hover:bg-cyan-500/50 text-cyan-100 border border-cyan-400/40 active:scale-95 transition-all"
-          title="Copy coordinates"
-        >
-          {copied ? '✓' : 'Copy'}
-        </button>
-      </div>
       {isSpeaking && (
         <div className={`absolute flex items-end gap-1 pointer-events-none ${fluid ? 'bottom-28' : '-bottom-1'}`}>
           {[0.5, 0.9, 0.65, 1, 0.75, 0.55, 0.85].map((b, i) => (

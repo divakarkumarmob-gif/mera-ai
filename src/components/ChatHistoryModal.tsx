@@ -84,10 +84,10 @@ export default function ChatHistoryModal({ onClose }: { onClose: () => void }) {
                     initial={{ y: 40, opacity: 0 }}
                     animate={{ y: 0, opacity: 1 }}
                     exit={{ y: 40, opacity: 0 }}
-                    className="relative bg-[#0a0f24] border border-purple-500/30 rounded-3xl w-full max-w-md h-[70vh] flex flex-col overflow-hidden shadow-[0_0_50px_rgba(139,92,246,0.3)]"
+                    className="relative bg-slate-950/40 backdrop-blur-2xl border border-white/20 rounded-3xl w-full max-w-md h-[70vh] flex flex-col overflow-hidden shadow-[0_8px_50px_rgba(0,0,0,0.5),0_0_50px_rgba(139,92,246,0.25),inset_0_1px_0_rgba(255,255,255,0.15)]"
                     onClick={(e) => e.stopPropagation()}
                 >
-                    <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
+                    <div className="flex items-center justify-between px-5 py-4 border-b border-white/15 bg-white/5 backdrop-blur-xl">
                         <h2 className="text-white font-bold text-lg">Chat History</h2>
                         <div className="flex items-center gap-3">
                             <button
@@ -130,10 +130,10 @@ export default function ChatHistoryModal({ onClose }: { onClose: () => void }) {
                                 {messages.map((msg) => (
                                 <div
                                     key={msg.id}
-                                    className={`max-w-[85%] px-4 py-2 rounded-2xl text-sm leading-relaxed ${
+                                    className={`max-w-[85%] px-4 py-2 rounded-2xl text-sm leading-relaxed backdrop-blur-xl shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] ${
                                         msg.sender === 'ai'
-                                            ? 'bg-purple-500/15 border border-purple-500/20 text-slate-100 mr-auto'
-                                            : 'bg-blue-500/15 border border-blue-500/20 text-slate-100 ml-auto'
+                                            ? 'bg-purple-500/20 border border-purple-400/25 text-slate-100 mr-auto'
+                                            : 'bg-blue-500/20 border border-blue-400/25 text-slate-100 ml-auto'
                                     }`}
                                 >
                                     {msg.text}

@@ -3368,7 +3368,13 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
 
             <div className="w-full h-full flex flex-col flex-1 relative z-10" style={{ overflow: 'visible' }}>
                 {/* ── 🧍 Fullscreen 3D stage: poori screen khidki, model kahin nahi katega ── */}
-                <div className="absolute inset-0 z-0 pointer-events-none">
+                {/* ── Welcome (model ke PEECHE) ── */}
+                <div className="absolute inset-x-0 top-[24%] z-0 text-center pointer-events-none">
+                    <span className="text-2xl md:text-3xl font-extrabold bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent tracking-wide">
+                        Welcome
+                    </span>
+                </div>
+                <div className="absolute inset-0 z-[1] pointer-events-none">
                     <div className="w-full h-full pointer-events-auto">
                         <FridayModel3D status={status} volume={volume} reaction={faceReaction} height={500} fluid onTap={handleFaceDoubleTap} action={avatarAction} onActionDone={() => setAvatarAction(null)} />
                     </div>
@@ -4108,12 +4114,6 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
 
                 {/* pointer-events-none taaki neeche fullscreen model/slider tak touch pahunche */}
                 <div className="flex-1 flex flex-col items-center justify-start gap-1 overflow-hidden relative z-10 pt-1 pointer-events-none">
-                    <div className="text-center">
-                        <span className="text-2xl md:text-3xl font-extrabold bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent tracking-wide">
-                            Welcome
-                        </span>
-                    </div>
-
                     {/* ── 🔔 Real-Action Face Message Toast (overlay — layout ki jagah nahi khayega) ── */}
                     <div className="absolute top-12 left-0 right-0 flex items-start justify-center z-30 px-2 pointer-events-none">
                         <AnimatePresence mode="wait">
@@ -4155,16 +4155,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                         </AnimatePresence>
                     </div>
 
-                    <p className="text-slate-300 text-sm font-medium relative z-20">{status}</p>
-
-                    {!isRecording && wakeWordActive && (
-                        <div className="relative z-20 flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-xs text-cyan-300 shadow-[0_0_15px_rgba(6,182,212,0.15)] animate-pulse">
-                            <span className="w-2 h-2 rounded-full bg-cyan-400" />
-                            <span>Say <b>"Hello Friday"</b> to start session</span>
-                        </div>
-                    )}
-
-                    {/* ── Mini Music Title Pill (Below Agent Face: Hidden big player by default) ── */}
+                    {/* ── Mini Music Title Pill (overlay) ── */}
                     <AnimatePresence>
                         {nowPlayingMusic && !isMusicPlayerExpanded && (
                             <motion.div
@@ -4301,6 +4292,17 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                                     </button>
                                 </div>
                             ))}
+                        </div>
+                    )}
+                </div>
+
+                {/* ── Status stack (mic ke upar): Listening... > Say Hello Friday > mic buttons ── */}
+                <div className="relative z-20 flex flex-col items-center gap-2 w-full">
+                    <p className="text-slate-300 text-sm font-medium">{status}</p>
+                    {!isRecording && wakeWordActive && (
+                        <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-xs text-cyan-300 shadow-[0_0_15px_rgba(6,182,212,0.15)] animate-pulse">
+                            <span className="w-2 h-2 rounded-full bg-cyan-400" />
+                            <span>Say <b>"Hello Friday"</b> to start session</span>
                         </div>
                     )}
                 </div>
