@@ -228,7 +228,7 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         const chainR = chainBones('right');
         upL = chainL.up; foreL = chainL.fore; handL = chainL.hand;
         upR = chainR.up; foreR = chainR.fore; handR = chainR.hand;
-        [upL, upR, foreL, foreR].forEach((b) => { if (b) baseQ.set(b, b.quaternion.clone()); });
+        [upL, upR, foreL, foreR, handL, handR].forEach((b) => { if (b) baseQ.set(b, b.quaternion.clone()); });
         console.log('[FridayModel3D] action rig:', { upL: !!upL, upR: !!upR, foreL: !!foreL, foreR: !!foreR });
 
         // Portrait framing: sir se kamar tak closeup — chehra bada dikhe, faile haath frame se bahar
@@ -385,9 +385,11 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
           try {
             modelRoot.updateMatrixWorld(true);
             // Harness-verified targets (Node me asli FBX par nape hue):
-            // namaste: haath seene-par milte hain (gap 4.7cm) | think: haath chin par (gap 3cm)
-            const chestP = modelRoot.localToWorld(new THREE.Vector3(0, 1.34, 0.26));
+            // namaste: hatheliyan chipki (gap 5cm), ungliyan UPAR (twist Z±90) | think: haath chin par (gap 3cm)
+            const chestL = modelRoot.localToWorld(new THREE.Vector3(0.035, 1.35, 0.27));
+            const chestR = modelRoot.localToWorld(new THREE.Vector3(-0.035, 1.35, 0.27));
             const chinP = modelRoot.localToWorld(new THREE.Vector3(0, 1.68, 0.15));
+            const Z_AXIS = new THREE.Vector3(0, 0, 1);
             const aimArm = (up: THREE.Object3D | null, fore: THREE.Object3D | null, hand: THREE.Object3D | null, upTarget: THREE.Vector3, foreTarget: THREE.Vector3) => {
               if (!up || !fore) return;
               const sP = up.getWorldPosition(new THREE.Vector3());
@@ -405,8 +407,11 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
             const namUpL = modelRoot.localToWorld(new THREE.Vector3(0.28, 0.9, 0.15));
             const namUpR = modelRoot.localToWorld(new THREE.Vector3(-0.28, 0.9, 0.15));
             if (act === 'namaste') {
-              aimArm(upL, foreL, handL, namUpL, chestP);
-              aimArm(upR, foreR, handR, namUpR, chestP);
+              aimArm(upL, foreL, handL, namUpL, chestL);
+              aimArm(upR, foreR, handR, namUpR, chestR);
+              // Ungliyan UPAR (harness: Z +90 left / -90 right, score 1.00)
+              if (handL && baseQ.has(handL)) handL.quaternion.multiply(tmpQ.setFromAxisAngle(Z_AXIS, Math.PI / 2));
+              if (handR && baseQ.has(handR)) handR.quaternion.multiply(tmpQ.setFromAxisAngle(Z_AXIS, -Math.PI / 2));
             } else {
               // think: kohni upar, right hand chin par
               const thinkUpR = modelRoot.localToWorld(new THREE.Vector3(-0.15, 1.3, 0.2));
@@ -428,13 +433,29 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
       }
       const actT = t - actionStart;
       if (act === 'dance') {
+        // World-space groove: haath/konhi HAMESHA saamne (harness: min z 0.10) — peeche kabhi nahi!
         const d = t * 7;
         modelRoot.position.y += Math.abs(Math.sin(d)) * 0.07;
         modelRoot.rotation.z = Math.sin(d * 0.5) * 0.07;
-        if (upL && baseQ.has(upL)) upL.quaternion.copy(baseQ.get(upL)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, Math.sin(d) * 0.55));
-        if (upR && baseQ.has(upR)) upR.quaternion.copy(baseQ.get(upR)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, -Math.sin(d) * 0.55));
-        if (foreL && baseQ.has(foreL)) foreL.quaternion.copy(baseQ.get(foreL)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, Math.abs(Math.sin(d)) * 0.5));
-        if (foreR && baseQ.has(foreR)) foreR.quaternion.copy(baseQ.get(foreR)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, Math.abs(Math.cos(d)) * 0.5));
+        const groove = (up: THREE.Object3D | null, fore: THREE.Object3D | null, out: 1 | -1, ph: number) => {
+          if (!up || !fore) return;
+          const sP = up.getWorldPosition(new THREE.Vector3());
+          const eP = fore.getWorldPosition(new THREE.Vector3());
+          const toElbow = eP.clone().sub(sP);
+          if (toElbow.length() > 1e-4) {
+            aimBone(up, toElbow.normalize(), new THREE.Vector3(out * 0.3, -0.5 + 0.3 * Math.sin(ph), 0.6).normalize());
+          }
+          fore.updateMatrixWorld(true);
+          const eP2 = fore.getWorldPosition(new THREE.Vector3());
+          const wrist = fore.children.find((c) => (c as THREE.Bone).isBone);
+          const wP = wrist ? (wrist as THREE.Object3D).getWorldPosition(new THREE.Vector3()) : eP2.clone();
+          const fDir = wP.sub(eP2);
+          if (fDir.length() > 1e-4) {
+            aimBone(fore, fDir.normalize(), new THREE.Vector3(out * 0.1, -0.2 + 0.35 * Math.cos(ph), 0.7).normalize());
+          }
+        };
+        groove(upL, foreL, 1, d);
+        groove(upR, foreR, -1, d + Math.PI);
         if (headBone && headBone !== modelRoot) headBone.rotation.x += Math.sin(d * 2) * 0.05;
       } else if (act === 'wave' && upR && foreR && baseQ.has(upR) && baseQ.has(foreR)) {
         upR.quaternion.copy(baseQ.get(upR)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, -0.7));
