@@ -4306,7 +4306,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                 <div className="relative z-20 flex items-center justify-center gap-4 w-full pb-6">
                     <button
                         onClick={() => fileInputRef.current?.click()}
-                        className="p-3 rounded-full bg-slate-800/80 border border-slate-600 text-white hover:bg-slate-700 transition-colors"
+                        className="p-3 rounded-full bg-white/10 backdrop-blur-xl border border-white/20 text-white shadow-[0_8px_32px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.25)] hover:bg-white/20 transition-all"
                         title="Upload Image"
                     >
                         <Plus className="w-5 h-5" />
@@ -4315,7 +4315,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
 
                     <button
                         onClick={handleToggleRecording}
-                        className={`p-5 rounded-full text-white shadow-lg transition-all ${isRecording ? 'bg-red-600 shadow-red-500/40 hover:bg-red-500' : 'gradient-btn-primary shadow-purple-500/40 hover:scale-105'}`}
+                        className={`p-5 rounded-full text-white backdrop-blur-xl border border-white/30 transition-all ${isRecording ? 'bg-gradient-to-br from-red-500/70 to-rose-700/70 shadow-[0_0_35px_rgba(239,68,68,0.45),inset_0_1px_0_rgba(255,255,255,0.3)] hover:from-red-500/80 hover:to-rose-700/80' : 'bg-gradient-to-br from-purple-500/60 to-pink-600/60 shadow-[0_0_35px_rgba(168,85,247,0.4),inset_0_1px_0_rgba(255,255,255,0.3)] hover:scale-105'}`}
                         title={isRecording ? "Stop Session" : "Start Session"}
                     >
                         {isRecording ? <Square className="w-7 h-7" /> : <Mic className="w-7 h-7" />}
@@ -4329,7 +4329,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                                     ws.current.send(JSON.stringify({ type: 'trigger_reply' }));
                                 }
                             }}
-                            className="px-4 py-3 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white font-bold text-xs shadow-[0_0_20px_rgba(245,158,11,0.4)] transition-all flex items-center gap-1.5 active:scale-95 animate-pulse cursor-pointer"
+                            className="px-4 py-3 rounded-full bg-gradient-to-r from-amber-500/60 to-orange-500/60 hover:from-amber-400/70 hover:to-orange-400/70 backdrop-blur-xl border border-white/25 text-white font-bold text-xs shadow-[0_0_20px_rgba(245,158,11,0.35),inset_0_1px_0_rgba(255,255,255,0.25)] transition-all flex items-center gap-1.5 active:scale-95 animate-pulse cursor-pointer"
                             title="Friday ko turant bolne ke liye kahein"
                         >
                             <span>⚡</span>
@@ -4340,7 +4340,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                     <button
                         onClick={handleInterrupt}
                         disabled={!isRecording}
-                        className="p-3 rounded-full bg-slate-800/80 border border-slate-600 text-white disabled:opacity-30 hover:bg-slate-700 transition-colors"
+                        className="p-3 rounded-full bg-white/10 backdrop-blur-xl border border-white/20 text-white shadow-[0_8px_32px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.25)] disabled:opacity-30 hover:bg-white/20 transition-all"
                         title="Interrupt AI"
                     >
                         <Loader2 className="w-5 h-5" />
