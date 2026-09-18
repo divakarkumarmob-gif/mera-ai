@@ -131,27 +131,33 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
       bone.quaternion.copy(parentQ.invert().multiply(q.multiply(worldQ)));
       bone.updateMatrixWorld(true);
     };
+    // Chain resolver: stray duplicate nodes ignore, sirf asli parent->child chain wali haddi
+    const isAncestor = (a: THREE.Object3D, b: THREE.Object3D) => {
+      let p = b.parent;
+      while (p) { if (p === a) return true; p = p.parent; }
+      return false;
+    };
     const relaxArms = (model: THREE.Object3D) => {
       model.updateMatrixWorld(true);
       const bones: THREE.Bone[] = [];
       model.traverse((o) => { if ((o as THREE.Bone).isBone) bones.push(o as THREE.Bone); });
       if (!bones.length) return false;
-      const uppers = bones.filter((b) => /upperarm|upper_arm|uparm|shoulder/i.test(b.name));
-      const fores = bones.filter((b) => /forearm|fore_arm|lowerarm|lower_arm|elbow/i.test(b.name));
-      if (!uppers.length) return false;
+      // Anatomical upper-arm = woh 'arm' bone jiske neeche forearm chain hai.
+      // Shoulder/clavicle ko CHHUO MAT — wahi peeche dhansne ka kaaran tha!
+      const pickUpper = (side: 'left' | 'right') => {
+        const cands = bones.filter((b) => b.name.toLowerCase() === `${side}arm`);
+        const fore = bones.find((b) => b.name.toLowerCase().startsWith(`${side}forearm`));
+        return cands.find((c) => fore && isAncestor(c, fore)) ?? cands[0] ?? null;
+      };
       let fixed = 0;
-      uppers.forEach((up) => {
-        // Elbow reference: SAME-SIDE forearm (doosre side ka pakda to haath tootega!)
-        const nm = up.name.toLowerCase();
-        const side = /left/.test(nm) ? 'L' : /right/.test(nm) ? 'R' : '?';
-        const fore = fores.find((f) => {
-          const fn = f.name.toLowerCase();
-          if (side === 'L' && !/left/.test(fn)) return false;
-          if (side === 'R' && !/right/.test(fn)) return false;
-          const a = up.getWorldPosition(new THREE.Vector3());
-          const b = f.getWorldPosition(new THREE.Vector3());
-          return a.distanceTo(b) < 1.5;
-        }) ?? up.children.find((c) => (c as THREE.Bone).isBone) as THREE.Object3D | undefined;
+      (['left', 'right'] as const).forEach((side) => {
+        const up = pickUpper(side) as THREE.Object3D | null;
+        if (!up) return;
+        // Kohni = upper ke neeche wali chain (stray duplicate nahi)
+        let fore: THREE.Object3D | null = null;
+        up.traverse((o) => {
+          if (!fore && o !== up && (o as THREE.Bone).isBone && /forearm|elbow/i.test(o.name)) fore = o;
+        });
         if (!fore) return;
         up.updateMatrixWorld(true);
         const shoulderP = up.getWorldPosition(new THREE.Vector3());
@@ -161,10 +167,9 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         curDir.normalize();
         // Sirf tab fix karo jab haath waqai faila ho (sideways), nahi to chhedo mat
         if (Math.abs(curDir.y) > 0.55) return;
-        // Bahar ki taraf = haath abhi jis side faila hai usi ka sign
-        // Harness-verified: kohni torso se gap par (±0.23), haath natural (±0.24, z 0.08)
-        const out = Math.sign(curDir.x) || 1;
-        aimBone(up, curDir, new THREE.Vector3(out * 0.35, -1, 0.2));
+        const out = side === 'left' ? 1 : -1;
+        // Harness-verified (chain bones): kohni (±0.23, 1.35), haath (±0.22, 1.08, 0.07), shoulder untouched
+        aimBone(up, curDir, new THREE.Vector3(out * 0.08, -1, 0.2));
         // Kohni me halka mod (natural look)
         const wristObj = (fore as THREE.Object3D).children.find((c) => (c as THREE.Bone).isBone);
         if (wristObj) {
@@ -174,7 +179,7 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
           const fDir = wP.sub(eP);
           if (fDir.length() > 1e-4) {
             fDir.normalize();
-            aimBone(fore as THREE.Object3D, fDir, new THREE.Vector3(out * 0.05, -1, 0.3));
+            aimBone(fore as THREE.Object3D, fDir, new THREE.Vector3(0, -1, 0.35));
           }
         }
         fixed++;
@@ -202,19 +207,27 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         // T-pose haath neeche lao (rigging), phir framing — taaki frame sahi bane
         try { relaxArms(model); } catch (e) { console.warn('[FridayModel3D] arm relax failed', e); }
 
-        // Action bones dhoondo + relaxed base pose yaad rakho (actions isi par overlay honge)
-        model.traverse((o) => {
-          const n = o.name.toLowerCase();
-          if (n === 'leftarm') upL = o;
-          else if (n === 'rightarm') upR = o;
-          else if (!foreL && n.startsWith('leftforearm')) foreL = o;
-          else if (!foreR && n.startsWith('rightforearm')) foreR = o;
-        });
-        model.traverse((o) => {
-          const n = o.name.toLowerCase();
-          if (n === 'lefthand') handL = o;
-          else if (n === 'righthand') handR = o;
-        });
+        // Action bones: chain-resolved (stray duplicates nahi — wahi jo relax me use hue)
+        const chainBones = (side: 'left' | 'right') => {
+          const chain: THREE.Object3D[] = [];
+          model.traverse((o) => { if ((o as THREE.Bone).isBone) chain.push(o); });
+          const ups = chain.filter((b) => b.name.toLowerCase() === `${side}arm`);
+          const firstFore = chain.find((b) => b.name.toLowerCase().startsWith(`${side}forearm`));
+          const up = ups.find((c) => firstFore && isAncestor(c, firstFore)) ?? ups[0] ?? null;
+          let fore: THREE.Object3D | null = null;
+          if (up) up.traverse((o) => {
+            if (!fore && o !== up && (o as THREE.Bone).isBone && /forearm|elbow/i.test(o.name)) fore = o;
+          });
+          let hand: THREE.Object3D | null = null;
+          if (fore) fore.traverse((o) => {
+            if (!hand && o !== fore && (o as THREE.Bone).isBone && /hand$/i.test(o.name)) hand = o;
+          });
+          return { up, fore, hand };
+        };
+        const chainL = chainBones('left');
+        const chainR = chainBones('right');
+        upL = chainL.up; foreL = chainL.fore; handL = chainL.hand;
+        upR = chainR.up; foreR = chainR.fore; handR = chainR.hand;
         [upL, upR, foreL, foreR].forEach((b) => { if (b) baseQ.set(b, b.quaternion.clone()); });
         console.log('[FridayModel3D] action rig:', { upL: !!upL, upR: !!upR, foreL: !!foreL, foreR: !!foreR });
 
