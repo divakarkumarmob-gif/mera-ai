@@ -4100,15 +4100,15 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                     )}
                 </AnimatePresence>
 
-                <div className="flex-1 flex flex-col items-center justify-center gap-4 overflow-hidden relative">
+                <div className="flex-1 flex flex-col items-center justify-center gap-1 overflow-hidden relative">
                     <div className="text-center">
                         <span className="text-2xl md:text-3xl font-extrabold bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent tracking-wide">
                             Welcome
                         </span>
                     </div>
 
-                    {/* ── 🔔 Real-Action Face Message Toast (Positioned directly above AgentFace) ── */}
-                    <div className="min-h-[46px] flex items-center justify-center z-30 px-2 pointer-events-none">
+                    {/* ── 🔔 Real-Action Face Message Toast (overlay — layout ki jagah nahi khayega) ── */}
+                    <div className="absolute top-12 left-0 right-0 flex items-start justify-center z-30 px-2 pointer-events-none">
                         <AnimatePresence mode="wait">
                             {faceToast && (
                                 <motion.div
@@ -4148,7 +4148,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                         </AnimatePresence>
                     </div>
 
-                    <FridayModel3D status={status} volume={volume} reaction={faceReaction} height={250} onTap={handleFaceDoubleTap} action={avatarAction} onActionDone={() => setAvatarAction(null)} />
+                    <FridayModel3D status={status} volume={volume} reaction={faceReaction} height={310} onTap={handleFaceDoubleTap} action={avatarAction} onActionDone={() => setAvatarAction(null)} />
                     <p className="text-slate-300 text-sm font-medium">{status}</p>
 
                     {!isRecording && wakeWordActive && (

@@ -88,6 +88,24 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
     let foreR: THREE.Object3D | null = null;
     let handL: THREE.Object3D | null = null;
     let handR: THREE.Object3D | null = null;
+    // Alive-idle rig: seena (saans), aankhein (saccade)
+    let spine: THREE.Object3D | null = null;
+    let eyeL: THREE.Object3D | null = null;
+    let eyeR: THREE.Object3D | null = null;
+    let sacT = 2; // next eye saccade timer
+    let sacX = 0, sacY = 0, sacTX = 0, sacTY = 0; // eye look current/target
+    let glanceT = 4; // next head glance timer
+    let glanceX = 0, glanceY = 0, glanceTX = 0, glanceTY = 0;
+    // Co-speech gesture engine: bolte time haath/sir/body — energy volume se, style phrase se
+    let speakEnergy = 0;
+    let wasSpeaking = false;
+    let speakPhrase = 'nod';
+    let phraseT = 0;
+    let phraseDur = 2;
+    const baseHandL = new THREE.Vector3();
+    const baseHandR = new THREE.Vector3();
+    let baseHandsSaved = false;
+    const PHRASES = ['nod', 'tilt', 'handR', 'handL', 'both', 'lean', 'nod', 'handR'];
     const baseQ = new Map<THREE.Object3D, THREE.Quaternion>();
     let prevAction: AvatarAction = null;
     let actionStart = 0;
@@ -247,21 +265,39 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         upL = chainL.up; foreL = chainL.fore; handL = chainL.hand;
         upR = chainR.up; foreR = chainR.fore; handR = chainR.hand;
         [upL, upR, foreL, foreR, handL, handR].forEach((b) => { if (b) baseQ.set(b, b.quaternion.clone()); });
+        // Haathon ki rest position (root-local) — speaking gestures isi se uthenge
+        modelRoot.updateMatrixWorld(true);
+        if (handL) { baseHandL.copy(modelRoot.worldToLocal(handL.getWorldPosition(new THREE.Vector3()))); baseHandsSaved = true; }
+        if (handR) { baseHandR.copy(modelRoot.worldToLocal(handR.getWorldPosition(new THREE.Vector3()))); baseHandsSaved = true; }
+        // Alive rig: pehla Spine2 + aankhein pakdo
+        model.traverse((o) => {
+          const n = o.name.toLowerCase();
+          if (!spine && n === 'spine2') spine = o;
+          else if (!eyeL && n === 'lefteye') eyeL = o;
+          else if (!eyeR && n === 'righteye') eyeR = o;
+        });
+        // Load hote hi friendly wave — "zinda" first impression!
+        setTimeout(() => {
+          if (disposed || stateRef.current.action || localRef.current) return;
+          localRef.current = 'wave'; setLocalAction('wave');
+          setTimeout(() => {
+            if (disposed || localRef.current !== 'wave') return;
+            localRef.current = null; setLocalAction(null);
+          }, 4400);
+        }, 800);
         console.log('[FridayModel3D] action rig:', { upL: !!upL, upR: !!upR, foreL: !!foreL, foreR: !!foreR });
 
-        // Portrait framing: sir se kamar tak closeup — chehra bada dikhe, faile haath frame se bahar
+        // Full-body framing: sir se pair tak — pair neeche buttons ke PEECHE jhaankenge
         modelRoot.updateMatrixWorld(true);
         const frame = new THREE.Box3().setFromObject(modelRoot);
         const fullH = Math.max(frame.max.y - frame.min.y, 0.001);
-        const top = frame.max.y;
-        const waistY = frame.min.y + fullH * 0.45; // neeche kamar tak
-        const centerY = (top + waistY) / 2;
-        const visH = top - waistY;
-        const visW = Math.min(frame.max.x - frame.min.x, 1.2); // chaude T-pose haath ignore
+        const centerY = frame.min.y + fullH * 0.5;
+        const visH = fullH;
+        const visW = Math.min(frame.max.x - frame.min.x, 1.2);
         const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
         const fitH = (visH / 2) / Math.tan(halfFov);
         const fitW = (visW / 2) / (Math.tan(halfFov) * Math.max(camera.aspect, 0.3));
-        const fitDist = Math.max(fitH, fitW) * 1.18;
+        const fitDist = Math.max(fitH, fitW) * 1.12;
         fitRef.current = { dist: fitDist, cy: centerY };
         camera.position.set(0, centerY + 0.05, fitDist / zoomRef.current);
         camera.lookAt(0, centerY, 0);
@@ -496,6 +532,119 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         headBone.rotation.x = THREE.MathUtils.clamp(headBone.rotation.x, -0.4, 0.4);
         headBone.rotation.y = THREE.MathUtils.clamp(headBone.rotation.y, -0.5, 0.5);
         headBone.rotation.z = THREE.MathUtils.clamp(headBone.rotation.z, -0.32, 0.32);
+      }
+
+      // ── Zinda raho: saans + aankhein + nazar (labarish look khatm!) ──
+      const breath = Math.sin(t * 1.6);
+      if (spine) {
+        const s = 1 + breath * 0.012;
+        spine.scale.set(s, s, s);
+      }
+      // Aankhein idhar-udhar dart (saccade) — hamesha, action ke beech bhi
+      sacT -= dt;
+      if (sacT <= 0) {
+        sacT = 1.8 + Math.random() * 2.5;
+        sacTX = (Math.random() - 0.5) * 0.24;
+        sacTY = (Math.random() - 0.5) * 0.14;
+      }
+      sacX = lerp(sacX, sacTX, 1 - Math.pow(0.0001, dt));
+      sacY = lerp(sacY, sacTY, 1 - Math.pow(0.0001, dt));
+      if (eyeL) { eyeL.rotation.y = sacX; eyeL.rotation.x = sacY; }
+      if (eyeR) { eyeR.rotation.y = sacX; eyeR.rotation.x = sacY; }
+      if (!act) {
+        // Saans ke saath kandhe halke hilo
+        if (upL && baseQ.has(upL)) upL.quaternion.copy(baseQ.get(upL)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, breath * 0.035));
+        if (upR && baseQ.has(upR)) upR.quaternion.copy(baseQ.get(upR)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, -breath * 0.035));
+        // Wazan ek pair se doosre par — zinda khada!
+        modelRoot.rotation.z = Math.sin(t * 0.33) * 0.022;
+        modelRoot.position.x = Math.sin(t * 0.23) * 0.02;
+        // Kabhi-kabhi khud gardan ghuma kar dekho (mouse ke alava)
+        glanceT -= dt;
+        if (glanceT <= 0) {
+          glanceT = 4 + Math.random() * 4;
+          glanceTX = (Math.random() - 0.5) * 0.5;
+          glanceTY = (Math.random() - 0.5) * 0.2;
+          setTimeout(() => { glanceTX = 0; glanceTY = 0; }, 1400);
+        }
+        glanceX = lerp(glanceX, glanceTX, 1 - Math.pow(0.001, dt));
+        glanceY = lerp(glanceY, glanceTY, 1 - Math.pow(0.001, dt));
+        if (headBone && headBone !== modelRoot) {
+          headBone.rotation.y = THREE.MathUtils.clamp(headBone.rotation.y + glanceX, -0.5, 0.5);
+          headBone.rotation.x = THREE.MathUtils.clamp(headBone.rotation.x + glanceY, -0.4, 0.4);
+        }
+      }
+
+      // ── Co-speech gestures: baat + haath/sir/body ek saath ──
+      const energyTarget = speaking ? THREE.MathUtils.clamp(volume * 3, 0.18, 1) : 0;
+      speakEnergy = lerp(speakEnergy, energyTarget, 1 - Math.pow(0.01, dt));
+      if (speaking && !wasSpeaking) { phraseT = 99; } // bolna shuru = turant naya gesture
+      const justStopped = wasSpeaking && !speaking;
+      wasSpeaking = speaking;
+      if (speaking) {
+        phraseT += dt;
+        if (phraseT >= phraseDur) {
+          // Naya phrase: pichla wala repeat nahi, haath base par wapas
+          let next = speakPhrase;
+          while (next === speakPhrase) next = PHRASES[Math.floor(Math.random() * PHRASES.length)];
+          speakPhrase = next;
+          phraseT = 0;
+          phraseDur = 1.6 + Math.random() * 1.4;
+          if (!act) baseQ.forEach((q, b) => { if (b === upL || b === upR || b === foreL || b === foreR) b.quaternion.copy(q); });
+        }
+        const p = Math.min(phraseT / phraseDur, 1);
+        const env = Math.sin(p * Math.PI); // smooth in-out
+        const beat = Math.abs(Math.sin(t * 9)) * 0.6 + Math.abs(Math.sin(t * 5.3)) * 0.4;
+        const amp = env * speakEnergy;
+        // Sir: baat ke saath nod + halka storytelling sway (hamesha, action me bhi thoda)
+        if (headBone && headBone !== modelRoot) {
+          const nodAmp = (speakPhrase === 'nod' ? 0.10 : 0.045) + volume * 0.22;
+          headBone.rotation.x += Math.sin(t * 6.5) * nodAmp * Math.max(env, 0.35) * speakEnergy;
+          headBone.rotation.y += Math.sin(t * 0.8) * 0.05 * speakEnergy;
+          if (speakPhrase === 'tilt') headBone.rotation.z += 0.07 * amp;
+        }
+        // Haath: sirf jab koi action pose na chal raha ho (world-space, hamesha saamne)
+        if (!act && baseHandsSaved) {
+          const liftHand = (up: THREE.Object3D | null, fore: THREE.Object3D | null, hand: THREE.Object3D | null, base: THREE.Vector3, lift: number) => {
+            if (!up || !fore || !hand || lift <= 0.01) return;
+            const target = modelRoot.localToWorld(base.clone().add(new THREE.Vector3(0, lift * 0.35, lift * 0.45)));
+            const sP = up.getWorldPosition(new THREE.Vector3());
+            const eP = fore.getWorldPosition(new THREE.Vector3());
+            const toElbow = eP.clone().sub(sP);
+            if (toElbow.length() < 1e-4) return;
+            // Kohni thodi bahar, haath target ki taraf
+            const eDir = target.clone().sub(sP).normalize();
+            eDir.x += (sP.x >= 0 ? 0.25 : -0.25);
+            aimBone(up, toElbow.normalize(), eDir.normalize());
+            fore.updateMatrixWorld(true);
+            const eP2 = fore.getWorldPosition(new THREE.Vector3());
+            const hP = hand.getWorldPosition(new THREE.Vector3());
+            const fDir = hP.sub(eP2);
+            if (fDir.length() > 1e-4) aimBone(fore, fDir.normalize(), target.sub(eP2).normalize());
+          };
+          const e = amp * (0.35 + beat * 0.65);
+          if (speakPhrase === 'handR') liftHand(upR, foreR, handR, baseHandR, e * 0.55);
+          else if (speakPhrase === 'handL') liftHand(upL, foreL, handL, baseHandL, e * 0.55);
+          else if (speakPhrase === 'both') {
+            liftHand(upR, foreR, handR, baseHandR, e * 0.4);
+            liftHand(upL, foreL, handL, baseHandL, e * 0.4);
+          } else {
+            // nod/tilt/lean me haath halke saath me (beat par)
+            liftHand(upR, foreR, handR, baseHandR, e * 0.12);
+          }
+        }
+        // Body lean-in on emphasis (bow action me nahi)
+        if (act !== 'bow') modelRoot.rotation.x = (speakPhrase === 'lean' ? amp * 0.07 : amp * 0.02);
+      } else if (!act && justStopped) {
+        // Bolna band hua ABHI = haath wapas + seedha khada (ek baar, taaki saans wala sway chalta rahe)
+        baseQ.forEach((q, b) => {
+          if (b === upL || b === upR || b === foreL || b === foreR) b.quaternion.copy(q);
+        });
+        modelRoot.rotation.x = 0;
+      }
+      // Gesture ke baad bhi sir limit me
+      if (headBone && headBone !== modelRoot) {
+        headBone.rotation.x = THREE.MathUtils.clamp(headBone.rotation.x, -0.42, 0.42);
+        headBone.rotation.y = THREE.MathUtils.clamp(headBone.rotation.y, -0.5, 0.5);
       }
       } catch (e) {
         // Ek action fail = poora avatar freeze NAHO — bas base pose par wapas
