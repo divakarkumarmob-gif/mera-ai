@@ -46,7 +46,7 @@ export interface IntimacyProfile {
 
 const INTIMACY_COLLECTION = "gf_intimacy_profiles";
 const GF_CHAT_MEMORY_COLLECTION = "gf_chat_memory";
-const GF_CHAT_MEMORY_CAP = 20;
+const GF_CHAT_MEMORY_CAP = 100;
 
 export const DEFAULT_GIRLFRIEND_PROFILE: GirlfriendProfile = {
   id: "default",
@@ -1262,7 +1262,28 @@ ${customInstruction}
     } catch {}
   }
 
-  public async loadGfChatHistory(jid: string, limit = 12): Promise<Array<{ role: string; text: string }>> {
+  /**
+   * Full context: last 20 turns verbatim + older turns as compact one-liners.
+   * Isse "last 20 msg yaad + usse pehle ka pura memory" dono milta hai.
+   */
+  public async loadGfChatContext(jid: string, recentN = 20, earlierN = 40): Promise<{
+    recent: Array<{ role: string; text: string }>;
+    earlierCompact: string;
+  }> {
+    try {
+      const all = await this.loadGfChatHistory(jid, recentN + earlierN);
+      const recent = all.slice(-recentN);
+      const earlier = all.slice(0, Math.max(0, all.length - recentN)).slice(-earlierN);
+      const earlierCompact = earlier.length > 0
+        ? earlier.map((t) => `${t.role === "user" ? "DK" : "Tum"}: ${t.text.slice(0, 90)}`).join("\n")
+        : "";
+      return { recent, earlierCompact };
+    } catch {
+      return { recent: [], earlierCompact: "" };
+    }
+  }
+
+  public async loadGfChatHistory(jid: string, limit = 20): Promise<Array<{ role: string; text: string }>> {
     try {
       const snap = await db.collection(GF_CHAT_MEMORY_COLLECTION).doc(String(jid || "")).get();
       if (!snap.exists) return [];

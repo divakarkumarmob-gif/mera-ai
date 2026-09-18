@@ -254,10 +254,10 @@ export class WhatsAppGirlfriendEngine {
     const mood = this.parseGirlfriendMood(rawText);
     const isModeB = mood === "mode_b" || /\b(mode\s*b|uncensored|open\s*talk|nsfw)\b/i.test(rawText);
 
-    // Reload persisted chat continuity (restart-proof — pichli baatein yaad rahengi)
+    // Reload persisted chat continuity (restart-proof — pichli 20 baatein yaad rahengi)
     let restoredHistory: Array<{ role: "user" | "model"; text: string }> = [];
     try {
-      const saved = await girlfriendProfileService.loadGfChatHistory(jid, 12);
+      const saved = await girlfriendProfileService.loadGfChatHistory(jid, 20);
       restoredHistory = saved.map((t) => ({ role: t.role === "user" ? ("user" as const) : ("model" as const), text: t.text }));
     } catch {}
     this.girlfriendSessions.set(jid, {
@@ -2028,7 +2028,7 @@ STRICT REALISTIC WHATSAPP CHAT RULES:
             const ai = new GoogleGenAI({ apiKey });
             const historyContents: any[] = [];
 
-            for (const h of session.tempHistory.slice(-10)) {
+            for (const h of session.tempHistory.slice(-20)) {
               historyContents.push({
                 role: h.role,
                 parts: [{ text: h.text }]
@@ -2074,7 +2074,7 @@ STRICT REALISTIC WHATSAPP CHAT RULES:
 
         const historyContents: any[] = [];
 
-        for (const h of session.tempHistory.slice(-10)) {
+        for (const h of session.tempHistory.slice(-20)) {
           historyContents.push({
             role: h.role,
             parts: [{ text: h.text }]
@@ -2191,7 +2191,7 @@ STRICT REALISTIC WHATSAPP CHAT RULES:
 
       session.tempHistory.push({ role: "user", text: rawText });
       session.tempHistory.push({ role: "model", text: replyText });
-      if (session.tempHistory.length > 30) session.tempHistory.splice(0, session.tempHistory.length - 30);
+      if (session.tempHistory.length > 60) session.tempHistory.splice(0, session.tempHistory.length - 60);
 
       // Intimate memory: learn likes/kinks/limits from Mode-B intimate turns (fire-and-forget)
       if (isModeBSession && this.isIntimateMoment(rawText, replyText)) {
@@ -2339,7 +2339,7 @@ STRICT REALISTIC WHATSAPP CHAT RULES:
 
     const messages = [
       { role: "system", content: systemPrompt },
-      ...tempHistory.slice(-10).map((h) => ({
+      ...tempHistory.slice(-20).map((h) => ({
         role: h.role === "user" ? "user" : "assistant",
         content: h.text,
       })),

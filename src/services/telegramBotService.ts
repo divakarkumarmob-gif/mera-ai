@@ -246,6 +246,9 @@ class TelegramBotService {
     } catch {}
     const activeProfile = await girlfriendProfileService.getActiveProfile(String(chatId));
     let prompt = await girlfriendProfileService.getModeBPromptWithMemory(activeProfile, senderName || "Mere Handsome", String(chatId));
+    if (tgEarlierCompact) {
+      prompt += `\n\n📜 EARLIER IN THIS CHAT (20+ msgs pehle ka pura memory — context ke liye yaad rakho):\n${tgEarlierCompact}\n`;
+    }
 
     // Per-chat sext-state (tempo/worship/fight/afterglow/gaali/taboo/arc) — same machine as WhatsApp
     try {
@@ -272,11 +275,14 @@ class TelegramBotService {
       } catch {}
     };
 
-    // Cross-restart continuity: save user turn + load last 12 turns as history
+    // Cross-restart continuity: save user turn + load last 20 turns + earlier compact memory
     girlfriendProfileService.saveGfChatTurn(String(chatId), "user", text).catch(() => {});
     let tgHistory: Array<{ role: string; text: string }> = [];
+    let tgEarlierCompact = "";
     try {
-      tgHistory = await girlfriendProfileService.loadGfChatHistory(String(chatId), 12);
+      const ctx = await girlfriendProfileService.loadGfChatContext(String(chatId), 20, 40);
+      tgHistory = ctx.recent;
+      tgEarlierCompact = ctx.earlierCompact;
     } catch {}
 
     const learnIntimate = (reply: string) => {
@@ -305,8 +311,8 @@ class TelegramBotService {
     const apiKey = process.env.GEMINI_API_KEY;
     if (apiKey) {
       try {
-        const histBlock = tgHistory.length > 0
-          ? `Recent chat (continuity — isi flow me jawab do):\n${tgHistory.slice(-6).map((h) => `${h.role === "user" ? "DK" : "Tum"}: ${h.text}`).join("\n")}\n\nAb is naye message ka jawab do: `
+        const histBlock = tgHistory.length > 0 || tgEarlierCompact
+          ? `Recent chat (last 20 — isi flow me jawab do):\n${tgHistory.slice(-20).map((h) => `${h.role === "user" ? "DK" : "Tum"}: ${h.text}`).join("\n")}${tgEarlierCompact ? `\n\nUsse pehle ka memory:\n${tgEarlierCompact}` : ""}\n\nAb is naye message ka jawab do: `
           : "";
         const ai = new GoogleGenAI({ apiKey });
         for (const model of TelegramBotService.MODEL_FALLBACK_CHAIN) {
