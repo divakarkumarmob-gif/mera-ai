@@ -8,9 +8,9 @@ import type { AgentFaceReaction } from './AgentFace';
 
 // Body actions: voice command ("dance karo", "namaste karo"...) ya window event se trigger.
 // Test: dispatchEvent(new CustomEvent('friday-action', { detail: 'dance' }))
-export type AvatarAction = 'dance' | 'namaste' | 'think' | 'wave' | 'bow' | 'nod-yes' | 'nod-no' | 'stop' | null;
-export const AVATAR_ACTION_LIST = ['dance', 'namaste', 'think', 'wave', 'bow', 'nod-yes', 'nod-no', 'stop'];
-const ONE_SHOT_SECONDS: Record<string, number> = { wave: 4, namaste: 6, think: 6, bow: 3.2, 'nod-yes': 2.5, 'nod-no': 2.5 };
+export type AvatarAction = 'dance' | 'namaste' | 'think' | 'wave' | 'bow' | 'nod-yes' | 'nod-no' | 'phone' | 'stop' | null;
+export const AVATAR_ACTION_LIST = ['dance', 'namaste', 'think', 'wave', 'bow', 'nod-yes', 'nod-no', 'phone', 'stop'];
+const ONE_SHOT_SECONDS: Record<string, number> = { wave: 4, namaste: 6, think: 6, bow: 3.2, 'nod-yes': 2.5, 'nod-no': 2.5, phone: 8 };
 
 interface FridayModel3DProps {
   status: string;
@@ -84,6 +84,9 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
     let shinR: THREE.Object3D | null = null;
     let footL: THREE.Object3D | null = null;
     let footR: THREE.Object3D | null = null;
+    // Phone model (iPhone 14 Pro)
+    let phoneModel: THREE.Object3D | null = null;
+    let phoneVisible = false;
     // Alive-idle rig: seena (saans), aankhein (saccade)
     let spine: THREE.Object3D | null = null;
     let eyeL: THREE.Object3D | null = null;
@@ -392,6 +395,42 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
 
         // Kuch na mile to poore model ko head mano (procedural motion ke liye)
         if (!headBone) headBone = model;
+
+        // ── iPhone 14 Pro load karke haath me attach karo ──
+        try {
+          new FBXLoader().load('/iPhone+14+Pro.fbx', (phoneFbx) => {
+            if (disposed) return;
+            // Phone ko chhota karo (haath me fit ho) — scale adjust based on model
+            const phoneBox = new THREE.Box3().setFromObject(phoneFbx);
+            const phoneH = phoneBox.max.y - phoneBox.min.y;
+            const targetPhoneH = 0.12; // ~12cm in model units
+            const phoneScale = targetPhoneH / Math.max(phoneH, 0.001);
+            phoneFbx.scale.setScalar(phoneScale);
+            // Center the phone on its own geometry
+            phoneBox.setFromObject(phoneFbx);
+            const phoneCenter = phoneBox.getCenter(new THREE.Vector3());
+            phoneFbx.position.sub(phoneCenter);
+            // Rotate phone to be held naturally in hand (screen facing user)
+            phoneFbx.rotation.set(Math.PI / 2, 0, 0);
+            // Attach to right hand bone if available
+            if (handR) {
+              handR.add(phoneFbx);
+              // Position relative to hand bone (palm me)
+              phoneFbx.position.set(0, 0.05, 0);
+            } else {
+              // Fallback: scene me add, but hidden
+              scene.add(phoneFbx);
+              phoneFbx.visible = false;
+            }
+            phoneModel = phoneFbx;
+            phoneModel.visible = false; // Start hidden
+            console.log('[FridayModel3D] iPhone 14 Pro loaded and attached to hand');
+          }, undefined, (err) => {
+            console.warn('[FridayModel3D] iPhone model load failed:', err);
+          });
+        } catch (e) {
+          console.warn('[FridayModel3D] iPhone load error:', e);
+        }
     };
 
     const tryLoad = (i: number) => {
@@ -550,6 +589,11 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         baseQ.forEach((q, b) => b.quaternion.copy(q));
         modelRoot.rotation.x = 0;
         if (clearTimer) { clearTimeout(clearTimer); clearTimer = null; }
+        // Phone action se bahar aate hi phone hide karo
+        if (prevAction === 'phone' && phoneModel) {
+          phoneModel.visible = false;
+          phoneVisible = false;
+        }
         if (act === 'namaste' || act === 'think') {
           // Static pose — smooth transition hoga animate loop me
           // IK targets set karo, animate me easing se blend hoga
@@ -766,6 +810,76 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         headBone.rotation.x += Math.sin(actT * 10) * 0.12 * Math.max(0, 1 - actT / 2.5);
       } else if (act === 'nod-no' && headBone && headBone !== modelRoot) {
         headBone.rotation.y += Math.sin(actT * 9) * 0.25 * Math.max(0, 1 - actT / 2.5);
+
+      } else if (act === 'phone') {
+        // ── Phone action: pocket se nikalo, dekhte hue tap karo ──
+        // Phase 1 (0-1s): haath niche jaata hai (pocket reach)
+        // Phase 2 (1-2s): phone uthake chest level par laata hai
+        // Phase 3 (2-7s): phone dekhte hue tap karta hai
+        // Phase 4 (7-8s): phone wapas niche (put away)
+        const totalDur = ONE_SHOT_SECONDS.phone ?? 8;
+
+        // Show phone when action starts
+        if (phoneModel && !phoneModel.visible && actT > 0.3) {
+          phoneModel.visible = true;
+          phoneVisible = true;
+        }
+        // Hide phone near end
+        if (phoneModel && actT > totalDur - 1.5) {
+          phoneModel.visible = false;
+          phoneVisible = false;
+        }
+
+        // Smooth phase transitions
+        const reachDown = Math.min(actT / 0.8, 1); // 0-0.8s reach pocket
+        const bringUp = actT > 0.8 ? Math.min((actT - 0.8) / 0.7, 1) : 0; // 0.8-1.5s bring up
+        const holdPhase = actT > 1.5 && actT < totalDur - 1.5 ? 1 : 0; // holding & tapping
+        const putAway = actT > totalDur - 1.5 ? Math.min((actT - (totalDur - 1.5)) / 1, 1) : 0;
+        const reachSmooth = reachDown * reachDown * (3 - 2 * reachDown);
+        const upSmooth = bringUp * bringUp * (3 - 2 * bringUp);
+        const awaySmooth = putAway * putAway * (3 - 2 * putAway);
+
+        // Combined arm position blend
+        const armProg = actT < 0.8
+          ? reachSmooth * 0.3 // reaching down
+          : actT < 1.5
+            ? 0.3 + upSmooth * 0.7 // bringing up
+            : actT < totalDur - 1.5
+              ? 1.0 // holding at chest
+              : 1.0 - awaySmooth; // putting away
+
+        if (upR && foreR && baseQ.has(upR) && baseQ.has(foreR)) {
+          // Right arm: holds phone at chest/waist level
+          const armX = -0.6 * armProg; // arm forward
+          const armZ = 0.3 * armProg; // arm slightly inward
+          upR.quaternion.copy(baseQ.get(upR)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, armX));
+          // Forearm bends to hold phone at viewing angle
+          const foreX = -0.8 * armProg;
+          foreR.quaternion.copy(baseQ.get(foreR)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, foreX));
+
+          // Tapping animation on phone (subtle finger motion during hold phase)
+          if (handR && baseQ.has(handR) && holdPhase > 0) {
+            const tapRhythm = Math.abs(Math.sin(t * 3.5)) > 0.7 ? Math.sin(t * 7) * 0.15 : 0;
+            handR.quaternion.copy(baseQ.get(handR)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, tapRhythm));
+          }
+        }
+
+        // Left arm: supports phone (comes to meet right hand)
+        if (upL && foreL && baseQ.has(upL) && baseQ.has(foreL) && armProg > 0.5) {
+          const supportP = (armProg - 0.5) * 2; // 0.5-1 range → 0-1
+          upL.quaternion.copy(baseQ.get(upL)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, -0.4 * supportP));
+          foreL.quaternion.copy(baseQ.get(foreL)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, -0.6 * supportP));
+        }
+
+        // Head: looks down at phone
+        if (headBone && headBone !== modelRoot) {
+          headBone.rotation.x += 0.25 * armProg; // look down at phone
+          headBone.rotation.y += Math.sin(t * 0.8) * 0.04 * holdPhase; // subtle scan motion
+          headBone.rotation.z += -0.03 * armProg;
+        }
+
+        // Body: slight forward lean (natural phone posture)
+        modelRoot.rotation.x = 0.06 * armProg;
       }
       // Final safety: action overlays ke baad bhi sir limit me rahe
       if (headBone && headBone !== modelRoot) {
