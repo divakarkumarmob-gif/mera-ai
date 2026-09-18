@@ -3527,7 +3527,17 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                                 <span>🛸 3D Lab</span>
                             </button>
 
-                            {/* 11. 🧪 Model Test */}
+                            {/* 11. Chat History (moved from lower row to upper) */}
+                            <button
+                                onClick={() => setShowChatHistory(true)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/40 text-blue-300 text-xs font-semibold shadow-[0_0_12px_rgba(59,130,246,0.2)] transition-all shrink-0 whitespace-nowrap active:scale-95"
+                                title="Chat History"
+                            >
+                                <MessageSquare className="w-3.5 h-3.5" />
+                                <span>Chat History</span>
+                            </button>
+
+                            {/* 12. 🧪 Model Test */}
                             <button
                                 onClick={() => setShowModelTester(true)}
                                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gradient-to-r from-cyan-500/25 via-sky-500/25 to-indigo-500/25 hover:from-cyan-500/35 hover:to-indigo-500/35 border border-cyan-400/50 text-cyan-200 text-xs font-bold shadow-[0_0_15px_rgba(6,182,212,0.35)] transition-all shrink-0 whitespace-nowrap active:scale-95"
@@ -3557,15 +3567,6 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                                 <span>Code Agent</span>
                             </button>
 
-                            {/* 14. Chat History */}
-                            <button
-                                onClick={() => setShowChatHistory(true)}
-                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/40 text-blue-300 text-xs font-semibold shadow-[0_0_12px_rgba(59,130,246,0.2)] transition-all shrink-0 whitespace-nowrap active:scale-95"
-                                title="Chat History"
-                            >
-                                <MessageSquare className="w-3.5 h-3.5" />
-                                <span>Chat History</span>
-                            </button>
 
                             {/* 15. Phone Info */}
                             <button
@@ -3763,6 +3764,18 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                                             <span>🛸 3D Lab</span>
                                         </button>
                                     </HangingRopeCapsule>
+
+                                    {/* 11. Chat History (moved from lower tier to upper) */}
+                                    <HangingRopeCapsule ropeHeight={35} swayIndex={11} ropeColor="from-blue-400/90 via-sky-300 to-blue-500/90" glowColor="rgba(59,130,246,0.4)">
+                                        <button
+                                            onClick={() => setShowChatHistory(true)}
+                                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/50 text-blue-300 text-xs font-semibold shadow-[0_0_15px_rgba(59,130,246,0.25)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
+                                            title="Encrypted Chat History"
+                                        >
+                                            <MessageSquare className="w-3.5 h-3.5" />
+                                            <span>Chat History</span>
+                                        </button>
+                                    </HangingRopeCapsule>
                                 </div>
                             </div>
 
@@ -3842,17 +3855,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                                         </button>
                                     </HangingRopeCapsule>
 
-                                    {/* 13. Chat History */}
-                                    <HangingRopeCapsule rowTier="lower" ropeHeight={38} swayIndex={13} ropeColor="from-blue-400/90 via-sky-300 to-blue-500/90" glowColor="rgba(59,130,246,0.4)">
-                                        <button
-                                            onClick={() => setShowChatHistory(true)}
-                                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/50 text-blue-300 text-xs font-semibold shadow-[0_0_15px_rgba(59,130,246,0.25)] transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
-                                            title="Encrypted Chat History"
-                                        >
-                                            <MessageSquare className="w-3.5 h-3.5" />
-                                            <span>Chat History</span>
-                                        </button>
-                                    </HangingRopeCapsule>
+
 
                                     {/* 14. 📱 Phone Info (Deep OSINT & Carrier Radar) */}
                                     <HangingRopeCapsule rowTier="lower" ropeHeight={35} swayIndex={14} ropeColor="from-cyan-400/90 via-blue-300 to-cyan-500/90" glowColor="rgba(6,182,212,0.4)">
