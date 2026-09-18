@@ -83,6 +83,63 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
     let blinkTimer = 2;
     let blinkT = -1;
 
+    // ── Auto arm-rigging: T-pose haathon ko neeche lao ──
+    // Kisi bhi humanoid rig par kaam karega — bone ke local axis guess nahi karta,
+    // world-space direction se rotate karta hai (shoulder -> elbow abhi kidhar, neeche kidhar).
+    const aimBone = (bone: THREE.Object3D, curDir: THREE.Vector3, wantDir: THREE.Vector3) => {
+      const q = new THREE.Quaternion().setFromUnitVectors(curDir.clone().normalize(), wantDir.clone().normalize());
+      const worldQ = bone.getWorldQuaternion(new THREE.Quaternion());
+      const parentQ = bone.parent ? bone.parent.getWorldQuaternion(new THREE.Quaternion()) : new THREE.Quaternion();
+      bone.quaternion.copy(parentQ.invert().multiply(q.multiply(worldQ)));
+      bone.updateMatrixWorld(true);
+    };
+    const relaxArms = (model: THREE.Object3D) => {
+      model.updateMatrixWorld(true);
+      const bones: THREE.Bone[] = [];
+      model.traverse((o) => { if ((o as THREE.Bone).isBone) bones.push(o as THREE.Bone); });
+      if (!bones.length) return false;
+      const uppers = bones.filter((b) => /upperarm|upper_arm|uparm|shoulder/i.test(b.name));
+      const fores = bones.filter((b) => /forearm|fore_arm|lowerarm|lower_arm|elbow/i.test(b.name));
+      if (!uppers.length) return false;
+      let fixed = 0;
+      uppers.forEach((up) => {
+        // Elbow reference: forearm bone (same side) ya upper ka pehla bone-child
+        const sideHint = /left|_l\b|\.l\b|l_/i.test(up.name) ? 1 : /right|_r\b|\.r\b|r_/i.test(up.name) ? -1 : 0;
+        const fore = fores.find((f) => {
+          const a = up.getWorldPosition(new THREE.Vector3());
+          const b = f.getWorldPosition(new THREE.Vector3());
+          return a.distanceTo(b) < 1.5;
+        }) ?? up.children.find((c) => (c as THREE.Bone).isBone) as THREE.Object3D | undefined;
+        if (!fore) return;
+        up.updateMatrixWorld(true);
+        const shoulderP = up.getWorldPosition(new THREE.Vector3());
+        const elbowP = fore.getWorldPosition(new THREE.Vector3());
+        const curDir = elbowP.sub(shoulderP);
+        if (curDir.length() < 1e-4) return;
+        curDir.normalize();
+        // Sirf tab fix karo jab haath waqai faila ho (sideways), nahi to chhedo mat
+        if (Math.abs(curDir.y) > 0.55) return;
+        // Bahar ki taraf = haath abhi jis side faila hai usi ka sign (left/right naam par bharosa nahi)
+        const out = Math.sign(curDir.x) || (sideHint !== 0 ? sideHint : 1);
+        aimBone(up, curDir, new THREE.Vector3(out * 0.14, -1, 0.04));
+        // Kohni me halka mod (natural look)
+        const wristObj = (fore as THREE.Object3D).children.find((c) => (c as THREE.Bone).isBone);
+        if (wristObj) {
+          fore.updateMatrixWorld(true);
+          const eP = fore.getWorldPosition(new THREE.Vector3());
+          const wP = wristObj.getWorldPosition(new THREE.Vector3());
+          const fDir = wP.sub(eP);
+          if (fDir.length() > 1e-4) {
+            fDir.normalize();
+            aimBone(fore, fDir, new THREE.Vector3(out * 0.1, -1, 0.14));
+          }
+        }
+        fixed++;
+      });
+      console.log(`[FridayModel3D] arms relaxed: ${fixed}`);
+      return fixed > 0;
+    };
+
     // .glb aur .fbx dono support — jo file mile wahi load hogi
     const handleLoaded = (model: THREE.Object3D, animations: THREE.AnimationClip[]) => {
         if (disposed) return;
@@ -98,6 +155,9 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         const s = targetH / Math.max(size.y, 0.001);
         model.scale.setScalar(s);
         modelRoot.add(model);
+
+        // T-pose haath neeche lao (rigging), phir framing — taaki frame sahi bane
+        try { relaxArms(model); } catch (e) { console.warn('[FridayModel3D] arm relax failed', e); }
 
         // Portrait framing: sir se kamar tak closeup — chehra bada dikhe, faile haath frame se bahar
         modelRoot.updateMatrixWorld(true);
