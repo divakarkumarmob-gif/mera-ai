@@ -3367,8 +3367,14 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
             <CyberMonkeyMechanic />
 
             <div className="w-full h-full flex flex-col flex-1 relative z-10" style={{ overflow: 'visible' }}>
+                {/* ── 🧍 Fullscreen 3D stage: poori screen khidki, model kahin nahi katega ── */}
+                <div className="absolute inset-0 z-0 pointer-events-none">
+                    <div className="w-full h-full pointer-events-auto">
+                        <FridayModel3D status={status} volume={volume} reaction={faceReaction} height={500} fluid onTap={handleFaceDoubleTap} action={avatarAction} onActionDone={() => setAvatarAction(null)} />
+                    </div>
+                </div>
                 {/* ── Top Dashboard Header (100% Fully Transparent so all hanging ropes behind it are visible) ── */}
-                <div className="w-full flex flex-col gap-1.5 mb-2 pt-0.5 shrink-0 bg-transparent" style={{ overflow: 'visible' }}>
+                <div className="relative z-10 w-full flex flex-col gap-1.5 mb-2 pt-0.5 shrink-0 bg-transparent" style={{ overflow: 'visible' }}>
                     <div className="flex items-center justify-between px-1 bg-transparent pointer-events-auto">
                         <h1 className="text-base sm:text-lg font-bold flex items-center gap-2 drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]">
                             <span className="filter drop-shadow-[0_0_8px_rgba(59,130,246,0.6)]">🤖</span>
@@ -4100,7 +4106,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                     )}
                 </AnimatePresence>
 
-                <div className="flex-1 flex flex-col items-center justify-center gap-1 overflow-hidden relative">
+                <div className="flex-1 flex flex-col items-center justify-start gap-1 overflow-hidden relative z-10 pt-1">
                     <div className="text-center">
                         <span className="text-2xl md:text-3xl font-extrabold bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent tracking-wide">
                             Welcome
@@ -4149,11 +4155,6 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                     </div>
 
                     <p className="text-slate-300 text-sm font-medium relative z-20">{status}</p>
-
-                    {/* Model canvas neeche buttons tak badhta hai — pair buttons ke PEECHE */}
-                    <div className="relative z-0" style={{ marginBottom: -120 }}>
-                        <FridayModel3D status={status} volume={volume} reaction={faceReaction} height={310} onTap={handleFaceDoubleTap} action={avatarAction} onActionDone={() => setAvatarAction(null)} />
-                    </div>
 
                     {!isRecording && wakeWordActive && (
                         <div className="relative z-20 flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-xs text-cyan-300 shadow-[0_0_15px_rgba(6,182,212,0.15)] animate-pulse">

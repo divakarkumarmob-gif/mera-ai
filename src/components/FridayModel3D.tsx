@@ -20,13 +20,15 @@ interface FridayModel3DProps {
   onTap?: () => void;
   action?: AvatarAction;
   onActionDone?: () => void;
+  /** fluid = poori screen ka stage (LiveAIInterface), fixed box nahi */
+  fluid?: boolean;
 }
 
 // Tumhara real 3D model: public/friday.glb (best) ya public/friday.fbx — pehle .glb, phir .fbx try hoga.
 // Koi file na mile to photo wala avatar fallback rahega.
 const MODEL_URLS = ['/friday.glb', '/friday.fbx'];
 
-const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction, height = 340, onTap, action, onActionDone }) => {
+const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction, height = 340, onTap, action, onActionDone, fluid }) => {
   const mountRef = useRef<HTMLDivElement>(null);
   const stateRef = useRef({ status, volume, reaction, action });
   stateRef.current = { status, volume, reaction, action };
@@ -694,16 +696,23 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
   }
 
   return (
-    <div className="relative flex flex-col items-center" style={{ perspective: 900 }} onClick={onTap}>
+    <div
+      className={`relative flex flex-col items-center ${fluid ? 'w-full h-full' : ''}`}
+      style={{ perspective: 900 }}
+      onDoubleClick={onTap}
+    >
       <div
         ref={mountRef}
-        style={{ width: Math.round(height * 0.75), height, cursor: onTap ? 'pointer' : 'default' }}
+        style={fluid
+          ? { width: '100%', height: '100%', cursor: onTap ? 'pointer' : 'default' }
+          : { width: Math.round(height * 0.75), height, cursor: onTap ? 'pointer' : 'default' }}
       />
       {/* TEMP vertical size scale (right side, value ke saath) — best value batao, lock kar dunga */}
       <div
-        className="absolute right-0 top-1/2 -translate-y-1/2 z-20 flex flex-col items-center justify-center gap-1"
-        style={{ width: 34, height: Math.round(height * 0.62) }}
+        className="absolute right-1 top-1/2 -translate-y-1/2 z-20 flex flex-col items-center justify-center gap-1"
+        style={{ width: 34, height: fluid ? 210 : Math.round(height * 0.62) }}
         onClick={(e) => e.stopPropagation()}
+        onDoubleClick={(e) => e.stopPropagation()}
         title="Model size (temporary)"
       >
         <span className="text-[10px] font-mono text-cyan-300 bg-slate-900/80 px-1.5 py-0.5 rounded border border-cyan-500/30">
@@ -718,7 +727,7 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
           onChange={(e) => applyZoom(Number(e.target.value))}
           aria-label="Model size"
           style={{
-            width: Math.round(height * 0.5),
+            width: fluid ? 160 : Math.round(height * 0.5),
             transform: 'rotate(-90deg)',
             accentColor: '#38bdf8',
             cursor: 'ns-resize',
@@ -726,7 +735,7 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         />
       </div>
       {isSpeaking && (
-        <div className="absolute -bottom-1 flex items-end gap-1 pointer-events-none">
+        <div className={`absolute flex items-end gap-1 pointer-events-none ${fluid ? 'bottom-28' : '-bottom-1'}`}>
           {[0.5, 0.9, 0.65, 1, 0.75, 0.55, 0.85].map((b, i) => (
             <motion.span
               key={i}
