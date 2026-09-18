@@ -34,6 +34,23 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
   doneRef.current = onActionDone;
   const mouseRef = useRef({ x: 0, y: 0 });
   const [modelMissing, setModelMissing] = useState(false);
+  // ── TEMP size slider (calibration): tum best size batao, mai lock kar dunga ──
+  const [zoom, setZoom] = useState<number>(() => {
+    try { return Number(localStorage.getItem('friday-model-zoom')) || 1; } catch { return 1; }
+  });
+  const zoomRef = useRef(zoom);
+  const camRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const fitRef = useRef({ dist: 4, cy: 1 });
+  const applyZoom = (z: number) => {
+    zoomRef.current = z;
+    setZoom(z);
+    try { localStorage.setItem('friday-model-zoom', String(z)); } catch { /* noop */ }
+    const cam = camRef.current;
+    if (cam) {
+      cam.position.set(0, fitRef.current.cy + 0.05, fitRef.current.dist / z);
+      cam.lookAt(0, fitRef.current.cy, 0);
+    }
+  };
   // Manual override (console test / future buttons) — prop action se merge hota hai
   const [localAction, setLocalAction] = useState<AvatarAction>(null);
   const localRef = useRef<AvatarAction>(null);
@@ -84,6 +101,7 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
     const camera = new THREE.PerspectiveCamera(28, W / H, 0.1, 100);
     camera.position.set(0, 1.35, 3.4);
     camera.lookAt(0, 1.0, 0);
+    camRef.current = camera;
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(W, H);
@@ -244,7 +262,8 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         const fitH = (visH / 2) / Math.tan(halfFov);
         const fitW = (visW / 2) / (Math.tan(halfFov) * Math.max(camera.aspect, 0.3));
         const fitDist = Math.max(fitH, fitW) * 1.18;
-        camera.position.set(0, centerY + 0.05, fitDist);
+        fitRef.current = { dist: fitDist, cy: centerY };
+        camera.position.set(0, centerY + 0.05, fitDist / zoomRef.current);
         camera.lookAt(0, centerY, 0);
 
         // Animations: idle wali clip chalao
@@ -503,6 +522,7 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
     return () => {
       disposed = true;
       cancelAnimationFrame(raf);
+      camRef.current = null;
       if (clearTimer) clearTimeout(clearTimer);
       window.removeEventListener('mousemove', onMouse);
       window.removeEventListener('resize', onResize);
@@ -529,6 +549,32 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         ref={mountRef}
         style={{ width: Math.round(height * 0.75), height, cursor: onTap ? 'pointer' : 'default' }}
       />
+      {/* TEMP vertical size scale (right side, value ke saath) — best value batao, lock kar dunga */}
+      <div
+        className="absolute right-0 top-1/2 -translate-y-1/2 z-20 flex flex-col items-center justify-center gap-1"
+        style={{ width: 34, height: Math.round(height * 0.62) }}
+        onClick={(e) => e.stopPropagation()}
+        title="Model size (temporary)"
+      >
+        <span className="text-[10px] font-mono text-cyan-300 bg-slate-900/80 px-1.5 py-0.5 rounded border border-cyan-500/30">
+          {zoom.toFixed(2)}
+        </span>
+        <input
+          type="range"
+          min={0.5}
+          max={2.5}
+          step={0.01}
+          value={zoom}
+          onChange={(e) => applyZoom(Number(e.target.value))}
+          aria-label="Model size"
+          style={{
+            width: Math.round(height * 0.5),
+            transform: 'rotate(-90deg)',
+            accentColor: '#38bdf8',
+            cursor: 'ns-resize',
+          }}
+        />
+      </div>
       {isSpeaking && (
         <div className="absolute -bottom-1 flex items-end gap-1 pointer-events-none">
           {[0.5, 0.9, 0.65, 1, 0.75, 0.55, 0.85].map((b, i) => (
