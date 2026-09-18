@@ -28,9 +28,9 @@ interface FridayModel3DProps {
 // Koi file na mile to photo wala avatar fallback rahega.
 const MODEL_URLS = ['/friday.glb', '/friday.fbx'];
 
-// 🔒 LOCKED position: zoom=0.91 x=-0.03 y=-1.15 (model bottom pe khada — screen end tak)
+// 🔒 LOCKED position: zoom=0.91 x=-0.03 y=0 (camera offset handles bottom alignment)
 const LOCKED_ZOOM = 0.91;
-const LOCKED_POS = { x: -0.03, y: -1.15 };
+const LOCKED_POS = { x: -0.03, y: 0 };
 
 const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction, height = 340, onTap, action, onActionDone, fluid }) => {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -287,8 +287,10 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         const fitH = (visH / 2) / Math.tan(halfFov);
         const fitW = (visW / 2) / (Math.tan(halfFov) * Math.max(camera.aspect, 0.3));
         const fitDist = Math.max(fitH, fitW) * 1.12;
-        camera.position.set(0, centerY + 0.05, fitDist / LOCKED_ZOOM);
-        camera.lookAt(0, centerY, 0);
+        // Camera ko model ke center se UPAR point karo — model screen ke bottom pe dikhega
+        const camOffsetY = fullH * 0.40; // 40% upar = model niche khisak jaayega visually
+        camera.position.set(0, centerY + camOffsetY + 0.05, fitDist / LOCKED_ZOOM);
+        camera.lookAt(0, centerY + camOffsetY, 0);
 
         // Animations: idle wali clip chalao
         if (animations.length > 0) {
