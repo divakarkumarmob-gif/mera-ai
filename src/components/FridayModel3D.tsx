@@ -98,13 +98,14 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
     // Co-speech gesture engine: bolte time haath/sir/body — energy volume se, style phrase se
     let speakEnergy = 0;
     let wasSpeaking = false;
-    let speakPhrase = 'nod';
+    let speakPhrase = 'handR_explain';
     let phraseT = 0;
-    let phraseDur = 2;
+    let phraseDur = 2.5;
+    let gestureBlend = 0;
     const baseHandL = new THREE.Vector3();
     const baseHandR = new THREE.Vector3();
     let baseHandsSaved = false;
-    const PHRASES = ['nod', 'tilt', 'handR', 'handL', 'both', 'lean', 'nod', 'handR'];
+    const PHRASES = ['handR_explain', 'both_open', 'handR_point', 'handL_explain', 'both_explain', 'handR_open'];
     const baseQ = new Map<THREE.Object3D, THREE.Quaternion>();
     let prevAction: AvatarAction = null;
     let actionStart = 0;
@@ -584,9 +585,16 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         ? Math.abs(Math.sin(t * 2.6)) * 0.04
         : Math.sin(t * 1.5) * 0.015) + LOCKED_POS.y;
       if (headBone && headBone !== modelRoot.children[0]) {
-        headBone.rotation.y = lerp(headBone.rotation.y, m.x * 0.35 + (thinking ? Math.sin(t * 1.6) * 0.2 : 0), 0.08);
-        headBone.rotation.x = lerp(headBone.rotation.x, m.y * 0.18 + (listening ? -0.1 : 0) + (speaking ? Math.sin(t * 13) * 0.03 * Math.min(1, volume * 4) : 0), 0.08);
-        headBone.rotation.z = lerp(headBone.rotation.z, thinking ? 0.12 : 0, 0.06);
+        if (speaking) {
+          // Head stays straight facing forward during speech, no wobbling/nodding/tilting
+          headBone.rotation.x = lerp(headBone.rotation.x, m.y * 0.04, 0.1);
+          headBone.rotation.y = lerp(headBone.rotation.y, m.x * 0.08, 0.1);
+          headBone.rotation.z = lerp(headBone.rotation.z, 0, 0.1);
+        } else {
+          headBone.rotation.y = lerp(headBone.rotation.y, m.x * 0.35 + (thinking ? Math.sin(t * 1.6) * 0.2 : 0), 0.08);
+          headBone.rotation.x = lerp(headBone.rotation.x, m.y * 0.18 + (listening ? -0.1 : 0), 0.08);
+          headBone.rotation.z = lerp(headBone.rotation.z, thinking ? 0.12 : 0, 0.06);
+        }
         // Safety clamp: sir kabhi profile/exorcist mode me na jaaye
         headBone.rotation.x = THREE.MathUtils.clamp(headBone.rotation.x, -0.35, 0.35);
         headBone.rotation.y = THREE.MathUtils.clamp(headBone.rotation.y, -0.45, 0.45);
@@ -706,7 +714,7 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         // In this FBX rig, local -X = arm goes sideways/up (not Z!)
         // -1.4 rad = ~80° outward raise (elbow at ear height)
         upR.quaternion.copy(baseQ.get(upR)!)
-          .multiply(tmpQ.setFromAxisAngle(X_AXIS, -1.31 * raiseSmooth)); // 75° sideways OUT
+          .multiply(tmpQ.setFromAxisAngle(X_AXIS, -1.45 * raiseSmooth)); // 83° sideways/up OUT
 
         // ── Forearm: 107° elbow + forearm ALSO waves (larger arc) ──
         foreR.quaternion.copy(baseQ.get(foreR)!)
@@ -999,93 +1007,178 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         // Wazan ek pair se doosre par — zinda khada!
         modelRoot.rotation.z = Math.sin(t * 0.33) * 0.022;
         modelRoot.position.x = Math.sin(t * 0.23) * 0.02 + LOCKED_POS.x;
-        // Kabhi-kabhi khud gardan ghuma kar dekho (mouse ke alava)
-        glanceT -= dt;
-        if (glanceT <= 0) {
-          glanceT = 4 + Math.random() * 4;
-          glanceTX = (Math.random() - 0.5) * 0.5;
-          glanceTY = (Math.random() - 0.5) * 0.2;
-          setTimeout(() => { glanceTX = 0; glanceTY = 0; }, 1400);
-        }
-        glanceX = lerp(glanceX, glanceTX, 1 - Math.pow(0.001, dt));
-        glanceY = lerp(glanceY, glanceTY, 1 - Math.pow(0.001, dt));
-        if (headBone && headBone !== modelRoot) {
-          headBone.rotation.y = THREE.MathUtils.clamp(headBone.rotation.y + glanceX, -0.5, 0.5);
-          headBone.rotation.x = THREE.MathUtils.clamp(headBone.rotation.x + glanceY, -0.4, 0.4);
+        // Glance sirf tab jab bol na raha ho (bolte waqt head straight rehta hai)
+        if (!speaking) {
+          glanceT -= dt;
+          if (glanceT <= 0) {
+            glanceT = 4 + Math.random() * 4;
+            glanceTX = (Math.random() - 0.5) * 0.35;
+            glanceTY = (Math.random() - 0.5) * 0.12;
+            setTimeout(() => { glanceTX = 0; glanceTY = 0; }, 1400);
+          }
+          glanceX = lerp(glanceX, glanceTX, 1 - Math.pow(0.001, dt));
+          glanceY = lerp(glanceY, glanceTY, 1 - Math.pow(0.001, dt));
+          if (headBone && headBone !== modelRoot) {
+            headBone.rotation.y = THREE.MathUtils.clamp(headBone.rotation.y + glanceX, -0.5, 0.5);
+            headBone.rotation.x = THREE.MathUtils.clamp(headBone.rotation.x + glanceY, -0.4, 0.4);
+          }
         }
       }
 
-      // ── Co-speech gestures: baat + haath/sir/body ek saath ──
-      const energyTarget = speaking ? THREE.MathUtils.clamp(volume * 3, 0.18, 1) : 0;
+      // ── Co-speech natural human conversational gestures ──
+      const energyTarget = speaking ? THREE.MathUtils.clamp(volume * 3.5, 0.25, 1.0) : 0;
       speakEnergy = lerp(speakEnergy, energyTarget, 1 - Math.pow(0.01, dt));
-      if (speaking && !wasSpeaking) { phraseT = 99; } // bolna shuru = turant naya gesture
-      const justStopped = wasSpeaking && !speaking;
+      if (speaking && !wasSpeaking) { phraseT = 99; } // Bolna shuru hote hi natural gesture trigger
       wasSpeaking = speaking;
+
       if (speaking) {
         phraseT += dt;
         if (phraseT >= phraseDur) {
-          // Naya phrase: pichla wala repeat nahi, haath base par wapas
           let next = speakPhrase;
           while (next === speakPhrase) next = PHRASES[Math.floor(Math.random() * PHRASES.length)];
           speakPhrase = next;
           phraseT = 0;
-          phraseDur = 1.6 + Math.random() * 1.4;
-          if (!act) baseQ.forEach((q, b) => { if (b === upL || b === upR || b === foreL || b === foreR) b.quaternion.copy(q); });
+          phraseDur = 2.2 + Math.random() * 1.5;
         }
+      }
+
+      // Smooth envelope blend in and out
+      const targetBlend = speaking && !act ? 1.0 : 0.0;
+      gestureBlend = lerp(gestureBlend, targetBlend, 1 - Math.pow(0.002, dt));
+
+      if (!act && gestureBlend > 0.005) {
         const p = Math.min(phraseT / phraseDur, 1);
-        const env = Math.sin(p * Math.PI); // smooth in-out
-        const beat = Math.abs(Math.sin(t * 9)) * 0.6 + Math.abs(Math.sin(t * 5.3)) * 0.4;
-        const amp = env * speakEnergy;
-        // Sir: baat ke saath nod + halka storytelling sway (hamesha, action me bhi thoda)
-        if (headBone && headBone !== modelRoot) {
-          const nodAmp = (speakPhrase === 'nod' ? 0.10 : 0.045) + volume * 0.22;
-          headBone.rotation.x += Math.sin(t * 6.5) * nodAmp * Math.max(env, 0.35) * speakEnergy;
-          headBone.rotation.y += Math.sin(t * 0.8) * 0.05 * speakEnergy;
-          if (speakPhrase === 'tilt') headBone.rotation.z += 0.07 * amp;
-        }
-        // Haath: sirf jab koi action pose na chal raha ho (world-space, hamesha saamne)
-        if (!act && baseHandsSaved) {
-          const liftHand = (up: THREE.Object3D | null, fore: THREE.Object3D | null, hand: THREE.Object3D | null, base: THREE.Vector3, lift: number) => {
-            if (!up || !fore || !hand || lift <= 0.01) return;
-            const target = modelRoot.localToWorld(base.clone().add(new THREE.Vector3(0, lift * 0.35, lift * 0.45)));
-            const sP = up.getWorldPosition(new THREE.Vector3());
-            const eP = fore.getWorldPosition(new THREE.Vector3());
-            const toElbow = eP.clone().sub(sP);
-            if (toElbow.length() < 1e-4) return;
-            // Kohni thodi bahar, haath target ki taraf
-            const eDir = target.clone().sub(sP).normalize();
-            eDir.x += (sP.x >= 0 ? 0.25 : -0.25);
-            aimBone(up, toElbow.normalize(), eDir.normalize());
-            fore.updateMatrixWorld(true);
-            const eP2 = fore.getWorldPosition(new THREE.Vector3());
-            const hP = hand.getWorldPosition(new THREE.Vector3());
-            const fDir = hP.sub(eP2);
-            if (fDir.length() > 1e-4) aimBone(fore, fDir.normalize(), target.sub(eP2).normalize());
-          };
-          const e = amp * (0.35 + beat * 0.65);
-          if (speakPhrase === 'handR') liftHand(upR, foreR, handR, baseHandR, e * 0.55);
-          else if (speakPhrase === 'handL') liftHand(upL, foreL, handL, baseHandL, e * 0.55);
-          else if (speakPhrase === 'both') {
-            liftHand(upR, foreR, handR, baseHandR, e * 0.4);
-            liftHand(upL, foreL, handL, baseHandL, e * 0.4);
-          } else {
-            // nod/tilt/lean me haath halke saath me (beat par)
-            liftHand(upR, foreR, handR, baseHandR, e * 0.12);
+        const env = Math.sin(p * Math.PI); // smooth phrase bell curve
+        const gPower = gestureBlend * (0.6 + 0.4 * env) * (0.75 + 0.25 * speakEnergy);
+        const cadencePulse = syllable * 0.10 * speakEnergy;
+
+        const LX = new THREE.Vector3(1, 0, 0);
+        const LY = new THREE.Vector3(0, 1, 0);
+        const LZ = new THREE.Vector3(0, 0, 1);
+
+        if (speakPhrase === 'handR_explain' || speakPhrase === 'handR_open') {
+          // Right hand raised high to chest/sternum level, explaining naturally
+          if (upR && baseQ.has(upR)) {
+            const target = baseQ.get(upR)!.clone()
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LZ, -0.32))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.85 - cadencePulse))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LY, 0.18));
+            upR.quaternion.copy(baseQ.get(upR)!).slerp(target, gPower);
+          }
+          if (foreR && baseQ.has(foreR)) {
+            const target = baseQ.get(foreR)!.clone()
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -1.78 - cadencePulse * 1.2))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LY, -0.48));
+            foreR.quaternion.copy(baseQ.get(foreR)!).slerp(target, gPower);
+          }
+          if (handR && baseQ.has(handR)) {
+            const target = baseQ.get(handR)!.clone()
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.22 + cadencePulse * 0.8))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LZ, 0.12));
+            handR.quaternion.copy(baseQ.get(handR)!).slerp(target, gPower);
+          }
+          if (upL && baseQ.has(upL)) {
+            const target = baseQ.get(upL)!.clone().multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.15 * gPower));
+            upL.quaternion.copy(baseQ.get(upL)!).slerp(target, gPower * 0.4);
+          }
+          if (foreL && baseQ.has(foreL)) {
+            const target = baseQ.get(foreL)!.clone().multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.25 * gPower));
+            foreL.quaternion.copy(baseQ.get(foreL)!).slerp(target, gPower * 0.4);
+          }
+        } else if (speakPhrase === 'handL_explain') {
+          // Left hand raised high to chest level (mirror)
+          if (upL && baseQ.has(upL)) {
+            const target = baseQ.get(upL)!.clone()
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LZ, 0.32))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.85 - cadencePulse))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LY, -0.18));
+            upL.quaternion.copy(baseQ.get(upL)!).slerp(target, gPower);
+          }
+          if (foreL && baseQ.has(foreL)) {
+            const target = baseQ.get(foreL)!.clone()
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -1.78 - cadencePulse * 1.2))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LY, 0.48));
+            foreL.quaternion.copy(baseQ.get(foreL)!).slerp(target, gPower);
+          }
+          if (handL && baseQ.has(handL)) {
+            const target = baseQ.get(handL)!.clone()
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.22 + cadencePulse * 0.8))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LZ, -0.12));
+            handL.quaternion.copy(baseQ.get(handL)!).slerp(target, gPower);
+          }
+          if (upR && baseQ.has(upR)) {
+            const target = baseQ.get(upR)!.clone().multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.15 * gPower));
+            upR.quaternion.copy(baseQ.get(upR)!).slerp(target, gPower * 0.4);
+          }
+          if (foreR && baseQ.has(foreR)) {
+            const target = baseQ.get(foreR)!.clone().multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.25 * gPower));
+            foreR.quaternion.copy(baseQ.get(foreR)!).slerp(target, gPower * 0.4);
+          }
+        } else if (speakPhrase === 'handR_point') {
+          // Right hand emphasis point/gesture raised high near upper chest
+          if (upR && baseQ.has(upR)) {
+            const target = baseQ.get(upR)!.clone()
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LZ, -0.28))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.96 - cadencePulse * 1.2))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LY, 0.22));
+            upR.quaternion.copy(baseQ.get(upR)!).slerp(target, gPower);
+          }
+          if (foreR && baseQ.has(foreR)) {
+            const target = baseQ.get(foreR)!.clone()
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -1.92 - cadencePulse * 1.4))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LY, -0.38));
+            foreR.quaternion.copy(baseQ.get(foreR)!).slerp(target, gPower);
+          }
+          if (handR && baseQ.has(handR)) {
+            const target = baseQ.get(handR)!.clone()
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.28 + cadencePulse * 1.0));
+            handR.quaternion.copy(baseQ.get(handR)!).slerp(target, gPower);
+          }
+        } else {
+          // both_open / both_explain: Both hands raised up in open explanatory presentation
+          if (upR && baseQ.has(upR)) {
+            const target = baseQ.get(upR)!.clone()
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LZ, -0.25))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.78 - cadencePulse))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LY, 0.15));
+            upR.quaternion.copy(baseQ.get(upR)!).slerp(target, gPower);
+          }
+          if (foreR && baseQ.has(foreR)) {
+            const target = baseQ.get(foreR)!.clone()
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -1.68 - cadencePulse))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LY, -0.42));
+            foreR.quaternion.copy(baseQ.get(foreR)!).slerp(target, gPower);
+          }
+          if (handR && baseQ.has(handR)) {
+            const target = baseQ.get(handR)!.clone()
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.18 + cadencePulse * 0.7));
+            handR.quaternion.copy(baseQ.get(handR)!).slerp(target, gPower);
+          }
+
+          if (upL && baseQ.has(upL)) {
+            const target = baseQ.get(upL)!.clone()
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LZ, 0.25))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.78 - cadencePulse))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LY, -0.15));
+            upL.quaternion.copy(baseQ.get(upL)!).slerp(target, gPower);
+          }
+          if (foreL && baseQ.has(foreL)) {
+            const target = baseQ.get(foreL)!.clone()
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -1.68 - cadencePulse))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LY, 0.42));
+            foreL.quaternion.copy(baseQ.get(foreL)!).slerp(target, gPower);
+          }
+          if (handL && baseQ.has(handL)) {
+            const target = baseQ.get(handL)!.clone()
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.18 + cadencePulse * 0.7));
+            handL.quaternion.copy(baseQ.get(handL)!).slerp(target, gPower);
           }
         }
-        // Body lean-in on emphasis (bow action me nahi)
-        if (act !== 'bow') modelRoot.rotation.x = (speakPhrase === 'lean' ? amp * 0.07 : amp * 0.02);
-      } else if (!act && justStopped) {
-        // Bolna band hua ABHI = haath wapas + seedha khada (ek baar, taaki saans wala sway chalta rahe)
-        baseQ.forEach((q, b) => {
-          if (b === upL || b === upR || b === foreL || b === foreR) b.quaternion.copy(q);
+      } else if (!act && gestureBlend <= 0.005) {
+        // Return cleanly to base pose when speech ends
+        [upL, upR, foreL, foreR, handL, handR].forEach((b) => {
+          if (b && baseQ.has(b)) b.quaternion.copy(baseQ.get(b)!);
         });
-        modelRoot.rotation.x = 0;
-      }
-      // Gesture ke baad bhi sir limit me
-      if (headBone && headBone !== modelRoot) {
-        headBone.rotation.x = THREE.MathUtils.clamp(headBone.rotation.x, -0.42, 0.42);
-        headBone.rotation.y = THREE.MathUtils.clamp(headBone.rotation.y, -0.5, 0.5);
       }
       } catch (e) {
         // Ek action fail = poora avatar freeze NAHO — bas base pose par wapas
