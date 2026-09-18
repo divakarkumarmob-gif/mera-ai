@@ -713,7 +713,7 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         // Y-axis: supination — rotates palm from -X to face +Z (toward viewer)
         foreR.quaternion.copy(baseQ.get(foreR)!)
           .multiply(tmpQ.setFromAxisAngle(X_AXIS, -1.4 * raiseSmooth))   // elbow bend up
-          .multiply(tmpQ.setFromAxisAngle(Y_WAVE, -1.57 * raiseSmooth)); // palm → +Z front
+          .multiply(tmpQ.setFromAxisAngle(Y_WAVE, 1.57 * raiseSmooth));  // palm → +Z front (corrected sign)
 
         // ── Forearm waves: Y-axis left-right oscillation ──
         const waveOsc = Math.sin(t * 5.5) * 0.55 * raiseSmooth;
