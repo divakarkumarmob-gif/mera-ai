@@ -100,6 +100,12 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
     let actionStart = 0;
     let mouthMorph: { mesh: THREE.Mesh; index: number } | null = null;
     let blinkMorphs: { mesh: THREE.Mesh; index: number }[] = [];
+    // Multi-viseme lip-sync: realistic speech needs multiple mouth shapes
+    let visemes: Record<string, { mesh: THREE.Mesh; index: number }> = {};
+    // Viseme state for smooth blending
+    let visemePhase = 0; // cycles through phoneme patterns
+    let visemeSpeed = 8; // base oscillation speed
+    let lastVolPeak = 0; // track volume peaks for emphasis
 
     const W = mount.clientWidth || 300;
     const H = mount.clientHeight || height;
@@ -213,6 +219,38 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
       return fixed > 0;
     };
 
+    // ── Natural finger curl: khade time ungliyaan halki mudi honi chahiye ──
+    // Real human jab seedha khada hota hai, ungliyaan thodi curved rehti hain — akdi nahi
+    const curlFingers = (model: THREE.Object3D) => {
+      model.updateMatrixWorld(true);
+      const fingerPattern = /^(left|right)(hand|index|middle|ring|pinky|thumb)(\d|proximal|intermediate|distal|metacarpal|tip)/i;
+      let curled = 0;
+      model.traverse((o) => {
+        if (!(o as THREE.Bone).isBone) return;
+        const n = o.name.toLowerCase();
+        // Finger bones: index1/2/3, middle1/2/3, ring1/2/3, pinky1/2/3, thumb1/2/3
+        // OR: proximal/intermediate/distal naming
+        if (!fingerPattern.test(o.name) && !/finger/i.test(n)) return;
+        // Skip thumb metacarpal (base) — sirf phalanges curl karo
+        if (/metacarpal/i.test(n)) return;
+        // Thumb ko kam curl karo (natural rest position me thumb kam muda hota hai)
+        const isThumb = /thumb/i.test(n);
+        // Distal (fingertip) thoda zyada curl, proximal thoda kam
+        const isDistal = /distal|3$/i.test(n);
+        const isIntermediate = /intermediate|2$/i.test(n);
+        const curlAmount = isThumb
+          ? 0.12 + (isDistal ? 0.08 : 0)
+          : isDistal ? 0.35 : isIntermediate ? 0.28 : 0.18;
+        // X-axis rotation = ungli andar ki taraf mudi (grip direction)
+        o.rotation.x += curlAmount;
+        // Pinky aur ring thoda zyada natural curl
+        if (/pinky|ring/i.test(n)) o.rotation.x += 0.06;
+        curled++;
+      });
+      if (curled > 0) console.log(`[FridayModel3D] fingers curled: ${curled} bones`);
+      return curled > 0;
+    };
+
     // .glb aur .fbx dono support — jo file mile wahi load hogi
     const handleLoaded = (model: THREE.Object3D, animations: THREE.AnimationClip[]) => {
         if (disposed) return;
@@ -231,6 +269,8 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
 
         // T-pose haath neeche lao (rigging), phir framing — taaki frame sahi bane
         try { relaxArms(model); } catch (e) { console.warn('[FridayModel3D] arm relax failed', e); }
+        // Ungliyaan natural curl karo (real human standing pose)
+        try { curlFingers(model); } catch (e) { console.warn('[FridayModel3D] finger curl failed', e); }
 
         // Action bones: chain-resolved (stray duplicates nahi — wahi jo relax me use hue)
         const chainBones = (side: 'left' | 'right') => {
@@ -318,9 +358,20 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
               const nm = name.toLowerCase();
               if (!mouthMorph && /jawopen|mouthopen|aa|ah|open/i.test(nm)) mouthMorph = { mesh, index: idx };
               if (/blink|eyelid|eye.*close/i.test(nm)) blinkMorphs.push({ mesh, index: idx });
+              // Multi-viseme morphs for realistic speech
+              if (/mouthsmile|smile/i.test(nm) && !visemes.smile) visemes.smile = { mesh, index: idx };
+              if (/mouthfunnel|funnel|oo|oh/i.test(nm) && !visemes.funnel) visemes.funnel = { mesh, index: idx };
+              if (/mouthpucker|pucker/i.test(nm) && !visemes.pucker) visemes.pucker = { mesh, index: idx };
+              if (/mouthstretch|stretch/i.test(nm) && !visemes.stretch) visemes.stretch = { mesh, index: idx };
+              if (/mouthclose|mouthpress|press/i.test(nm) && !visemes.press) visemes.press = { mesh, index: idx };
+              if (/mouthlower|lowerlip/i.test(nm) && !visemes.lowerLip) visemes.lowerLip = { mesh, index: idx };
+              if (/mouthshrugup|shrug/i.test(nm) && !visemes.shrug) visemes.shrug = { mesh, index: idx };
+              if (/jawforward|jawleft|jawright/i.test(nm) && !visemes.jawShift) visemes.jawShift = { mesh, index: idx };
+              if (/cheekpuff|puff/i.test(nm) && !visemes.cheekPuff) visemes.cheekPuff = { mesh, index: idx };
             });
           }
         });
+        console.log('[FridayModel3D] visemes found:', Object.keys(visemes));
 
         // Kuch na mile to poore model ko head mano (procedural motion ke liye)
         if (!headBone) headBone = model;
@@ -375,14 +426,71 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
 
       mixer?.update(dt);
 
-      // ── Lip-sync: jaw bone ya mouth morph, nahi to head bob ──
+      // ── Lip-sync: multi-viseme realistic speech ──
+      // Volume peaks track karo for emphasis moments
+      if (speaking && volume > lastVolPeak) lastVolPeak = volume;
+      lastVolPeak = lerp(lastVolPeak, 0, 1 - Math.pow(0.05, dt));
+
+      // Phoneme-like oscillation: multiple frequencies mix karke natural speech feel
+      const v = speaking ? Math.max(volume, 0.05) : 0;
+      const emphasis = Math.min(v * 3, 1); // 0-1 energy
+      // Fast syllable rhythm (har syllable par munh khulta-bandh hota)
+      const syllable = Math.abs(Math.sin(t * 11.5)) * 0.6 + Math.abs(Math.sin(t * 7.3)) * 0.25 + Math.abs(Math.sin(t * 18.7)) * 0.15;
+      // Slow phrase envelope (bolte time energy wax/wane hota hai)
+      const phrase = 0.5 + 0.5 * Math.sin(t * 1.8);
+
       const openTarget = speaking
-        ? 0.25 + Math.min(volume * 2.2, 0.75) + Math.abs(Math.sin(t * 15)) * 0.2 * Math.min(1, volume * 4 + 0.25)
-        : happy ? 0.3 : 0.04;
-      jawOpen = lerp(jawOpen, openTarget, 1 - Math.pow(0.0005, dt));
-      if (jawBone && jawBone !== modelRoot) jawBone.rotation.x = jawOpen * 0.7;
+        ? (0.15 + emphasis * 0.55) * syllable * (0.6 + phrase * 0.4)
+        : happy ? 0.25 : 0.02;
+      jawOpen = lerp(jawOpen, openTarget, 1 - Math.pow(0.001, dt));
+
+      // Jaw bone rotation
+      if (jawBone && jawBone !== modelRoot) jawBone.rotation.x = jawOpen * 0.55;
+      // Primary mouth morph
       if (mouthMorph && mouthMorph.mesh.morphTargetInfluences) {
         mouthMorph.mesh.morphTargetInfluences[mouthMorph.index] = Math.min(jawOpen, 1);
+      }
+
+      // Multi-viseme blending: har viseme alag phase par fire karta hai — speech natural lagti hai
+      if (speaking) {
+        visemePhase += dt * (8 + emphasis * 6); // speed up with energy
+        const vp = visemePhase;
+        // Each viseme fires at different phase offsets (like real phonemes cycling)
+        const setV = (key: string, val: number) => {
+          const v = visemes[key];
+          if (v && v.mesh.morphTargetInfluences) {
+            v.mesh.morphTargetInfluences[v.index] = lerp(
+              v.mesh.morphTargetInfluences[v.index] ?? 0, Math.max(0, Math.min(val, 1)),
+              1 - Math.pow(0.005, dt)
+            );
+          }
+        };
+        // "aa" moments (jaw open wide) — main driver
+        // "ee/smile" moments — lips stretch horizontally
+        setV('smile', Math.max(0, Math.sin(vp * 1.3 + 1.5)) * emphasis * 0.4);
+        // "oo/funnel" moments — lips round
+        setV('funnel', Math.max(0, Math.sin(vp * 0.9 + 3.0)) * emphasis * 0.45);
+        // "u/pucker" — lips purse
+        setV('pucker', Math.max(0, Math.sin(vp * 1.1 + 4.5)) * emphasis * 0.3);
+        // Mouth stretch (wide) — on emphasis
+        setV('stretch', Math.max(0, Math.sin(vp * 0.7)) * emphasis * 0.25);
+        // Press lips ("m", "b", "p" sounds) — brief closures
+        setV('press', Math.max(0, Math.sin(vp * 2.1 + 2.0)) * 0.3 * (syllable < 0.3 ? 1 : 0));
+        // Lower lip movement
+        setV('lowerLip', Math.max(0, Math.sin(vp * 1.5 + 1.0)) * emphasis * 0.3);
+        // Cheek puff on certain phrases
+        setV('cheekPuff', Math.max(0, Math.sin(vp * 0.4 + 5.0)) * emphasis * 0.15);
+        // Jaw micro-shift (natural jaw movement isn't perfectly centered)
+        setV('jawShift', Math.sin(vp * 0.6) * emphasis * 0.12);
+      } else {
+        // Not speaking: smoothly return all visemes to 0
+        Object.values(visemes).forEach(({ mesh, index }) => {
+          if (mesh.morphTargetInfluences) {
+            mesh.morphTargetInfluences[index] = lerp(
+              mesh.morphTargetInfluences[index] ?? 0, 0, 1 - Math.pow(0.01, dt)
+            );
+          }
+        });
       }
 
       // ── Blink (morph ho to wahi, nahi to head micro-nod se natural feel) ──
