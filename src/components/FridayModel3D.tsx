@@ -36,7 +36,8 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
   const [modelMissing, setModelMissing] = useState(false);
   // ── TEMP size slider (calibration): tum best size batao, mai lock kar dunga ──
   const [zoom, setZoom] = useState<number>(() => {
-    try { return Number(localStorage.getItem('friday-model-zoom')) || 1; } catch { return 1; }
+    // v2 key: full-body framing ke hisaab se fresh default (purana portrait wala zoom sir kaat-ta tha)
+    try { return Number(localStorage.getItem('friday-model-zoom-v2')) || 1; } catch { return 1; }
   });
   const zoomRef = useRef(zoom);
   const camRef = useRef<THREE.PerspectiveCamera | null>(null);
@@ -44,7 +45,7 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
   const applyZoom = (z: number) => {
     zoomRef.current = z;
     setZoom(z);
-    try { localStorage.setItem('friday-model-zoom', String(z)); } catch { /* noop */ }
+    try { localStorage.setItem('friday-model-zoom-v2', String(z)); } catch { /* noop */ }
     const cam = camRef.current;
     if (cam) {
       cam.position.set(0, fitRef.current.cy + 0.05, fitRef.current.dist / z);
