@@ -162,9 +162,9 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         // Sirf tab fix karo jab haath waqai faila ho (sideways), nahi to chhedo mat
         if (Math.abs(curDir.y) > 0.55) return;
         // Bahar ki taraf = haath abhi jis side faila hai usi ka sign
-        // Harness-verified: haath thighs ke AAGE (±0.21, 0.95, 0.11) — peeche chhupe nahi!
+        // Harness-verified: kohni torso se gap par (±0.23), haath natural (±0.24, z 0.08)
         const out = Math.sign(curDir.x) || 1;
-        aimBone(up, curDir, new THREE.Vector3(out * 0.2, -1, 0.25));
+        aimBone(up, curDir, new THREE.Vector3(out * 0.35, -1, 0.2));
         // Kohni me halka mod (natural look)
         const wristObj = (fore as THREE.Object3D).children.find((c) => (c as THREE.Bone).isBone);
         if (wristObj) {
@@ -174,7 +174,7 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
           const fDir = wP.sub(eP);
           if (fDir.length() > 1e-4) {
             fDir.normalize();
-            aimBone(fore as THREE.Object3D, fDir, new THREE.Vector3(out * 0.15, -1, 0.35));
+            aimBone(fore as THREE.Object3D, fDir, new THREE.Vector3(out * 0.05, -1, 0.3));
           }
         }
         fixed++;
