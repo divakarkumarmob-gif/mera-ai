@@ -708,22 +708,21 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         upR.quaternion.copy(baseQ.get(upR)!)
           .multiply(tmpQ.setFromAxisAngle(X_AXIS, -1.31 * raiseSmooth)); // 75° sideways OUT
 
-        // ── Forearm: ONLY elbow bend on X — no Y twist (elbow joint clean) ──
-        // Elbow joint angle = 75° (1.31 rad) between upper arm and forearm
+        // ── Forearm: FIXED at elbow bend — NO rotation during wave ──
+        // Real wave: elbow stays locked, only wrist moves
         foreR.quaternion.copy(baseQ.get(foreR)!)
-          .multiply(tmpQ.setFromAxisAngle(X_AXIS, -1.31 * raiseSmooth)); // 75° elbow joint angle
+          .multiply(tmpQ.setFromAxisAngle(X_AXIS, -1.31 * raiseSmooth)); // 75° elbow — STATIC
 
-        // ── Hand/Wrist: palm faces front + wave oscillation ──
-        // Palm orientation goes on HAND bone — keeps elbow joint natural
+        // ── Hand/Wrist: ALL wave motion here only ──
+        // Y-axis: left-right two-way swing (main wave)
+        // Z-axis: slight wrist flip for personality
         if (handR && baseQ.has(handR)) {
+          const waveOsc = Math.sin(t * 5.0) * 0.5 * raiseSmooth; // left-right swing
           handR.quaternion.copy(baseQ.get(handR)!)
-            .multiply(tmpQ.setFromAxisAngle(Y_WAVE,  1.57 * raiseSmooth))  // palm → +Z front
-            .multiply(tmpQ.setFromAxisAngle(Z_WAVE, Math.sin(t * 5.5 + 0.5) * 0.35 * raiseSmooth)); // wave flip
+            .multiply(tmpQ.setFromAxisAngle(Y_WAVE, 1.57 * raiseSmooth))           // palm → front
+            .multiply(tmpQ.setFromAxisAngle(Z_WAVE, waveOsc))                       // wave left-right
+            .multiply(tmpQ.setFromAxisAngle(X_AXIS, Math.sin(t * 5.0 + 0.8) * 0.15 * raiseSmooth)); // subtle nod
         }
-
-        // ── Forearm waves: Y-axis left-right oscillation ──
-        const waveOsc = Math.sin(t * 5.5) * 0.45 * raiseSmooth;
-        foreR.quaternion.multiply(tmpQ.setFromAxisAngle(Y_WAVE, waveOsc));
 
         // Body lean slightly toward wave side
         modelRoot.rotation.z = -0.04 * raiseSmooth;
