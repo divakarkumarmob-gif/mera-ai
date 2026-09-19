@@ -137,16 +137,11 @@ export function initGlobalFetchInterceptor() {
     };
 
     // Background Heartbeat: Check session validity every 25 seconds
-    // ⚠️ STARTUP GRACE: First 45s ke andar heartbeat lock nahi karega (Render cold-start ke liye)
     if (typeof window !== 'undefined' && !(window as any).__sessionHeartbeatStarted) {
         (window as any).__sessionHeartbeatStarted = true;
-        const startedAt = Date.now();
         setInterval(async () => {
             const token = getAppToken();
             if (!token) return;
-
-            // Grace window: 45 seconds after page load, don't lock on heartbeat failures
-            const isStartupGrace = Date.now() - startedAt < 45_000;
 
             const backendBase = getBackendBaseUrl();
             const checkUrl = backendBase ? `${backendBase}/api/app-key/session-check` : '/api/app-key/session-check';
@@ -155,12 +150,12 @@ export function initGlobalFetchInterceptor() {
                 const res = await originalFetch(checkUrl, {
                     headers: { 'x-app-key-token': token },
                 });
-                if ((res.status === 401 || res.status === 403) && !isStartupGrace) {
+                if (res.status === 401 || res.status === 403) {
                     console.warn('[AppSecurityClient] Heartbeat session invalid/revoked. Locking.');
                     clearAppSession();
                 }
             } catch {
-                // Ignore transient network errors (especially during Render cold-start)
+                // Ignore transient network errors
             }
         }, 25000);
     }
