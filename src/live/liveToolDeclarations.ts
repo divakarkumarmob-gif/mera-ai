@@ -2866,14 +2866,14 @@ const rawFunctionDeclarations: any[] = [
   },
   {
     "name": "avatar_action",
-    "description": "AVATAR BODY ACTION TOOL: Friday has a visible 3D body on screen. Call this when DK asks her to DO a physical action with her body. 'dance karo / naach ke dikha' -> dance. 'back flip maro / flip karo / palti maro' -> flip. 'front flip' -> flip_front. 'kick maro / fight' -> flip_kick. 'jump karo' -> jump. 'push up lagao' -> pushup. 'salute karo' -> salute. 'gussa ho jao' -> angry. 'rap karo' -> rap. 'chalo / walk karo' -> walk. 'namaste karo' -> namaste. 'soch ke dikha' -> think. 'bye karo / wave karo' -> wave. 'sir jhukao / bow karo' -> bow. 'phone dekho' -> phone. 'haan me gardan hilao' -> nod-yes. 'naa me gardan hilao' -> nod-no. 'ruk jao / stop' -> stop. Always call the tool AND speak a matching Hinglish line.",
+    "description": "AVATAR BODY ACTION TOOL: Friday has a visible 3D body on screen. Call this when DK asks her to DO a physical action. IMPORTANT: 'dance karo / naach / thumka lagao' -> ALWAYS use action:'dance' (triggers FULL CHOREOGRAPHY SHOW: Hip Hop → Salsa → Backflip → Swing → Uppercut Flip → Pushup → Backflip → Salute, all seamless). 'back flip maro / flip karo / palti maro' -> flip. 'front flip' -> flip_front. 'uppercut flip' -> flip_uppercut. 'kick maro / flip kick' -> flip_kick. 'twist flip' -> flip_twist. 'run flip' -> run_flip. 'jump karo' -> jump. 'push up lagao' -> pushup. 'salute karo' -> salute. 'gussa ho jao' -> angry. 'rap karo' -> rap. 'chalo / walk karo' -> walk. 'namaste karo' -> namaste. 'soch ke dikha' -> think. 'bye karo / wave karo' -> wave. 'sir jhukao / bow karo' -> bow. 'phone dekho' -> phone. 'haan me gardan hilao' -> nod-yes. 'naa me gardan hilao' -> nod-no. 'ruk jao / stop / dance band karo' -> stop. Always call AND speak a matching Hinglish line.",
     "parameters": {
       "type": "OBJECT",
       "properties": {
         "action": {
           "type": "STRING",
-          "enum": ["dance", "dance_salsa", "dance_swing", "dance_silly", "flip", "flip_front", "flip_kick", "jump", "pushup", "salute", "angry", "rap", "walk", "namaste", "think", "wave", "bow", "phone", "nod-yes", "nod-no", "stop"],
-          "description": "Body action to perform on the 3D avatar"
+          "enum": ["dance", "dance_hiphop2", "dance_salsa", "dance_swing", "dance_silly", "dance_silly2", "flip", "flip_uppercut", "flip_front", "flip_twist", "flip_kick", "run_flip", "jump", "pushup", "salute", "angry", "rap", "walk", "namaste", "think", "wave", "bow", "phone", "nod-yes", "nod-no", "stop"],
+          "description": "Body action to perform. Use 'dance' for full choreography show. Other values for specific one-shot actions."
         }
       },
       "required": [
