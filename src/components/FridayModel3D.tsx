@@ -229,6 +229,99 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
     let blinkTimer = 2;
     let blinkT = -1;
 
+    // ── Dance Sequencer: All dance clips play one by one seamlessly ──
+    const DANCE_CLIPS = [
+      'dance',
+      'dance_hiphop2',
+      'dance_salsa',
+      'dance_swing',
+      'dance_silly',
+      'dance_silly2',
+    ];
+    let danceSeqIndex = 0;
+    let danceSeqActive = false;
+    let danceSeqListening = false;
+
+    const shuffleDanceOrder = () => {
+      // Fisher-Yates shuffle so every play feels fresh
+      const arr = [...DANCE_CLIPS];
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    };
+    let dancePlaylist: string[] = shuffleDanceOrder();
+
+    // Hook into mixer 'finished' to advance the dance playlist
+    const onDanceFinished = (e: any) => {
+      if (!danceSeqActive) return;
+      const finishedName = e.action?.getClip()?.name as string;
+      if (!DANCE_CLIPS.includes(finishedName)) return;
+      // Advance to next
+      danceSeqIndex = (danceSeqIndex + 1) % dancePlaylist.length;
+      if (danceSeqIndex === 0) dancePlaylist = shuffleDanceOrder(); // reshuffle each round
+      const nextClip = dancePlaylist[danceSeqIndex];
+      const nextAction = actions[nextClip];
+      const curAction = actions[finishedName];
+      if (nextAction && mixer) {
+        nextAction.reset();
+        nextAction.setEffectiveTimeScale(1);
+        nextAction.setEffectiveWeight(1);
+        // LoopOnce + clamp so we catch 'finished' for each clip
+        nextAction.setLoop(THREE.LoopOnce, 1);
+        nextAction.clampWhenFinished = true;
+        if (curAction) curAction.crossFadeTo(nextAction, 0.3, true);
+        nextAction.play();
+        currentActionName = nextClip;
+        console.log(`[Dance Seq] → ${nextClip}`);
+      }
+    };
+
+    const startDanceSequencer = () => {
+      if (danceSeqActive) return;
+      danceSeqActive = true;
+      danceSeqIndex = 0;
+      dancePlaylist = shuffleDanceOrder();
+
+      // Set ALL dance clips to LoopOnce so we catch their 'finished' event
+      DANCE_CLIPS.forEach((name) => {
+        const a = actions[name];
+        if (a) {
+          a.setLoop(THREE.LoopOnce, 1);
+          a.clampWhenFinished = true;
+        }
+      });
+
+      const firstClip = dancePlaylist[0];
+      const firstAction = actions[firstClip];
+      const curAction = actions[currentActionName];
+      if (firstAction && mixer) {
+        firstAction.reset();
+        firstAction.setEffectiveTimeScale(1);
+        firstAction.setEffectiveWeight(1);
+        if (curAction && curAction !== firstAction) curAction.crossFadeTo(firstAction, 0.3, true);
+        firstAction.play();
+        currentActionName = firstClip;
+        console.log(`[Dance Seq] Start → ${firstClip}`);
+      }
+
+      if (!danceSeqListening) {
+        mixer?.addEventListener('finished', onDanceFinished);
+        danceSeqListening = true;
+      }
+    };
+
+    const stopDanceSequencer = () => {
+      if (!danceSeqActive) return;
+      danceSeqActive = false;
+      // Restore loop state for dance clips
+      DANCE_CLIPS.forEach((name) => {
+        const a = actions[name];
+        if (a) a.setLoop(THREE.LoopRepeat, Infinity);
+      });
+    };
+
     const fadeToAction = (targetName: string, dur = 0.35) => {
       if (!mixer || currentActionName === targetName) return;
       const current = actions[currentActionName];
@@ -346,7 +439,9 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
       mixer = new THREE.AnimationMixer(model);
 
       mixer.addEventListener('finished', (e: any) => {
-        const finishedClipName = e.action?.getClip()?.name;
+        const finishedClipName = e.action?.getClip()?.name as string;
+        // Dance clips are handled by danceSequencer — skip here
+        if (DANCE_CLIPS.includes(finishedClipName)) return;
         console.log(`[FridayModel3D] Mocap finished: ${finishedClipName}`);
         if (localRef.current === finishedClipName) {
           localRef.current = null;
@@ -479,13 +574,22 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
 
       const rawActCheck = stateRef.current.action ?? localRef.current;
       const actCheck = normalizeAvatarAction(rawActCheck as string);
+      const isDancing = actCheck === 'dance';
 
-      if (actCheck && actions[actCheck]) {
-        fadeToAction(actCheck, 0.25);
-      } else if (speaking && (actions['talking'] || actions['talking_alt'])) {
-        fadeToAction(actions['talking'] ? 'talking' : 'talking_alt', 0.3);
-      } else if (!actCheck && actions['idle']) {
-        fadeToAction('idle', 0.4);
+      if (isDancing) {
+        // Dance sequencer: start if not already running
+        if (!danceSeqActive && mixer) startDanceSequencer();
+      } else {
+        // Stop dance sequencer if it was running
+        if (danceSeqActive) stopDanceSequencer();
+
+        if (actCheck && actions[actCheck]) {
+          fadeToAction(actCheck, 0.25);
+        } else if (speaking && (actions['talking'] || actions['talking_alt'])) {
+          fadeToAction(actions['talking'] ? 'talking' : 'talking_alt', 0.3);
+        } else if (!actCheck && actions['idle']) {
+          fadeToAction('idle', 0.4);
+        }
       }
 
       mixer?.update(dt);
