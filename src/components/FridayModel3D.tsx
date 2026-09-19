@@ -113,7 +113,7 @@ interface FridayModel3DProps {
   fluid?: boolean;
 }
 
-const MODEL_URLS = ['/friday.glb', '/friday.fbx'];
+const MODEL_URLS = ['/friday.fbx'];
 const LOCKED_ZOOM = 0.91;
 const LOCKED_POS = { x: -0.03, y: 0 };
 
@@ -134,6 +134,7 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
   doneRef.current = onActionDone;
   const mouseRef = useRef({ x: 0, y: 0 });
   const [modelMissing, setModelMissing] = useState(false);
+  const [isModelLoaded, setIsModelLoaded] = useState(false);
   const [localAction, setLocalAction] = useState<AvatarAction>(null);
   const localRef = useRef<AvatarAction>(null);
 
@@ -399,6 +400,9 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
       model.scale.setScalar(s);
       modelRoot.add(model);
 
+      // ✅ Model successfully added to scene — hide loading placeholder
+      setIsModelLoaded(true);
+
       model.traverse((o) => {
         const n = o.name.toLowerCase();
         if (!spine && n === 'spine2') spine = o;
@@ -475,33 +479,9 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
       });
 
       const animLoader = new FBXLoader();
-      const animFiles: { name: string; url: string; loop?: boolean }[] = [
-        { name: 'idle', url: '/Breathing%20Idle%20(1).fbx', loop: true },
-        { name: 'talking', url: '/Talking.fbx', loop: true },
-        { name: 'talking_alt', url: '/Talking%20(1).fbx', loop: true },
-        { name: 'dance', url: '/Hip%20Hop%20Dancing.fbx', loop: true },
-        { name: 'dance_hiphop2', url: '/Hip%20Hop%20Dancing%20(1).fbx', loop: true },
-        { name: 'dance_salsa', url: '/Salsa%20Dancing.fbx', loop: true },
-        { name: 'dance_swing', url: '/Swing%20Dancing.fbx', loop: true },
-        { name: 'dance_silly', url: '/Silly%20Dancing.fbx', loop: true },
-        { name: 'dance_silly2', url: '/Silly%20Dancing%20(1).fbx', loop: true },
-        { name: 'namaste', url: '/Praying.fbx', loop: false },
-        { name: 'salute', url: '/Salute.fbx', loop: false },
-        { name: 'angry', url: '/Angry.fbx', loop: false },
-        { name: 'rap', url: '/Rapping.fbx', loop: true },
-        { name: 'jump', url: '/Jump.fbx', loop: false },
-        { name: 'pushup', url: '/Push%20Up.fbx', loop: false },
-        { name: 'flip', url: '/Backflip.fbx', loop: false },
-        { name: 'flip_uppercut', url: '/Back%20Flip%20To%20Uppercut.fbx', loop: false },
-        { name: 'flip_front', url: '/Front%20Flip.fbx', loop: false },
-        { name: 'flip_twist', url: '/Front%20Twist%20Flip.fbx', loop: false },
-        { name: 'flip_kick', url: '/Flip%20Kick.fbx', loop: false },
-        { name: 'run_flip', url: '/Run%20To%20Flip.fbx', loop: false },
-        { name: 'walk', url: '/Walking.fbx', loop: true },
-      ];
 
-      let loadedIdle = false;
-      animFiles.forEach(({ name, url, loop }) => {
+      // Helper to load a single animation clip
+      const loadAnim = (name: string, url: string, loop: boolean) => {
         animLoader.load(
           url,
           (animFbx) => {
@@ -519,8 +499,8 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
               }
               actions[name] = action;
 
-              if (name === 'idle' && !loadedIdle) {
-                loadedIdle = true;
+              // Auto-play idle as soon as it's ready
+              if (name === 'idle') {
                 action.play();
                 currentActionName = 'idle';
               }
@@ -532,7 +512,44 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
             console.warn(`[FridayModel3D] Could not load ${name} animation:`, err);
           }
         );
-      });
+      };
+
+      // ── Phase 1: CRITICAL — Load idle immediately (avatar needs this to start) ──
+      loadAnim('idle', '/Breathing%20Idle%20(1).fbx', true);
+
+      // ── Phase 2: IMPORTANT — Load talking shortly after (used frequently) ──
+      setTimeout(() => {
+        if (disposed) return;
+        loadAnim('talking',     '/Talking.fbx',      true);
+        loadAnim('talking_alt', '/Talking%20(1).fbx', true);
+      }, 800);
+
+      // ── Phase 3: LAZY — Load all other animations after 3s (non-critical) ──
+      setTimeout(() => {
+        if (disposed) return;
+        const lazyAnims: { name: string; url: string; loop: boolean }[] = [
+          { name: 'dance',          url: '/Hip%20Hop%20Dancing.fbx',         loop: true  },
+          { name: 'dance_hiphop2',  url: '/Hip%20Hop%20Dancing%20(1).fbx',   loop: true  },
+          { name: 'dance_salsa',    url: '/Salsa%20Dancing.fbx',             loop: true  },
+          { name: 'dance_swing',    url: '/Swing%20Dancing.fbx',             loop: true  },
+          { name: 'dance_silly',    url: '/Silly%20Dancing.fbx',             loop: true  },
+          { name: 'dance_silly2',   url: '/Silly%20Dancing%20(1).fbx',       loop: true  },
+          { name: 'namaste',        url: '/Praying.fbx',                     loop: false },
+          { name: 'salute',         url: '/Salute.fbx',                      loop: false },
+          { name: 'angry',          url: '/Angry.fbx',                       loop: false },
+          { name: 'rap',            url: '/Rapping.fbx',                     loop: true  },
+          { name: 'jump',           url: '/Jump.fbx',                        loop: false },
+          { name: 'pushup',         url: '/Push%20Up.fbx',                   loop: false },
+          { name: 'flip',           url: '/Backflip.fbx',                    loop: false },
+          { name: 'flip_uppercut',  url: '/Back%20Flip%20To%20Uppercut.fbx', loop: false },
+          { name: 'flip_front',     url: '/Front%20Flip.fbx',                loop: false },
+          { name: 'flip_twist',     url: '/Front%20Twist%20Flip.fbx',        loop: false },
+          { name: 'flip_kick',      url: '/Flip%20Kick.fbx',                 loop: false },
+          { name: 'run_flip',       url: '/Run%20To%20Flip.fbx',             loop: false },
+          { name: 'walk',           url: '/Walking.fbx',                     loop: true  },
+        ];
+        lazyAnims.forEach(({ name, url, loop }) => loadAnim(name, url, loop));
+      }, 3000);
     };
 
     const tryLoad = (i: number) => {
@@ -887,6 +904,63 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
       style={{ perspective: 900 }}
       onDoubleClick={onTap}
     >
+      {/* ── Premium Animated Loading Placeholder (shown while 3D model downloads) ── */}
+      {!isModelLoaded && (
+        <div
+          className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-10"
+          style={{ width: fluid ? '100%' : Math.round(height * 0.75), height }}
+        >
+          {/* Outer pulsing ring */}
+          <div className="relative flex items-center justify-center" style={{ width: 90, height: 90 }}>
+            <div
+              className="absolute inset-0 rounded-full border-2 border-cyan-400/40 animate-ping"
+              style={{ animationDuration: '1.6s' }}
+            />
+            <div
+              className="absolute inset-0 rounded-full border border-cyan-500/20"
+            />
+            {/* Spinning arc */}
+            <svg
+              className="absolute inset-0 animate-spin"
+              style={{ animationDuration: '1.2s' }}
+              viewBox="0 0 90 90"
+              fill="none"
+            >
+              <circle
+                cx="45" cy="45" r="38"
+                stroke="url(#avatarGrad)"
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeDasharray="60 160"
+              />
+              <defs>
+                <linearGradient id="avatarGrad" x1="0" y1="0" x2="90" y2="90" gradientUnits="userSpaceOnUse">
+                  <stop stopColor="#22d3ee" />
+                  <stop offset="1" stopColor="#3b82f6" stopOpacity="0" />
+                </linearGradient>
+              </defs>
+            </svg>
+            {/* Center avatar silhouette icon */}
+            <svg viewBox="0 0 40 60" fill="none" style={{ width: 36, height: 36 }}>
+              <ellipse cx="20" cy="14" rx="9" ry="10" fill="#22d3ee" opacity="0.25" />
+              <path d="M5 54 Q5 34 20 34 Q35 34 35 54" fill="#3b82f6" opacity="0.18" />
+            </svg>
+          </div>
+          {/* Loading text */}
+          <div className="mt-3 flex items-center gap-1.5">
+            <span className="text-[11px] text-cyan-400/70 font-medium tracking-widest uppercase">Loading Avatar</span>
+            <span className="flex gap-0.5">
+              {[0, 1, 2].map(i => (
+                <span
+                  key={i}
+                  className="block w-1 h-1 rounded-full bg-cyan-400/60 animate-bounce"
+                  style={{ animationDelay: `${i * 0.15}s`, animationDuration: '0.9s' }}
+                />
+              ))}
+            </span>
+          </div>
+        </div>
+      )}
       <div
         ref={mountRef}
         style={
