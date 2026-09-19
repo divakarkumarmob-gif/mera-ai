@@ -3319,8 +3319,31 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
 
         socket.onclose = (event: CloseEvent) => {
             if (event.code === 4001) {
-                console.warn("[LiveAIInterface] 🚫 WebSocket closed: 4001 UNAUTHORIZED_APP_KEY. Forcing app lock.");
-                clearAppSession();
+                console.warn("[LiveAIInterface] ⚠️ WebSocket closed: 4001. Verifying token before locking...");
+                // Grace window: re-verify token with server before locking.
+                // On cold-start Render deploys, the server may briefly send 4001 before being ready.
+                const token = getAppToken();
+                if (!token) { clearAppSession(); return; }
+                const checkUrl = (window as any).__backendBase
+                    ? `${(window as any).__backendBase}/api/app-key/session-check`
+                    : '/api/app-key/session-check';
+                fetch(checkUrl, { headers: { 'x-app-key-token': token } })
+                    .then((r) => {
+                        if (r.status === 401 || r.status === 403) {
+                            console.warn('[LiveAIInterface] Token truly invalid. Locking.');
+                            clearAppSession();
+                        } else {
+                            // Token still valid — server was restarting. Show reconnect UI.
+                            console.log('[LiveAIInterface] Token still valid after 4001, treating as transient disconnect.');
+                            setStatus('⚡ Reconnecting...');
+                            isInitializedRef.current = false;
+                        }
+                    })
+                    .catch(() => {
+                        // Network error: server might be cold-starting. Don't lock.
+                        setStatus('⚡ Reconnecting...');
+                        isInitializedRef.current = false;
+                    });
                 return;
             }
             isInitializedRef.current = false;
