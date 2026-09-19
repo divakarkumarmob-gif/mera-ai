@@ -105,7 +105,7 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
     const baseHandL = new THREE.Vector3();
     const baseHandR = new THREE.Vector3();
     let baseHandsSaved = false;
-    const PHRASES = ['handR_explain', 'both_open', 'handR_point', 'handL_explain', 'both_explain', 'handR_open'];
+    const PHRASES = ['handR_explain', 'handR_point', 'handR_open', 'handL_explain', 'handR_subtle'];
     const baseQ = new Map<THREE.Object3D, THREE.Quaternion>();
     let prevAction: AvatarAction = null;
     let actionStart = 0;
@@ -1056,123 +1056,139 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         const LY = new THREE.Vector3(0, 1, 0);
         const LZ = new THREE.Vector3(0, 0, 1);
 
-        if (speakPhrase === 'handR_explain' || speakPhrase === 'handR_open') {
-          // Right hand raised high to chest/sternum level, explaining naturally
-          if (upR && baseQ.has(upR)) {
-            const target = baseQ.get(upR)!.clone()
-              .multiply(new THREE.Quaternion().setFromAxisAngle(LZ, -0.32))
-              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.85 - cadencePulse))
-              .multiply(new THREE.Quaternion().setFromAxisAngle(LY, 0.18));
-            upR.quaternion.copy(baseQ.get(upR)!).slerp(target, gPower);
-          }
-          if (foreR && baseQ.has(foreR)) {
-            const target = baseQ.get(foreR)!.clone()
-              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -1.78 - cadencePulse * 1.2))
-              .multiply(new THREE.Quaternion().setFromAxisAngle(LY, -0.48));
-            foreR.quaternion.copy(baseQ.get(foreR)!).slerp(target, gPower);
-          }
-          if (handR && baseQ.has(handR)) {
-            const target = baseQ.get(handR)!.clone()
-              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.22 + cadencePulse * 0.8))
-              .multiply(new THREE.Quaternion().setFromAxisAngle(LZ, 0.12));
-            handR.quaternion.copy(baseQ.get(handR)!).slerp(target, gPower);
-          }
-          if (upL && baseQ.has(upL)) {
-            const target = baseQ.get(upL)!.clone().multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.15 * gPower));
-            upL.quaternion.copy(baseQ.get(upL)!).slerp(target, gPower * 0.4);
-          }
-          if (foreL && baseQ.has(foreL)) {
-            const target = baseQ.get(foreL)!.clone().multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.25 * gPower));
-            foreL.quaternion.copy(baseQ.get(foreL)!).slerp(target, gPower * 0.4);
-          }
-        } else if (speakPhrase === 'handL_explain') {
-          // Left hand raised high to chest level (mirror)
+        if (speakPhrase === 'handL_explain') {
+          // Left hand single conversational gesture (pointing/explaining towards user along -Z)
           if (upL && baseQ.has(upL)) {
             const target = baseQ.get(upL)!.clone()
-              .multiply(new THREE.Quaternion().setFromAxisAngle(LZ, 0.32))
-              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.85 - cadencePulse))
-              .multiply(new THREE.Quaternion().setFromAxisAngle(LY, -0.18));
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LZ, 0.22))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.42 - cadencePulse * 0.4))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LY, -0.10));
             upL.quaternion.copy(baseQ.get(upL)!).slerp(target, gPower);
           }
           if (foreL && baseQ.has(foreL)) {
             const target = baseQ.get(foreL)!.clone()
-              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -1.78 - cadencePulse * 1.2))
-              .multiply(new THREE.Quaternion().setFromAxisAngle(LY, 0.48));
-            foreL.quaternion.copy(baseQ.get(foreL)!).slerp(target, gPower);
-          }
-          if (handL && baseQ.has(handL)) {
-            const target = baseQ.get(handL)!.clone()
-              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.22 + cadencePulse * 0.8))
-              .multiply(new THREE.Quaternion().setFromAxisAngle(LZ, -0.12));
-            handL.quaternion.copy(baseQ.get(handL)!).slerp(target, gPower);
-          }
-          if (upR && baseQ.has(upR)) {
-            const target = baseQ.get(upR)!.clone().multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.15 * gPower));
-            upR.quaternion.copy(baseQ.get(upR)!).slerp(target, gPower * 0.4);
-          }
-          if (foreR && baseQ.has(foreR)) {
-            const target = baseQ.get(foreR)!.clone().multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.25 * gPower));
-            foreR.quaternion.copy(baseQ.get(foreR)!).slerp(target, gPower * 0.4);
-          }
-        } else if (speakPhrase === 'handR_point') {
-          // Right hand emphasis point/gesture raised high near upper chest
-          if (upR && baseQ.has(upR)) {
-            const target = baseQ.get(upR)!.clone()
-              .multiply(new THREE.Quaternion().setFromAxisAngle(LZ, -0.28))
-              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.96 - cadencePulse * 1.2))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.52 - cadencePulse * 0.4)) // reduced angle in -X
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LZ, 0.36)) // forward axis towards user
               .multiply(new THREE.Quaternion().setFromAxisAngle(LY, 0.22));
-            upR.quaternion.copy(baseQ.get(upR)!).slerp(target, gPower);
-          }
-          if (foreR && baseQ.has(foreR)) {
-            const target = baseQ.get(foreR)!.clone()
-              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -1.92 - cadencePulse * 1.4))
-              .multiply(new THREE.Quaternion().setFromAxisAngle(LY, -0.38));
-            foreR.quaternion.copy(baseQ.get(foreR)!).slerp(target, gPower);
-          }
-          if (handR && baseQ.has(handR)) {
-            const target = baseQ.get(handR)!.clone()
-              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.28 + cadencePulse * 1.0));
-            handR.quaternion.copy(baseQ.get(handR)!).slerp(target, gPower);
-          }
-        } else {
-          // both_open / both_explain: Both hands raised up in open explanatory presentation
-          if (upR && baseQ.has(upR)) {
-            const target = baseQ.get(upR)!.clone()
-              .multiply(new THREE.Quaternion().setFromAxisAngle(LZ, -0.25))
-              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.78 - cadencePulse))
-              .multiply(new THREE.Quaternion().setFromAxisAngle(LY, 0.15));
-            upR.quaternion.copy(baseQ.get(upR)!).slerp(target, gPower);
-          }
-          if (foreR && baseQ.has(foreR)) {
-            const target = baseQ.get(foreR)!.clone()
-              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -1.68 - cadencePulse))
-              .multiply(new THREE.Quaternion().setFromAxisAngle(LY, -0.42));
-            foreR.quaternion.copy(baseQ.get(foreR)!).slerp(target, gPower);
-          }
-          if (handR && baseQ.has(handR)) {
-            const target = baseQ.get(handR)!.clone()
-              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.18 + cadencePulse * 0.7));
-            handR.quaternion.copy(baseQ.get(handR)!).slerp(target, gPower);
-          }
-
-          if (upL && baseQ.has(upL)) {
-            const target = baseQ.get(upL)!.clone()
-              .multiply(new THREE.Quaternion().setFromAxisAngle(LZ, 0.25))
-              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.78 - cadencePulse))
-              .multiply(new THREE.Quaternion().setFromAxisAngle(LY, -0.15));
-            upL.quaternion.copy(baseQ.get(upL)!).slerp(target, gPower);
-          }
-          if (foreL && baseQ.has(foreL)) {
-            const target = baseQ.get(foreL)!.clone()
-              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -1.68 - cadencePulse))
-              .multiply(new THREE.Quaternion().setFromAxisAngle(LY, 0.42));
             foreL.quaternion.copy(baseQ.get(foreL)!).slerp(target, gPower);
           }
           if (handL && baseQ.has(handL)) {
             const target = baseQ.get(handL)!.clone()
-              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.18 + cadencePulse * 0.7));
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.12 + cadencePulse * 0.3))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LZ, -0.08));
             handL.quaternion.copy(baseQ.get(handL)!).slerp(target, gPower);
           }
+          // Right arm stays strictly at base rest pose
+          if (upR && baseQ.has(upR)) upR.quaternion.copy(baseQ.get(upR)!);
+          if (foreR && baseQ.has(foreR)) foreR.quaternion.copy(baseQ.get(foreR)!);
+          if (handR && baseQ.has(handR)) handR.quaternion.copy(baseQ.get(handR)!);
+
+        } else if (speakPhrase === 'handR_point') {
+          // Right hand pointing gesture forward towards user (-Z axis, small -X bend)
+          if (upR && baseQ.has(upR)) {
+            const target = baseQ.get(upR)!.clone()
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LZ, -0.26))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.48 - cadencePulse * 0.5))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LY, 0.12));
+            upR.quaternion.copy(baseQ.get(upR)!).slerp(target, gPower);
+          }
+          if (foreR && baseQ.has(foreR)) {
+            const target = baseQ.get(foreR)!.clone()
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.58 - cadencePulse * 0.5)) // small bend
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LZ, -0.42)) // strong forward pointing on -Z
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LY, -0.15));
+            foreR.quaternion.copy(baseQ.get(foreR)!).slerp(target, gPower);
+          }
+          if (handR && baseQ.has(handR)) {
+            const target = baseQ.get(handR)!.clone()
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.16 + cadencePulse * 0.4))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LZ, 0.10));
+            handR.quaternion.copy(baseQ.get(handR)!).slerp(target, gPower);
+          }
+          // Left arm stays strictly at base rest pose
+          if (upL && baseQ.has(upL)) upL.quaternion.copy(baseQ.get(upL)!);
+          if (foreL && baseQ.has(foreL)) foreL.quaternion.copy(baseQ.get(foreL)!);
+          if (handL && baseQ.has(handL)) handL.quaternion.copy(baseQ.get(handL)!);
+
+        } else if (speakPhrase === 'handR_open') {
+          // Right hand open conversational gesture forward towards user
+          if (upR && baseQ.has(upR)) {
+            const target = baseQ.get(upR)!.clone()
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LZ, -0.18))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.38 - cadencePulse * 0.35))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LY, 0.08));
+            upR.quaternion.copy(baseQ.get(upR)!).slerp(target, gPower);
+          }
+          if (foreR && baseQ.has(foreR)) {
+            const target = baseQ.get(foreR)!.clone()
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.46 - cadencePulse * 0.35))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LZ, -0.30)) // -Z direction
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LY, -0.28));
+            foreR.quaternion.copy(baseQ.get(foreR)!).slerp(target, gPower);
+          }
+          if (handR && baseQ.has(handR)) {
+            const target = baseQ.get(handR)!.clone()
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.08 + cadencePulse * 0.25))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LZ, 0.06));
+            handR.quaternion.copy(baseQ.get(handR)!).slerp(target, gPower);
+          }
+          // Left arm stays strictly at base rest pose
+          if (upL && baseQ.has(upL)) upL.quaternion.copy(baseQ.get(upL)!);
+          if (foreL && baseQ.has(foreL)) foreL.quaternion.copy(baseQ.get(foreL)!);
+          if (handL && baseQ.has(handL)) handL.quaternion.copy(baseQ.get(handL)!);
+
+        } else if (speakPhrase === 'handR_subtle') {
+          // Right hand subtle conversational gesture
+          if (upR && baseQ.has(upR)) {
+            const target = baseQ.get(upR)!.clone()
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LZ, -0.15))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.30 - cadencePulse * 0.25))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LY, 0.06));
+            upR.quaternion.copy(baseQ.get(upR)!).slerp(target, gPower);
+          }
+          if (foreR && baseQ.has(foreR)) {
+            const target = baseQ.get(foreR)!.clone()
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.38 - cadencePulse * 0.3))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LZ, -0.24))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LY, -0.18));
+            foreR.quaternion.copy(baseQ.get(foreR)!).slerp(target, gPower);
+          }
+          if (handR && baseQ.has(handR)) {
+            const target = baseQ.get(handR)!.clone()
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.08 + cadencePulse * 0.2));
+            handR.quaternion.copy(baseQ.get(handR)!).slerp(target, gPower);
+          }
+          // Left arm stays strictly at base rest pose
+          if (upL && baseQ.has(upL)) upL.quaternion.copy(baseQ.get(upL)!);
+          if (foreL && baseQ.has(foreL)) foreL.quaternion.copy(baseQ.get(foreL)!);
+          if (handL && baseQ.has(handL)) handL.quaternion.copy(baseQ.get(handL)!);
+
+        } else {
+          // handR_explain: Default primary single-hand conversational gesture
+          if (upR && baseQ.has(upR)) {
+            const target = baseQ.get(upR)!.clone()
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LZ, -0.22))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.42 - cadencePulse * 0.4))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LY, 0.10));
+            upR.quaternion.copy(baseQ.get(upR)!).slerp(target, gPower);
+          }
+          if (foreR && baseQ.has(foreR)) {
+            const target = baseQ.get(foreR)!.clone()
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.52 - cadencePulse * 0.4)) // reduced angle
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LZ, -0.36)) // towards forward -Z axis
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LY, -0.22));
+            foreR.quaternion.copy(baseQ.get(foreR)!).slerp(target, gPower);
+          }
+          if (handR && baseQ.has(handR)) {
+            const target = baseQ.get(handR)!.clone()
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LX, -0.12 + cadencePulse * 0.3))
+              .multiply(new THREE.Quaternion().setFromAxisAngle(LZ, 0.08));
+            handR.quaternion.copy(baseQ.get(handR)!).slerp(target, gPower);
+          }
+          // Left arm stays strictly at base rest pose
+          if (upL && baseQ.has(upL)) upL.quaternion.copy(baseQ.get(upL)!);
+          if (foreL && baseQ.has(foreL)) foreL.quaternion.copy(baseQ.get(foreL)!);
+          if (handL && baseQ.has(handL)) handL.quaternion.copy(baseQ.get(handL)!);
         }
       } else if (!act && gestureBlend <= 0.005) {
         // Return cleanly to base pose when speech ends
