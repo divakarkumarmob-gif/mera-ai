@@ -931,7 +931,10 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
       const dt = Math.min(clock.getDelta(), 0.05);
       const t = clock.elapsedTime;
       const { status, volume, reaction } = stateRef.current;
-      const speaking = status === 'Speaking...';
+      const realSpeechEnergy = getSpeechEnergy();
+      const isVoiceActive = realSpeechEnergy > 0.025;
+      const isSpkStatus = status === 'Speaking...' || (typeof status === 'string' && status.toLowerCase().includes('speaking'));
+      const speaking = isSpkStatus || isVoiceActive;
       const listening = status === 'Listening...';
       const thinking = status === 'Thinking...';
       const happy =
@@ -1022,11 +1025,6 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
       }
 
       // ── Lip-sync & Natural Dynamic Mouth Opening ──
-      const realSpeechEnergy = getSpeechEnergy();
-      const isVoiceActive = realSpeechEnergy > 0.025;
-      const isSpkStatus = status === 'Speaking...' || (typeof status === 'string' && status.toLowerCase().includes('speaking'));
-      const speaking = isSpkStatus || isVoiceActive;
-
       // Natural multi-frequency speech cadence & syllable rhythm
       const syll1 = Math.abs(Math.sin(t * 13.5));
       const syll2 = Math.abs(Math.sin(t * 8.2));
