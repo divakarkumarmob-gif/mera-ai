@@ -8,9 +8,9 @@ import type { AgentFaceReaction } from './AgentFace';
 
 // Body actions: voice command ("dance karo", "namaste karo"...) ya window event se trigger.
 // Test: dispatchEvent(new CustomEvent('friday-action', { detail: 'dance' }))
-export type AvatarAction = 'dance' | 'dance_salsa' | 'dance_swing' | 'dance_silly' | 'rap' | 'jump' | 'jacks' | 'pushup' | 'warmup' | 'flip' | 'walk' | 'namaste' | 'think' | 'wave' | 'bow' | 'nod-yes' | 'nod-no' | 'phone' | 'stop' | null;
-export const AVATAR_ACTION_LIST = ['dance', 'dance_salsa', 'dance_swing', 'dance_silly', 'rap', 'jump', 'jacks', 'pushup', 'warmup', 'flip', 'walk', 'namaste', 'think', 'wave', 'bow', 'nod-yes', 'nod-no', 'phone', 'stop'];
-const ONE_SHOT_SECONDS: Record<string, number> = { wave: 4, namaste: 6, think: 6, bow: 3.2, 'nod-yes': 2.5, 'nod-no': 2.5, phone: 8, jump: 2.5, jacks: 6, pushup: 8, warmup: 8, flip: 3.5, walk: 6 };
+export type AvatarAction = 'dance' | 'dance_salsa' | 'dance_swing' | 'dance_silly' | 'rap' | 'jump' | 'pushup' | 'flip' | 'flip_front' | 'flip_kick' | 'walk' | 'namaste' | 'salute' | 'angry' | 'think' | 'wave' | 'bow' | 'nod-yes' | 'nod-no' | 'phone' | 'stop' | null;
+export const AVATAR_ACTION_LIST = ['dance', 'dance_salsa', 'dance_swing', 'dance_silly', 'rap', 'jump', 'pushup', 'flip', 'flip_front', 'flip_kick', 'walk', 'namaste', 'salute', 'angry', 'think', 'wave', 'bow', 'nod-yes', 'nod-no', 'phone', 'stop'];
+const ONE_SHOT_SECONDS: Record<string, number> = { wave: 4, namaste: 6, salute: 4, angry: 4, think: 6, bow: 3.2, 'nod-yes': 2.5, 'nod-no': 2.5, phone: 8, jump: 2.5, pushup: 8, flip: 3.5, flip_front: 3.5, flip_kick: 3.5, walk: 6 };
 
 interface FridayModel3DProps {
   status: string;
@@ -382,8 +382,7 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
 
         const animLoader = new FBXLoader();
         const animFiles: { name: string; url: string }[] = [
-          { name: 'idle', url: '/Breathing%20Idle.fbx' },
-          { name: 'idle_alt', url: '/Idle.fbx' },
+          { name: 'idle', url: '/Breathing%20Idle%20(1).fbx' },
           { name: 'talking', url: '/Talking.fbx' },
           { name: 'talking_alt', url: '/Talking%20(1).fbx' },
           { name: 'dance', url: '/Hip%20Hop%20Dancing.fbx' },
@@ -391,12 +390,16 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
           { name: 'dance_salsa', url: '/Salsa%20Dancing.fbx' },
           { name: 'dance_swing', url: '/Swing%20Dancing.fbx' },
           { name: 'dance_silly', url: '/Silly%20Dancing.fbx' },
+          { name: 'dance_silly2', url: '/Silly%20Dancing%20(1).fbx' },
+          { name: 'namaste', url: '/Praying.fbx' },
+          { name: 'salute', url: '/Salute.fbx' },
+          { name: 'angry', url: '/Angry.fbx' },
           { name: 'rap', url: '/Rapping.fbx' },
           { name: 'jump', url: '/Jump.fbx' },
-          { name: 'jacks', url: '/Jumping%20Jacks.fbx' },
           { name: 'pushup', url: '/Push%20Up.fbx' },
-          { name: 'warmup', url: '/Warming%20Up.fbx' },
           { name: 'flip', url: '/Backflip.fbx' },
+          { name: 'flip_front', url: '/Front%20Flip.fbx' },
+          { name: 'flip_kick', url: '/Flip%20Kick.fbx' },
           { name: 'walk', url: '/Walking.fbx' },
         ];
 
