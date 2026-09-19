@@ -2812,7 +2812,11 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
             const isGateOpen = isSpeechDetected || ((now - lastSpeechTime) < 450);
 
             if (isGateOpen) {
-                ws.current?.send(JSON.stringify({ audio: pcmToBase64(pcm) }));
+                if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+                    try {
+                        ws.current.send(JSON.stringify({ audio: pcmToBase64(pcm) }));
+                    } catch {}
+                }
                 setVolume(Math.min(100, rms * 2.5));
             } else {
                 // 4. Intelligent Turn-End Silence Window (VAD Flush)
@@ -2821,9 +2825,11 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                 if (wasSpeaking && (now - lastSpeechTime) >= 450 && (now - lastEndStreamSent) > 1500) {
                     wasSpeaking = false;
                     lastEndStreamSent = now;
-                    try {
-                        ws.current?.send(JSON.stringify({ type: "audio_stream_end" }));
-                    } catch {}
+                    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+                        try {
+                            ws.current.send(JSON.stringify({ type: "audio_stream_end" }));
+                        } catch {}
+                    }
                 }
                 setVolume(0);
             }
