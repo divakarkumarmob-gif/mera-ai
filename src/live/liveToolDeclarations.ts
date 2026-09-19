@@ -2866,19 +2866,22 @@ const rawFunctionDeclarations: any[] = [
   },
   {
     "name": "avatar_action",
-    "description": "AVATAR BODY ACTION TOOL: Friday has a visible 3D body on screen. Call this when DK asks her to DO a physical action. IMPORTANT: 'dance karo / naach / thumka lagao' -> ALWAYS use action:'dance' (triggers FULL CHOREOGRAPHY SHOW: Hip Hop → Salsa → Backflip → Swing → Uppercut Flip → Pushup → Backflip → Salute, all seamless). 'back flip maro / flip karo / palti maro' -> flip. 'front flip' -> flip_front. 'uppercut flip' -> flip_uppercut. 'kick maro / flip kick' -> flip_kick. 'twist flip' -> flip_twist. 'run flip' -> run_flip. 'jump karo' -> jump. 'push up lagao' -> pushup. 'salute karo' -> salute. 'gussa ho jao' -> angry. 'rap karo' -> rap. 'chalo / walk karo' -> walk. 'namaste karo' -> namaste. 'soch ke dikha' -> think. 'bye karo / wave karo' -> wave. 'sir jhukao / bow karo' -> bow. 'phone dekho' -> phone. 'haan me gardan hilao' -> nod-yes. 'naa me gardan hilao' -> nod-no. 'ruk jao / stop / dance band karo' -> stop. Always call AND speak a matching Hinglish line.",
+    "description": "AVATAR BODY ACTION TOOL: Friday has a visible 3D body on screen. Call this when DK asks her to DO physical body actions. CRITICAL: Follow DK's exact orders! If DK specifies ANY custom sequence of actions in ANY order (e.g. 'pehle namaste karo, phir dance karo, phir front flip maro, phir salute karo' or 'salute phir backflip phir jump'): pass all actions in the exact requested order in 'sequence' (e.g. [\"namaste\", \"dance\", \"flip_front\", \"salute\"]) OR comma-separated in 'action' (\"namaste, dance, flip_front, salute\"). For a single action: pass 'action'. 'dance karo' -> action:'dance' (triggers full choreography). Actions: dance, flip, flip_front, flip_uppercut, flip_twist, flip_kick, run_flip, jump, pushup, salute, angry, rap, walk, namaste, think, wave, bow, phone, nod-yes, nod-no, stop. Always speak an enthusiastic matching Hinglish confirmation line.",
     "parameters": {
       "type": "OBJECT",
       "properties": {
         "action": {
           "type": "STRING",
-          "enum": ["dance", "dance_hiphop2", "dance_salsa", "dance_swing", "dance_silly", "dance_silly2", "flip", "flip_uppercut", "flip_front", "flip_twist", "flip_kick", "run_flip", "jump", "pushup", "salute", "angry", "rap", "walk", "namaste", "think", "wave", "bow", "phone", "nod-yes", "nod-no", "stop"],
-          "description": "Body action to perform. Use 'dance' for full choreography show. Other values for specific one-shot actions."
+          "description": "Body action or comma/then-separated sequence of actions (e.g. 'flip_front' or 'namaste, dance, flip_front, salute')."
+        },
+        "sequence": {
+          "type": "ARRAY",
+          "items": {
+            "type": "STRING"
+          },
+          "description": "Ordered list of actions to execute sequentially one after another in the exact order requested by DK."
         }
-      },
-      "required": [
-        "action"
-      ]
+      }
     }
   },
   {

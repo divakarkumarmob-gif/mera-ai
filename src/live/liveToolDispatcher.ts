@@ -251,22 +251,60 @@ export async function dispatchLiveToolCall(call: any, context: ToolDispatchConte
                     salsa: "dance_salsa",
                     swing: "dance_swing",
                     silly: "dance_silly",
+                    nacho: "dance",
+                    naach: "dance",
+                    kudo: "jump",
+                    jhuko: "bow",
+                    namaskar: "namaste",
                   };
-                  let act = String((call.args || {}).action || "").toLowerCase().trim();
-                  if (ACTION_MAP[act]) act = ACTION_MAP[act];
                   const allowed = [
                     "dance", "dance_hiphop2", "dance_salsa", "dance_swing", "dance_silly", "dance_silly2",
                     "flip", "flip_uppercut", "flip_front", "flip_twist", "flip_kick", "run_flip",
                     "jump", "pushup", "salute", "angry", "rap", "walk", "namaste",
                     "think", "wave", "bow", "phone", "nod-yes", "nod-no", "stop"
                   ];
-                  if (!allowed.includes(act)) {
-                    result = { success: false, error: "Unknown action: " + act + ". Allowed: " + allowed.join(", ") };
+
+                  // Collect sequence or single action
+                  let rawItems: string[] = [];
+                  if (Array.isArray(call.args?.sequence) && call.args.sequence.length > 0) {
+                    rawItems = call.args.sequence.map((x: any) => String(x || ""));
+                  } else if (typeof call.args?.action === "string" && call.args.action.trim()) {
+                    rawItems = call.args.action
+                      .split(/[,|\n]|->|\b(?:then|phir|aur|and|after that)\b/i)
+                      .map((s: string) => s.trim())
+                      .filter(Boolean);
+                  }
+
+                  const validSequence: string[] = [];
+                  for (const item of rawItems) {
+                    let cleaned = item.toLowerCase().trim();
+                    if (ACTION_MAP[cleaned]) cleaned = ACTION_MAP[cleaned];
+                    if (allowed.includes(cleaned)) {
+                      validSequence.push(cleaned);
+                    }
+                  }
+
+                  if (validSequence.length === 0) {
+                    result = {
+                      success: false,
+                      error: "No recognized actions found. Allowed actions: " + allowed.join(", ")
+                    };
                   } else {
                     try {
-                      clientWs.send(JSON.stringify({ type: "avatar_action", action: act }));
+                      clientWs.send(JSON.stringify({
+                        type: "avatar_action",
+                        action: validSequence[0],
+                        sequence: validSequence
+                      }));
                     } catch {}
-                    result = { success: true, action: act, message: "Avatar body action '" + act + "' triggered successfully on screen." };
+                    result = {
+                      success: true,
+                      action: validSequence[0],
+                      sequence: validSequence,
+                      message: validSequence.length > 1
+                        ? `Custom sequence of ${validSequence.length} actions triggered in exact order: ${validSequence.join(" ➔ ")}`
+                        : `Avatar body action '${validSequence[0]}' triggered successfully on screen.`
+                    };
                   }
                 } else if (call.name === "send_photo_to_whatsapp") {
                   const { contactNameOrPhone, caption } = call.args || {};

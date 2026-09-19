@@ -82,24 +82,59 @@ export const ACTION_ALIASES: Record<string, string> = {
   praying: 'namaste',
   pray: 'namaste',
   pranam: 'namaste',
+  namaskar: 'namaste',
   pushups: 'pushup',
   'push up': 'pushup',
   push_up: 'pushup',
   'push-up': 'pushup',
   jumping: 'jump',
+  kudo: 'jump',
+  koodo: 'jump',
   rapping: 'rap',
   walking: 'walk',
+  chalo: 'walk',
   dancing: 'dance',
+  nacho: 'dance',
+  naach: 'dance',
+  thumka: 'dance',
   salsa: 'dance_salsa',
   swing: 'dance_swing',
   silly: 'dance_silly',
+  jhuko: 'bow',
+  sir_jhukao: 'bow',
+  tata: 'wave',
+  bye: 'wave',
+  hello: 'wave',
+  gussa: 'angry',
+  workout: 'pushup',
+  exercise: 'pushup',
+  palti: 'flip',
+  'front palti': 'flip_front',
+  'back palti': 'flip',
 };
 
 export const normalizeAvatarAction = (raw: string | null | undefined): string | null => {
   if (!raw) return null;
-  const clean = raw.toLowerCase().trim();
-  if (clean === 'stop' || clean === '') return null;
-  return ACTION_ALIASES[clean] || clean;
+  const clean = raw
+    .toLowerCase()
+    .trim()
+    .replace(/^(pehle|phir|then|aur)\s+/i, '')
+    .replace(/\s+(karo|lagao|maro|dikhao|do|hoga|karegi|kijiye)$/i, '')
+    .trim();
+  if (clean === 'stop' || clean === 'ruk jao' || clean === 'bas' || clean === 'bas karo' || clean === '') return 'stop';
+  return ACTION_ALIASES[clean] || ACTION_ALIASES[raw.toLowerCase().trim()] || clean;
+};
+
+export const parseActionSequence = (input: string | string[] | null | undefined): string[] => {
+  if (!input) return [];
+  if (Array.isArray(input)) {
+    return input.map(s => normalizeAvatarAction(s)).filter((s): s is string => !!s && s !== 'stop');
+  }
+  const parts = input
+    .split(/[,|\n]|->|\b(?:then|phir|aur|and|after that)\b/i)
+    .map(s => normalizeAvatarAction(s.trim()))
+    .filter((s): s is string => !!s && s !== 'stop');
+  return parts;
 };
 
 interface FridayModel3DProps {
@@ -140,9 +175,24 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
 
   useEffect(() => {
     const h = (e: Event) => {
-      const raw = (e as CustomEvent).detail as string;
-      const normalized = normalizeAvatarAction(raw);
-      if (!normalized) {
+      const raw = (e as CustomEvent).detail as any;
+      if (!raw) {
+        localRef.current = null;
+        setLocalAction(null);
+        return;
+      }
+      if (typeof raw === 'object' && Array.isArray(raw.sequence) && raw.sequence.length > 0) {
+        window.dispatchEvent(new CustomEvent('friday-action-sequence', { detail: { sequence: raw.sequence } }));
+        return;
+      }
+      const rawStr = typeof raw === 'string' ? raw : String(raw.action || '');
+      const parsed = parseActionSequence(rawStr);
+      if (parsed.length > 1) {
+        window.dispatchEvent(new CustomEvent('friday-action-sequence', { detail: { sequence: parsed } }));
+        return;
+      }
+      const normalized = normalizeAvatarAction(rawStr);
+      if (!normalized || normalized === 'stop') {
         localRef.current = null;
         setLocalAction(null);
         return;
@@ -344,6 +394,169 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
       if (mixer) mixer.timeScale = 1.0;
     };
 
+    // ── Custom User Sequence Engine ──
+    // Allows Boss to specify ANY arbitrary sequence of actions in ANY order!
+    // (e.g. "pehle namaste karo, phir dance karo, phir front flip maro, phir salute karo")
+    let userSequence: string[] = [];
+    let userSeqIndex = 0;
+    let userSeqActive = false;
+    let userSeqTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const clearUserSeqTimer = () => {
+      if (userSeqTimer) {
+        clearTimeout(userSeqTimer);
+        userSeqTimer = null;
+      }
+    };
+
+    const stopUserSequence = () => {
+      if (!userSeqActive) return;
+      userSeqActive = false;
+      userSequence = [];
+      userSeqIndex = 0;
+      clearUserSeqTimer();
+      if (mixer) mixer.timeScale = 1.0;
+    };
+
+    const playUserSeqStep = (idx: number) => {
+      if (!userSeqActive || !mixer) return;
+      clearUserSeqTimer();
+
+      if (idx >= userSequence.length) {
+        // Complete sequence finished → return to idle
+        userSeqActive = false;
+        userSequence = [];
+        localRef.current = null;
+        setLocalAction(null);
+        if (mixer) mixer.timeScale = 1.0;
+        const cur = actions[currentActionName];
+        const isSpk = stateRef.current.status === 'Speaking...';
+        const targetNext = isSpk ? (actions['talking'] ? 'talking' : 'talking_alt') : actions['idle'] ? 'idle' : '';
+        if (targetNext && actions[targetNext] && cur && cur !== actions[targetNext]) {
+          cur.crossFadeTo(actions[targetNext], 0.45, true);
+          actions[targetNext].play();
+          currentActionName = targetNext;
+        }
+        try {
+          doneRef.current?.();
+        } catch {
+          /* noop */
+        }
+        console.log('[UserSeq] 🏁 Custom action sequence complete → returned to idle');
+        return;
+      }
+
+      userSeqIndex = idx;
+      const stepClipName = userSequence[idx];
+      const curAction = actions[currentActionName];
+      const nextAction = actions[stepClipName];
+
+      if (!nextAction) {
+        // If clip is currently loading, wait up to 1.5s
+        let waited = 0;
+        const checkInt = setInterval(() => {
+          waited += 100;
+          if (actions[stepClipName] || waited >= 1500) {
+            clearInterval(checkInt);
+            if (actions[stepClipName]) {
+              playUserSeqStep(idx);
+            } else {
+              console.warn(`[UserSeq] Clip "${stepClipName}" not available, skipping to next`);
+              playUserSeqStep(idx + 1);
+            }
+          }
+        }, 100);
+        return;
+      }
+
+      nextAction.reset();
+      nextAction.setEffectiveTimeScale(1);
+      nextAction.setEffectiveWeight(1);
+
+      const isLoopable = [
+        'dance',
+        'dance_hiphop2',
+        'dance_salsa',
+        'dance_swing',
+        'dance_silly',
+        'dance_silly2',
+        'rap',
+        'walk',
+      ].includes(stepClipName);
+
+      if (isLoopable) {
+        nextAction.setLoop(THREE.LoopRepeat, Infinity);
+        if (curAction && curAction !== nextAction) curAction.crossFadeTo(nextAction, 0.35, true);
+        nextAction.play();
+        currentActionName = stepClipName;
+
+        // If there are more actions waiting after this in the sequence, play dance/loop for 4.0s then advance
+        if (idx + 1 < userSequence.length) {
+          console.log(
+            `[UserSeq] Step ${idx + 1}/${userSequence.length}: "${stepClipName}" (playing for 4s, then advancing)`
+          );
+          userSeqTimer = setTimeout(() => {
+            if (userSeqActive && userSeqIndex === idx) {
+              playUserSeqStep(idx + 1);
+            }
+          }, 4000);
+        } else {
+          console.log(`[UserSeq] Final step in sequence: "${stepClipName}" (will stay playing)`);
+          userSeqActive = false; // Finished sequencing, let it loop
+        }
+      } else {
+        // One-shot stunt or gesture (flip, front flip, jump, pushup, salute, namaste, bow, wave, etc.)
+        nextAction.setLoop(THREE.LoopOnce, 1);
+        nextAction.clampWhenFinished = true;
+        if (curAction && curAction !== nextAction) curAction.crossFadeTo(nextAction, 0.3, true);
+        nextAction.play();
+        currentActionName = stepClipName;
+        console.log(
+          `[UserSeq] Step ${idx + 1}/${userSequence.length}: "${stepClipName}" (one-shot, advances on finished)`
+        );
+      }
+    };
+
+    const onUserSeqFinished = (e: any) => {
+      if (!userSeqActive) return;
+      const finishedName = e.action?.getClip()?.name as string;
+      const currentStepClip = userSequence[userSeqIndex];
+      const isLoopable = [
+        'dance',
+        'dance_hiphop2',
+        'dance_salsa',
+        'dance_swing',
+        'dance_silly',
+        'dance_silly2',
+        'rap',
+        'walk',
+      ].includes(currentStepClip);
+      if (isLoopable) return; // loop steps advance via timer
+      if (finishedName !== currentStepClip) return;
+      clearUserSeqTimer();
+      playUserSeqStep(userSeqIndex + 1);
+    };
+
+    const startUserSequence = (seq: string[]) => {
+      if (!seq || seq.length === 0) return;
+      if (choreoActive) stopChoreo();
+      stopUserSequence();
+
+      const validList = seq
+        .map((s) => normalizeAvatarAction(s))
+        .filter((s): s is string => !!s && s !== 'stop');
+
+      if (validList.length === 0) return;
+
+      console.log('[UserSeq] 🎬 Starting user ordered sequence:', validList);
+      userSequence = validList;
+      userSeqIndex = 0;
+      userSeqActive = true;
+      clearUserSeqTimer();
+      mixer?.addEventListener('finished', onUserSeqFinished);
+      playUserSeqStep(0);
+    };
+
     const fadeToAction = (targetName: string, dur = 0.35) => {
       if (!mixer || currentActionName === targetName) return;
       const current = actions[currentActionName];
@@ -508,8 +721,8 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
 
       mixer.addEventListener('finished', (e: any) => {
         const finishedClipName = e.action?.getClip()?.name as string;
-        // Choreo engine handles its own clips — don't double-handle them here
-        if (choreoActive) return;
+        // Choreo and UserSeq engines handle their own clips — don't double-handle them here
+        if (choreoActive || userSeqActive) return;
         console.log(`[FridayModel3D] Mocap finished: ${finishedClipName}`);
         if (localRef.current === finishedClipName) {
           localRef.current = null;
@@ -708,7 +921,20 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
       const actCheck = normalizeAvatarAction(rawActCheck as string);
       const isDancing = actCheck === 'dance';
 
-      if (isDancing) {
+      // Check if action prop is a multi-action sequence
+      if (!userSeqActive && rawActCheck && typeof rawActCheck === 'string') {
+        const parsedSeq = parseActionSequence(rawActCheck);
+        if (parsedSeq.length > 1) {
+          startUserSequence(parsedSeq);
+        }
+      }
+
+      if (userSeqActive) {
+        // User custom sequence is currently active and managing actions
+        if (actCheck === 'stop') {
+          stopUserSequence();
+        }
+      } else if (isDancing) {
         // Choreography show: start if not already running
         if (!choreoActive && mixer) {
           startChoreo();
@@ -732,7 +958,8 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
       mixer?.update(dt);
 
       // ── Beat-Sync Dance Bounce & Dynamic Tempo ──
-      if (isDancing || choreoActive) {
+      const isDancingNow = isDancing || choreoActive || (userSeqActive && currentActionName.startsWith('dance'));
+      if (isDancingNow) {
         const rawE = getBeatEnergy();
         beatEnergy = lerp(beatEnergy, rawE, 0.25);
 
@@ -920,11 +1147,22 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
     };
     window.addEventListener('resize', onResize);
 
+    const onActionSeqEvent = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail && Array.isArray(detail.sequence) && detail.sequence.length > 0) {
+        startUserSequence(detail.sequence);
+      }
+    };
+    window.addEventListener('friday-action-sequence', onActionSeqEvent);
+
     return () => {
       disposed = true;
       cancelAnimationFrame(raf);
       clearChoreoTimer(); // kill any pending choreo step timers
       choreoActive = false;
+      clearUserSeqTimer();
+      stopUserSequence();
+      window.removeEventListener('friday-action-sequence', onActionSeqEvent);
       window.removeEventListener('mousemove', onMouse);
       window.removeEventListener('resize', onResize);
       scene.traverse((o) => {

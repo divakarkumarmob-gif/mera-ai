@@ -3089,12 +3089,28 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                     }
 
                 } else if (msg.type === 'avatar_action') {
-                    // Friday ne body action tool call kiya (flip/dance/namaste/pushup/jump/salute/angry/rap/walk/think/wave/bow/nod/stop)
-                    const a = normalizeAvatarAction(msg.action);
-                    if (!a || a === 'stop') {
+                    // Friday ne body action tool call kiya (single action ya custom sequence)
+                    const seq: string[] = Array.isArray(msg.sequence) && msg.sequence.length > 0
+                        ? msg.sequence
+                        : (typeof msg.action === 'string' && msg.action.includes(',')
+                            ? msg.action.split(',').map((s: string) => s.trim()).filter(Boolean)
+                            : [msg.action].filter(Boolean));
+
+                    if (seq.length > 1) {
+                        // Multi-action custom ordered sequence!
+                        console.log('[LiveAIInterface] 🎬 Triggering ordered multi-action sequence:', seq);
+                        window.dispatchEvent(new CustomEvent('friday-action-sequence', { detail: { sequence: seq } }));
+                        setAvatarAction(seq[0] as AvatarAction);
+                    } else if (seq.length === 1) {
+                        const a = normalizeAvatarAction(seq[0]);
+                        if (!a || a === 'stop') {
+                            window.dispatchEvent(new CustomEvent('friday-action-sequence', { detail: { sequence: ['stop'] } }));
+                            setAvatarAction(null);
+                        } else if ((AVATAR_ACTION_LIST as string[]).includes(a)) {
+                            setAvatarAction(a as AvatarAction);
+                        }
+                    } else {
                         setAvatarAction(null);
-                    } else if ((AVATAR_ACTION_LIST as string[]).includes(a)) {
-                        setAvatarAction(a as AvatarAction);
                     }
 
                 } else if (msg.type === 'trigger_incoming_call') {
