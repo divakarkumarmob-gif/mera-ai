@@ -13,5 +13,15 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      // Register Friday 3D Assets Service Worker for instant future loads
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js', { scope: '/' })
+            .then(reg => console.log('[SW] Friday 3D cache registered:', reg.scope))
+            .catch(err => console.warn('[SW] Registration notice:', err));
+        });
+      }
+    </script>
   </body>
 </html>

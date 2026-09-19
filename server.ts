@@ -138,11 +138,19 @@ async function startServer() {
       server: { middlewareMode: true }, appType: "spa", });
     app.use(vite.middlewares);
   } else {
+    // ── 1-Year cache for heavy 3D assets (FBX/GLB) — instant on repeat visits ──
+    app.use((req, res, next) => {
+      if (/\.(fbx|glb|gltf)$/i.test(req.path)) {
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      }
+      next();
+    });
     app.use(express.static(distPath, { index: false }));
     app.get("*", (_req, res) => {
       res.sendFile(path.resolve(distPath, "index.html"));
     });
   }
+
 
   // ── HTTP & WebSocket Server Setup ─────────────────────────────────────────
   const httpServer = http.createServer(app);
