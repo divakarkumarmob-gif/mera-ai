@@ -13,19 +13,42 @@ export type AvatarAction =
   | 'dance_swing'
   | 'dance_silly'
   | 'dance_silly2'
+  | 'dance_robot'
+  | 'dance_samba'
+  | 'dance_breakfreeze'
   | 'rap'
   | 'jump'
+  | 'big_jump'
+  | 'jumping_jacks'
   | 'pushup'
+  | 'situps'
+  | 'bicycle_crunch'
+  | 'arm_stretch'
+  | 'warming_up'
   | 'flip'
   | 'flip_uppercut'
   | 'flip_front'
   | 'flip_twist'
   | 'flip_kick'
+  | 'flip_kick2'
   | 'run_flip'
   | 'walk'
   | 'namaste'
   | 'salute'
+  | 'blow_kiss'
+  | 'victory'
+  | 'excited'
+  | 'flair'
   | 'angry'
+  | 'sad'
+  | 'sad2'
+  | 'dying'
+  | 'fighting_idle'
+  | 'fight_to_idle'
+  | 'fist_fight'
+  | 'kicking'
+  | 'punching'
+  | 'idle_situp'
   | 'think'
   | 'wave'
   | 'bow'
@@ -36,82 +59,87 @@ export type AvatarAction =
   | null;
 
 export const AVATAR_ACTION_LIST: string[] = [
-  'dance',
-  'dance_hiphop2',
-  'dance_salsa',
-  'dance_swing',
-  'dance_silly',
-  'dance_silly2',
+  'dance', 'dance_hiphop2', 'dance_salsa', 'dance_swing', 'dance_silly', 'dance_silly2',
+  'dance_robot', 'dance_samba', 'dance_breakfreeze',
   'rap',
-  'jump',
-  'pushup',
-  'flip',
-  'flip_uppercut',
-  'flip_front',
-  'flip_twist',
-  'flip_kick',
-  'run_flip',
+  'jump', 'big_jump', 'jumping_jacks',
+  'pushup', 'situps', 'bicycle_crunch', 'arm_stretch', 'warming_up',
+  'flip', 'flip_uppercut', 'flip_front', 'flip_twist', 'flip_kick', 'flip_kick2', 'run_flip',
   'walk',
-  'namaste',
-  'salute',
-  'angry',
-  'think',
-  'wave',
-  'bow',
-  'nod-yes',
-  'nod-no',
-  'phone',
+  'namaste', 'salute', 'blow_kiss', 'victory', 'excited', 'flair',
+  'angry', 'sad', 'sad2', 'dying',
+  'fighting_idle', 'fight_to_idle', 'fist_fight', 'kicking', 'punching', 'idle_situp',
+  'think', 'wave', 'bow', 'nod-yes', 'nod-no', 'phone',
   'stop',
 ];
 
-export const ACTION_ALIASES: Record<string, string> = {
-  backflip: 'flip',
-  'back flip': 'flip',
-  back_flip: 'flip',
-  'back-flip': 'flip',
-  frontflip: 'flip_front',
-  'front flip': 'flip_front',
-  front_flip: 'flip_front',
-  'front-flip': 'flip_front',
-  flipkick: 'flip_kick',
-  'flip kick': 'flip_kick',
-  flip_kick: 'flip_kick',
-  twistflip: 'flip_twist',
-  'twist flip': 'flip_twist',
-  uppercut: 'flip_uppercut',
-  praying: 'namaste',
-  pray: 'namaste',
-  pranam: 'namaste',
-  namaskar: 'namaste',
-  pushups: 'pushup',
-  'push up': 'pushup',
-  push_up: 'pushup',
-  'push-up': 'pushup',
-  jumping: 'jump',
-  kudo: 'jump',
-  koodo: 'jump',
-  rapping: 'rap',
-  walking: 'walk',
-  chalo: 'walk',
-  dancing: 'dance',
-  nacho: 'dance',
-  naach: 'dance',
-  thumka: 'dance',
-  salsa: 'dance_salsa',
-  swing: 'dance_swing',
-  silly: 'dance_silly',
-  jhuko: 'bow',
-  sir_jhukao: 'bow',
-  tata: 'wave',
-  bye: 'wave',
-  hello: 'wave',
-  gussa: 'angry',
-  workout: 'pushup',
-  exercise: 'pushup',
-  palti: 'flip',
-  'front palti': 'flip_front',
-  'back palti': 'flip',
+// ── Multi-variant random pool ──
+// Jab bhi ek action ke multiple animations hain, play time pe random ek select hoga
+export const ACTION_VARIANTS: Record<string, string[]> = {
+  flip:        ['flip', 'flip_uppercut'],
+  backflip:    ['flip', 'flip_uppercut'],
+  flip_kick:   ['flip_kick', 'flip_kick2'],
+  dance:       ['dance', 'dance_hiphop2'],
+  dance_silly: ['dance_silly', 'dance_silly2'],
+  sad:         ['sad', 'sad2'],
+  warmup:      ['arm_stretch', 'jumping_jacks', 'situps', 'bicycle_crunch', 'pushup', 'warming_up'],
+  workout:     ['arm_stretch', 'jumping_jacks', 'situps', 'bicycle_crunch', 'pushup', 'situps', 'warming_up'],
+  fight:       ['fist_fight', 'kicking', 'punching'],
+  jump:        ['jump', 'big_jump'],
 };
+
+// Helper — pick a random variant from the pool, or return the name unchanged
+export const resolveVariant = (name: string): string => {
+  const pool = ACTION_VARIANTS[name];
+  if (pool && pool.length > 1) {
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+  return name;
+};
+
+export const ACTION_ALIASES: Record<string, string> = {
+  // ── Flips ──
+  backflip: 'flip', 'back flip': 'flip', back_flip: 'flip', 'back-flip': 'flip',
+  frontflip: 'flip_front', 'front flip': 'flip_front', front_flip: 'flip_front', 'front-flip': 'flip_front',
+  flipkick: 'flip_kick', 'flip kick': 'flip_kick',
+  twistflip: 'flip_twist', 'twist flip': 'flip_twist',
+  uppercut: 'flip_uppercut',
+  palti: 'flip', 'front palti': 'flip_front', 'back palti': 'flip',
+  // ── Dance ──
+  dancing: 'dance', nacho: 'dance', naach: 'dance', thumka: 'dance',
+  salsa: 'dance_salsa', swing: 'dance_swing', silly: 'dance_silly',
+  robot: 'dance_robot', samba: 'dance_samba', breakdance: 'dance_breakfreeze',
+  'robot dance': 'dance_robot', 'samba dance': 'dance_samba',
+  bhangra: 'dance', garba: 'dance_salsa',
+  // ── Warm-up / Exercise ──
+  warmup: 'warmup', garam_karo: 'warmup', 'warm-up': 'warmup',
+  exercise: 'workout', workout: 'workout', vyayam: 'warmup',
+  pushups: 'pushup', 'push up': 'pushup', push_up: 'pushup', 'push-up': 'pushup',
+  situp: 'situps', 'sit up': 'situps', 'sit-up': 'situps',
+  'jumping jack': 'jumping_jacks', 'jumping jacks': 'jumping_jacks',
+  stretch: 'arm_stretch', stretching: 'arm_stretch', 'arm stretch': 'arm_stretch',
+  'warm up': 'warmup', 'warming up': 'warming_up',
+  // ── Jumps ──
+  jumping: 'jump', kudo: 'jump', koodo: 'jump', 'big jump': 'big_jump', bigjump: 'big_jump',
+  // ── Expressions / Gestures ──
+  praying: 'namaste', pray: 'namaste', pranam: 'namaste', namaskar: 'namaste',
+  jhuko: 'bow', sir_jhukao: 'bow',
+  tata: 'wave', bye: 'wave', hello: 'wave',
+  gussa: 'angry',
+  khush: 'excited',
+  jeet: 'victory', win: 'victory', winner: 'victory',
+  'blow kiss': 'blow_kiss', kiss: 'blow_kiss', muhchuma: 'blow_kiss',
+  udas: 'sad', dukhi: 'sad',
+  mar_gaya: 'dying', gir_gaya: 'dying',
+  // ── Fight / Combat ──
+  fight: 'fist_fight', lad_jao: 'fist_fight', 'fist fight': 'fist_fight', boxing: 'fist_fight',
+  kick: 'kicking', maaro: 'kicking', maar: 'kicking',
+  punch: 'punching', ghusa: 'punching',
+  'fighting idle': 'fighting_idle', fighter: 'fighting_idle',
+  // ── Misc ──
+  rapping: 'rap', walking: 'walk', chalo: 'walk',
+};
+
 
 export const normalizeAvatarAction = (raw: string | null | undefined): string | null => {
   if (!raw) return null;
@@ -214,6 +242,15 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
     let raf = 0;
     let mixer: THREE.AnimationMixer | null = null;
     const actions: Record<string, THREE.AnimationAction> = {};
+
+    // Random variant resolver — picks a random pool member if one exists
+    const resolveActionName = (name: string): string => {
+      const pool = ACTION_VARIANTS[name];
+      if (pool && pool.length > 1) {
+        return pool[Math.floor(Math.random() * pool.length)];
+      }
+      return name;
+    };
     let currentActionName = '';
     let jawBone: THREE.Object3D | null = null;
     let headBone: THREE.Object3D | null = null;
@@ -292,16 +329,22 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
       maxDuration?: number; // Cap for dance clips so they play 1 clean phrase without repeating 3-4 times
     }
     const CHOREO_SEQUENCE: ChoreoStep[] = [
-      { clip: 'dance',         maxDuration: 4.2 }, // Hip Hop: 1 crisp phrase (~4.2s)
-      { clip: 'flip' },                            // BACKFLIP 💥 (one-shot stunt)
-      { clip: 'dance_salsa',   maxDuration: 4.0 }, // Salsa: 1 phrase (~4.0s)
-      { clip: 'flip_uppercut' },                   // UPPERCUT FLIP 💥 (one-shot stunt)
-      { clip: 'pushup' },                          // PUSH UP 💪 (one-shot stunt)
-      { clip: 'dance_swing',   maxDuration: 4.0 }, // Swing: 1 phrase (~4.0s)
-      { clip: 'dance_silly2',  maxDuration: 3.8 }, // Silly Alt: 1 phrase (~3.8s)
-      { clip: 'dance_hiphop2', maxDuration: 4.0 }, // Hip Hop Alt: 1 phrase (~4.0s)
-      { clip: 'flip' },                            // BACKFLIP again 💥
-      { clip: 'salute' },                          // SALUTE 🫡 — finale gesture
+      { clip: 'dance',              maxDuration: 4.2 }, // Hip Hop: 1 phrase
+      { clip: 'flip' },                                 // BACKFLIP 💥
+      { clip: 'dance_salsa',        maxDuration: 4.0 }, // Salsa: 1 phrase
+      { clip: 'flip_uppercut' },                        // UPPERCUT FLIP 💥
+      { clip: 'dance_robot',        maxDuration: 4.0 }, // Robot Hip Hop
+      { clip: 'flip_front' },                           // FRONT FLIP 💥
+      { clip: 'dance_swing',        maxDuration: 4.0 }, // Swing: 1 phrase
+      { clip: 'big_jump' },                             // BIG JUMP ⬆️
+      { clip: 'dance_samba',        maxDuration: 4.0 }, // Samba: 1 phrase
+      { clip: 'flip_kick' },                            // FLIP KICK 🦵
+      { clip: 'dance_silly',        maxDuration: 3.8 }, // Silly Alt
+      { clip: 'dance_hiphop2',      maxDuration: 4.0 }, // Hip Hop Alt
+      { clip: 'dance_breakfreeze',  maxDuration: 4.0 }, // Breakdance Freeze
+      { clip: 'flip' },                                 // BACKFLIP again 💥
+      { clip: 'victory' },                              // VICTORY 🏆
+      { clip: 'salute' },                               // SALUTE 🫡 — finale
     ];
 
     let choreoActive = false;
@@ -448,7 +491,9 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
       }
 
       userSeqIndex = idx;
-      const stepClipName = userSequence[idx];
+      // Resolve random variant at play time
+      const stepClipName = resolveActionName(userSequence[idx]);
+      userSequence[idx] = stepClipName; // Update so finished event matches
       const curAction = actions[currentActionName];
       const nextAction = actions[stepClipName];
 
@@ -474,16 +519,12 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
       nextAction.setEffectiveTimeScale(1);
       nextAction.setEffectiveWeight(1);
 
-      const isLoopable = [
-        'dance',
-        'dance_hiphop2',
-        'dance_salsa',
-        'dance_swing',
-        'dance_silly',
-        'dance_silly2',
-        'rap',
-        'walk',
-      ].includes(stepClipName);
+      const LOOPABLE_ACTIONS = new Set([
+        'dance', 'dance_hiphop2', 'dance_salsa', 'dance_swing', 'dance_silly', 'dance_silly2',
+        'dance_robot', 'dance_samba', 'dance_breakfreeze',
+        'rap', 'walk', 'fighting_idle',
+      ]);
+      const isLoopable = LOOPABLE_ACTIONS.has(stepClipName);
 
       if (isLoopable) {
         nextAction.setLoop(THREE.LoopRepeat, Infinity);
@@ -522,16 +563,12 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
       if (!userSeqActive) return;
       const finishedName = e.action?.getClip()?.name as string;
       const currentStepClip = userSequence[userSeqIndex];
-      const isLoopable = [
-        'dance',
-        'dance_hiphop2',
-        'dance_salsa',
-        'dance_swing',
-        'dance_silly',
-        'dance_silly2',
-        'rap',
-        'walk',
-      ].includes(currentStepClip);
+      const LOOPABLE_ACTIONS = new Set([
+        'dance', 'dance_hiphop2', 'dance_salsa', 'dance_swing', 'dance_silly', 'dance_silly2',
+        'dance_robot', 'dance_samba', 'dance_breakfreeze',
+        'rap', 'walk', 'fighting_idle',
+      ]);
+      const isLoopable = LOOPABLE_ACTIONS.has(currentStepClip);
       if (isLoopable) return; // loop steps advance via timer
       if (finishedName !== currentStepClip) return;
       clearUserSeqTimer();
@@ -558,7 +595,8 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
       playUserSeqStep(0);
     };
 
-    const fadeToAction = (targetName: string, dur = 0.35) => {
+    const fadeToAction = (targetNameRaw: string, dur = 0.35) => {
+      const targetName = resolveActionName(targetNameRaw);
       if (!mixer || currentActionName === targetName) return;
       const current = actions[currentActionName];
       const next = actions[targetName];
@@ -786,32 +824,70 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
         loadAnim('talking_alt', '/Talking%20(1).fbx', true);
       }, 800);
 
-      // ── Phase 3: LAZY — Load all other animations after 3s (non-critical) ──
+      // ── Phase 3A: HIGH-PRIORITY lazy — popular actions (dance, rap, flip) ──
+      setTimeout(() => {
+        if (disposed) return;
+        const highPri: { name: string; url: string; loop: boolean }[] = [
+          { name: 'dance',         url: '/Hip%20Hop%20Dancing.fbx',          loop: true  },
+          { name: 'dance_hiphop2', url: '/Hip%20Hop%20Dancing%20(1).fbx',    loop: true  },
+          { name: 'dance_salsa',   url: '/Salsa%20Dancing.fbx',              loop: true  },
+          { name: 'dance_swing',   url: '/Swing%20Dancing.fbx',              loop: true  },
+          { name: 'dance_silly',   url: '/Silly%20Dancing.fbx',              loop: true  },
+          { name: 'dance_silly2',  url: '/Silly%20Dancing%20(1).fbx',        loop: true  },
+          { name: 'rap',           url: '/Rapping.fbx',                      loop: true  },
+          { name: 'flip',          url: '/Backflip.fbx',                     loop: false },
+          { name: 'flip_front',    url: '/Front%20Flip.fbx',                 loop: false },
+          { name: 'namaste',       url: '/Praying.fbx',                      loop: false },
+          { name: 'salute',        url: '/Salute.fbx',                       loop: false },
+        ];
+        highPri.forEach(({ name, url, loop }) => loadAnim(name, url, loop));
+      }, 2500);
+
+      // ── Phase 3B: ALL remaining animations ──
       setTimeout(() => {
         if (disposed) return;
         const lazyAnims: { name: string; url: string; loop: boolean }[] = [
-          { name: 'dance',          url: '/Hip%20Hop%20Dancing.fbx',         loop: true  },
-          { name: 'dance_hiphop2',  url: '/Hip%20Hop%20Dancing%20(1).fbx',   loop: true  },
-          { name: 'dance_salsa',    url: '/Salsa%20Dancing.fbx',             loop: true  },
-          { name: 'dance_swing',    url: '/Swing%20Dancing.fbx',             loop: true  },
-          { name: 'dance_silly',    url: '/Silly%20Dancing.fbx',             loop: true  },
-          { name: 'dance_silly2',   url: '/Silly%20Dancing%20(1).fbx',       loop: true  },
-          { name: 'namaste',        url: '/Praying.fbx',                     loop: false },
-          { name: 'salute',         url: '/Salute.fbx',                      loop: false },
-          { name: 'angry',          url: '/Angry.fbx',                       loop: false },
-          { name: 'rap',            url: '/Rapping.fbx',                     loop: true  },
-          { name: 'jump',           url: '/Jump.fbx',                        loop: false },
-          { name: 'pushup',         url: '/Push%20Up.fbx',                   loop: false },
-          { name: 'flip',           url: '/Backflip.fbx',                    loop: false },
-          { name: 'flip_uppercut',  url: '/Back%20Flip%20To%20Uppercut.fbx', loop: false },
-          { name: 'flip_front',     url: '/Front%20Flip.fbx',                loop: false },
-          { name: 'flip_twist',     url: '/Front%20Twist%20Flip.fbx',        loop: false },
-          { name: 'flip_kick',      url: '/Flip%20Kick.fbx',                 loop: false },
-          { name: 'run_flip',       url: '/Run%20To%20Flip.fbx',             loop: false },
-          { name: 'walk',           url: '/Walking.fbx',                     loop: true  },
+          // Flips & Stunts
+          { name: 'flip_uppercut',    url: '/Back%20Flip%20To%20Uppercut.fbx',   loop: false },
+          { name: 'flip_twist',       url: '/Front%20Twist%20Flip.fbx',          loop: false },
+          { name: 'flip_kick',        url: '/Flip%20Kick.fbx',                   loop: false },
+          { name: 'flip_kick2',       url: '/Flip%20Kick%20(1).fbx',             loop: false },
+          { name: 'run_flip',         url: '/Run%20To%20Flip.fbx',               loop: false },
+          // Jumps
+          { name: 'jump',             url: '/Jump.fbx',                          loop: false },
+          { name: 'big_jump',         url: '/Big%20Jump.fbx',                    loop: false },
+          { name: 'jumping_jacks',    url: '/Jumping%20Jacks.fbx',               loop: false },
+          // Warm-up / Exercise
+          { name: 'pushup',           url: '/Push%20Up.fbx',                     loop: false },
+          { name: 'situps',           url: '/Situps.fbx',                        loop: false },
+          { name: 'bicycle_crunch',   url: '/Bicycle%20Crunch.fbx',              loop: false },
+          { name: 'arm_stretch',      url: '/Arm%20Stretching.fbx',              loop: false },
+          { name: 'warming_up',       url: '/Warming%20Up.fbx',                  loop: false },
+          { name: 'idle_situp',       url: '/Idle%20To%20Situp.fbx',             loop: false },
+          // More Dance
+          { name: 'dance_robot',      url: '/Robot%20Hip%20Hop%20Dance.fbx',     loop: true  },
+          { name: 'dance_samba',      url: '/Samba%20Dancing.fbx',               loop: true  },
+          { name: 'dance_breakfreeze',url: '/Breakdance%20Freeze%20Var%202.fbx', loop: true  },
+          // Walk
+          { name: 'walk',             url: '/Walking.fbx',                       loop: true  },
+          // Expressions / Gestures
+          { name: 'angry',            url: '/Angry.fbx',                         loop: false },
+          { name: 'sad',              url: '/Sad%20Idle.fbx',                    loop: false },
+          { name: 'sad2',             url: '/Sad%20Idle%20(1).fbx',              loop: false },
+          { name: 'excited',          url: '/Excited.fbx',                       loop: false },
+          { name: 'victory',          url: '/Victory.fbx',                       loop: false },
+          { name: 'flair',            url: '/Flair.fbx',                         loop: false },
+          { name: 'blow_kiss',        url: '/Blow%20A%20Kiss.fbx',               loop: false },
+          { name: 'dying',            url: '/Dying.fbx',                         loop: false },
+          // Fight / Combat
+          { name: 'fighting_idle',    url: '/Fighting%20Idle.fbx',               loop: true  },
+          { name: 'fight_to_idle',    url: '/Fight%20Idle%20To%20Standing%20Idle.fbx', loop: false },
+          { name: 'fist_fight',       url: '/Fist%20Fight%20A.fbx',              loop: false },
+          { name: 'kicking',          url: '/Kicking.fbx',                       loop: false },
+          { name: 'punching',         url: '/Punching%20Bag.fbx',                loop: false },
         ];
         lazyAnims.forEach(({ name, url, loop }) => loadAnim(name, url, loop));
-      }, 3000);
+      }, 4000);
     };
 
     const tryLoad = (i: number) => {
@@ -1032,15 +1108,15 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
       const cadence = syll1 * 0.55 + syll2 * 0.3 + syll3 * 0.15;
       const vowelPhrase = 0.7 + 0.3 * Math.sin(t * 2.5);
 
-      let openTarget = 0.02; // resting closed lips
+      let openTarget = 0.01; // resting closed lips
       if (speaking) {
-        // High visibility mouth opening: so user clearly sees her mouth opening wide and articulating
+        // Mouth opening — tuned to ~50% visibility
         if (isVoiceActive) {
           // Driven dynamically by real speech audio waveform
-          openTarget = THREE.MathUtils.clamp(realSpeechEnergy * 2.6 + cadence * 0.35, 0.25, 1.0);
+          openTarget = THREE.MathUtils.clamp(realSpeechEnergy * 1.3 + cadence * 0.18, 0.12, 0.50);
         } else {
-          // Generative human speech cadence: prominently cycles between 0.30 (consonants) and 0.92 (vowels)
-          openTarget = THREE.MathUtils.clamp((0.32 + cadence * 0.65) * vowelPhrase, 0.18, 0.95);
+          // Generative human speech cadence
+          openTarget = THREE.MathUtils.clamp((0.16 + cadence * 0.33) * vowelPhrase, 0.09, 0.48);
         }
       } else if (happy) {
         openTarget = 0.16; // pleasant subtle open smile
@@ -1050,20 +1126,20 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
       const lerpSpeed = openTarget > jawOpen ? 0.45 : 0.28;
       jawOpen = lerp(jawOpen, openTarget, lerpSpeed);
 
-      // 1. Physical Jaw Bone rotation: opens prominently (~20-25 degrees) so head visibly talks
+      // 1. Physical Jaw Bone rotation (~10-12 degrees)
       if (jawBone && jawBone !== modelRoot) {
-        jawBone.rotation.x = jawOpen * 0.44;
+        jawBone.rotation.x = jawOpen * 0.22;
       }
 
       // 2. Morph targets on all face / teeth / mouth meshes
       if (mouthOpenMorphs.length > 0) {
         mouthOpenMorphs.forEach(({ mesh, index }) => {
           if (mesh.morphTargetInfluences) {
-            mesh.morphTargetInfluences[index] = THREE.MathUtils.clamp(jawOpen * 1.25, 0, 1);
+            mesh.morphTargetInfluences[index] = THREE.MathUtils.clamp(jawOpen * 0.62, 0, 1);
           }
         });
       } else if (mouthMorph && mouthMorph.mesh.morphTargetInfluences) {
-        mouthMorph.mesh.morphTargetInfluences[mouthMorph.index] = THREE.MathUtils.clamp(jawOpen * 1.25, 0, 1);
+        mouthMorph.mesh.morphTargetInfluences[mouthMorph.index] = THREE.MathUtils.clamp(jawOpen * 0.62, 0, 1);
       }
 
       // 3. Multi-viseme shaping (lips widening, funneling for 'oo/oh', vowel dynamics)
