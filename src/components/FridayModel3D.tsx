@@ -230,36 +230,24 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
     let blinkT = -1;
 
     // ── Choreography Engine ──
-    // Full show: dance ke beech flips, pushup, salute — seamless crossfade
-    // duration: null = one-shot (play full clip once, then advance via 'finished' event)
-    // duration: N = timed dance (play N seconds, then crossfade to next step)
+    // Non-repeating variety: Dance clips are capped to ~4s (1 phrase) so no clip repeats the same step 3-4 times.
+    // Stunts (flips, uppercuts, pushups, salute) are one-shot (LoopOnce) and play fully once.
     interface ChoreoStep {
       clip: string;
-      duration: number | null; // null = one-shot
+      maxDuration?: number; // Cap for dance clips so they play 1 clean phrase without repeating 3-4 times
     }
     const CHOREO_SEQUENCE: ChoreoStep[] = [
-      { clip: 'dance',          duration: 10 },   // Hip Hop — 10s
-      { clip: 'dance_salsa',    duration: 9  },   // Salsa — 9s
-      { clip: 'flip',           duration: null },  // BACKFLIP 💥
-      { clip: 'dance_hiphop2',  duration: 10 },   // Hip Hop Alt — 10s
-      { clip: 'dance_swing',    duration: 9  },   // Swing — 9s
-      { clip: 'flip_uppercut',  duration: null },  // UPPERCUT FLIP 💥
-      { clip: 'dance_silly',    duration: 8  },   // Silly — 8s
-      { clip: 'pushup',         duration: null },  // PUSH UP 💪
-      { clip: 'dance_silly2',   duration: 8  },   // Silly Alt — 8s
-      { clip: 'dance',          duration: 10 },   // Hip Hop — 10s
-      { clip: 'flip',           duration: null },  // BACKFLIP again 💥
-      { clip: 'salute',         duration: null },  // SALUTE 🫡 — finale
+      { clip: 'dance',         maxDuration: 4.2 }, // Hip Hop: 1 crisp phrase (~4.2s)
+      { clip: 'flip' },                            // BACKFLIP 💥 (one-shot stunt)
+      { clip: 'dance_salsa',   maxDuration: 4.0 }, // Salsa: 1 phrase (~4.0s)
+      { clip: 'flip_uppercut' },                   // UPPERCUT FLIP 💥 (one-shot stunt)
+      { clip: 'pushup' },                          // PUSH UP 💪 (one-shot stunt)
+      { clip: 'dance_swing',   maxDuration: 4.0 }, // Swing: 1 phrase (~4.0s)
+      { clip: 'dance_silly2',  maxDuration: 3.8 }, // Silly Alt: 1 phrase (~3.8s)
+      { clip: 'dance_hiphop2', maxDuration: 4.0 }, // Hip Hop Alt: 1 phrase (~4.0s)
+      { clip: 'flip' },                            // BACKFLIP again 💥
+      { clip: 'salute' },                          // SALUTE 🫡 — finale gesture
     ];
-
-    // Pure dance clips that are used as timed steps
-    const ALL_DANCE_NAMES = new Set([
-      'dance', 'dance_hiphop2', 'dance_salsa', 'dance_swing', 'dance_silly', 'dance_silly2',
-    ]);
-    // One-shot clips used in choreo (need LoopOnce)
-    const CHOREO_ONESHOT_NAMES = new Set(
-      CHOREO_SEQUENCE.filter((s) => s.duration === null).map((s) => s.clip)
-    );
 
     let choreoActive = false;
     let choreoIndex = 0;
@@ -272,23 +260,27 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
     // Play a specific step in the choreography
     const playChoreoStep = (idx: number) => {
       if (!choreoActive || !mixer) return;
+      clearChoreoTimer();
+
       if (idx >= CHOREO_SEQUENCE.length) {
         // Show finished → return to idle
         choreoActive = false;
         const cur = actions[currentActionName];
         const idle = actions['idle'];
         if (idle && cur) { cur.crossFadeTo(idle, 0.5, true); idle.play(); currentActionName = 'idle'; }
+        if (mixer) mixer.timeScale = 1.0;
         try { doneRef.current?.(); } catch { /* noop */ }
-        console.log('[Choreo] Show complete → idle');
+        console.log('[Choreo] 🏁 Routine complete → returned to idle');
         return;
       }
+
       choreoIndex = idx;
       const step = CHOREO_SEQUENCE[idx];
       const curAction = actions[currentActionName];
       const nextAction = actions[step.clip];
+
       if (!nextAction) {
-        // Clip not loaded yet — skip this step
-        console.warn(`[Choreo] Clip "${step.clip}" not loaded, skipping step ${idx}`);
+        console.warn(`[Choreo] Clip "${step.clip}" not ready, advancing to next step`);
         playChoreoStep(idx + 1);
         return;
       }
@@ -297,35 +289,37 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
       nextAction.setEffectiveTimeScale(1);
       nextAction.setEffectiveWeight(1);
 
-      if (step.duration !== null) {
-        // Timed dance step: loop while playing, advance after duration
+      if (step.maxDuration) {
+        // Dance move: loop for 1 musical phrase, then advance smoothly via timer
         nextAction.setLoop(THREE.LoopRepeat, Infinity);
-        if (curAction && curAction !== nextAction) curAction.crossFadeTo(nextAction, 0.3, true);
+        if (curAction && curAction !== nextAction) curAction.crossFadeTo(nextAction, 0.35, true);
         nextAction.play();
         currentActionName = step.clip;
-        console.log(`[Choreo] ${idx}. ${step.clip} (${step.duration}s)`);
+        console.log(`[Choreo] Step ${idx + 1}/${CHOREO_SEQUENCE.length}: ${step.clip} (capped at ${step.maxDuration}s)`);
         choreoTimer = setTimeout(() => {
-          if (choreoActive) playChoreoStep(idx + 1);
-        }, step.duration * 1000);
+          if (choreoActive && choreoIndex === idx) {
+            playChoreoStep(idx + 1);
+          }
+        }, step.maxDuration * 1000);
       } else {
-        // One-shot step: LoopOnce, advance via 'finished' event
+        // Stunt / flip / pushup / salute: one-shot, advance when finished
         nextAction.setLoop(THREE.LoopOnce, 1);
         nextAction.clampWhenFinished = true;
         if (curAction && curAction !== nextAction) curAction.crossFadeTo(nextAction, 0.3, true);
         nextAction.play();
         currentActionName = step.clip;
-        console.log(`[Choreo] ${idx}. ${step.clip} (one-shot)`);
-        // Advance happens in onChoreoFinished
+        console.log(`[Choreo] Step ${idx + 1}/${CHOREO_SEQUENCE.length}: ${step.clip} (one-shot stunt)`);
       }
     };
 
-    // mixer 'finished' handler for one-shot choreo steps
+    // mixer 'finished' handler for choreo steps
     const onChoreoFinished = (e: any) => {
       if (!choreoActive) return;
       const finishedName = e.action?.getClip()?.name as string;
       const step = CHOREO_SEQUENCE[choreoIndex];
-      if (!step || step.duration !== null) return; // only handle one-shot steps
+      if (!step || step.maxDuration) return; // Timed steps advance via choreoTimer
       if (finishedName !== step.clip) return;
+      clearChoreoTimer();
       playChoreoStep(choreoIndex + 1);
     };
 
@@ -335,7 +329,7 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
       choreoIndex = 0;
       clearChoreoTimer();
       mixer?.addEventListener('finished', onChoreoFinished);
-      console.log('[Choreo] 🎬 Show starting!');
+      console.log('[Choreo] 🎬 Mega Dance Routine starting!');
       playChoreoStep(0);
     };
 
@@ -343,11 +337,7 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
       if (!choreoActive) return;
       choreoActive = false;
       clearChoreoTimer();
-      // Restore any one-shot clips that might be stuck
-      CHOREO_ONESHOT_NAMES.forEach((name) => {
-        const a = actions[name];
-        if (a) { a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true; }
-      });
+      if (mixer) mixer.timeScale = 1.0;
     };
 
     const fadeToAction = (targetName: string, dur = 0.35) => {
@@ -588,6 +578,57 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
     const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
     let jawOpen = 0;
 
+    // ── Beat Detector: Web Audio API se audio energy measure karke dance bounce ──
+    // Direct music player analyser (window.__fridayMusicAnalyser) ya page audio elements se
+    let beatAudioCtx: AudioContext | null = null;
+    let beatAnalyser: AnalyserNode | null = null;
+    let beatDataArray: Uint8Array | null = null;
+    let beatEnergy = 0;       // smoothed energy 0-1
+    let beatPeak = 0.1;       // peak tracker for beat detection
+    let beatPulse = 0;        // short pulse on beat hit (decays fast)
+    let lastBeatTime = 0;     // debounce rapid beats
+
+    const initBeatDetector = () => {
+      if ((window as any).__fridayMusicAnalyser) return;
+      if (beatAudioCtx) return;
+      try {
+        beatAudioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        beatAnalyser = beatAudioCtx.createAnalyser();
+        beatAnalyser.fftSize = 256;
+        beatAnalyser.smoothingTimeConstant = 0.75;
+        beatDataArray = new Uint8Array(beatAnalyser.frequencyBinCount);
+        // Connect all audio elements on the page
+        document.querySelectorAll<HTMLAudioElement>('audio').forEach((el) => {
+          try {
+            const src = beatAudioCtx!.createMediaElementSource(el);
+            src.connect(beatAnalyser!);
+            beatAnalyser!.connect(beatAudioCtx!.destination);
+          } catch { /* element may already be connected */ }
+        });
+        console.log('[BeatDetector] Initialized page audio analyser');
+      } catch (e) {
+        console.warn('[BeatDetector] Web Audio API notice:', e);
+      }
+    };
+
+    const getBeatEnergy = (): number => {
+      // Priority 1: Direct music player analyser from LiveAIInterface
+      const globalAnalyser = (window as any).__fridayMusicAnalyser as AnalyserNode | undefined;
+      const analyser = globalAnalyser || beatAnalyser;
+      if (!analyser) return 0;
+
+      if (!beatDataArray || beatDataArray.length !== analyser.frequencyBinCount) {
+        beatDataArray = new Uint8Array(analyser.frequencyBinCount);
+      }
+      analyser.getByteFrequencyData(beatDataArray);
+
+      // Focus on kick/bass bins (bins 0-6 ≈ 40-500 Hz where the rhythm lives)
+      let sum = 0;
+      const bassBins = Math.min(6, beatDataArray.length);
+      for (let i = 0; i < bassBins; i++) sum += beatDataArray[i];
+      return sum / (bassBins * 255); // normalize 0-1
+    };
+
     const animate = () => {
       if (disposed) return;
       raf = requestAnimationFrame(animate);
@@ -606,7 +647,12 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
 
       if (isDancing) {
         // Choreography show: start if not already running
-        if (!choreoActive && mixer) startChoreo();
+        if (!choreoActive && mixer) {
+          startChoreo();
+          // Initialize beat detector when dance starts
+          initBeatDetector();
+          if (beatAudioCtx?.state === 'suspended') beatAudioCtx.resume();
+        }
       } else {
         // Stop choreo if it was running (user said stop / different action)
         if (choreoActive) stopChoreo();
@@ -621,6 +667,49 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
       }
 
       mixer?.update(dt);
+
+      // ── Beat-Sync Dance Bounce & Dynamic Tempo ──
+      if (isDancing || choreoActive) {
+        const rawE = getBeatEnergy();
+        beatEnergy = lerp(beatEnergy, rawE, 0.25);
+
+        // Beat detection: kick drum spike
+        const now = clock.elapsedTime;
+        if (rawE > Math.max(beatPeak * 1.35, 0.12) && (now - lastBeatTime) > 0.22) {
+          beatPulse = 1; // trigger beat snap
+          lastBeatTime = now;
+        }
+        beatPeak = lerp(beatPeak, Math.max(rawE, 0.08), 0.05);
+        beatPulse *= Math.pow(0.0005, dt); // instant snap decay
+
+        // Dynamic Tempo: speeds up animation on fast/heavy beats, keeps 1.0 on chill
+        if (mixer) {
+          const targetTimeScale = beatEnergy > 0.04 ? 0.95 + beatEnergy * 0.45 : 1.0;
+          mixer.timeScale = lerp(mixer.timeScale, targetTimeScale, 0.1);
+        }
+
+        // Fallback BPM (~126 BPM = 2.1 Hz) if no external music audio is detected
+        const fallbackBPM = 2.1;
+        const fallbackBounce = beatEnergy < 0.03
+          ? Math.abs(Math.sin(t * Math.PI * fallbackBPM)) * 0.028
+          : 0;
+
+        // Combine: direct bounce height (NO continuous accumulator so model never flies up!)
+        const bounceMag = beatPulse * 0.05 + fallbackBounce;
+        modelRoot.position.y = bounceMag;
+
+        // Hip & Torso sway: moves in rhythm
+        const swayFreq = beatEnergy > 0.04 ? 2.5 : fallbackBPM * 0.5;
+        modelRoot.rotation.z = Math.sin(t * Math.PI * swayFreq) * 0.028;
+      } else {
+        // Smoothly restore base transforms when not dancing
+        beatPulse = 0;
+        modelRoot.position.y = lerp(modelRoot.position.y, 0, 0.15);
+        modelRoot.rotation.z = lerp(modelRoot.rotation.z, 0, 0.08);
+        if (mixer && mixer.timeScale !== 1.0) {
+          mixer.timeScale = lerp(mixer.timeScale, 1.0, 0.15);
+        }
+      }
 
       // ── Lip-sync & Multi-Visemes ──
       if (speaking && volume > lastVolPeak) lastVolPeak = volume;

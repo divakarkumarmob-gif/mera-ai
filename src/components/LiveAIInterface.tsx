@@ -1723,6 +1723,17 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                 trebleFilter.connect(ctx.destination);
             }
 
+            // Connect musicAnalyser for Friday 3D model beat-sync
+            try {
+                const musicAnalyser = ctx.createAnalyser();
+                musicAnalyser.fftSize = 256;
+                musicAnalyser.smoothingTimeConstant = 0.75;
+                source.connect(musicAnalyser);
+                (window as any).__fridayMusicAnalyser = musicAnalyser;
+            } catch (aErr) {
+                console.warn('[Music DSP] Analyser connect error:', aErr);
+            }
+
             musicDspAudioCtxRef.current = ctx;
             musicBassFilterRef.current = bassFilter;
             musicMidFilterRef.current = midFilter;
@@ -1803,6 +1814,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
             const iframe = document.getElementById('youtube-iframe') as HTMLIFrameElement;
             iframe?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'stopVideo', args: [] }), '*');
         } catch { /* ignore */ }
+        (window as any).__fridayMusicAnalyser = null;
         setNowPlayingMusic(null);
         setMusicCurrentTime(0);
         setMusicDuration(0);
