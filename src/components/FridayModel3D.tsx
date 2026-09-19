@@ -229,96 +229,124 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
     let blinkTimer = 2;
     let blinkT = -1;
 
-    // ── Dance Sequencer: All dance clips play one by one seamlessly ──
-    const DANCE_CLIPS = [
-      'dance',
-      'dance_hiphop2',
-      'dance_salsa',
-      'dance_swing',
-      'dance_silly',
-      'dance_silly2',
+    // ── Choreography Engine ──
+    // Full show: dance ke beech flips, pushup, salute — seamless crossfade
+    // duration: null = one-shot (play full clip once, then advance via 'finished' event)
+    // duration: N = timed dance (play N seconds, then crossfade to next step)
+    interface ChoreoStep {
+      clip: string;
+      duration: number | null; // null = one-shot
+    }
+    const CHOREO_SEQUENCE: ChoreoStep[] = [
+      { clip: 'dance',          duration: 10 },   // Hip Hop — 10s
+      { clip: 'dance_salsa',    duration: 9  },   // Salsa — 9s
+      { clip: 'flip',           duration: null },  // BACKFLIP 💥
+      { clip: 'dance_hiphop2',  duration: 10 },   // Hip Hop Alt — 10s
+      { clip: 'dance_swing',    duration: 9  },   // Swing — 9s
+      { clip: 'flip_uppercut',  duration: null },  // UPPERCUT FLIP 💥
+      { clip: 'dance_silly',    duration: 8  },   // Silly — 8s
+      { clip: 'pushup',         duration: null },  // PUSH UP 💪
+      { clip: 'dance_silly2',   duration: 8  },   // Silly Alt — 8s
+      { clip: 'dance',          duration: 10 },   // Hip Hop — 10s
+      { clip: 'flip',           duration: null },  // BACKFLIP again 💥
+      { clip: 'salute',         duration: null },  // SALUTE 🫡 — finale
     ];
-    let danceSeqIndex = 0;
-    let danceSeqActive = false;
-    let danceSeqListening = false;
 
-    const shuffleDanceOrder = () => {
-      // Fisher-Yates shuffle so every play feels fresh
-      const arr = [...DANCE_CLIPS];
-      for (let i = arr.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [arr[i], arr[j]] = [arr[j], arr[i]];
-      }
-      return arr;
+    // Pure dance clips that are used as timed steps
+    const ALL_DANCE_NAMES = new Set([
+      'dance', 'dance_hiphop2', 'dance_salsa', 'dance_swing', 'dance_silly', 'dance_silly2',
+    ]);
+    // One-shot clips used in choreo (need LoopOnce)
+    const CHOREO_ONESHOT_NAMES = new Set(
+      CHOREO_SEQUENCE.filter((s) => s.duration === null).map((s) => s.clip)
+    );
+
+    let choreoActive = false;
+    let choreoIndex = 0;
+    let choreoTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const clearChoreoTimer = () => {
+      if (choreoTimer) { clearTimeout(choreoTimer); choreoTimer = null; }
     };
-    let dancePlaylist: string[] = shuffleDanceOrder();
 
-    // Hook into mixer 'finished' to advance the dance playlist
-    const onDanceFinished = (e: any) => {
-      if (!danceSeqActive) return;
-      const finishedName = e.action?.getClip()?.name as string;
-      if (!DANCE_CLIPS.includes(finishedName)) return;
-      // Advance to next
-      danceSeqIndex = (danceSeqIndex + 1) % dancePlaylist.length;
-      if (danceSeqIndex === 0) dancePlaylist = shuffleDanceOrder(); // reshuffle each round
-      const nextClip = dancePlaylist[danceSeqIndex];
-      const nextAction = actions[nextClip];
-      const curAction = actions[finishedName];
-      if (nextAction && mixer) {
-        nextAction.reset();
-        nextAction.setEffectiveTimeScale(1);
-        nextAction.setEffectiveWeight(1);
-        // LoopOnce + clamp so we catch 'finished' for each clip
+    // Play a specific step in the choreography
+    const playChoreoStep = (idx: number) => {
+      if (!choreoActive || !mixer) return;
+      if (idx >= CHOREO_SEQUENCE.length) {
+        // Show finished → return to idle
+        choreoActive = false;
+        const cur = actions[currentActionName];
+        const idle = actions['idle'];
+        if (idle && cur) { cur.crossFadeTo(idle, 0.5, true); idle.play(); currentActionName = 'idle'; }
+        try { doneRef.current?.(); } catch { /* noop */ }
+        console.log('[Choreo] Show complete → idle');
+        return;
+      }
+      choreoIndex = idx;
+      const step = CHOREO_SEQUENCE[idx];
+      const curAction = actions[currentActionName];
+      const nextAction = actions[step.clip];
+      if (!nextAction) {
+        // Clip not loaded yet — skip this step
+        console.warn(`[Choreo] Clip "${step.clip}" not loaded, skipping step ${idx}`);
+        playChoreoStep(idx + 1);
+        return;
+      }
+
+      nextAction.reset();
+      nextAction.setEffectiveTimeScale(1);
+      nextAction.setEffectiveWeight(1);
+
+      if (step.duration !== null) {
+        // Timed dance step: loop while playing, advance after duration
+        nextAction.setLoop(THREE.LoopRepeat, Infinity);
+        if (curAction && curAction !== nextAction) curAction.crossFadeTo(nextAction, 0.3, true);
+        nextAction.play();
+        currentActionName = step.clip;
+        console.log(`[Choreo] ${idx}. ${step.clip} (${step.duration}s)`);
+        choreoTimer = setTimeout(() => {
+          if (choreoActive) playChoreoStep(idx + 1);
+        }, step.duration * 1000);
+      } else {
+        // One-shot step: LoopOnce, advance via 'finished' event
         nextAction.setLoop(THREE.LoopOnce, 1);
         nextAction.clampWhenFinished = true;
-        if (curAction) curAction.crossFadeTo(nextAction, 0.3, true);
+        if (curAction && curAction !== nextAction) curAction.crossFadeTo(nextAction, 0.3, true);
         nextAction.play();
-        currentActionName = nextClip;
-        console.log(`[Dance Seq] → ${nextClip}`);
+        currentActionName = step.clip;
+        console.log(`[Choreo] ${idx}. ${step.clip} (one-shot)`);
+        // Advance happens in onChoreoFinished
       }
     };
 
-    const startDanceSequencer = () => {
-      if (danceSeqActive) return;
-      danceSeqActive = true;
-      danceSeqIndex = 0;
-      dancePlaylist = shuffleDanceOrder();
-
-      // Set ALL dance clips to LoopOnce so we catch their 'finished' event
-      DANCE_CLIPS.forEach((name) => {
-        const a = actions[name];
-        if (a) {
-          a.setLoop(THREE.LoopOnce, 1);
-          a.clampWhenFinished = true;
-        }
-      });
-
-      const firstClip = dancePlaylist[0];
-      const firstAction = actions[firstClip];
-      const curAction = actions[currentActionName];
-      if (firstAction && mixer) {
-        firstAction.reset();
-        firstAction.setEffectiveTimeScale(1);
-        firstAction.setEffectiveWeight(1);
-        if (curAction && curAction !== firstAction) curAction.crossFadeTo(firstAction, 0.3, true);
-        firstAction.play();
-        currentActionName = firstClip;
-        console.log(`[Dance Seq] Start → ${firstClip}`);
-      }
-
-      if (!danceSeqListening) {
-        mixer?.addEventListener('finished', onDanceFinished);
-        danceSeqListening = true;
-      }
+    // mixer 'finished' handler for one-shot choreo steps
+    const onChoreoFinished = (e: any) => {
+      if (!choreoActive) return;
+      const finishedName = e.action?.getClip()?.name as string;
+      const step = CHOREO_SEQUENCE[choreoIndex];
+      if (!step || step.duration !== null) return; // only handle one-shot steps
+      if (finishedName !== step.clip) return;
+      playChoreoStep(choreoIndex + 1);
     };
 
-    const stopDanceSequencer = () => {
-      if (!danceSeqActive) return;
-      danceSeqActive = false;
-      // Restore loop state for dance clips
-      DANCE_CLIPS.forEach((name) => {
+    const startChoreo = () => {
+      if (choreoActive) return;
+      choreoActive = true;
+      choreoIndex = 0;
+      clearChoreoTimer();
+      mixer?.addEventListener('finished', onChoreoFinished);
+      console.log('[Choreo] 🎬 Show starting!');
+      playChoreoStep(0);
+    };
+
+    const stopChoreo = () => {
+      if (!choreoActive) return;
+      choreoActive = false;
+      clearChoreoTimer();
+      // Restore any one-shot clips that might be stuck
+      CHOREO_ONESHOT_NAMES.forEach((name) => {
         const a = actions[name];
-        if (a) a.setLoop(THREE.LoopRepeat, Infinity);
+        if (a) { a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true; }
       });
     };
 
@@ -440,8 +468,8 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
 
       mixer.addEventListener('finished', (e: any) => {
         const finishedClipName = e.action?.getClip()?.name as string;
-        // Dance clips are handled by danceSequencer — skip here
-        if (DANCE_CLIPS.includes(finishedClipName)) return;
+        // Choreo engine handles its own clips — don't double-handle them here
+        if (choreoActive) return;
         console.log(`[FridayModel3D] Mocap finished: ${finishedClipName}`);
         if (localRef.current === finishedClipName) {
           localRef.current = null;
@@ -577,11 +605,11 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
       const isDancing = actCheck === 'dance';
 
       if (isDancing) {
-        // Dance sequencer: start if not already running
-        if (!danceSeqActive && mixer) startDanceSequencer();
+        // Choreography show: start if not already running
+        if (!choreoActive && mixer) startChoreo();
       } else {
-        // Stop dance sequencer if it was running
-        if (danceSeqActive) stopDanceSequencer();
+        // Stop choreo if it was running (user said stop / different action)
+        if (choreoActive) stopChoreo();
 
         if (actCheck && actions[actCheck]) {
           fadeToAction(actCheck, 0.25);
@@ -735,6 +763,8 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
     return () => {
       disposed = true;
       cancelAnimationFrame(raf);
+      clearChoreoTimer(); // kill any pending choreo step timers
+      choreoActive = false;
       window.removeEventListener('mousemove', onMouse);
       window.removeEventListener('resize', onResize);
       scene.traverse((o) => {
