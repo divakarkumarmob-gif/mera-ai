@@ -2913,6 +2913,36 @@ Please review the codebase, diagnose the root cause, fix the issue with proper e
                   } catch (e: any) {
                     result = { success: false, message: `Website audit fail hua: ${e?.message || e}` };
                   }
+                } else if (call.name === "nikto_website_deep_scan") {
+                  const { url } = call.args || {};
+                  try {
+                    const { niktoService } = await import("../services/niktoService");
+                    const report = await niktoService.scan(String(url || ""), {
+                      checkPaths: true,
+                      checkHeaders: true,
+                      checkMethods: true,
+                      maxPaths: 60,
+                      concurrency: 10,
+                    });
+                    const critical = report.findings.filter((f) => f.severity === "critical");
+                    const high = report.findings.filter((f) => f.severity === "high");
+                    result = {
+                      success: true,
+                      grade: report.grade,
+                      securityScore: report.securityScore,
+                      criticalCount: critical.length,
+                      highCount: high.length,
+                      topFindings: [...critical, ...high].slice(0, 8).map((f) => ({
+                        severity: f.severity,
+                        title: f.title,
+                        url: f.url,
+                        remediation: f.remediation,
+                      })),
+                      message: report.summary,
+                    };
+                  } catch (e: any) {
+                    result = { success: false, message: `Deep vulnerability scan fail hua: ${e?.message || e}` };
+                  }
                 } else if (call.name === "lookup_ip_intelligence") {
                   const { ipOrDomain } = call.args || {};
                   try {

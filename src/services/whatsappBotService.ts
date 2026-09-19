@@ -1458,6 +1458,21 @@ class WhatsAppBotService {
       return;
     }
 
+    // ── WEBSITE VULNERABILITY SCAN (fast regex path — works even if LLM classifier is down) ──
+    // Triggers: "find vulnerabilities in example.com", "find error in url xyz", "link scan karo ...", "website security check karo ..."
+    try {
+      const { parseWebsiteScanCommand, runWebsiteSecurityScan } = await import("./websiteSecurityCommands");
+      const scanCmd = parseWebsiteScanCommand(rawText);
+      if (scanCmd) {
+        await this.sendHumanLikeMessage(replyJid, `🔍 *Scanning:* \`${scanCmd.target}\` (${scanCmd.mode} mode)... thoda rukiye ⚡`, rawText, messageKey);
+        const replyText = await runWebsiteSecurityScan(scanCmd.target, scanCmd.mode);
+        await this.sendHumanLikeMessage(replyJid, replyText, rawText, messageKey);
+        return;
+      }
+    } catch (scanErr: any) {
+      console.warn("[WhatsAppBot] Website scan fast-path failed:", scanErr?.message || scanErr);
+    }
+
     // ── LLM-Driven Intent Classification (Replaces Hardcoded Regex Patterns) ──
     try {
       const intentResult = await this.classifyAndExecuteOwnerIntent(
@@ -2579,6 +2594,16 @@ class WhatsAppBotService {
           const { phoneIntelligenceService } = await import("./phoneIntelligenceService");
           const report = await phoneIntelligenceService.lookup(parameters.phoneNumber);
           const replyText = phoneIntelligenceService.formatReportMarkdown(report, "whatsapp");
+          await this.sendHumanLikeMessage(replyJid, replyText, rawText, messageKey);
+          return { handled: true, replyText };
+        }
+
+        case "scan_website_security": {
+          const { runWebsiteSecurityScan } = await import("./websiteSecurityCommands");
+          const target = String(parameters.urlOrDomain || "").trim() || rawText;
+          const mode = parameters.scanMode === "audit" ? "audit" : parameters.scanMode === "link" ? "link" : "deep";
+          await this.sendHumanLikeMessage(replyJid, `🔍 *Scanning:* \`${target}\` (${mode} mode)... thoda rukiye ⚡`, rawText, messageKey);
+          const replyText = await runWebsiteSecurityScan(target, mode);
           await this.sendHumanLikeMessage(replyJid, replyText, rawText, messageKey);
           return { handled: true, replyText };
         }

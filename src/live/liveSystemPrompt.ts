@@ -331,8 +331,10 @@ ${activePhotoContext}
    - Save concrete personal fact -> Call 'remember_personal_fact' IMMEDIATELY.
    - Boss correction / rule teaching -> Call 'record_ai_self_correction' IMMEDIATELY.
 8. CYBER DEFENSE & OSINT:
-   - Link safety / Phishing -> Call 'scan_link_safety'.
-   - Data breach check -> Call 'check_email_data_breach'.
+    - Link safety / Phishing -> Call 'scan_link_safety'.
+    - Data breach check -> Call 'check_email_data_breach'.
+    - Website headers/SSL/DNS audit ("website security check karo", "domain audit karo") -> Call 'audit_website_security'.
+    - Deep vulnerability scan ("find vulnerabilities", "find error in url", "weak point dhundho", "data leak check karo", "vulnerability scan karo") -> Call 'nikto_website_deep_scan'.
    - Webpage crawling -> Call 'crawl_and_extract_webpage' or 'deep_crawl_website'.
 9. VOICE CHANGE (IMPORTANT):
    - Jab DK bole "male voice lagao" / "awaaz badlo male" / "ladke ki awaaz" -> Call 'change_voice' with gender: "male".

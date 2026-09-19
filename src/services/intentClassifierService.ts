@@ -444,6 +444,18 @@ const INTENT_FUNCTION_DECLARATIONS = [
     }
   },
   {
+    name: "scan_website_security",
+    description: "Scan a website/URL for vulnerabilities, phishing risk, security headers, SSL and exposed paths. Use when user says 'find vulnerabilities', 'find error in url', 'link scan karo', 'website security check karo', 'domain audit karo', 'ye link safe hai kya', 'scan url'. Examples: 'find vulnerabilities in example.com', 'find error in url xyz.com', 'scan https://example.com'.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        urlOrDomain: { type: Type.STRING, description: "URL or domain to scan (e.g. 'example.com', 'https://example.com')" },
+        scanMode: { type: Type.STRING, description: "Scan depth: 'deep' (vulnerabilities), 'audit' (headers/SSL/grade), 'link' (phishing safety). Default: 'deep'." }
+      },
+      required: ["urlOrDomain"]
+    }
+  },
+  {
     name: "general_chat",
     description: "General conversation - no specific action needed. Just chat naturally. Use for greetings, casual talk, questions not covered above, emotional venting, etc.",
     parameters: {
@@ -571,6 +583,30 @@ Be decisive. One function call per classification.`;
         reasoning: "Fallback: detected message intent but need clarification",
         originalText: userText
       };
+    }
+
+    // Website security scan fallback (works even when LLM is down)
+    if (/\b(find\s+(vulnerabilit|vuln|weak\s*point|weakness|data\s*leak|leak|bug|error|issue)|vulnerability\s*scan|deep\s*scan|nikto|website\s*security|domain\s*audit|security\s*audit|link\s*scan|scan.*(url|link|website|domain)|audit\s*(website|domain|url|site)|phishing)\b/i.test(clean)) {
+      const urlMatch =
+        userText.match(/https?:\/\/[^\s"'<>\]\)]+/i) ||
+        userText.match(/www\.[^\s"'<>\]\)]+/i) ||
+        userText.match(/["'“”]([^"'“”\s]{3,120})["'“”]/) ||
+        userText.match(/\b((?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^\s"'<>\]\)]*)?)/i);
+      const scanTarget = (urlMatch?.[1] || urlMatch?.[0] || "").replace(/[.,;:!?'"\])]+$/g, "").trim();
+      if (scanTarget) {
+        const scanMode = /find\s+(vulnerabilit|vuln|weak|data\s*leak|bug|error)|nikto|deep\s*scan|vulnerability\s*scan/i.test(clean)
+          ? "deep"
+          : /audit|website\s*security|domain|grade|security\s*check/i.test(clean)
+            ? "audit"
+            : "link";
+        return {
+          action: "scan_website_security",
+          confidence: 0.75,
+          parameters: { urlOrDomain: scanTarget, scanMode },
+          reasoning: "Fallback regex match for website security scan intent",
+          originalText: userText
+        };
+      }
     }
 
     return {

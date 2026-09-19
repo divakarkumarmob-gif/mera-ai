@@ -2872,6 +2872,23 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
       return;
     }
 
+    // ── WEBSITE VULNERABILITY SCAN (fast regex path — works even if LLM classifier is down) ──
+    // Triggers: "find vulnerabilities in example.com", "find error in url xyz", "link scan karo ...", "website security check karo ..."
+    if (isOwner && text && text.trim().length >= 3) {
+      try {
+        const { parseWebsiteScanCommand, runWebsiteSecurityScan } = await import("./websiteSecurityCommands");
+        const scanCmd = parseWebsiteScanCommand(text);
+        if (scanCmd) {
+          await this.sendMessage(chatId, `🔍 *Scanning:* \`${scanCmd.target}\` (${scanCmd.mode} mode)... thoda rukiye ⚡`);
+          const replyText = await runWebsiteSecurityScan(scanCmd.target, scanCmd.mode);
+          await this.sendMessage(chatId, replyText);
+          return;
+        }
+      } catch (scanErr: any) {
+        console.warn("[TelegramBot] Website scan fast-path failed:", scanErr?.message || scanErr);
+      }
+    }
+
     // ── LLM-Driven Intent Classification for Owner Messages (Replaces Hardcoded Regex) ──
     if (isOwner && text && text.trim().length >= 3) {
       try {
@@ -4133,6 +4150,20 @@ INSTRUCTIONS:
           const { phoneIntelligenceService } = await import("./phoneIntelligenceService");
           const report = await phoneIntelligenceService.lookup(parameters.phoneNumber);
           const replyText = phoneIntelligenceService.formatReportMarkdown(report, "telegram");
+          await this.sendMessage(chatId, replyText);
+          return { handled: true, replyText };
+        }
+
+        case "scan_website_security": {
+          const { runWebsiteSecurityScan } = await import("./websiteSecurityCommands");
+          const target = String(parameters.urlOrDomain || "").trim();
+          const mode = parameters.scanMode === "audit" ? "audit" : parameters.scanMode === "link" ? "link" : "deep";
+          if (!target) {
+            await this.sendMessage(chatId, "🔍 *Website scan ke liye URL/domain bhejo:*\n• `find vulnerabilities in example.com`\n• `find error in url example.com`\n• `link scan karo https://example.com`");
+            return { handled: true };
+          }
+          await this.sendMessage(chatId, `🔍 *Scanning:* \`${target}\` (${mode} mode)... thoda rukiye ⚡`);
+          const replyText = await runWebsiteSecurityScan(target, mode);
           await this.sendMessage(chatId, replyText);
           return { handled: true, replyText };
         }

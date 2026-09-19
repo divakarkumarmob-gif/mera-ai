@@ -3679,6 +3679,22 @@ const rawFunctionDeclarations: any[] = [
     }
   },
   {
+    "name": "nikto_website_deep_scan",
+    "description": "Deep vulnerability scan on any URL/website: exposed admin panels, .env/config leaks, backup files, .git exposure, dangerous HTTP methods, cookie flags, CMS detection, security score 0-100 with grade. Call when DK says 'find vulnerabilities', 'find error in url', 'vulnerability scan karo', 'weak point dhundho', 'data leak check karo'.",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {
+        "url": {
+          "type": "STRING",
+          "description": "The URL or domain to deep-scan (e.g. 'https://example.com', 'example.com')"
+        }
+      },
+      "required": [
+        "url"
+      ]
+    }
+  },
+  {
     "name": "lookup_ip_intelligence",
     "description": "Lookup IP address or domain geolocation, ISP organization, ASN, coordinates, and hosting/cloud infrastructure threat intelligence. Call when DK says 'IP trace karo', 'is IP ka location batao'.",
     "parameters": {
