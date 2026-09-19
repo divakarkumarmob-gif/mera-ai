@@ -136,6 +136,29 @@ export const ACTION_ALIASES: Record<string, string> = {
   kick: 'kicking', maaro: 'kicking', maar: 'kicking',
   punch: 'punching', ghusa: 'punching',
   'fighting idle': 'fighting_idle', fighter: 'fighting_idle',
+  'fight idle': 'fighting_idle',
+  'fight to idle': 'fight_to_idle', 'fight idle to standing': 'fight_to_idle', 'fight idle to standing idle': 'fight_to_idle',
+  // ── All 50 direct spoken names (exact FBX names mapped) ──
+  'hip hop dancing': 'dance', 'hip hop': 'dance',
+  'hip hop dancing 1': 'dance_hiphop2', 'hip hop 2': 'dance_hiphop2',
+  'salsa dancing': 'dance_salsa',
+  'swing dancing': 'dance_swing',
+  'silly dancing': 'dance_silly',
+  'robot hip hop dance': 'dance_robot', 'robot hip hop': 'dance_robot',
+  'samba dancing': 'dance_samba',
+  'breakdance freeze': 'dance_breakfreeze', 'breakdance freeze var 2': 'dance_breakfreeze', 'freeze': 'dance_breakfreeze',
+  'back flip to uppercut': 'flip_uppercut',
+  'front twist flip': 'flip_twist',
+  'flip kick 1': 'flip_kick2',
+  'run to flip': 'run_flip', 'run flip': 'run_flip',
+  'bicycle crunch': 'bicycle_crunch', 'bicycle': 'bicycle_crunch',
+  'arm stretching': 'arm_stretch',
+  'idle to situp': 'idle_situp', 'situp idle': 'idle_situp',
+  'blow a kiss': 'blow_kiss', 'flying kiss': 'blow_kiss',
+  'fist fight a': 'fist_fight',
+  'punching bag': 'punching',
+  'sad idle': 'sad', 'sad idle 1': 'sad2',
+  'breathing idle': 'idle',
   // ── Misc ──
   rapping: 'rap', walking: 'walk', chalo: 'walk',
 };
@@ -150,7 +173,17 @@ export const normalizeAvatarAction = (raw: string | null | undefined): string | 
     .replace(/\s+(karo|lagao|maro|dikhao|do|hoga|karegi|kijiye)$/i, '')
     .trim();
   if (clean === 'stop' || clean === 'ruk jao' || clean === 'bas' || clean === 'bas karo' || clean === '') return 'stop';
-  return ACTION_ALIASES[clean] || ACTION_ALIASES[raw.toLowerCase().trim()] || clean;
+
+  // 1. Direct alias lookup
+  if (ACTION_ALIASES[clean]) return ACTION_ALIASES[clean];
+  if (ACTION_ALIASES[raw.toLowerCase().trim()]) return ACTION_ALIASES[raw.toLowerCase().trim()];
+
+  // 2. Smart fallback: spaces/hyphens → underscores (e.g. "bicycle crunch" → "bicycle_crunch")
+  const underscored = clean.replace(/[\s\-]+/g, '_');
+  if (ACTION_ALIASES[underscored]) return ACTION_ALIASES[underscored];
+
+  // 3. Return as-is (may be a direct action name like 'flip_kick')
+  return underscored !== clean ? underscored : clean;
 };
 
 export const parseActionSequence = (input: string | string[] | null | undefined): string[] => {
@@ -163,6 +196,56 @@ export const parseActionSequence = (input: string | string[] | null | undefined)
     .map(s => normalizeAvatarAction(s.trim()))
     .filter((s): s is string => !!s && s !== 'stop');
   return parts;
+};
+
+// ── Category Sequences ──
+// Jab koi category bolo (warmup, workout, fight etc.), puri ordered routine chalegi ek ke baad ek
+export const CATEGORY_SEQUENCES: Record<string, string[]> = {
+  // 💪 Warm-up routine (6 exercises in order)
+  warmup:   ['arm_stretch', 'jumping_jacks', 'bicycle_crunch', 'situps', 'pushup', 'warming_up'],
+  // 🏋️ Full workout
+  workout:  ['jumping_jacks', 'pushup', 'bicycle_crunch', 'situps', 'arm_stretch', 'idle_situp', 'warming_up'],
+  // ⚔️ Fight combo
+  fight_combo: ['fighting_idle', 'fist_fight', 'kicking', 'punching', 'fight_to_idle'],
+  // 🔥 Full dance showcase
+  dance_all:   ['dance', 'dance_robot', 'dance_samba', 'dance_breakfreeze', 'dance_salsa', 'dance_swing'],
+  // 🤸 Flip combo
+  flip_combo:  ['flip', 'flip_front', 'flip_kick', 'flip_twist', 'flip_uppercut'],
+};
+
+// ── Cloud Firestore Persistent Routines (In-Memory Live Sync, No localStorage) ──
+let firestoreRoutinesCache: Record<string, string[]> = {};
+
+export const setFirestoreRoutines = (routines: Record<string, string[]>) => {
+  firestoreRoutinesCache = { ...(routines || {}) };
+  console.log(`[Friday3D] ☁️ Live synced ${Object.keys(firestoreRoutinesCache).length} routines from Cloud Firestore.`);
+};
+
+export const getFirestoreRoutines = (): Record<string, string[]> => {
+  return firestoreRoutinesCache;
+};
+
+// Expand a single action name to a sequence — checks built-in sequences and Cloud Firestore live routines
+const expandToSequence = (name: string): string[] | null => {
+  const norm = (name || '').toLowerCase().trim();
+  // 1. Built-in category sequences
+  if (CATEGORY_SEQUENCES[norm]) return CATEGORY_SEQUENCES[norm];
+  const normUnderscore = norm.replace(/\s+/g, '_');
+  const normSpace = norm.replace(/_/g, ' ');
+  if (CATEGORY_SEQUENCES[normUnderscore]) return CATEGORY_SEQUENCES[normUnderscore];
+  if (CATEGORY_SEQUENCES[normSpace]) return CATEGORY_SEQUENCES[normSpace];
+
+  // 2. Cloud Firestore saved routines (live memory synced from server, NO localStorage!)
+  const custom = firestoreRoutinesCache;
+  if (custom[norm]) return custom[norm];
+  if (custom[normUnderscore]) return custom[normUnderscore];
+  if (custom[normSpace]) return custom[normSpace];
+  const match = Object.keys(custom).find(k =>
+    k.toLowerCase() === norm ||
+    k.toLowerCase().replace(/_/g, ' ') === normSpace
+  );
+  if (match) return custom[match];
+  return null;
 };
 
 interface FridayModel3DProps {
@@ -225,11 +308,27 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
         setLocalAction(null);
         return;
       }
+      // ── Category expansion: warmup/workout/fight_combo etc. ──
+      const expanded = expandToSequence(normalized);
+      if (expanded && expanded.length > 0) {
+        window.dispatchEvent(new CustomEvent('friday-action-sequence', { detail: { sequence: expanded } }));
+        return;
+      }
       localRef.current = normalized as AvatarAction;
       setLocalAction(normalized as AvatarAction);
     };
+    const syncHandler = (e: Event) => {
+      const routines = (e as CustomEvent).detail;
+      if (routines && typeof routines === 'object') {
+        setFirestoreRoutines(routines);
+      }
+    };
     window.addEventListener('friday-action', h);
-    return () => window.removeEventListener('friday-action', h);
+    window.addEventListener('friday-routines-synced', syncHandler);
+    return () => {
+      window.removeEventListener('friday-action', h);
+      window.removeEventListener('friday-routines-synced', syncHandler);
+    };
   }, []);
 
   const isSpeaking = status === 'Speaking...';

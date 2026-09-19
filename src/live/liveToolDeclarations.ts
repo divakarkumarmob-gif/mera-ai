@@ -2885,6 +2885,65 @@ const rawFunctionDeclarations: any[] = [
     }
   },
   {
+    "name": "save_animation_routine",
+    "description": "CUSTOM ANIMATION ROUTINE SAVER: Jab DK apna khud ka animation routine define kare (e.g. 'jab main morning routine bolun to arm stretch phir jumping jacks phir pushup karo', 'fight sequence me kicking phir punching phir flip karo'), IMMEDIATELY call this to save it permanently. The saved routine will run automatically whenever DK says the trigger_name. trigger_name should be the short phrase DK wants to use as a shortcut (e.g. 'morning routine', 'fight sequence', 'cool combo'). sequence should be the ordered list of animation action names.",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {
+        "trigger_name": {
+          "type": "STRING",
+          "description": "The shortcut name/phrase DK will say to trigger this routine (e.g. 'morning routine', 'my warm up', 'fight combo', 'cool moves'). Keep it short and memorable."
+        },
+        "sequence": {
+          "type": "ARRAY",
+          "items": { "type": "STRING" },
+          "description": "Ordered list of animation action names to play one after another (e.g. ['arm_stretch', 'jumping_jacks', 'pushup', 'flip', 'victory'])."
+        },
+        "description": {
+          "type": "STRING",
+          "description": "Optional short description of what this routine does."
+        }
+      },
+      "required": ["trigger_name", "sequence"]
+    }
+  },
+  {
+    "name": "get_animation_routines",
+    "description": "LIST all custom animation routines DK has saved so far. Call this when DK asks 'mera koi routine saved hai?', 'kaun kaun se routines hain?', 'list my routines', 'meri saari sequences dikhaao'.",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "update_animation_routine",
+    "description": "UPDATE an existing custom animation routine. Call this when DK wants to modify a previously saved routine — add animations, remove animations, or replace the whole sequence. Operations: 'add' (add animations to end), 'remove' (remove specific animations), 'replace' (replace entire sequence with new one), 'rename' (rename trigger_name). IMPORTANT: This OVERWRITES the old routine automatically — DK does NOT need to say 'hata ke naya banao', just call update directly. Examples: 'morning routine me flip add karo' -> operation:'add', routine_name:'morning routine', animations:['flip']. 'fight sequence se kicking hata do' -> operation:'remove', routine_name:'fight sequence', animations:['kicking']. 'cool combo badal do: namaste, dance, victory' -> operation:'replace', routine_name:'cool combo', animations:['namaste','dance','victory'].",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {
+        "routine_name": {
+          "type": "STRING",
+          "description": "The trigger name of the routine to update (must match exactly as saved)."
+        },
+        "operation": {
+          "type": "STRING",
+          "description": "What to do: 'add' (append animations to the sequence), 'remove' (delete specific animations from sequence), 'replace' (overwrite entire sequence), 'rename' (rename the trigger_name to new_name)."
+        },
+        "animations": {
+          "type": "ARRAY",
+          "items": { "type": "STRING" },
+          "description": "List of animation names to add/remove/replace with."
+        },
+        "new_name": {
+          "type": "STRING",
+          "description": "Only for operation='rename': the new trigger name to use."
+        }
+      },
+      "required": ["routine_name", "operation"]
+    }
+  },
+  {
     "name": "stop_music",
     "description": "Stop and close the currently playing music immediately when DK says 'stop', 'gana band karo', 'mujhe achha nahi laga', 'band karo gana', 'gana nahi sunna mujhe'.",
     "parameters": {

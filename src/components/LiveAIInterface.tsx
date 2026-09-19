@@ -3120,10 +3120,21 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                             setAvatarAction(null);
                         } else if ((AVATAR_ACTION_LIST as string[]).includes(a)) {
                             setAvatarAction(a as AvatarAction);
+                        } else {
+                            // Could be a custom routine — dispatch as friday-action for expandToSequence to handle
+                            window.dispatchEvent(new CustomEvent('friday-action', { detail: a }));
                         }
                     } else {
                         setAvatarAction(null);
                     }
+
+                } else if (msg.type === 'sync_animation_routines') {
+                    // Cloud Firestore Synced custom animation routines received from server (No localStorage!)
+                    const routines = (msg.routines && typeof msg.routines === 'object') ? msg.routines : {};
+                    console.log(`[LiveAI] ☁️ Cloud Firestore routines synced (${Object.keys(routines).length} routines):`, routines);
+                    // Dispatch to 3D Avatar (FridayModel3D) in-memory engine
+                    window.dispatchEvent(new CustomEvent('friday-routines-synced', { detail: routines }));
+                    try { localStorage.removeItem('friday_custom_routines'); } catch {}
 
                 } else if (msg.type === 'trigger_incoming_call') {
                     console.log('[LiveAIInterface] 📞 Remote incoming call trigger received:', msg);

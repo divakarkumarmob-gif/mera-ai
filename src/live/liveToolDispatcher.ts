@@ -40,6 +40,7 @@ import { priceDropTrackerService } from "../services/priceDropTrackerService";
 import { ecommerceOrderService } from "../services/ecommerceOrderService";
 import { autonomousBuyerService } from "../services/autonomousBuyerService";
 import { freeFireGamingService } from "../services/freeFireGamingService";
+import { animationRoutineService } from "../services/animationRoutineService";
 
 export interface ToolDispatchContext {
   sessionId: string;
@@ -222,47 +223,59 @@ export async function dispatchLiveToolCall(call: any, context: ToolDispatchConte
                     }
                   }
                 } else if (call.name === "avatar_action") {
-                  const ACTION_MAP: Record<string, string> = {
-                    backflip: "flip",
-                    "back flip": "flip",
-                    "back_flip": "flip",
-                    "back-flip": "flip",
-                    frontflip: "flip_front",
-                    "front flip": "flip_front",
-                    "front_flip": "flip_front",
-                    "front-flip": "flip_front",
-                    flipkick: "flip_kick",
-                    "flip kick": "flip_kick",
-                    "flip_kick": "flip_kick",
-                    twistflip: "flip_twist",
-                    "twist flip": "flip_twist",
-                    uppercut: "flip_uppercut",
-                    praying: "namaste",
-                    pray: "namaste",
-                    pranam: "namaste",
-                    pushups: "pushup",
-                    "push up": "pushup",
-                    "push_up": "pushup",
-                    "push-up": "pushup",
-                    jumping: "jump",
-                    rapping: "rap",
-                    walking: "walk",
-                    dancing: "dance",
-                    salsa: "dance_salsa",
-                    swing: "dance_swing",
-                    silly: "dance_silly",
-                    nacho: "dance",
-                    naach: "dance",
-                    kudo: "jump",
-                    jhuko: "bow",
-                    namaskar: "namaste",
+                  // Use the same normalization as FridayModel3D for consistency
+                  const normalizeAction = (raw: string): string => {
+                    const clean = raw.toLowerCase().trim()
+                      .replace(/^(pehle|phir|then|aur)\s+/i, '')
+                      .replace(/\s+(karo|lagao|maro|dikhao|do|hoga|karegi|kijiye)$/i, '')
+                      .trim();
+                    const ALIASES: Record<string, string> = {
+                      backflip:'flip','back flip':'flip',back_flip:'flip','back-flip':'flip',
+                      frontflip:'flip_front','front flip':'flip_front',front_flip:'flip_front',
+                      flipkick:'flip_kick','flip kick':'flip_kick',
+                      twistflip:'flip_twist','twist flip':'flip_twist',
+                      uppercut:'flip_uppercut',
+                      praying:'namaste',pray:'namaste',pranam:'namaste',namaskar:'namaste',
+                      pushups:'pushup','push up':'pushup',push_up:'pushup','push-up':'pushup',
+                      jumping:'jump',kudo:'jump',koodo:'jump','big jump':'big_jump',
+                      'jumping jacks':'jumping_jacks','jumping jack':'jumping_jacks',
+                      rapping:'rap',walking:'walk',chalo:'walk',
+                      dancing:'dance',nacho:'dance',naach:'dance',thumka:'dance',
+                      salsa:'dance_salsa',swing:'dance_swing',silly:'dance_silly',
+                      robot:'dance_robot',samba:'dance_samba',breakdance:'dance_breakfreeze',
+                      'robot dance':'dance_robot','samba dance':'dance_samba',
+                      bhangra:'dance',garba:'dance_salsa',
+                      warmup:'warmup','warm up':'warmup','warm-up':'warmup',garam_karo:'warmup',
+                      exercise:'workout',workout:'workout',vyayam:'warmup',
+                      situp:'situps','sit up':'situps','sit-up':'situps',
+                      stretch:'arm_stretch','arm stretch':'arm_stretch','arm stretching':'arm_stretch',
+                      'warming up':'warming_up',
+                      'bicycle crunch':'bicycle_crunch',bicycle:'bicycle_crunch',
+                      'idle to situp':'idle_situp',
+                      'blow kiss':'blow_kiss','blow a kiss':'blow_kiss','flying kiss':'blow_kiss',
+                      khush:'excited',jeet:'victory',win:'victory',winner:'victory',
+                      udas:'sad',dukhi:'sad',
+                      mar_gaya:'dying',gir_gaya:'dying',
+                      gussa:'angry',
+                      fight:'fist_fight',lad_jao:'fist_fight','fist fight':'fist_fight',boxing:'fist_fight',
+                      kick:'kicking',maaro:'kicking',maar:'kicking',
+                      punch:'punching',ghusa:'punching','punching bag':'punching',
+                      'fighting idle':'fighting_idle',fighter:'fighting_idle',
+                      'fight to idle':'fight_to_idle',
+                      jhuko:'bow',sir_jhukao:'bow',
+                      tata:'wave',bye:'wave',hello:'wave',
+                      palti:'flip','front palti':'flip_front','back palti':'flip',
+                      'run to flip':'run_flip','run flip':'run_flip',
+                      'back flip to uppercut':'flip_uppercut',
+                      'front twist flip':'flip_twist',
+                      'fight combo':'fight_combo','flip combo':'flip_combo','dance all':'dance_all',
+                    };
+                    if (clean==='stop'||clean==='ruk jao'||clean==='bas'||clean==='') return 'stop';
+                    if (ALIASES[clean]) return ALIASES[clean];
+                    const underscored = clean.replace(/[\s\-]+/g,'_');
+                    if (ALIASES[underscored]) return ALIASES[underscored];
+                    return underscored !== clean ? underscored : clean;
                   };
-                  const allowed = [
-                    "dance", "dance_hiphop2", "dance_salsa", "dance_swing", "dance_silly", "dance_silly2",
-                    "flip", "flip_uppercut", "flip_front", "flip_twist", "flip_kick", "run_flip",
-                    "jump", "pushup", "salute", "angry", "rap", "walk", "namaste",
-                    "think", "wave", "bow", "phone", "nod-yes", "nod-no", "stop"
-                  ];
 
                   // Collect sequence or single action
                   let rawItems: string[] = [];
@@ -275,20 +288,12 @@ export async function dispatchLiveToolCall(call: any, context: ToolDispatchConte
                       .filter(Boolean);
                   }
 
-                  const validSequence: string[] = [];
-                  for (const item of rawItems) {
-                    let cleaned = item.toLowerCase().trim();
-                    if (ACTION_MAP[cleaned]) cleaned = ACTION_MAP[cleaned];
-                    if (allowed.includes(cleaned)) {
-                      validSequence.push(cleaned);
-                    }
-                  }
+                  const validSequence: string[] = rawItems
+                    .map(normalizeAction)
+                    .filter(a => !!a && a !== 'stop');
 
                   if (validSequence.length === 0) {
-                    result = {
-                      success: false,
-                      error: "No recognized actions found. Allowed actions: " + allowed.join(", ")
-                    };
+                    result = { success: false, error: "No recognized actions found." };
                   } else {
                     try {
                       clientWs.send(JSON.stringify({
@@ -302,9 +307,58 @@ export async function dispatchLiveToolCall(call: any, context: ToolDispatchConte
                       action: validSequence[0],
                       sequence: validSequence,
                       message: validSequence.length > 1
-                        ? `Custom sequence of ${validSequence.length} actions triggered in exact order: ${validSequence.join(" ➔ ")}`
-                        : `Avatar body action '${validSequence[0]}' triggered successfully on screen.`
+                        ? `Sequence of ${validSequence.length} actions triggered: ${validSequence.join(" ➔ ")}`
+                        : `Avatar action '${validSequence[0]}' triggered.`
                     };
+                  }
+                } else if (call.name === "save_animation_routine") {
+                  // Save a custom named animation routine into Cloud Firestore & Telegram
+                  const { trigger_name, sequence: seq, description } = call.args || {};
+                  if (!trigger_name || !Array.isArray(seq) || seq.length === 0) {
+                    result = { success: false, error: "trigger_name and sequence[] are required." };
+                  } else {
+                    const saveRes = await animationRoutineService.saveRoutine(
+                      String(trigger_name),
+                      seq.map((s: any) => String(s)),
+                      description
+                    );
+                    result = saveRes;
+                  }
+                } else if (call.name === "get_animation_routines") {
+                  // List all saved custom routines from Cloud Firestore
+                  await animationRoutineService.init();
+                  const routines = animationRoutineService.getRoutines();
+                  const entries = Object.entries(routines);
+                  if (entries.length === 0) {
+                    result = {
+                      success: true,
+                      routines: {},
+                      message: "Abhi koi custom routine Cloud Firestore mein saved nahi hai.",
+                    };
+                  } else {
+                    const listSummary = entries
+                      .map(([name, actions]) => `• ${name}: [${actions.join(" → ")}]`)
+                      .join("\n");
+                    result = {
+                      success: true,
+                      routines,
+                      count: entries.length,
+                      message: `Cloud Firestore mein total ${entries.length} custom routines saved hain:\n${listSummary}`,
+                    };
+                  }
+                } else if (call.name === "update_animation_routine") {
+                  // Update an existing custom animation routine in Cloud Firestore & notify Telegram
+                  const { routine_name, operation, animations: anims, new_name } = call.args || {};
+                  if (!routine_name || !operation) {
+                    result = { success: false, error: "routine_name and operation ('add' | 'remove' | 'replace' | 'rename' | 'delete') are required." };
+                  } else {
+                    const updateRes = await animationRoutineService.updateRoutine(
+                      String(routine_name),
+                      String(operation),
+                      Array.isArray(anims) ? anims.map((s: any) => String(s)) : [],
+                      new_name ? String(new_name) : undefined
+                    );
+                    result = updateRes;
                   }
                 } else if (call.name === "send_photo_to_whatsapp") {
                   const { contactNameOrPhone, caption } = call.args || {};

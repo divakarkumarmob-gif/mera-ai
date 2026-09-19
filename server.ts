@@ -37,6 +37,8 @@ import { freeFireGamingService } from "./src/services/freeFireGamingService";
 import { telegramMemoryBotService } from "./src/services/telegramMemoryBotService";
 import { proactiveExecutiveService } from "./src/services/proactiveExecutiveService";
 
+import { animationRoutineService } from "./src/services/animationRoutineService";
+
 // Clean modular live AI & route subsystems
 import { fridayFunctionDeclarations } from "./src/live/liveToolDeclarations";
 import { dispatchLiveToolCall } from "./src/live/liveToolDispatcher";
@@ -169,6 +171,13 @@ async function startServer() {
   // ── Real-time App Security Killswitch & Force Logout Broadcaster ──────────
   appSecurityService.setBroadcastCallback((event) => {
     const payload = JSON.stringify(event);
+    for (const client of connectedClients) {
+      if (client.readyState === client.OPEN) client.send(payload);
+    }
+  });
+
+  // ── Real-time 3D Avatar Animation Routines Broadcaster (Firestore Synced) ──
+  animationRoutineService.setWebSocketBroadcaster((payload) => {
     for (const client of connectedClients) {
       if (client.readyState === client.OPEN) client.send(payload);
     }
@@ -311,6 +320,14 @@ async function startServer() {
         }
       }
     };
+
+    // ── Instantly sync Cloud Firestore custom animation routines to connecting client ──
+    try {
+      const initialRoutines = animationRoutineService.getRoutines();
+      safeSend(JSON.stringify({ type: "sync_animation_routines", routines: initialRoutines }));
+    } catch (e) {
+      console.warn("[Server] Initial routine sync error:", e);
+    }
 
     let currentSession: any;
     let currentSessionToken = 0;
