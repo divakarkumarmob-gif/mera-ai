@@ -193,8 +193,11 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(28, W / H, 0.1, 100);
-    camera.position.set(0, 1.35, 3.4);
-    camera.lookAt(0, 1.0, 0);
+    let baseCamZ = 3.4;
+    let baseCamY = 1.35;
+    let baseLookY = 1.0;
+    camera.position.set(0, baseCamY, baseCamZ);
+    camera.lookAt(0, baseLookY, 0);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(W, H);
@@ -357,7 +360,7 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
       currentActionName = targetName;
     };
 
-    const sanitizeClip = (clip: THREE.AnimationClip, targetModel: THREE.Object3D) => {
+    const sanitizeClip = (clip: THREE.AnimationClip, targetModel: THREE.Object3D, clipName?: string) => {
       const normalizeKey = (str: string) =>
         str
           .replace(/^(mixamorig\d*|armature|root|_)+/i, '')
@@ -373,14 +376,54 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
         }
       });
 
+      const isStuntOrFlip = !!(clipName && /flip|jump|kick/i.test(clipName));
+      const isLocomotion = !!(clipName && /walk|run/i.test(clipName));
+
       clip.tracks.forEach((track) => {
         const parts = track.name.split('.');
         const nodeName = parts[0];
+        const prop = parts[1] || '';
         const k = normalizeKey(nodeName);
         const matched = boneMap.get(k) ?? boneMap.get(nodeName.toLowerCase());
         if (matched) {
           parts[0] = matched;
           track.name = parts.join('.');
+        }
+
+        // ── IN-PLACE ROOT MOTION LOCK & STUNT CLAMPING ──
+        // Mixamo mocap animations (especially Front Flip, Backflip, Run To Flip, Walk)
+        // contain root translation tracks on the Hips bone that fling the avatar 2-3m forward
+        // directly out of the screen / into the camera lens!
+        // We lock X and Z so the avatar flips & moves 100% in-place on the glowing pedestal!
+        const isRootBone = k === 'hips' || k === 'root' || /hips|root|pelvis|armature/i.test(nodeName);
+        const isPosTrack = prop === 'position' || track.name.endsWith('.position');
+
+        if (isRootBone && isPosTrack && track.values && track.values.length >= 3) {
+          const startX = track.values[0];
+          const startY = track.values[1];
+          const startZ = track.values[2];
+          const len = track.values.length;
+
+          for (let i = 0; i < len; i += 3) {
+            // 1. Zero out horizontal displacement: stays centered on pedestal, never flies out of screen
+            track.values[i] = startX;
+            track.values[i + 2] = startZ;
+
+            // 2. Vertical jump (Y) scaling
+            const deltaY = track.values[i + 1] - startY;
+            if (isStuntOrFlip) {
+              if (deltaY > 0) {
+                // Damp jump apex by ~58% so head doesn't clip above top of screen during flip
+                track.values[i + 1] = startY + deltaY * 0.42;
+              } else {
+                // Natural crouch / landing
+                track.values[i + 1] = startY + deltaY * 0.8;
+              }
+            } else if (isLocomotion) {
+              // Smooth in-place treadmill walk on pedestal
+              track.values[i + 1] = startY + deltaY * 0.5;
+            }
+          }
         }
       });
       return clip;
@@ -454,8 +497,11 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
       const fitW = visW / 2 / (Math.tan(halfFov) * Math.max(camera.aspect, 0.3));
       const fitDist = Math.max(fitH, fitW) * 1.12;
       const camOffsetY = fullH * 0.09;
-      camera.position.set(0, centerY + camOffsetY + 0.05, fitDist / LOCKED_ZOOM);
-      camera.lookAt(0, centerY + camOffsetY, 0);
+      baseCamZ = fitDist / LOCKED_ZOOM;
+      baseCamY = centerY + camOffsetY + 0.05;
+      baseLookY = centerY + camOffsetY;
+      camera.position.set(0, baseCamY, baseCamZ);
+      camera.lookAt(0, baseLookY, 0);
 
       // ── MIXAMO MOCAP ENGINE ──
       mixer = new THREE.AnimationMixer(model);
@@ -488,7 +534,7 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
             if (disposed || !mixer) return;
             if (animFbx.animations && animFbx.animations.length > 0) {
               const rawClip = animFbx.animations[0];
-              const clip = sanitizeClip(rawClip, model);
+              const clip = sanitizeClip(rawClip, model, name);
               clip.name = name;
               const action = mixer.clipAction(clip);
               if (loop) {
@@ -852,6 +898,14 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
 
       // Rim glow theme pulse
       rim.intensity = 18 + Math.min(volume * 60, 22) + Math.sin(t * 2) * 3;
+
+      // ── Dynamic Stunt Framing: gently pulls camera back during flips/jumps so avatar stays 100% in-frame ──
+      const isStuntActive = !!(actCheck && /flip|jump|kick/i.test(actCheck));
+      const targetCamZ = isStuntActive ? baseCamZ * 1.14 : baseCamZ;
+      const targetCamY = isStuntActive ? baseCamY + 0.08 : baseCamY;
+      camera.position.z = lerp(camera.position.z, targetCamZ, 0.08);
+      camera.position.y = lerp(camera.position.y, targetCamY, 0.08);
+      camera.lookAt(0, baseLookY + (isStuntActive ? 0.04 : 0), 0);
 
       renderer.render(scene, camera);
     };
