@@ -1047,7 +1047,19 @@ async function playAudioChunk(
 
         const source = audioCtx.createBufferSource();
         source.buffer = buffer;
-        source.connect(audioCtx.destination);
+
+        // ── Real-Time AI Speech Analyser (Feeds Friday 3D model dynamic mouth opening) ──
+        let speechAnalyser = (audioCtx as any).__fridaySpeechAnalyser as AnalyserNode;
+        if (!speechAnalyser) {
+            speechAnalyser = audioCtx.createAnalyser();
+            speechAnalyser.fftSize = 256;
+            speechAnalyser.smoothingTimeConstant = 0.35;
+            (audioCtx as any).__fridaySpeechAnalyser = speechAnalyser;
+            (window as any).__fridaySpeechAnalyser = speechAnalyser;
+            speechAnalyser.connect(audioCtx.destination);
+        }
+
+        source.connect(speechAnalyser);
 
         const startTime = Math.max(audioCtx.currentTime, nextStartTime.current);
         source.start(startTime);

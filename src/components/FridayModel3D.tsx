@@ -233,6 +233,7 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
       glanceTY = 0;
 
     let mouthMorph: { mesh: THREE.Mesh; index: number } | null = null;
+    const mouthOpenMorphs: { mesh: THREE.Mesh; index: number }[] = [];
     const blinkMorphs: { mesh: THREE.Mesh; index: number }[] = [];
     const visemes: Record<string, { mesh: THREE.Mesh; index: number }> = {};
     let visemePhase = 0;
@@ -673,8 +674,10 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
         if (dict && mesh.morphTargetInfluences) {
           Object.entries(dict).forEach(([name, idx]) => {
             const nm = name.toLowerCase();
-            if (!mouthMorph && /jawopen|mouthopen|aa|ah|open/i.test(nm))
-              mouthMorph = { mesh, index: idx };
+            if (/jawopen|mouthopen|mouth_open|viseme_aa|viseme_o|open|aa|ah/i.test(nm)) {
+              if (!mouthMorph) mouthMorph = { mesh, index: idx };
+              mouthOpenMorphs.push({ mesh, index: idx });
+            }
             if (/blink|eyelid|eye.*close/i.test(nm)) blinkMorphs.push({ mesh, index: idx });
             if (/mouthsmile|smile/i.test(nm) && !visemes.smile) visemes.smile = { mesh, index: idx };
             if (/mouthfunnel|funnel|oo|oh/i.test(nm) && !visemes.funnel)
@@ -905,6 +908,23 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
       return sum / (bassBins * 255); // normalize 0-1
     };
 
+    let speechDataArray: Uint8Array | null = null;
+    const getSpeechEnergy = (): number => {
+      const analyser = (window as any).__fridaySpeechAnalyser as AnalyserNode | undefined;
+      if (!analyser) return 0;
+      if (!speechDataArray || speechDataArray.length !== analyser.frequencyBinCount) {
+        speechDataArray = new Uint8Array(analyser.frequencyBinCount);
+      }
+      analyser.getByteFrequencyData(speechDataArray);
+      // Human speech formant frequency range (bins 2-28 ≈ 180Hz - 2800Hz)
+      let sum = 0;
+      const startBin = 2;
+      const endBin = Math.min(28, speechDataArray.length);
+      for (let i = startBin; i < endBin; i++) sum += speechDataArray[i];
+      const count = Math.max(1, endBin - startBin);
+      return sum / (count * 255);
+    };
+
     const animate = () => {
       if (disposed) return;
       raf = requestAnimationFrame(animate);
@@ -1001,32 +1021,56 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
         }
       }
 
-      // ── Lip-sync & Multi-Visemes ──
-      if (speaking && volume > lastVolPeak) lastVolPeak = volume;
-      lastVolPeak = lerp(lastVolPeak, 0, 1 - Math.pow(0.05, dt));
+      // ── Lip-sync & Natural Dynamic Mouth Opening ──
+      const realSpeechEnergy = getSpeechEnergy();
+      const isVoiceActive = realSpeechEnergy > 0.025;
+      const isSpkStatus = status === 'Speaking...' || (typeof status === 'string' && status.toLowerCase().includes('speaking'));
+      const speaking = isSpkStatus || isVoiceActive;
 
-      const v = speaking ? Math.max(volume, 0.05) : 0;
-      const emphasis = Math.min(v * 3, 1);
-      const syllable =
-        Math.abs(Math.sin(t * 11.5)) * 0.6 +
-        Math.abs(Math.sin(t * 7.3)) * 0.25 +
-        Math.abs(Math.sin(t * 18.7)) * 0.15;
-      const phrase = 0.5 + 0.5 * Math.sin(t * 1.8);
+      // Natural multi-frequency speech cadence & syllable rhythm
+      const syll1 = Math.abs(Math.sin(t * 13.5));
+      const syll2 = Math.abs(Math.sin(t * 8.2));
+      const syll3 = Math.abs(Math.sin(t * 19.1));
+      const cadence = syll1 * 0.55 + syll2 * 0.3 + syll3 * 0.15;
+      const vowelPhrase = 0.7 + 0.3 * Math.sin(t * 2.5);
 
-      const openTarget = speaking
-        ? (0.15 + emphasis * 0.55) * syllable * (0.6 + phrase * 0.4)
-        : happy
-          ? 0.25
-          : 0.02;
-      jawOpen = lerp(jawOpen, openTarget, 1 - Math.pow(0.001, dt));
-
-      if (jawBone && jawBone !== modelRoot) jawBone.rotation.x = jawOpen * 0.55;
-      if (mouthMorph && mouthMorph.mesh.morphTargetInfluences) {
-        mouthMorph.mesh.morphTargetInfluences[mouthMorph.index] = Math.min(jawOpen, 1);
+      let openTarget = 0.02; // resting closed lips
+      if (speaking) {
+        // High visibility mouth opening: so user clearly sees her mouth opening wide and articulating
+        if (isVoiceActive) {
+          // Driven dynamically by real speech audio waveform
+          openTarget = THREE.MathUtils.clamp(realSpeechEnergy * 2.6 + cadence * 0.35, 0.25, 1.0);
+        } else {
+          // Generative human speech cadence: prominently cycles between 0.30 (consonants) and 0.92 (vowels)
+          openTarget = THREE.MathUtils.clamp((0.32 + cadence * 0.65) * vowelPhrase, 0.18, 0.95);
+        }
+      } else if (happy) {
+        openTarget = 0.16; // pleasant subtle open smile
       }
 
+      // Fast opening for sharp articulation, smooth closing
+      const lerpSpeed = openTarget > jawOpen ? 0.45 : 0.28;
+      jawOpen = lerp(jawOpen, openTarget, lerpSpeed);
+
+      // 1. Physical Jaw Bone rotation: opens prominently (~20-25 degrees) so head visibly talks
+      if (jawBone && jawBone !== modelRoot) {
+        jawBone.rotation.x = jawOpen * 0.44;
+      }
+
+      // 2. Morph targets on all face / teeth / mouth meshes
+      if (mouthOpenMorphs.length > 0) {
+        mouthOpenMorphs.forEach(({ mesh, index }) => {
+          if (mesh.morphTargetInfluences) {
+            mesh.morphTargetInfluences[index] = THREE.MathUtils.clamp(jawOpen * 1.25, 0, 1);
+          }
+        });
+      } else if (mouthMorph && mouthMorph.mesh.morphTargetInfluences) {
+        mouthMorph.mesh.morphTargetInfluences[mouthMorph.index] = THREE.MathUtils.clamp(jawOpen * 1.25, 0, 1);
+      }
+
+      // 3. Multi-viseme shaping (lips widening, funneling for 'oo/oh', vowel dynamics)
       if (speaking) {
-        visemePhase += dt * (8 + emphasis * 6);
+        visemePhase += dt * 14;
         const vp = visemePhase;
         const setV = (key: string, val: number) => {
           const vObj = visemes[key];
@@ -1034,25 +1078,22 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
             vObj.mesh.morphTargetInfluences[vObj.index] = lerp(
               vObj.mesh.morphTargetInfluences[vObj.index] ?? 0,
               Math.max(0, Math.min(val, 1)),
-              1 - Math.pow(0.005, dt)
+              0.35
             );
           }
         };
-        setV('smile', Math.max(0, Math.sin(vp * 1.3 + 1.5)) * emphasis * 0.4);
-        setV('funnel', Math.max(0, Math.sin(vp * 0.9 + 3.0)) * emphasis * 0.45);
-        setV('pucker', Math.max(0, Math.sin(vp * 1.1 + 4.5)) * emphasis * 0.3);
-        setV('stretch', Math.max(0, Math.sin(vp * 0.7)) * emphasis * 0.25);
-        setV('press', Math.max(0, Math.sin(vp * 2.1 + 2.0)) * 0.3 * (syllable < 0.3 ? 1 : 0));
-        setV('lowerLip', Math.max(0, Math.sin(vp * 1.5 + 1.0)) * emphasis * 0.3);
-        setV('cheekPuff', Math.max(0, Math.sin(vp * 0.4 + 5.0)) * emphasis * 0.15);
-        setV('jawShift', Math.sin(vp * 0.6) * emphasis * 0.12);
+        setV('funnel', Math.max(0, Math.sin(vp * 0.8 + 2.5)) * 0.55 * jawOpen);
+        setV('smile', Math.max(0, Math.sin(vp * 1.2)) * 0.45 * jawOpen);
+        setV('pucker', Math.max(0, Math.sin(vp * 1.0 + 4.0)) * 0.35 * jawOpen);
+        setV('stretch', Math.max(0, Math.sin(vp * 0.6)) * 0.3 * jawOpen);
+        setV('lowerLip', Math.max(0, Math.sin(vp * 1.4 + 1.0)) * 0.4 * jawOpen);
       } else {
         Object.values(visemes).forEach(({ mesh, index }) => {
           if (mesh.morphTargetInfluences) {
             mesh.morphTargetInfluences[index] = lerp(
               mesh.morphTargetInfluences[index] ?? 0,
               0,
-              1 - Math.pow(0.01, dt)
+              0.2
             );
           }
         });
