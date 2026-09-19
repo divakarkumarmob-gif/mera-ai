@@ -497,7 +497,17 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
     window.addEventListener('mousemove', onMouse);
 
     const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
-    let jawOpen = 0;
+    const DANCE_SEQUENCE = [
+      'dance',
+      'dance_hiphop2',
+      'dance_salsa',
+      'dance_swing',
+      'dance_silly',
+      'dance_silly2',
+    ];
+    let danceIndex = 0;
+    let danceTimer = 0;
+    let wasDancing = false;
 
     const animate = () => {
       if (disposed) return;
@@ -514,12 +524,33 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
       const rawActCheck = stateRef.current.action ?? localRef.current;
       const actCheck = normalizeAvatarAction(rawActCheck as string);
 
-      if (actCheck && actions[actCheck]) {
-        fadeToAction(actCheck, 0.25);
-      } else if (speaking && (actions['talking'] || actions['talking_alt'])) {
-        fadeToAction(actions['talking'] ? 'talking' : 'talking_alt', 0.3);
-      } else if (!actCheck && actions['idle']) {
-        fadeToAction('idle', 0.4);
+      if (actCheck === 'dance') {
+        if (!wasDancing) {
+          wasDancing = true;
+          danceIndex = 0;
+          danceTimer = 0;
+        } else {
+          danceTimer += dt;
+          if (danceTimer >= 6.5) {
+            danceTimer = 0;
+            danceIndex = (danceIndex + 1) % DANCE_SEQUENCE.length;
+          }
+        }
+        const currentDanceName = DANCE_SEQUENCE[danceIndex];
+        if (actions[currentDanceName]) {
+          fadeToAction(currentDanceName, 0.55);
+        } else if (actions['dance']) {
+          fadeToAction('dance', 0.55);
+        }
+      } else {
+        wasDancing = false;
+        if (actCheck && actions[actCheck]) {
+          fadeToAction(actCheck, 0.25);
+        } else if (speaking && (actions['talking'] || actions['talking_alt'])) {
+          fadeToAction(actions['talking'] ? 'talking' : 'talking_alt', 0.3);
+        } else if (!actCheck && actions['idle']) {
+          fadeToAction('idle', 0.4);
+        }
       }
 
       mixer?.update(dt);
