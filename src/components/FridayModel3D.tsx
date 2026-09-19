@@ -345,20 +345,6 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
       // ── MIXAMO MOCAP ENGINE ──
       mixer = new THREE.AnimationMixer(model);
 
-      // Embedded animation fallback (instant 0ms motion if available)
-      if (_animations && _animations.length > 0) {
-        try {
-          const fallbackClip = sanitizeClip(_animations[0], model);
-          fallbackClip.name = 'embedded_idle';
-          const fallbackAction = mixer.clipAction(fallbackClip);
-          fallbackAction.setLoop(THREE.LoopRepeat, Infinity);
-          fallbackAction.play();
-          currentActionName = 'embedded_idle';
-        } catch {
-          /* noop */
-        }
-      }
-
       mixer.addEventListener('finished', (e: any) => {
         const finishedClipName = e.action?.getClip()?.name;
         console.log(`[FridayModel3D] Mocap finished: ${finishedClipName}`);
@@ -376,84 +362,64 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
       });
 
       const animLoader = new FBXLoader();
+      const animFiles: { name: string; url: string; loop?: boolean }[] = [
+        { name: 'idle', url: '/Breathing%20Idle%20(1).fbx', loop: true },
+        { name: 'talking', url: '/Talking.fbx', loop: true },
+        { name: 'talking_alt', url: '/Talking%20(1).fbx', loop: true },
+        { name: 'dance', url: '/Hip%20Hop%20Dancing.fbx', loop: true },
+        { name: 'dance_hiphop2', url: '/Hip%20Hop%20Dancing%20(1).fbx', loop: true },
+        { name: 'dance_salsa', url: '/Salsa%20Dancing.fbx', loop: true },
+        { name: 'dance_swing', url: '/Swing%20Dancing.fbx', loop: true },
+        { name: 'dance_silly', url: '/Silly%20Dancing.fbx', loop: true },
+        { name: 'dance_silly2', url: '/Silly%20Dancing%20(1).fbx', loop: true },
+        { name: 'namaste', url: '/Praying.fbx', loop: false },
+        { name: 'salute', url: '/Salute.fbx', loop: false },
+        { name: 'angry', url: '/Angry.fbx', loop: false },
+        { name: 'rap', url: '/Rapping.fbx', loop: true },
+        { name: 'jump', url: '/Jump.fbx', loop: false },
+        { name: 'pushup', url: '/Push%20Up.fbx', loop: false },
+        { name: 'flip', url: '/Backflip.fbx', loop: false },
+        { name: 'flip_uppercut', url: '/Back%20Flip%20To%20Uppercut.fbx', loop: false },
+        { name: 'flip_front', url: '/Front%20Flip.fbx', loop: false },
+        { name: 'flip_twist', url: '/Front%20Twist%20Flip.fbx', loop: false },
+        { name: 'flip_kick', url: '/Flip%20Kick.fbx', loop: false },
+        { name: 'run_flip', url: '/Run%20To%20Flip.fbx', loop: false },
+        { name: 'walk', url: '/Walking.fbx', loop: true },
+      ];
 
-      const loadRemainingAnimations = () => {
-        const animFiles: { name: string; url: string; loop?: boolean }[] = [
-          { name: 'talking', url: '/Talking.fbx', loop: true },
-          { name: 'talking_alt', url: '/Talking%20(1).fbx', loop: true },
-          { name: 'dance', url: '/Hip%20Hop%20Dancing.fbx', loop: true },
-          { name: 'dance_hiphop2', url: '/Hip%20Hop%20Dancing%20(1).fbx', loop: true },
-          { name: 'dance_salsa', url: '/Salsa%20Dancing.fbx', loop: true },
-          { name: 'dance_swing', url: '/Swing%20Dancing.fbx', loop: true },
-          { name: 'dance_silly', url: '/Silly%20Dancing.fbx', loop: true },
-          { name: 'dance_silly2', url: '/Silly%20Dancing%20(1).fbx', loop: true },
-          { name: 'namaste', url: '/Praying.fbx', loop: false },
-          { name: 'salute', url: '/Salute.fbx', loop: false },
-          { name: 'angry', url: '/Angry.fbx', loop: false },
-          { name: 'rap', url: '/Rapping.fbx', loop: true },
-          { name: 'jump', url: '/Jump.fbx', loop: false },
-          { name: 'pushup', url: '/Push%20Up.fbx', loop: false },
-          { name: 'flip', url: '/Backflip.fbx', loop: false },
-          { name: 'flip_uppercut', url: '/Back%20Flip%20To%20Uppercut.fbx', loop: false },
-          { name: 'flip_front', url: '/Front%20Flip.fbx', loop: false },
-          { name: 'flip_twist', url: '/Front%20Twist%20Flip.fbx', loop: false },
-          { name: 'flip_kick', url: '/Flip%20Kick.fbx', loop: false },
-          { name: 'run_flip', url: '/Run%20To%20Flip.fbx', loop: false },
-          { name: 'walk', url: '/Walking.fbx', loop: true },
-        ];
-
-        animFiles.forEach(({ name, url, loop }) => {
-          animLoader.load(
-            url,
-            (animFbx) => {
-              if (disposed || !mixer) return;
-              if (animFbx.animations && animFbx.animations.length > 0) {
-                const rawClip = animFbx.animations[0];
-                const clip = sanitizeClip(rawClip, model);
-                clip.name = name;
-                const action = mixer.clipAction(clip);
-                if (loop) {
-                  action.setLoop(THREE.LoopRepeat, Infinity);
-                } else {
-                  action.setLoop(THREE.LoopOnce, 1);
-                  action.clampWhenFinished = true;
-                }
-                actions[name] = action;
-                console.log(`[FridayModel3D] Loaded mocap clip: ${name}`);
+      let loadedIdle = false;
+      animFiles.forEach(({ name, url, loop }) => {
+        animLoader.load(
+          url,
+          (animFbx) => {
+            if (disposed || !mixer) return;
+            if (animFbx.animations && animFbx.animations.length > 0) {
+              const rawClip = animFbx.animations[0];
+              const clip = sanitizeClip(rawClip, model);
+              clip.name = name;
+              const action = mixer.clipAction(clip);
+              if (loop) {
+                action.setLoop(THREE.LoopRepeat, Infinity);
+              } else {
+                action.setLoop(THREE.LoopOnce, 1);
+                action.clampWhenFinished = true;
               }
-            },
-            undefined,
-            (err) => {
-              console.warn(`[FridayModel3D] Could not load ${name} animation:`, err);
-            }
-          );
-        });
-      };
+              actions[name] = action;
 
-      // ⚡ TOP PRIORITY: Load & start Breathing Idle IMMEDIATELY on URL load
-      animLoader.load(
-        '/Breathing%20Idle%20(1).fbx',
-        (idleFbx) => {
-          if (disposed || !mixer) return;
-          if (idleFbx.animations && idleFbx.animations.length > 0) {
-            const rawClip = idleFbx.animations[0];
-            const clip = sanitizeClip(rawClip, model);
-            clip.name = 'idle';
-            const idleAction = mixer.clipAction(clip);
-            idleAction.setLoop(THREE.LoopRepeat, Infinity);
-            actions['idle'] = idleAction;
-            idleAction.play();
-            currentActionName = 'idle';
-            console.log('[FridayModel3D] ⚡ Breathing Idle activated immediately!');
+              if (name === 'idle' && !loadedIdle) {
+                loadedIdle = true;
+                action.play();
+                currentActionName = 'idle';
+              }
+              console.log(`[FridayModel3D] Loaded mocap clip: ${name}`);
+            }
+          },
+          undefined,
+          (err) => {
+            console.warn(`[FridayModel3D] Could not load ${name} animation:`, err);
           }
-          loadRemainingAnimations();
-        },
-        undefined,
-        (err) => {
-          console.warn('[FridayModel3D] Failed to load Breathing Idle:', err);
-          loadRemainingAnimations();
-        }
-      );
+        );
+      });
     };
 
     const tryLoad = (i: number) => {
