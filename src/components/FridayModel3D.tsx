@@ -8,9 +8,9 @@ import type { AgentFaceReaction } from './AgentFace';
 
 // Body actions: voice command ("dance karo", "namaste karo"...) ya window event se trigger.
 // Test: dispatchEvent(new CustomEvent('friday-action', { detail: 'dance' }))
-export type AvatarAction = 'dance' | 'namaste' | 'think' | 'wave' | 'bow' | 'nod-yes' | 'nod-no' | 'phone' | 'stop' | null;
-export const AVATAR_ACTION_LIST = ['dance', 'namaste', 'think', 'wave', 'bow', 'nod-yes', 'nod-no', 'phone', 'stop'];
-const ONE_SHOT_SECONDS: Record<string, number> = { wave: 4, namaste: 6, think: 6, bow: 3.2, 'nod-yes': 2.5, 'nod-no': 2.5, phone: 8 };
+export type AvatarAction = 'dance' | 'dance_salsa' | 'dance_swing' | 'dance_silly' | 'rap' | 'jump' | 'jacks' | 'pushup' | 'warmup' | 'flip' | 'walk' | 'namaste' | 'think' | 'wave' | 'bow' | 'nod-yes' | 'nod-no' | 'phone' | 'stop' | null;
+export const AVATAR_ACTION_LIST = ['dance', 'dance_salsa', 'dance_swing', 'dance_silly', 'rap', 'jump', 'jacks', 'pushup', 'warmup', 'flip', 'walk', 'namaste', 'think', 'wave', 'bow', 'nod-yes', 'nod-no', 'phone', 'stop'];
+const ONE_SHOT_SECONDS: Record<string, number> = { wave: 4, namaste: 6, think: 6, bow: 3.2, 'nod-yes': 2.5, 'nod-no': 2.5, phone: 8, jump: 2.5, jacks: 6, pushup: 8, warmup: 8, flip: 3.5, walk: 6 };
 
 interface FridayModel3DProps {
   status: string;
@@ -68,6 +68,8 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
     let disposed = false;
     let raf = 0;
     let mixer: THREE.AnimationMixer | null = null;
+    const actions: Record<string, THREE.AnimationAction> = {};
+    let currentActionName = '';
     let jawBone: THREE.Object3D | null = null;
     let headBone: THREE.Object3D | null = null;
     // Action rig: upper arms + forearms (LeftArm/RightArm, LeftForeArm/RightForeArm)
@@ -353,12 +355,78 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         camera.position.set(0, centerY + camOffsetY + 0.05, fitDist / LOCKED_ZOOM);
         camera.lookAt(0, centerY + camOffsetY, 0);
 
-        // Animations: idle wali clip chalao
-        if (animations.length > 0) {
-          mixer = new THREE.AnimationMixer(model);
-          const idle = animations.find((c) => /idle|breath|stand/i.test(c.name)) ?? animations[0];
-          mixer.clipAction(idle).play();
-        }
+        // ── Mixamo Mocap Animation Engine ──
+        mixer = new THREE.AnimationMixer(model);
+
+        const sanitizeClip = (clip: THREE.AnimationClip, targetModel: THREE.Object3D) => {
+          const boneMap = new Map<string, string>();
+          targetModel.traverse((o) => {
+            if ((o as THREE.Bone).isBone) {
+              const clean = o.name.replace(/^mixamorig:?/i, '').toLowerCase();
+              boneMap.set(clean, o.name);
+              boneMap.set(o.name.toLowerCase(), o.name);
+            }
+          });
+          clip.tracks.forEach((track) => {
+            const parts = track.name.split('.');
+            const nodeName = parts[0];
+            const clean = nodeName.replace(/^mixamorig:?/i, '').toLowerCase();
+            const matched = boneMap.get(clean) ?? boneMap.get(nodeName.toLowerCase());
+            if (matched) {
+              parts[0] = matched;
+              track.name = parts.join('.');
+            }
+          });
+          return clip;
+        };
+
+        const animLoader = new FBXLoader();
+        const animFiles: { name: string; url: string }[] = [
+          { name: 'idle', url: '/Breathing%20Idle.fbx' },
+          { name: 'idle_alt', url: '/Idle.fbx' },
+          { name: 'talking', url: '/Talking.fbx' },
+          { name: 'talking_alt', url: '/Talking%20(1).fbx' },
+          { name: 'dance', url: '/Hip%20Hop%20Dancing.fbx' },
+          { name: 'dance_hiphop2', url: '/Hip%20Hop%20Dancing%20(1).fbx' },
+          { name: 'dance_salsa', url: '/Salsa%20Dancing.fbx' },
+          { name: 'dance_swing', url: '/Swing%20Dancing.fbx' },
+          { name: 'dance_silly', url: '/Silly%20Dancing.fbx' },
+          { name: 'rap', url: '/Rapping.fbx' },
+          { name: 'jump', url: '/Jump.fbx' },
+          { name: 'jacks', url: '/Jumping%20Jacks.fbx' },
+          { name: 'pushup', url: '/Push%20Up.fbx' },
+          { name: 'warmup', url: '/Warming%20Up.fbx' },
+          { name: 'flip', url: '/Backflip.fbx' },
+          { name: 'walk', url: '/Walking.fbx' },
+        ];
+
+        let loadedIdle = false;
+        animFiles.forEach(({ name, url }) => {
+          animLoader.load(url, (animFbx) => {
+            if (disposed || !mixer) return;
+            if (animFbx.animations && animFbx.animations.length > 0) {
+              const rawClip = animFbx.animations[0];
+              const clip = sanitizeClip(rawClip, model);
+              clip.name = name;
+              const action = mixer.clipAction(clip);
+              if (name === 'idle' || name === 'idle_alt' || name === 'talking' || name === 'talking_alt' || name.startsWith('dance') || name === 'rap' || name === 'walk') {
+                action.setLoop(THREE.LoopRepeat, Infinity);
+              } else {
+                action.setLoop(THREE.LoopOnce, 1);
+                action.clampWhenFinished = true;
+              }
+              actions[name] = action;
+              if ((name === 'idle' || name === 'idle_alt') && !loadedIdle) {
+                loadedIdle = true;
+                action.play();
+                currentActionName = name;
+              }
+              console.log(`[FridayModel3D] Mixamo mocap loaded: ${name}`);
+            }
+          }, undefined, (err) => {
+            console.warn(`[FridayModel3D] Could not load ${name} animation:`, err);
+          });
+        });
 
         // Debug: rig ke bone naam console me (arms/pose fix ke kaam aayega)
         const boneNames: string[] = [];
@@ -496,6 +564,35 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
       const listening = status === 'Listening...';
       const thinking = status === 'Thinking...';
       const happy = reaction === 'happy' || reaction === 'success' || reaction === 'photo' || reaction === 'winking';
+
+      const fadeToAction = (targetName: string, dur = 0.35) => {
+        if (!mixer || currentActionName === targetName) return;
+        const current = actions[currentActionName];
+        const next = actions[targetName];
+        if (!next) return;
+
+        next.reset();
+        next.setEffectiveTimeScale(1);
+        next.setEffectiveWeight(1);
+        if (current) {
+          current.crossFadeTo(next, dur, true);
+        }
+        next.play();
+        currentActionName = targetName;
+      };
+
+      // Mixamo Mocap Animation Trigger
+      const rawActCheck: AvatarAction = stateRef.current.action ?? localRef.current;
+      const actCheck = rawActCheck === 'stop' ? null : rawActCheck;
+      if (actCheck && actions[actCheck]) {
+        fadeToAction(actCheck, 0.35);
+      } else if (actCheck === 'dance' && actions['dance']) {
+        fadeToAction('dance', 0.35);
+      } else if (speaking && (actions['talking'] || actions['talking_alt'])) {
+        fadeToAction(actions['talking'] ? 'talking' : 'talking_alt', 0.35);
+      } else if (!actCheck && (actions['idle'] || actions['idle_alt'])) {
+        fadeToAction(actions['idle'] ? 'idle' : 'idle_alt', 0.45);
+      }
 
       mixer?.update(dt);
 
@@ -1000,7 +1097,10 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
       sacY = lerp(sacY, sacTY, 1 - Math.pow(0.0001, dt));
       if (eyeL) { eyeL.rotation.y = sacX; eyeL.rotation.x = sacY; }
       if (eyeR) { eyeR.rotation.y = sacX; eyeR.rotation.x = sacY; }
-      if (!act) {
+      const hasMocapIdle = !!(actions['idle'] || actions['idle_alt']);
+      const hasMocapTalking = !!(actions['talking'] || actions['talking_alt']);
+
+      if (!hasMocapIdle && !act) {
         // Saans ke saath kandhe halke hilo
         if (upL && baseQ.has(upL)) upL.quaternion.copy(baseQ.get(upL)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, breath * 0.035));
         if (upR && baseQ.has(upR)) upR.quaternion.copy(baseQ.get(upR)!).multiply(tmpQ.setFromAxisAngle(X_AXIS, -breath * 0.035));
@@ -1025,10 +1125,10 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
         }
       }
 
-      // ── Co-speech natural human conversational gestures ──
+      // ── Co-speech fallback gestures (sirf tab jab Mixamo talking mocap na ho) ──
       const energyTarget = speaking ? THREE.MathUtils.clamp(volume * 3.5, 0.25, 1.0) : 0;
       speakEnergy = lerp(speakEnergy, energyTarget, 1 - Math.pow(0.01, dt));
-      if (speaking && !wasSpeaking) { phraseT = 99; } // Bolna shuru hote hi natural gesture trigger
+      if (speaking && !wasSpeaking) { phraseT = 99; }
       wasSpeaking = speaking;
 
       if (speaking) {
@@ -1046,7 +1146,7 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({ status, volume, reaction,
       const targetBlend = speaking && !act ? 1.0 : 0.0;
       gestureBlend = lerp(gestureBlend, targetBlend, 1 - Math.pow(0.002, dt));
 
-      if (!act && gestureBlend > 0.005) {
+      if (!hasMocapTalking && !act && gestureBlend > 0.005) {
         const p = Math.min(phraseT / phraseDur, 1);
         const env = Math.sin(p * Math.PI); // smooth phrase bell curve
         const gPower = gestureBlend * (0.6 + 0.4 * env) * (0.75 + 0.25 * speakEnergy);
