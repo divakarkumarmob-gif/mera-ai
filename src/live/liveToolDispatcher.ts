@@ -222,15 +222,51 @@ export async function dispatchLiveToolCall(call: any, context: ToolDispatchConte
                     }
                   }
                 } else if (call.name === "avatar_action") {
-                  const allowed = ["dance", "namaste", "think", "wave", "bow", "nod-yes", "nod-no", "stop"];
-                  const act = String((call.args || {}).action || "").toLowerCase().trim();
+                  const ACTION_MAP: Record<string, string> = {
+                    backflip: "flip",
+                    "back flip": "flip",
+                    "back_flip": "flip",
+                    "back-flip": "flip",
+                    frontflip: "flip_front",
+                    "front flip": "flip_front",
+                    "front_flip": "flip_front",
+                    "front-flip": "flip_front",
+                    flipkick: "flip_kick",
+                    "flip kick": "flip_kick",
+                    "flip_kick": "flip_kick",
+                    twistflip: "flip_twist",
+                    "twist flip": "flip_twist",
+                    uppercut: "flip_uppercut",
+                    praying: "namaste",
+                    pray: "namaste",
+                    pranam: "namaste",
+                    pushups: "pushup",
+                    "push up": "pushup",
+                    "push_up": "pushup",
+                    "push-up": "pushup",
+                    jumping: "jump",
+                    rapping: "rap",
+                    walking: "walk",
+                    dancing: "dance",
+                    salsa: "dance_salsa",
+                    swing: "dance_swing",
+                    silly: "dance_silly",
+                  };
+                  let act = String((call.args || {}).action || "").toLowerCase().trim();
+                  if (ACTION_MAP[act]) act = ACTION_MAP[act];
+                  const allowed = [
+                    "dance", "dance_hiphop2", "dance_salsa", "dance_swing", "dance_silly", "dance_silly2",
+                    "flip", "flip_uppercut", "flip_front", "flip_twist", "flip_kick", "run_flip",
+                    "jump", "pushup", "salute", "angry", "rap", "walk", "namaste",
+                    "think", "wave", "bow", "phone", "nod-yes", "nod-no", "stop"
+                  ];
                   if (!allowed.includes(act)) {
-                    result = { success: false, error: "Unknown action. Use one of: " + allowed.join(", ") };
+                    result = { success: false, error: "Unknown action: " + act + ". Allowed: " + allowed.join(", ") };
                   } else {
                     try {
                       clientWs.send(JSON.stringify({ type: "avatar_action", action: act }));
                     } catch {}
-                    result = { success: true, action: act, message: "Avatar body action sent to screen." };
+                    result = { success: true, action: act, message: "Avatar body action '" + act + "' triggered successfully on screen." };
                   }
                 } else if (call.name === "send_photo_to_whatsapp") {
                   const { contactNameOrPhone, caption } = call.args || {};

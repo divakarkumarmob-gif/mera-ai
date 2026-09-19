@@ -2866,13 +2866,13 @@ const rawFunctionDeclarations: any[] = [
   },
   {
     "name": "avatar_action",
-    "description": "AVATAR BODY ACTION TOOL: Friday has a visible 3D body on screen. Call this when DK asks her to DO a physical action with her body. 'dance karo / naach ke dikha / thumka lagao' -> dance. 'namaste karo / pranam karo / namaskar karo' -> namaste. 'soch ke dikha / thinking pose banao' -> think. 'bye karo / wave karo / tata karo / hello karo' -> wave. 'sir jhukao / bow karo / salaam karo' -> bow. 'haan me gardan hilao / nod karo' -> nod-yes. 'naa me gardan hilao' -> nod-no. 'ruk jao / ruko / stop karo / bas karo' -> stop. Always call the tool AND speak a matching Hinglish line (e.g. dance par 'Ye lo Boss, thumka ho jaye!').",
+    "description": "AVATAR BODY ACTION TOOL: Friday has a visible 3D body on screen. Call this when DK asks her to DO a physical action with her body. 'dance karo / naach ke dikha' -> dance. 'back flip maro / flip karo / palti maro' -> flip. 'front flip' -> flip_front. 'kick maro / fight' -> flip_kick. 'jump karo' -> jump. 'push up lagao' -> pushup. 'salute karo' -> salute. 'gussa ho jao' -> angry. 'rap karo' -> rap. 'chalo / walk karo' -> walk. 'namaste karo' -> namaste. 'soch ke dikha' -> think. 'bye karo / wave karo' -> wave. 'sir jhukao / bow karo' -> bow. 'phone dekho' -> phone. 'haan me gardan hilao' -> nod-yes. 'naa me gardan hilao' -> nod-no. 'ruk jao / stop' -> stop. Always call the tool AND speak a matching Hinglish line.",
     "parameters": {
       "type": "OBJECT",
       "properties": {
         "action": {
           "type": "STRING",
-          "enum": ["dance", "namaste", "think", "wave", "bow", "nod-yes", "nod-no", "stop"],
+          "enum": ["dance", "dance_salsa", "dance_swing", "dance_silly", "flip", "flip_front", "flip_kick", "jump", "pushup", "salute", "angry", "rap", "walk", "namaste", "think", "wave", "bow", "phone", "nod-yes", "nod-no", "stop"],
           "description": "Body action to perform on the 3D avatar"
         }
       },

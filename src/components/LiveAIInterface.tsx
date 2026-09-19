@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { X, Mic, Plus, Loader2, Settings, ChevronDown, ChevronLeft, ChevronRight, Captions, MessageSquare, Square, Code2, Terminal, Shield, ShieldCheck, Trash2, Key, Check, AlertCircle, Send, Instagram, Download, Radio, Music, Sparkles, Sliders, Volume2, Bot, Layers, Cpu, Phone, Eye, EyeOff, Copy, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import FridayModel3D, { type AvatarAction, AVATAR_ACTION_LIST } from './FridayModel3D';
+import FridayModel3D, { type AvatarAction, AVATAR_ACTION_LIST, normalizeAvatarAction } from './FridayModel3D';
 import ChatHistoryModal from './ChatHistoryModal';
 import WhatsAppPairModal from './WhatsAppPairModal';
 import CodeAgentPage from './CodeAgentPage';
@@ -3077,9 +3077,9 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                     }
 
                 } else if (msg.type === 'avatar_action') {
-                    // Friday ne body action tool call kiya (dance/namaste/think/wave/bow/nod/stop)
-                    const a = String(msg.action || '').toLowerCase().trim();
-                    if (a === 'stop' || a === '') {
+                    // Friday ne body action tool call kiya (flip/dance/namaste/pushup/jump/salute/angry/rap/walk/think/wave/bow/nod/stop)
+                    const a = normalizeAvatarAction(msg.action);
+                    if (!a || a === 'stop') {
                         setAvatarAction(null);
                     } else if ((AVATAR_ACTION_LIST as string[]).includes(a)) {
                         setAvatarAction(a as AvatarAction);
