@@ -1100,31 +1100,40 @@ const FridayModel3D: React.FC<FridayModel3DProps> = ({
         }
       }
 
-      // ── Lip-sync & Natural Dynamic Mouth Opening ──
-      // Natural multi-frequency speech cadence & syllable rhythm
-      const syll1 = Math.abs(Math.sin(t * 13.5));
-      const syll2 = Math.abs(Math.sin(t * 8.2));
-      const syll3 = Math.abs(Math.sin(t * 19.1));
-      const cadence = syll1 * 0.55 + syll2 * 0.3 + syll3 * 0.15;
-      const vowelPhrase = 0.7 + 0.3 * Math.sin(t * 2.5);
+      // ── Lip-sync: Real open/close syllable pulsing (jaise insaan bolta hai) ──
+      // Syllable oscillators — raw sin (positive AND near-zero phases), NOT abs()
+      // This creates true band-khulna-band cycles instead of always-open
+      const syllRate1 = 4.2;   // ~4 Hz = natural Hindi syllable speed
+      const syllRate2 = 6.8;   // faster consonant burst
+      const syllRate3 = 2.1;   // slow phrase envelope
+      const raw1 = Math.sin(t * Math.PI * syllRate1);
+      const raw2 = Math.sin(t * Math.PI * syllRate2);
+      const raw3 = Math.sin(t * Math.PI * syllRate3);
+      // Rectify: only let positive peaks through, negatives → mouth closes to 0
+      const pulse1 = Math.max(0, raw1);              // main syllable pulse
+      const pulse2 = Math.max(0, raw2) * 0.4;        // consonant burst overlay
+      const envelope = 0.55 + 0.45 * Math.max(0, raw3); // slow phrase swell 0.55–1.0
+      const syllablePulse = (pulse1 + pulse2) * envelope; // 0 to ~1.4, clamp below
 
-      let openTarget = 0.01; // resting closed lips
+      let openTarget = 0.0; // fully closed at rest
       if (speaking) {
-        // Mouth opening — tuned to ~50% visibility
         if (isVoiceActive) {
-          // Driven dynamically by real speech audio waveform
-          openTarget = THREE.MathUtils.clamp(realSpeechEnergy * 1.3 + cadence * 0.18, 0.12, 0.50);
+          // Real audio waveform drives mouth — scales with speech energy
+          // syllablePulse ensures it closes between syllables even with audio
+          const audioBoost = realSpeechEnergy * 1.1;
+          openTarget = THREE.MathUtils.clamp(audioBoost * syllablePulse + syllablePulse * 0.15, 0, 0.48);
         } else {
-          // Generative human speech cadence
-          openTarget = THREE.MathUtils.clamp((0.16 + cadence * 0.33) * vowelPhrase, 0.09, 0.48);
+          // Generative syllable rhythm: genuinely opens and closes
+          openTarget = THREE.MathUtils.clamp(syllablePulse * 0.42, 0, 0.45);
         }
       } else if (happy) {
-        openTarget = 0.16; // pleasant subtle open smile
+        openTarget = 0.08; // gentle smile, not wide open
       }
 
-      // Fast opening for sharp articulation, smooth closing
-      const lerpSpeed = openTarget > jawOpen ? 0.45 : 0.28;
+      // Quick snap open on vowel, smooth close on consonant (natural feel)
+      const lerpSpeed = openTarget > jawOpen ? 0.55 : 0.22;
       jawOpen = lerp(jawOpen, openTarget, lerpSpeed);
+
 
       // 1. Physical Jaw Bone rotation (~10-12 degrees)
       if (jawBone && jawBone !== modelRoot) {
