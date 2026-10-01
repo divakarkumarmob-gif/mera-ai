@@ -305,40 +305,24 @@ class TelegramBotService {
         return openReply;
       }
     } catch (e) {
-      console.warn("[TelegramBot] Girlfriend Open model query failed, falling back to Gemini:", e);
+      console.warn("[TelegramBot] Girlfriend Open model query failed:", e);
     }
 
-    // Fallback to Gemini with UNCENSORED_SAFETY_SETTINGS (with chat history for continuity)
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (apiKey) {
-      try {
-        const histBlock = tgHistory.length > 0 || tgEarlierCompact
-          ? `Recent chat (last 20 — isi flow me jawab do):\n${tgHistory.slice(-20).map((h) => `${h.role === "user" ? "DK" : "Tum"}: ${h.text}`).join("\n")}${tgEarlierCompact ? `\n\nUsse pehle ka memory:\n${tgEarlierCompact}` : ""}\n\nAb is naye message ka jawab do: `
-          : "";
-        const ai = new GoogleGenAI({ apiKey });
-        for (const model of TelegramBotService.MODEL_FALLBACK_CHAIN) {
-          try {
-            const resp = await ai.models.generateContent({
-              model,
-              contents: `${histBlock}${text}`,
-              config: {
-                systemInstruction: prompt,
-                safetySettings: UNCENSORED_SAFETY_SETTINGS as any,
-                temperature: 0.9,
-              },
-            });
-            const t = resp.text?.trim();
-            if (t) {
-              learnIntimate(t);
-              stampClimax(t);
-              return t;
-            }
-          } catch {}
+    try {
+      const encPrompt = encodeURIComponent(text);
+      const encSys = encodeURIComponent(prompt.slice(0, 300));
+      const res = await fetch(`https://text.pollinations.ai/${encPrompt}?model=openai-fast&system=${encSys}`);
+      if (res.ok) {
+        const t = (await res.text()).trim();
+        if (t) {
+          learnIntimate(t);
+          stampClimax(t);
+          return t;
         }
-      } catch {}
-    }
+      }
+    } catch {}
 
-    return `Haan mere handsome ${senderName}... Main toh sirf aapke baare me soch rahi hoon! Bolo baby kya keh rahe the? 😘❤️`;
+    return "";
   }
 
   // Multi-tier model fallback chain (Top-tier reasoning models first)
@@ -2828,33 +2812,35 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
 
       await this.sendChatAction(chatId, "typing");
       const gfReply = await this.generateGirlfriendReply(chatId, senderName, text);
-      await this.sendMessage(chatId, gfReply);
-      // Voice ONLY on moan-worthy (intimate) moments — moan-style voice + text both.
-      try {
-        if (whatsappGirlfriendEngine.isIntimateMoment(text, gfReply)) {
-          const { voiceBridgeService, VoiceBridgeService } = await import("./voiceBridgeService");
-          const speakText = whatsappGirlfriendEngine.buildMoanVoiceLine(gfReply, "", true).trim();
-          if (speakText) {
-            const speechRes = await voiceBridgeService.generateSpeech(speakText, VoiceBridgeService.FEMALE_VOICE);
-            if (speechRes && speechRes.buffer.length > 0) {
-              await this.sendVoice(chatId, speechRes.buffer, `🔊 "${speakText.slice(0, 80)}"`);
+      if (gfReply) {
+        await this.sendMessage(chatId, gfReply);
+        // Voice ONLY on moan-worthy (intimate) moments — moan-style voice + text both.
+        try {
+          if (whatsappGirlfriendEngine.isIntimateMoment(text, gfReply)) {
+            const { voiceBridgeService, VoiceBridgeService } = await import("./voiceBridgeService");
+            const speakText = whatsappGirlfriendEngine.buildMoanVoiceLine(gfReply, "", true).trim();
+            if (speakText) {
+              const speechRes = await voiceBridgeService.generateSpeech(speakText, VoiceBridgeService.FEMALE_VOICE);
+              if (speechRes && speechRes.buffer.length > 0) {
+                await this.sendVoice(chatId, speechRes.buffer, `🔊 "${speakText.slice(0, 80)}"`);
+              }
             }
           }
-        }
-        {
-          // Mid-chat auto photo drop at scene peak (~35%, no asking needed)
-          const peakHit = /\b(jhad|climax|aa\s*rah[ai]|nikal\s*do|bhar\s*do|cum|orgasm|HAAAN)\b/i.test(gfReply);
-          if (peakHit && Math.random() < 0.35) {
-            try {
-              const peakPhoto = await whatsappGirlfriendEngine.generateGirlfriendPhotoOrGift("nude photo bed par full body", String(chatId));
-              if (peakPhoto && peakPhoto.buffer) {
-                await this.sendPhoto(chatId, peakPhoto.buffer, "rukho... ye dekho abhi ki photo 🙈🔥");
-              }
-            } catch {}
+          {
+            // Mid-chat auto photo drop at scene peak (~35%, no asking needed)
+            const peakHit = /\b(jhad|climax|aa\s*rah[ai]|nikal\s*do|bhar\s*do|cum|orgasm|HAAAN)\b/i.test(gfReply);
+            if (peakHit && Math.random() < 0.35) {
+              try {
+                const peakPhoto = await whatsappGirlfriendEngine.generateGirlfriendPhotoOrGift("nude photo bed par full body", String(chatId));
+                if (peakPhoto && peakPhoto.buffer) {
+                  await this.sendPhoto(chatId, peakPhoto.buffer, "rukho... ye dekho abhi ki photo 🙈🔥");
+                }
+              } catch {}
+            }
           }
+        } catch (vErr) {
+          console.warn("[TelegramBot] GF intimate voice note failed:", (vErr as any)?.message || vErr);
         }
-      } catch (vErr) {
-        console.warn("[TelegramBot] GF intimate voice note failed:", (vErr as any)?.message || vErr);
       }
       return;
     }
