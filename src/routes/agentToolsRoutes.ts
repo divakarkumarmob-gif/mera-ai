@@ -506,8 +506,16 @@ export function createAgentToolsRouter(): Router {
   router.post("/api/learning/practice-drill", async (req, res) => {
     try {
       const { syntheticSelfGymEngine } = await import("../services/syntheticSelfGymEngine");
-      const { situationPrompt, idealBehaviorHint } = req.body || {};
-      const drill = await (syntheticSelfGymEngine as any).practiceDrill?.(situationPrompt, idealBehaviorHint) || { id: "d_" + Date.now() };
+      const { situationPrompt, idealBehaviorHint, lessonId, trigger, rule } = req.body || {};
+      const drill = await syntheticSelfGymEngine.runAutonomousDrill({
+        lessonId,
+        trigger: trigger || situationPrompt,
+        rule: rule || idealBehaviorHint,
+        whatBossTaught: trigger || situationPrompt,
+      });
+      if (!drill) {
+        return res.status(500).json({ ok: false, error: "Failed to generate autonomous drill. Check Gemini API key." });
+      }
       res.json({ ok: true, drill });
     } catch (e: any) {
       res.status(500).json({ ok: false, error: e?.message });
@@ -518,8 +526,8 @@ export function createAgentToolsRouter(): Router {
     try {
       const { syntheticSelfGymEngine } = await import("../services/syntheticSelfGymEngine");
       const { verdict, feedback } = req.body || {};
-      const updated = await (syntheticSelfGymEngine as any).recordBossVerdict?.(req.params.id, verdict, feedback) || { id: req.params.id };
-      res.json({ ok: true, drill: updated });
+      const result = await syntheticSelfGymEngine.recordBossVerdict(req.params.id, verdict, feedback);
+      res.json({ ok: result.ok, drill: result.drill, message: result.message });
     } catch (e: any) {
       res.status(500).json({ ok: false, error: e?.message });
     }
@@ -528,8 +536,9 @@ export function createAgentToolsRouter(): Router {
   router.post("/api/learning/drills/:id/retry", async (req, res) => {
     try {
       const { syntheticSelfGymEngine } = await import("../services/syntheticSelfGymEngine");
-      const updated = await (syntheticSelfGymEngine as any).retryDrill?.(req.params.id) || { id: req.params.id };
-      res.json({ ok: true, drill: updated });
+      const { instruction, feedback } = req.body || {};
+      const result = await syntheticSelfGymEngine.retryDrill(req.params.id, instruction || feedback);
+      res.json({ ok: result.ok, drill: result.drill, message: result.message });
     } catch (e: any) {
       res.status(500).json({ ok: false, error: e?.message });
     }
@@ -538,11 +547,13 @@ export function createAgentToolsRouter(): Router {
   router.post("/api/learning/teach-lesson", async (req, res) => {
     try {
       const { fridayChildTrainingService } = await import("../services/fridayChildTrainingService");
-      const { situation, lesson, tag } = req.body || {};
+      const { situation, lesson, tag, category } = req.body || {};
       if (!situation || !lesson) {
         return res.status(400).json({ ok: false, error: "situation and lesson required" });
       }
-      const record = await fridayChildTrainingService.teachLesson(situation, lesson, tag);
+      const categoryValue = (category || tag) as any;
+      const options = categoryValue ? { category: categoryValue } : undefined;
+      const record = await fridayChildTrainingService.teachLesson(situation, lesson, options);
       res.json({ ok: true, lesson: record });
     } catch (e: any) {
       res.status(500).json({ ok: false, error: e?.message });

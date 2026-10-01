@@ -300,32 +300,37 @@ export class WhatsAppHistoryEngine {
     }
   }
 
-  public parseDateFilter(dateFilter?: string): { startTs: number; endTs: number } {
+  public parseDateFilter(dateFilter?: string): { startTs: number; endTs: number; dateLabel?: string } {
     const now = Date.now();
+    if (!dateFilter) return { startTs: now - 48 * 60 * 60 * 1000, endTs: now, dateLabel: "Recent" };
+
+    const f = dateFilter.toLowerCase().trim();
+
+    if (/\b(aaj|ajj|aj|today)\b/i.test(f)) {
+      const bounds = baileysLiveStore.getISTDayBounds(0);
+      return { startTs: bounds.startTs, endTs: bounds.endTs, dateLabel: "Aaj" };
+    }
+    if (/\b(kal|yesterday)\b/i.test(f)) {
+      const bounds = baileysLiveStore.getISTDayBounds(1);
+      return { startTs: bounds.startTs, endTs: bounds.endTs, dateLabel: "Kal" };
+    }
+    if (/\b(parso)\b/i.test(f)) {
+      const bounds = baileysLiveStore.getISTDayBounds(2);
+      return { startTs: bounds.startTs, endTs: bounds.endTs, dateLabel: "Parso" };
+    }
+
+    const today = new Date();
     const startOfDay = (d: Date) =>
       new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
     const endOfDay = (d: Date) => startOfDay(d) + 86400000 - 1;
     const atHour = (d: Date, hour: number, minute = 0) =>
       new Date(d.getFullYear(), d.getMonth(), d.getDate(), hour, minute, 0).getTime();
 
-    if (!dateFilter) return { startTs: now - 48 * 60 * 60 * 1000, endTs: now };
-
-    const f = dateFilter.toLowerCase().trim();
-    const today = new Date();
-
-    if (f === "aaj" || f === "today") {
-      return { startTs: startOfDay(today), endTs: endOfDay(today) };
-    }
-    if (f === "kal" || f === "yesterday") {
-      const d = new Date(today); d.setDate(today.getDate() - 1);
-      return { startTs: startOfDay(d), endTs: endOfDay(d) };
-    }
-
     const dinMatch = f.match(/(\d+)\s*(?:din|days?)\s*(?:pehle|ago)/);
     if (dinMatch) {
       const daysAgo = parseInt(dinMatch[1]);
       const d = new Date(today); d.setDate(today.getDate() - daysAgo);
-      return { startTs: startOfDay(d), endTs: endOfDay(d) };
+      return { startTs: startOfDay(d), endTs: endOfDay(d), dateLabel: `${daysAgo} din pehle` };
     }
 
     const isMorning = /subah|morning/.test(f);
@@ -342,24 +347,24 @@ export class WhatsAppHistoryEngine {
         if (dayOffsetMatch) baseDay.setDate(today.getDate() - parseInt(dayOffsetMatch[1]));
       }
 
-      if (isMorning) return { startTs: atHour(baseDay, 5), endTs: atHour(baseDay, 12) };
-      if (isAfternoon) return { startTs: atHour(baseDay, 12), endTs: atHour(baseDay, 17) };
-      if (isEvening) return { startTs: atHour(baseDay, 17), endTs: atHour(baseDay, 21) };
-      if (isNight) return { startTs: atHour(baseDay, 21), endTs: endOfDay(baseDay) };
+      if (isMorning) return { startTs: atHour(baseDay, 5), endTs: atHour(baseDay, 12), dateLabel: "Subah" };
+      if (isAfternoon) return { startTs: atHour(baseDay, 12), endTs: atHour(baseDay, 17), dateLabel: "Dopahar" };
+      if (isEvening) return { startTs: atHour(baseDay, 17), endTs: atHour(baseDay, 21), dateLabel: "Shaam" };
+      if (isNight) return { startTs: atHour(baseDay, 21), endTs: endOfDay(baseDay), dateLabel: "Raat" };
     }
 
     if (f.includes("week") || f.includes("hafte")) {
-      return { startTs: now - 7 * 86400000, endTs: now };
+      return { startTs: now - 7 * 86400000, endTs: now, dateLabel: "Pichla Hafta" };
     }
     if (f.includes("month") || f.includes("mahine")) {
-      return { startTs: now - 30 * 86400000, endTs: now };
+      return { startTs: now - 30 * 86400000, endTs: now, dateLabel: "Pichla Mahina" };
     }
 
     if (/last|latest|abhi|recent/.test(f)) {
-      return { startTs: 0, endTs: now };
+      return { startTs: 0, endTs: now, dateLabel: "Recent" };
     }
 
-    return { startTs: 0, endTs: now };
+    return { startTs: 0, endTs: now, dateLabel: "All" };
   }
 
   public async getMessages(params: {
@@ -369,23 +374,30 @@ export class WhatsAppHistoryEngine {
     dateFilter?: string;
     limit?: number;
   } = {}): Promise<IncomingMessage[]> {
-    const effectiveDateFilter = params.dateFilter || (params.senderName || params.groupName ? "all" : undefined);
-    const { startTs, endTs } = params.dateFilter
-      ? this.parseDateFilter(params.dateFilter)
-      : (effectiveDateFilter === "all" ? { startTs: 0, endTs: Date.now() } : this.parseDateFilter(undefined));
+    const { startTs, endTs } = this.parseDateFilter(params.dateFilter);
+    const limit = params.limit || 20;
 
-    const isHistoricalQuery = !!params.dateFilter || !!params.senderName || !!params.groupName;
-
-    let messages: IncomingMessage[];
-
-    if (isHistoricalQuery) {
-      messages = await this.fetchFromFirestore(startTs, endTs);
-    } else {
-      const cutoff = Date.now() - 48 * 60 * 60 * 1000;
-      messages = this.messageCache.filter((m) => m.timestamp >= cutoff);
-      if (messages.length === 0) {
-        messages = await this.fetchFromFirestore(cutoff, Date.now());
+    // ── 1. CHECK BAILEYS LIVE STORE FIRST ──
+    if (params.senderName) {
+      const live = baileysLiveStore.getLiveMessagesDetailed(params.senderName, limit, { startTs, endTs });
+      if (live && live.filteredMessages.length > 0) {
+        return live.filteredMessages;
       }
+    } else if (params.groupName) {
+      const liveGroup = baileysLiveStore.getLiveGroupMessages(params.groupName, limit);
+      if (liveGroup && liveGroup.messages.length > 0) {
+        const filtered = liveGroup.messages.filter((m) => m.timestamp >= startTs && m.timestamp <= endTs);
+        if (filtered.length > 0) return filtered;
+      }
+    }
+
+    // ── 2. FALLBACK TO MEMORY CACHE & FIRESTORE ──
+    let messages: IncomingMessage[] = this.messageCache.filter(
+      (m) => m.timestamp >= startTs && m.timestamp <= endTs
+    );
+
+    if (messages.length === 0) {
+      messages = await this.fetchFromFirestore(startTs, endTs);
     }
 
     const type = params.messageType || "all";
@@ -397,7 +409,8 @@ export class WhatsAppHistoryEngine {
       messages = messages.filter(
         (m) =>
           m.senderName.toLowerCase().includes(q) ||
-          m.senderDisplayName.toLowerCase().includes(q)
+          m.senderDisplayName.toLowerCase().includes(q) ||
+          m.senderPhone.includes(q)
       );
     }
 
@@ -528,7 +541,24 @@ export class WhatsAppHistoryEngine {
     daysBack = 7
   ): Promise<{ success: boolean; summary: string; count: number; unreadCount?: number }> {
     const rawQ = (targetQuery || "").toLowerCase().trim();
-    const startTs = Date.now() - daysBack * 86400000;
+
+    // ── 0. DATE INTENT PARSING ──
+    const isTodayQuery = /\b(aaj|ajj|aj|today)\b/i.test(rawQ);
+    const isYesterdayQuery = /\b(kal|yesterday)\b/i.test(rawQ);
+    const isParsoQuery = /\b(parso)\b/i.test(rawQ);
+
+    let dateRange: { startTs: number; endTs: number; dateLabel: string } | undefined = undefined;
+    if (isTodayQuery) {
+      dateRange = baileysLiveStore.getISTDayBounds(0);
+    } else if (isYesterdayQuery) {
+      dateRange = baileysLiveStore.getISTDayBounds(1);
+    } else if (isParsoQuery) {
+      dateRange = baileysLiveStore.getISTDayBounds(2);
+    }
+
+    const startTs = dateRange ? dateRange.startTs : Date.now() - daysBack * 86400000;
+    const endTs = dateRange ? dateRange.endTs : Date.now();
+    const dateBadge = dateRange ? dateRange.dateLabel : `Pichle ${daysBack} din`;
 
     const isUnknownSearch =
       rawQ.includes("unknown") ||
@@ -541,19 +571,30 @@ export class WhatsAppHistoryEngine {
       !rawQ ||
       rawQ === "all" ||
       rawQ === "sab" ||
-      rawQ === "kisi" ||
-      rawQ === "everything" ||
+      rawQ === "sabka" ||
       rawQ === "all chats" ||
-      rawQ === "sabka";
+      rawQ === "kisi" ||
+      rawQ === "everything";
 
     // ── 1. GROUP CHAT CHECK ──
-    const nameMatch = rawQ.match(/(?:kya\s+)?([a-zA-Z0-9\u0900-\u097F\s\-_\.]+?)\s*(?:ne\s*msg|ne\s*message|se\s*kya|ka\s*msg|ka\s*message|se\s*baat|ne\s*kya|group|grup)/i);
-    const candidateName = nameMatch ? nameMatch[1].trim() : rawQ;
-
     const isGroupQuery =
       rawQ.includes("group") ||
-      rawQ.includes("grup") ||
-      candidateName.toLowerCase().includes("group");
+      rawQ.includes("grup");
+
+    // Clean conversational stopwords from rawQ to isolate pure contact / group name
+    const cleanCandidate = rawQ
+      .replace(/\b(aaj|ajj|aj|today|kal|yesterday|parso)\b/gi, " ")
+      .replace(/\b(msg|message|messages|chat|chats|baat|baatein|sms)\b/gi, " ")
+      .replace(/\b(kya|kya kya|hai|h|tha|the|thi|batao|bataiye|dikhao|dekho|dekh|chahiye|sunao)\b/gi, " ")
+      .replace(/\b(bheja|bheje|bheji|aaya|aaye|aayi|send|sent)\b/gi, " ")
+      .replace(/\b(ke|ka|ki|ko|se|ne|me|par|kuch|koi|kisi)\b/gi, " ")
+      .replace(/\b(group|grup|whatsapp|wa|watsapp|wtsapp)\b/gi, " ")
+      .replace(/\b(last|recent|latest|purana|purane)\b/gi, " ")
+      .replace(/\b(number|no)\b/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    const candidateName = cleanCandidate || rawQ;
 
     if (isGroupQuery && candidateName && !isAllSearch) {
       return await this.getGroupMessagesWithSummary(candidateName, limit, daysBack);
@@ -616,56 +657,79 @@ export class WhatsAppHistoryEngine {
       } else {
         // Specific contact search in Baileys Live Store
         const targetLookupKey = targetContactPhone || targetContactName || candidateName;
-        const liveMsgs = baileysLiveStore.getLiveMessages(targetLookupKey, limit);
+        const liveDetailed = baileysLiveStore.getLiveMessagesDetailed(targetLookupKey, limit, dateRange);
 
-        if (liveMsgs && liveMsgs.length > 0) {
-          const displayName = targetContactName || liveMsgs[0]?.senderName || candidateName;
-          const displayPhone = targetContactPhone || liveMsgs[0]?.senderPhone || "";
+        if (liveDetailed) {
+          const displayName = targetContactName || liveDetailed.matchedChatName || candidateName;
+          const displayPhone = targetContactPhone || liveDetailed.matchedChatPhone || "";
           const phoneBadge = displayPhone && displayPhone !== "me" ? ` (+${displayPhone})` : "";
-          const lastMsg = liveMsgs[liveMsgs.length - 1];
 
-          let card = `⚡ *WhatsApp Live Chat: ${displayName}*${phoneBadge}\n`;
-          card += `━━━━━━━━━━━━━━━━━━━━━\n`;
-          card += `📅 _Last Active: ${lastMsg.dateStr || "Abhi"}_\n`;
-          card += `💬 _Total recent messages: ${liveMsgs.length}_\n\n`;
+          // Case A: Filtered messages exist for requested date / today!
+          if (liveDetailed.hasFilteredMessages) {
+            const msgs = liveDetailed.filteredMessages;
+            const lastMsg = msgs[msgs.length - 1];
 
-          liveMsgs.forEach((m) => {
-            const timeTag = m.dateStr ? `[${m.dateStr}] ` : "";
-            if (m.senderPhone === "me") {
-              card += `  👤 *Aap (DK):* ${timeTag}_"${m.text}"_\n`;
-            } else {
-              card += `  📩 *${m.senderName}:* ${timeTag}_"${m.text}"_\n`;
-              if (m.botReply) {
-                card += `  🤖 *Friday:* _"${m.botReply}"_\n`;
+            let card = `⚡ *WhatsApp Live Chat: ${displayName}*${phoneBadge}\n`;
+            card += `━━━━━━━━━━━━━━━━━━━━━\n`;
+            card += `📅 _Date: ${dateBadge}_\n`;
+            card += `💬 _Messages found: ${msgs.length}_\n\n`;
+
+            msgs.forEach((m) => {
+              const timeTag = m.dateStr ? `[${m.dateStr}] ` : "";
+              if (m.senderPhone === "me") {
+                card += `  👤 *Aap (DK):* ${timeTag}_"${m.text}"_\n`;
+              } else {
+                card += `  📩 *${m.senderName}:* ${timeTag}_"${m.text}"_\n`;
+                if (m.botReply) {
+                  card += `  🤖 *Friday:* _"${m.botReply}"_\n`;
+                }
               }
+            });
+
+            // Check if there are any pending questions for this contact
+            try {
+              const { dailyUpdateService } = await import("../dailyUpdateService");
+              const pendingQuestions = await dailyUpdateService.getQuestionsAwaitingDK();
+              const relevant = pendingQuestions.filter(
+                (q) =>
+                  (targetContactPhone && q.senderPhone.includes(targetContactPhone)) ||
+                  (displayName && q.senderName.toLowerCase().includes(displayName.toLowerCase()))
+              );
+              if (relevant.length > 0) {
+                card += `\n━━━━━━━━━━━━━━━━━━━━━\n`;
+                card += `❓ *Pending Question Awaiting DK Reply:*\n`;
+                relevant.forEach((q) => {
+                  card += `  • _"${q.question}"_ (Poocha: ${q.senderName})\n`;
+                });
+              }
+            } catch {}
+
+            card += `\n_⚡ Source: Real-time Baileys live memory_\n`;
+
+            return {
+              success: true,
+              count: msgs.length,
+              summary: card.trim(),
+            };
+          }
+
+          // Case B: Contact is known in live memory, but sent 0 messages on the requested date (e.g. today)!
+          if (dateRange) {
+            let card = `Boss, *${displayName}*${phoneBadge} ka ${dateBadge.toLowerCase()} koi naya WhatsApp message nahi aaya hai. ✅\n\n`;
+            if (liveDetailed.lastOlderMessage) {
+              const older = liveDetailed.lastOlderMessage;
+              const sender = older.senderPhone === "me" ? "Aap (DK)" : older.senderName;
+              card += `📅 _Unka aakhiri message [${older.dateStr || "Pehle"}] ko aaya tha:_\n`;
+              card += `  • *${sender}:* _"${older.text}"_\n`;
             }
-          });
+            card += `\n_⚡ Checked via real-time Baileys live socket memory_\n`;
 
-          // Check if there are any pending questions for this contact
-          try {
-            const { dailyUpdateService } = await import("../dailyUpdateService");
-            const pendingQuestions = await dailyUpdateService.getQuestionsAwaitingDK();
-            const relevant = pendingQuestions.filter(
-              (q) =>
-                (targetContactPhone && q.senderPhone.includes(targetContactPhone)) ||
-                (displayName && q.senderName.toLowerCase().includes(displayName.toLowerCase()))
-            );
-            if (relevant.length > 0) {
-              card += `\n━━━━━━━━━━━━━━━━━━━━━\n`;
-              card += `❓ *Pending Question Awaiting DK Reply:*\n`;
-              relevant.forEach((q) => {
-                card += `  • _"${q.question}"_ (Poocha: ${q.senderName})\n`;
-              });
-            }
-          } catch {}
-
-          card += `\n_⚡ Source: Real-time Baileys live memory_\n`;
-
-          return {
-            success: true,
-            count: liveMsgs.length,
-            summary: card.trim(),
-          };
+            return {
+              success: true,
+              count: 0,
+              summary: card.trim(),
+            };
+          }
         }
       }
     }
@@ -675,14 +739,19 @@ export class WhatsAppHistoryEngine {
 
     let docs: IncomingMessage[] = [];
     try {
-      const snap = await inboxCol().where("timestamp", ">=", startTs).orderBy("timestamp", "desc").limit(200).get();
+      const snap = await inboxCol()
+        .where("timestamp", ">=", startTs)
+        .where("timestamp", "<=", endTs)
+        .orderBy("timestamp", "desc")
+        .limit(200)
+        .get();
       docs = snap.docs.map((d) => d.data() as IncomingMessage);
     } catch {
-      docs = this.messageCache.filter((m) => m.timestamp >= startTs);
+      docs = this.messageCache.filter((m) => m.timestamp >= startTs && m.timestamp <= endTs);
     }
 
     if (docs.length === 0 && this.messageCache.length > 0) {
-      docs = this.messageCache.filter((m) => m.timestamp >= startTs);
+      docs = this.messageCache.filter((m) => m.timestamp >= startTs && m.timestamp <= endTs);
     }
 
     // Backfill fetched docs into Baileys Live Store for immediate warm caching
@@ -692,14 +761,6 @@ export class WhatsAppHistoryEngine {
       } else {
         baileysLiveStore.recordIncoming(d);
       }
-    }
-
-    if (docs.length === 0) {
-      return {
-        success: true,
-        count: 0,
-        summary: `Boss, pichle ${daysBack} dino me WhatsApp par koi incoming/outgoing message nahi mila.`,
-      };
     }
 
     let filtered = docs.filter((m) => !m.isGroup);
@@ -722,13 +783,47 @@ export class WhatsAppHistoryEngine {
         return {
           success: true,
           count: 0,
-          summary: `Boss, pichle ${daysBack} dino me kisi bhi unknown number ne message nahi kiya hai! Sab clean hai. ✅`,
+          summary: `Boss, ${dateBadge.toLowerCase()} kisi bhi unknown number ne message nahi kiya hai! Sab clean hai. ✅`,
         };
       }
+
+      if (dateRange) {
+        // Try finding their last older message from Firestore so user is not left in the dark
+        try {
+          const oldSnap = await inboxCol()
+            .orderBy("timestamp", "desc")
+            .limit(100)
+            .get();
+          const oldDocs = oldSnap.docs.map((d) => d.data() as IncomingMessage);
+          const nameL = (targetContactName || candidateName).toLowerCase();
+          const lastOld = oldDocs.find(
+            (m) =>
+              !m.isGroup &&
+              ((targetContactPhone && (m.senderPhone.includes(targetContactPhone) || m.replyJid.includes(targetContactPhone))) ||
+               (nameL && m.senderName.toLowerCase().includes(nameL)) ||
+               (nameL && m.senderDisplayName.toLowerCase().includes(nameL)))
+          );
+          if (lastOld) {
+            const sender = lastOld.senderPhone === "me" ? "Aap (DK)" : lastOld.senderName;
+            return {
+              success: true,
+              count: 0,
+              summary: `Boss, *${targetContactName || candidateName}* ka ${dateBadge.toLowerCase()} koi naya message nahi aaya hai. ✅\n\n📅 _Unka aakhiri message [${lastOld.dateStr || "Pehle"}] ko tha:_\n• *${sender}:* _"${lastOld.text}"_\n\n_📁 Source: Firestore cloud archive_`,
+            };
+          }
+        } catch {}
+
+        return {
+          success: true,
+          count: 0,
+          summary: `Boss, *${targetContactName || candidateName}* ka ${dateBadge.toLowerCase()} koi WhatsApp message nahi mila. ✅`,
+        };
+      }
+
       return {
         success: true,
         count: 0,
-        summary: `Boss, "${targetContactName || targetQuery || "contact"}" se pichle ${daysBack} dino me koi message nahi mila.`,
+        summary: `Boss, "${targetContactName || targetQuery || "contact"}" se ${dateBadge.toLowerCase()} koi message nahi mila.`,
       };
     }
 
@@ -739,7 +834,7 @@ export class WhatsAppHistoryEngine {
       grouped.get(key)!.push(msg);
     }
 
-    let card = `📱 *WhatsApp Conversation Breakdown (Pichle ${daysBack} din, ${filtered.length} messages found):*\n\n`;
+    let card = `📱 *WhatsApp Conversation (${dateBadge}, ${filtered.length} messages found):*\n\n`;
 
     for (const [key, msgs] of grouped.entries()) {
       const sorted = msgs.sort((a, b) => a.timestamp - b.timestamp);

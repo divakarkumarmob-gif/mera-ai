@@ -185,23 +185,63 @@ class FridayChildTrainingService {
     return { success: false, message: `Boss, "${query}" se related koi lesson nahi mila.` };
   }
 
+  private static STOP_WORDS = new Set([
+    "kya", "hai", "hain", "aaj", "kal", "toh", "to", "aur", "kar", "karo", "kare", "karna", "yeh", "ye", "woh", "wo",
+    "theek", "mera", "meri", "mere", "tera", "teri", "tere", "main", "hum", "par", "bhi", "tha", "thi", "the",
+    "raha", "rahi", "rahe", "hoga", "hogi", "hoge", "nahi", "na", "hota", "hoti", "hote", "batao", "bolo", "suno",
+    "abhi", "baad", "pehle", "kuch", "sab", "saare", "koi", "jab", "tab", "fir", "phir", "se", "ko", "me", "mein",
+    "ka", "ki", "ke", "the", "and", "for", "with", "this", "that", "are", "you", "was", "will", "from", "just"
+  ]);
+
   /**
-   * Finds matching lessons relevant to current incoming message text
+   * Finds matching lessons relevant to current incoming message text with smart scoring
    */
   public findRelevantLessons(messageText: string): TrainingLesson[] {
     if (!messageText || this.lessons.length === 0) return [];
 
-    const lower = messageText.toLowerCase();
-    const words = lower.split(/\s+/).filter((w) => w.length > 2);
+    const lower = messageText.toLowerCase().replace(/[^\w\s\u0900-\u097F]/g, " ");
+    const words = lower
+      .split(/\s+/)
+      .filter((w) => w.length >= 3 && !FridayChildTrainingService.STOP_WORDS.has(w));
 
-    return this.lessons.filter((l) => {
+    const scored = this.lessons.map((l) => {
       const sitLower = l.situationTrigger.toLowerCase();
-      // Exact substring match
-      if (lower.includes(sitLower) || sitLower.includes(lower)) return true;
-      // Word overlap match
-      const matchedWords = words.filter((w) => sitLower.includes(w));
-      return matchedWords.length >= 2;
-    }).slice(0, 4);
+      let score = 0;
+
+      // Exact phrase match
+      if (sitLower.length > 5 && (lower.includes(sitLower) || sitLower.includes(lower))) {
+        score += 15;
+      }
+
+      // Meaningful content words overlap
+      for (const w of words) {
+        if (sitLower.includes(w)) {
+          score += 3;
+        }
+      }
+
+      // Category matching
+      if (/naraz|gussa|sad|rona|chhod|breakup|manana|sorry|pyaar/i.test(lower) && l.category === "relationship_advice") {
+        score += 4;
+      } else if (/stress|thaka|dard|tension|pareshan|depress/i.test(lower) && l.category === "emotional_comfort") {
+        score += 4;
+      } else if (/task|deploy|code|fix|build|bug|urgent/i.test(lower) && l.category === "task_execution") {
+        score += 4;
+      }
+
+      // Anchor bonus
+      if (l.isAnchor && score > 0) {
+        score += 2;
+      }
+
+      return { lesson: l, score };
+    });
+
+    return scored
+      .filter((s) => s.score >= 3)
+      .sort((a, b) => b.score - a.score)
+      .map((s) => s.lesson)
+      .slice(0, 4);
   }
 
   /**
@@ -213,8 +253,9 @@ class FridayChildTrainingService {
 
     let relevant = incomingMessage ? this.findRelevantLessons(incomingMessage) : [];
     if (relevant.length === 0) {
-      // Pick top 4 most recent core lessons
-      relevant = this.lessons.slice(0, 4);
+      // Pick top anchor lessons first, then recent
+      const anchors = this.lessons.filter((l) => l.isAnchor).slice(0, 3);
+      relevant = anchors.length > 0 ? anchors : this.lessons.slice(0, 3);
     }
 
     const lines = relevant.map((l, i) => {

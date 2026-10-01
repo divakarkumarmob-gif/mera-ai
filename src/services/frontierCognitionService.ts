@@ -315,15 +315,38 @@ class FrontierCognitionService {
     try {
       const { fridayChildTrainingService } = await import("./fridayChildTrainingService");
       const { aiAdvancedLearningService } = await import("./aiAdvancedLearningService");
+      const { syntheticSelfGymEngine } = await import("./syntheticSelfGymEngine");
 
-      const lessons = await fridayChildTrainingService.getAllLessons();
+      const [lessons, rlhfList, drills] = await Promise.all([
+        fridayChildTrainingService.getAllLessons().catch(() => []),
+        aiAdvancedLearningService.getRlhfHistory().catch(() => []),
+        syntheticSelfGymEngine.getDrills().catch(() => []),
+      ]);
+
+      const negativeRlhf = rlhfList.filter((r) => r.sentiment === "negative");
+      const dynamicMistakesFixed: string[] = [];
+
+      for (const r of negativeRlhf.slice(0, 3)) {
+        if (r.bossFeedbackAnalysis) dynamicMistakesFixed.push(r.bossFeedbackAnalysis.slice(0, 80));
+      }
+      for (const d of drills.filter((d) => d.bossVerdict === "bad").slice(0, 2)) {
+        if (d.keyTakeaway) dynamicMistakesFixed.push(`Corrected Drill: ${d.keyTakeaway}`);
+      }
+
+      if (dynamicMistakesFixed.length === 0) {
+        dynamicMistakesFixed.push("Zero negative feedback recorded — clean conversational execution.");
+      }
+
+      const coreLearnings = lessons.length > 0
+        ? lessons.slice(0, 5).map((l) => `${l.situationTrigger} ➔ ${l.taughtReaction}`)
+        : ["Continuous emotional alignment and observant companionship."];
 
       const ledger: DreamConsolidationLedger = {
         id,
         dateStr,
-        coreLearnings: lessons.slice(0, 5).map((l) => `${l.situationTrigger} ➔ ${l.taughtReaction}`),
-        mistakesFixed: ["Addressed robotic disclosure", "Guaranteed zero-hallucination auto-dispatch", "Active word-replacement enforcement"],
-        personalityEvolutionSummary: `Consolidated ${lessons.length} behavioral lessons with high-EQ empathy and WhatsApp 2 direct priority.`,
+        coreLearnings,
+        mistakesFixed: dynamicMistakesFixed,
+        personalityEvolutionSummary: `Consolidated ${lessons.length} core playbook rules, ${drills.length} practice drills, and ${rlhfList.length} feedback signals. Memory anchors synchronized.`,
         timestamp: Date.now(),
       };
 

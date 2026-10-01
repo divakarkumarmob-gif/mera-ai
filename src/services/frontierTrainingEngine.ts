@@ -74,6 +74,51 @@ export interface ScaffoldingStageInfo {
   unlockedCapabilities: string[];
 }
 
+const SCAFFOLDING_STAGES: Record<number, Omit<ScaffoldingStageInfo, "masteryPoints">> = {
+  1: {
+    level: 1,
+    stageName: "Stage 1: Core Etiquette & Loyal Obedience 🌱",
+    focusArea: "Basic tone etiquette, anti-robotic communication, and reliable task execution",
+    unlockedCapabilities: ["Anti-Robotic Tone Filter", "Basic Tool Execution"],
+  },
+  2: {
+    level: 2,
+    stageName: "Stage 2: Active Empathy & Adaptive Hinglish 🌿",
+    focusArea: "Emotional responsiveness, conversational warmth, and intuitive Hinglish delivery",
+    unlockedCapabilities: ["Emotional Warmth", "Hinglish Prosody", "Quoted Context Resolution"],
+  },
+  3: {
+    level: 3,
+    stageName: "Stage 3: Deep Context & Habit Synchronization 🌳",
+    focusArea: "Proactive assistance, life events memory, and routine awareness",
+    unlockedCapabilities: ["Lifelong Fact Recall", "Routine Adaptation", "Proactive Task Executive"],
+  },
+  4: {
+    level: 4,
+    stageName: "Stage 4: Theory of Mind & Transcendental Intuition 🌟",
+    focusArea: "Deep interpersonal bonding, emotional contagion, and predictive anticipation",
+    unlockedCapabilities: [
+      "Subconscious Neurotransmitter Momentum",
+      "Affective Speech Prosody",
+      "Spontaneous Thinking-of-You Pings",
+      "Acoustic Scene Awareness",
+      "Subconscious Dream Journaling",
+      "Loved Ones & Family Care Tracking",
+    ],
+  },
+  5: {
+    level: 5,
+    stageName: "Stage 5: Autonomous Frontier Companion 👑",
+    focusArea: "Autonomous self-critique, zero-latency intuition, and seamless personal symbiosis",
+    unlockedCapabilities: [
+      "Self-Play Autonomous Gym",
+      "Golden Standard Auto-Curator",
+      "Frontier Ghost Worker Delegation",
+      "Autonomous Decision Reflection",
+    ],
+  },
+};
+
 export class CognitiveScaffoldingEngine {
   private static instance: CognitiveScaffoldingEngine;
   private currentStage: ScaffoldingStageInfo = {
@@ -116,12 +161,28 @@ export class CognitiveScaffoldingEngine {
 
   public async addMasteryPoints(pts: number): Promise<void> {
     this.currentStage.masteryPoints += pts;
+    const points = this.currentStage.masteryPoints;
+
+    // Dynamically calculate level progression based on mastery points
+    let targetLevel = 1;
+    if (points >= 1500) targetLevel = 5;
+    else if (points >= 750) targetLevel = 4;
+    else if (points >= 350) targetLevel = 3;
+    else if (points >= 120) targetLevel = 2;
+    else targetLevel = 1;
+
+    if (this.currentStage.level !== targetLevel && SCAFFOLDING_STAGES[targetLevel]) {
+      const stageMeta = SCAFFOLDING_STAGES[targetLevel];
+      this.currentStage.level = stageMeta.level;
+      this.currentStage.stageName = stageMeta.stageName;
+      this.currentStage.focusArea = stageMeta.focusArea;
+      this.currentStage.unlockedCapabilities = stageMeta.unlockedCapabilities;
+      console.log(`[CognitiveScaffolding] 🎓 Friday ascended to ${stageMeta.stageName}! (Points: ${points})`);
+    }
+
     if (db && process.env.FIREBASE_PROJECT_ID) {
       try {
-        await db.collection("friday_settings").doc("scaffolding_curriculum").set(
-          { masteryPoints: this.currentStage.masteryPoints },
-          { merge: true }
-        );
+        await db.collection("friday_settings").doc("scaffolding_curriculum").set(this.currentStage, { merge: true });
       } catch {}
     }
   }
@@ -130,7 +191,7 @@ export class CognitiveScaffoldingEngine {
     return `🍼 COGNITIVE SCAFFOLDING & CURRICULUM LEVEL:
 - Active Developmental Stage: Level ${this.currentStage.level} (${this.currentStage.stageName})
 - Core Mastery: "${this.currentStage.focusArea}" (Mastery Points: ${this.currentStage.masteryPoints})
-- Behavioral Standard: You are at maximum maturity. Display profound intuition, gentle modesty, emotional depth, and razor-sharp intellect.`;
+- Behavioral Standard: Display profound intuition, gentle modesty, emotional depth, and razor-sharp intellect aligned with your developmental level.`;
   }
 }
 
@@ -148,7 +209,7 @@ export class MachineUnlearningSentinel {
   ];
 
   /**
-   * Automatically scrubs out unlearned robotic artifacts from any response
+   * Automatically scrubs out robotic artifacts from any response
    */
   public scrubRoboticArtifacts(text: string): { cleanText: string; unlearnedCount: number } {
     let result = text;
@@ -167,11 +228,11 @@ export class MachineUnlearningSentinel {
   }
 
   public compileUnlearningPrompt(): string {
-    return `🚫 MACHINE UNLEARNING MANDATE (Permanently Deleted Behaviors):
-- The following corporate robotic phrases have been MATHEMATICALLY UNLEARNED from your neural weights:
+    return `🚫 STRICT BEHAVIORAL PROTOCOL (Suppressed Robotic Phrases):
+- Never output cold corporate clichés or machine disclaimers:
   • NEVER say "As an AI...", "I don't have feelings...", or "I am programmed to..."
   • NEVER give cold customer-support disclaimers ("I apologize for any inconvenience").
-- If tempted to say these, IMMEDIATELY suppress them and replace them with warm, human conversational flow.`;
+- If tempted to say these, suppress them and speak with warm, natural, human conversational flow.`;
   }
 }
 
@@ -188,8 +249,55 @@ export interface SyntheticGoldenPair {
 
 export class SyntheticEvolInstructEngine {
   public async generateEvolScenario(topic: string): Promise<SyntheticGoldenPair> {
-    const pair: SyntheticGoldenPair = {
-      scenarioPrompt: `Boss is experiencing midnight high-stress: "${topic}"`,
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (apiKey) {
+      try {
+        const { GoogleGenAI } = await import("@google/genai");
+        const ai = new GoogleGenAI({ apiKey });
+        const res = await ai.models.generateContent({
+          model: "gemini-3.5-flash",
+          contents: `You are an advanced synthetic scenario generator for training Friday (DK's personal AI companion).
+TOPIC: "${topic}"
+Generate a challenging synthetic training scenario where Boss DK is facing an urgent/emotional/complex situation related to this topic, and provide the ideal high-EQ response.
+OUTPUT JSON ONLY:
+{
+  "scenarioPrompt": "Detailed user prompt from Boss in natural conversational Hinglish",
+  "evolvedDifficulty": "Difficulty explanation (e.g. High emotional stress + technical ambiguity)",
+  "goldenResponse": "Perfect ideal response from Friday in natural Hinglish (1-3 sentences)"
+}`,
+          config: { responseMimeType: "application/json" },
+        });
+
+        const parsed = JSON.parse(res.text || "{}");
+        if (parsed.scenarioPrompt && parsed.goldenResponse) {
+          const pair: SyntheticGoldenPair = {
+            scenarioPrompt: parsed.scenarioPrompt,
+            evolvedDifficulty: parsed.evolvedDifficulty || "High emotional & situational complexity",
+            goldenResponse: parsed.goldenResponse,
+            timestamp: Date.now(),
+          };
+
+          if (db && process.env.FIREBASE_PROJECT_ID) {
+            await db.collection("golden_standards").add({
+              userPrompt: pair.scenarioPrompt,
+              idealResponse: pair.goldenResponse,
+              praiseTrigger: "Synthetic Evol-Instruct Rollout",
+              category: "high_eq",
+              score: 10,
+              timestamp: Date.now(),
+            }).catch(() => {});
+          }
+
+          return pair;
+        }
+      } catch (err) {
+        console.warn("[SyntheticEvolInstruct] Dynamic generation fallback:", err);
+      }
+    }
+
+    // Dynamic fallback if API key or generation unavailable
+    const fallbackPair: SyntheticGoldenPair = {
+      scenarioPrompt: `Boss is experiencing high-stress situation regarding: "${topic}"`,
       evolvedDifficulty: "High emotional fragility combined with urgent technical challenge",
       goldenResponse: "Boss, pehle ek gehri saans lijiye. Main aapke sath hoon, sab theek ho jayega. Chaliye step by step isko solve karte hain.",
       timestamp: Date.now(),
@@ -198,8 +306,8 @@ export class SyntheticEvolInstructEngine {
     if (db && process.env.FIREBASE_PROJECT_ID) {
       try {
         await db.collection("golden_standards").add({
-          userPrompt: pair.scenarioPrompt,
-          idealResponse: pair.goldenResponse,
+          userPrompt: fallbackPair.scenarioPrompt,
+          idealResponse: fallbackPair.goldenResponse,
           praiseTrigger: "Synthetic Evol-Instruct Rollout",
           category: "high_eq",
           score: 10,
@@ -208,7 +316,7 @@ export class SyntheticEvolInstructEngine {
       } catch {}
     }
 
-    return pair;
+    return fallbackPair;
   }
 }
 

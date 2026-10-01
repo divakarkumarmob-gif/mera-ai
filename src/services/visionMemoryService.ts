@@ -43,6 +43,8 @@ export interface CachedMediaContext {
   shortSummary?: string;
   detectedScheduleSlots?: RoutineSlotDraft[];
   isScheduleOrTimetable?: boolean;
+  isStatusMedia?: boolean;
+  chatId?: string;
 }
 
 class VisionMemoryService {
@@ -58,16 +60,36 @@ class VisionMemoryService {
 
   /**
    * Retrieves the recent cached media for a given chat or globally (within 1 hour).
+   * Strict Isolation: WhatsApp Status stories (status@broadcast) are NEVER returned for chat queries!
    */
   public getChatMediaContext(chatId?: string): CachedMediaContext | null {
     const oneHour = 60 * 60 * 1000;
-    if (chatId && this.latestMediaPerChat.has(chatId)) {
-      const item = this.latestMediaPerChat.get(chatId)!;
-      if (Date.now() - item.timestamp < oneHour) {
-        return item;
+    if (chatId) {
+      // 1. Direct key match
+      if (this.latestMediaPerChat.has(chatId)) {
+        const item = this.latestMediaPerChat.get(chatId)!;
+        if (!item.isStatusMedia && Date.now() - item.timestamp < oneHour) {
+          return item;
+        }
+      }
+
+      // 2. Normalized phone / JID match
+      const cleanDigits = chatId.replace(/@.*$/, "").replace(/\D/g, "");
+      const last10 = cleanDigits.slice(-10);
+      for (const [k, item] of this.latestMediaPerChat.entries()) {
+        if (item.isStatusMedia || k === "status@broadcast") continue;
+        const kClean = k.replace(/@.*$/, "").replace(/\D/g, "");
+        if (cleanDigits && kClean === cleanDigits && Date.now() - item.timestamp < oneHour) {
+          return item;
+        }
+        if (last10 && kClean.endsWith(last10) && Date.now() - item.timestamp < oneHour) {
+          return item;
+        }
       }
     }
-    if (this.latestMedia && Date.now() - this.latestMedia.timestamp < oneHour) {
+
+    // Fallback: ONLY return latestMedia if it was an actual chat image/doc, NEVER a status story!
+    if (this.latestMedia && !this.latestMedia.isStatusMedia && Date.now() - this.latestMedia.timestamp < oneHour) {
       return this.latestMedia;
     }
     return null;
@@ -249,6 +271,7 @@ ${caption ? `User caption: "${caption}"` : ""}`;
     }
 
     // Cache latest media in memory and per-chat
+    const isStatusMedia = chatId === "status@broadcast" || (fileName && fileName.startsWith("status_"));
     const cachedItem: CachedMediaContext = {
       buffer,
       mimeType,
@@ -261,10 +284,21 @@ ${caption ? `User caption: "${caption}"` : ""}`;
       shortSummary,
       detectedScheduleSlots: detectedSlots.length > 0 ? detectedSlots : undefined,
       isScheduleOrTimetable: detectedSlots.length > 0,
+      isStatusMedia: !!isStatusMedia,
+      chatId,
     };
-    this.latestMedia = cachedItem;
+
+    // STRICT ISOLATION: WhatsApp Status stories MUST NEVER overwrite chat latestMedia!
+    if (!isStatusMedia) {
+      this.latestMedia = cachedItem;
+    }
+
     if (chatId) {
       this.latestMediaPerChat.set(chatId, cachedItem);
+      const cleanPhone = chatId.replace(/@.*$/, "").replace(/\D/g, "");
+      if (cleanPhone && !isStatusMedia) {
+        this.latestMediaPerChat.set(cleanPhone, cachedItem);
+      }
     }
 
     // Store in Firestore archive
@@ -283,6 +317,8 @@ ${caption ? `User caption: "${caption}"` : ""}`;
         shortSummary,
         timestamp: Date.now(),
         photoBase64: thumbBase64,
+        isStatusMedia: !!isStatusMedia,
+        chatId: chatId || "direct",
       });
     } catch (e) {
       console.warn("[VisionMemoryService] Failed to archive media in Firestore:", e);
@@ -292,7 +328,7 @@ ${caption ? `User caption: "${caption}"` : ""}`;
   }
 
   /**
-   * Retrieves what is inside the latest received WhatsApp photo or PDF.
+   * Retrieves what is inside the latest received WhatsApp photo or PDF (chat only, never status).
    */
   public async getLatestMediaInfo(query?: string): Promise<{
     hasMedia: boolean;
@@ -301,23 +337,27 @@ ${caption ? `User caption: "${caption}"` : ""}`;
     caption?: string;
     timeAgo?: string;
   }> {
-    if (!this.latestMedia) {
-      // Fallback: check Firestore
+    if (!this.latestMedia || this.latestMedia.isStatusMedia) {
+      // Fallback: check Firestore, strictly excluding WhatsApp status stories!
       try {
         const snap = await db
           .collection("whatsappMediaArchive")
           .orderBy("timestamp", "desc")
-          .limit(1)
+          .limit(10)
           .get();
         if (!snap.empty) {
-          const doc = snap.docs[0].data() as StoredMediaItem;
-          return {
-            hasMedia: true,
-            analysis: doc.analysis,
-            sender: doc.sender,
-            caption: doc.caption,
-            timeAgo: "kuch der pehle",
-          };
+          const doc = snap.docs
+            .map((d) => d.data() as StoredMediaItem & { isStatusMedia?: boolean; chatId?: string })
+            .find((d) => !d.isStatusMedia && d.chatId !== "status@broadcast" && !d.id.startsWith("status_"));
+          if (doc) {
+            return {
+              hasMedia: true,
+              analysis: doc.analysis,
+              sender: doc.sender,
+              caption: doc.caption,
+              timeAgo: "kuch der pehle",
+            };
+          }
         }
       } catch (e) {
         console.warn("[VisionMemoryService] Firestore fallback error:", e);
@@ -325,7 +365,7 @@ ${caption ? `User caption: "${caption}"` : ""}`;
 
       return {
         hasMedia: false,
-        analysis: "Boss, abhi tak WhatsApp par koi naya photo ya document receive nahi hua hai.",
+        analysis: "Boss, abhi tak WhatsApp chat me koi naya photo ya document receive nahi hua hai.",
       };
     }
 
@@ -349,6 +389,28 @@ ${caption ? `User caption: "${caption}"` : ""}`;
     fileName?: string,
     chatId?: string
   ): Promise<string> {
+    // Immediately register chat media so it is isolated from status even if AI is slow or offline
+    const initialItem: CachedMediaContext = {
+      buffer,
+      mimeType,
+      sender: "User",
+      caption: userInstruction || fileName,
+      fileName,
+      analysis: userInstruction || fileName || "Image received in chat",
+      timestamp: Date.now(),
+      shortSummary: userInstruction || fileName || "Image received in chat",
+      isStatusMedia: false,
+      chatId,
+    };
+    this.latestMedia = initialItem;
+    if (chatId) {
+      this.latestMediaPerChat.set(chatId, initialItem);
+      const cleanPhone = chatId.replace(/@.*$/, "").replace(/\D/g, "");
+      if (cleanPhone) {
+        this.latestMediaPerChat.set(cleanPhone, initialItem);
+      }
+    }
+
     const ai = this.getGenAI();
     if (!ai) {
       return "⚠️ Summary generate nahi ho payi: Gemini API key configured nahi hai.";
@@ -447,10 +509,16 @@ Use WhatsApp markdown (*bold*, _italic_, bullet points). Keep it clean, accurate
             shortSummary: finalReply.slice(0, 180),
             detectedScheduleSlots: slots.length > 0 ? slots : undefined,
             isScheduleOrTimetable: slots.length > 0,
+            isStatusMedia: false,
+            chatId,
           };
           this.latestMedia = cachedItem;
           if (chatId) {
             this.latestMediaPerChat.set(chatId, cachedItem);
+            const cleanPhone = chatId.replace(/@.*$/, "").replace(/\D/g, "");
+            if (cleanPhone) {
+              this.latestMediaPerChat.set(cleanPhone, cachedItem);
+            }
           }
           return finalReply;
         }

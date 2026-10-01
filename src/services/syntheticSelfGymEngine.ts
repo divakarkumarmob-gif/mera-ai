@@ -1,6 +1,7 @@
 import { getFirestore } from "firebase-admin/firestore";
 import { GoogleGenAI } from "@google/genai";
 import { fridayLearningService } from "./fridayLearningService";
+import { fridayChildTrainingService } from "./fridayChildTrainingService";
 import { aiAdvancedLearningService } from "./aiAdvancedLearningService";
 
 export interface GymDrill {
@@ -145,19 +146,42 @@ class SyntheticSelfGymEngine {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) return null;
 
-    // 1. Fetch lessons Boss has taught Friday
+    // 1. Fetch lessons Boss has taught Friday from BOTH Playbook and Learning Vault
     let targetLesson = lessonOptions;
     if (!targetLesson || (!targetLesson.rule && !targetLesson.trigger)) {
       try {
-        const allLessons = await fridayLearningService.getAllLessons();
-        if (allLessons && allLessons.length > 0) {
-          const randomL = allLessons[Math.floor(Math.random() * allLessons.length)];
-          targetLesson = {
-            lessonId: randomL.id,
-            trigger: randomL.triggerContext || randomL.whatFridayDidWrong,
-            rule: randomL.goldenRule,
-            whatBossTaught: randomL.whatBossTaught,
-          };
+        const candidateLessons: Array<{
+          lessonId: string;
+          trigger: string;
+          rule: string;
+          whatBossTaught: string;
+        }> = [];
+
+        // Source A: fridayChildTrainingService (Playbook)
+        const childLessons = await fridayChildTrainingService.getAllLessons().catch(() => []);
+        for (const cl of childLessons) {
+          candidateLessons.push({
+            lessonId: cl.id,
+            trigger: cl.situationTrigger,
+            rule: cl.taughtReaction,
+            whatBossTaught: cl.taughtReaction,
+          });
+        }
+
+        // Source B: fridayLearningService (Wisdom Vault)
+        const learningLessons = await fridayLearningService.getAllLessons().catch(() => []);
+        for (const ll of learningLessons) {
+          candidateLessons.push({
+            lessonId: ll.id,
+            trigger: ll.triggerContext || ll.whatFridayDidWrong,
+            rule: ll.goldenRule,
+            whatBossTaught: ll.whatBossTaught,
+          });
+        }
+
+        if (candidateLessons.length > 0) {
+          const randomL = candidateLessons[Math.floor(Math.random() * candidateLessons.length)];
+          targetLesson = randomL;
         }
       } catch (e) {
         console.warn("[SelfPlayGym] Could not fetch taught lessons, using fallback:", e);
@@ -232,6 +256,17 @@ OUTPUT MUST BE VALID JSON ONLY:
       console.warn("[SelfPlayGym] Simulation drill warning:", e?.message || e);
     }
     return null;
+  }
+
+  /**
+   * Compatibility alias for practiceDrill
+   */
+  public async practiceDrill(situationPrompt?: string, idealBehaviorHint?: string): Promise<GymDrill | null> {
+    return this.runAutonomousDrill({
+      trigger: situationPrompt,
+      rule: idealBehaviorHint,
+      whatBossTaught: situationPrompt,
+    });
   }
 
   /**

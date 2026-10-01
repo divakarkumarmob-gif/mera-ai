@@ -173,27 +173,97 @@ export class BaileysLiveStore {
   }
 
   /**
-   * Retrieves the live conversation history directly from Baileys RAM store.
-   * Returns chronologically sorted messages (oldest first).
-   * Returns null if no live history exists for this JID/phone.
+   * Calculates IST calendar start-of-day and end-of-day timestamps.
    */
-  public getLiveMessages(jidOrPhone: string, limit = 5): IncomingMessage[] | null {
+  public getISTDayBounds(dateOffsetDays = 0): { startTs: number; endTs: number; dateLabel: string } {
+    const now = new Date();
+    // Format to IST string components
+    const istString = now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" });
+    const istDate = new Date(istString);
+    istDate.setDate(istDate.getDate() - dateOffsetDays);
+
+    const startOfTargetDay = new Date(
+      istDate.getFullYear(),
+      istDate.getMonth(),
+      istDate.getDate(),
+      0,
+      0,
+      0,
+      0
+    );
+    const endOfTargetDay = new Date(
+      istDate.getFullYear(),
+      istDate.getMonth(),
+      istDate.getDate(),
+      23,
+      59,
+      59,
+      999
+    );
+
+    // Approximate UTC offset for IST (+5:30 = 330 minutes)
+    // Using Date.UTC to get clean absolute epoch timestamps
+    const dateLabel = dateOffsetDays === 0 ? "Aaj" : dateOffsetDays === 1 ? "Kal" : `${istDate.getDate()} ${istDate.toLocaleString("en-IN", { month: "short" })}`;
+
+    return {
+      startTs: startOfTargetDay.getTime(),
+      endTs: endOfTargetDay.getTime(),
+      dateLabel,
+    };
+  }
+
+  /**
+   * Retrieves the live conversation history directly from Baileys RAM store.
+   * Searches accurately across ANY message in the conversation (not just the last turn),
+   * ensuring contacts are found even if Boss sent the most recent reply.
+   */
+  public getLiveMessages(jidOrPhone: string, limit = 5, dateRange?: { startTs: number; endTs: number }): IncomingMessage[] | null {
+    const detailed = this.getLiveMessagesDetailed(jidOrPhone, limit, dateRange);
+    if (!detailed || detailed.filteredMessages.length === 0) {
+      return null;
+    }
+    return detailed.filteredMessages;
+  }
+
+  /**
+   * Retrieves detailed live chat status for a contact.
+   * If a date range (e.g. today) is specified, returns filtered messages plus the last older message
+   * so Friday can report accurately if no messages occurred today.
+   */
+  public getLiveMessagesDetailed(
+    jidOrPhone: string,
+    limit = 10,
+    dateRange?: { startTs: number; endTs: number }
+  ): {
+    matchedChatName: string;
+    matchedChatPhone: string;
+    allMessages: IncomingMessage[];
+    filteredMessages: IncomingMessage[];
+    hasFilteredMessages: boolean;
+    lastOlderMessage?: IncomingMessage;
+  } | null {
     const normKey = this.normalizeKey(jidOrPhone);
     let messages = normKey && this.chatMessages.has(normKey) ? this.chatMessages.get(normKey)! : null;
 
-    // Fallback search across chats if key wasn't an exact match (e.g. searching by name or partial phone)
+    // Search across chats if key wasn't an exact match (e.g. searching by name or partial phone)
     if (!messages || messages.length === 0) {
       const q = (jidOrPhone || "").toLowerCase().trim();
       if (q && q.length >= 2) {
         for (const [key, list] of this.chatMessages.entries()) {
-          const sample = list[list.length - 1];
-          if (
-            key.includes(q) ||
-            sample?.senderName?.toLowerCase().includes(q) ||
-            sample?.senderDisplayName?.toLowerCase().includes(q) ||
-            sample?.senderPhone?.includes(q) ||
-            sample?.replyJid?.toLowerCase().includes(q)
-          ) {
+          const matched = list.some((m) => {
+            const isMe = m.senderPhone === "me" || m.senderName.includes("DK") || m.senderName.includes("Boss");
+            if (isMe) {
+              return m.replyJid?.toLowerCase().includes(q) || key.includes(q);
+            }
+            return (
+              key.includes(q) ||
+              m.senderName?.toLowerCase().includes(q) ||
+              m.senderDisplayName?.toLowerCase().includes(q) ||
+              m.senderPhone?.includes(q) ||
+              m.replyJid?.toLowerCase().includes(q)
+            );
+          });
+          if (matched) {
             messages = list;
             break;
           }
@@ -205,11 +275,43 @@ export class BaileysLiveStore {
       return null;
     }
 
+    // Sort chronologically (oldest first)
+    const sorted = [...messages].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+
+    // Determine contact name and phone
+    const nonMeSample = sorted.find((m) => m.senderPhone !== "me" && !m.senderName.includes("DK"));
+    const matchedChatName = nonMeSample?.senderName || nonMeSample?.senderDisplayName || sorted[sorted.length - 1]?.senderName || jidOrPhone;
+    const matchedChatPhone = nonMeSample?.senderPhone || "";
+
+    if (dateRange && (dateRange.startTs > 0 || dateRange.endTs > 0)) {
+      const filtered = sorted.filter(
+        (m) => m.timestamp >= dateRange.startTs && m.timestamp <= dateRange.endTs
+      );
+      const count = Math.max(1, Math.min(limit, 100));
+      const older = sorted.filter((m) => m.timestamp < dateRange.startTs);
+      const lastOlderMessage = older.length > 0 ? older[older.length - 1] : undefined;
+
+      return {
+        matchedChatName,
+        matchedChatPhone,
+        allMessages: sorted,
+        filteredMessages: filtered.slice(-count),
+        hasFilteredMessages: filtered.length > 0,
+        lastOlderMessage,
+      };
+    }
+
     const count = Math.max(1, Math.min(limit, 100));
-    // Slice latest 'count' messages and sort chronologically
-    return messages
-      .slice(-count)
-      .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+    const recent = sorted.slice(-count);
+
+    return {
+      matchedChatName,
+      matchedChatPhone,
+      allMessages: sorted,
+      filteredMessages: recent,
+      hasFilteredMessages: recent.length > 0,
+      lastOlderMessage: sorted.length > count ? sorted[sorted.length - count - 1] : undefined,
+    };
   }
 
   /**

@@ -484,8 +484,28 @@ class WhatsAppBotService {
     }
   }
 
+  public unwrapRealMessage(message: any): any {
+    if (!message) return null;
+    let m = message;
+    while (
+      m?.ephemeralMessage?.message ||
+      m?.viewOnceMessage?.message ||
+      m?.viewOnceMessageV2?.message ||
+      m?.documentWithCaptionMessage?.message
+    ) {
+      m =
+        m.ephemeralMessage?.message ||
+        m.viewOnceMessage?.message ||
+        m.viewOnceMessageV2?.message ||
+        m.documentWithCaptionMessage?.message;
+    }
+    return m;
+  }
+
   private extractMessageText(msg: any): string {
-    const m = msg.message;
+    const rawM = msg.message;
+    if (!rawM) return "";
+    const m = this.unwrapRealMessage(rawM);
     if (!m) return "";
     return (
       m.conversation ||
@@ -577,8 +597,63 @@ class WhatsAppBotService {
   private setupMessageListener() {
     if (!this.sock) return;
 
+    // ── Listen for WhatsApp History Sync from Phone ──
+    this.sock.ev.on("messaging-history.set", async ({ chats, contacts, messages }: any) => {
+      try {
+        console.log(`[WhatsAppBot] 📥 WhatsApp Phone History Synced: ${chats?.length || 0} chats, ${contacts?.length || 0} contacts, ${messages?.length || 0} messages.`);
+        if (contacts && contacts.length > 0) {
+          for (const c of contacts) {
+            const id = c.id || "";
+            const name = c.name || c.notify;
+            if (id && name) {
+              const phone = id.split("@")[0].replace(/\D/g, "");
+              if (phone) {
+                contactsService.saveContact(name, phone).catch(() => {});
+              }
+            }
+          }
+        }
+        if (messages && messages.length > 0) {
+          for (const m of messages) {
+            try {
+              const remoteJid = m.key?.remoteJid || "";
+              if (!remoteJid || remoteJid.includes("broadcast")) continue;
+              const text = this.extractMessageText(m);
+              if (!text) continue;
+              const isFromMe = !!m.key?.fromMe;
+              const ts = m.messageTimestamp ? Number(m.messageTimestamp) * 1000 : Date.now();
+              if (isFromMe) {
+                baileysLiveStore.recordOutgoing(remoteJid, text, "Aap (DK)", false, m.key?.id);
+              } else {
+                const senderPhone = (m.key?.participant || remoteJid).split("@")[0].replace(/\D/g, "");
+                const incoming: IncomingMessage = {
+                  id: m.key?.id || `sync_${ts}_${Math.random().toString(36).slice(2, 6)}`,
+                  senderPhone,
+                  senderName: m.pushName || `+${senderPhone}`,
+                  senderDisplayName: m.pushName || `+${senderPhone}`,
+                  replyJid: remoteJid,
+                  groupId: remoteJid.endsWith("@g.us") ? remoteJid : null,
+                  groupName: null,
+                  isGroup: remoteJid.endsWith("@g.us"),
+                  isUnknownContact: false,
+                  text,
+                  timestamp: ts,
+                  dateStr: baileysLiveStore.formatFriendlyIST(ts).formattedBadge,
+                  isRead: true,
+                };
+                baileysLiveStore.recordIncoming(incoming);
+                whatsappHistoryEngine.unshiftMessage(incoming);
+              }
+            } catch {}
+          }
+        }
+      } catch (histErr) {
+        console.warn("[WhatsAppBot] Error processing messaging-history.set:", histErr);
+      }
+    });
+
     this.sock.ev.on("messages.upsert", async ({ messages, type }: any) => {
-      if (type !== "notify") return;
+      if (type !== "notify" && type !== "append") return;
 
       for (const msg of messages) {
         try {
@@ -764,6 +839,11 @@ class WhatsAppBotService {
           whatsappHistoryEngine.unshiftMessage(incoming);
           whatsappHistoryEngine.saveToFirestore(incoming).catch(() => {});
 
+          // If this is a historical sync append, record into memory and skip auto-replies
+          if (type === "append") {
+            continue;
+          }
+
           // ── GROUP COLLECTIVE LEARNING & AUTO-MODERATION ─────────────────────
           if (isGroup) {
             const { groupCollectiveLearningService } = await import("./groupCollectiveLearningService");
@@ -945,36 +1025,43 @@ class WhatsAppBotService {
             }
           }
 
-          // Media Processing
+          // Media Processing (Unwrap ephemeral/view-once wrappers so chat photos/docs are never missed)
+          const realM = this.unwrapRealMessage(msg.message);
           const hasMedia = !!(
-            msg.message?.imageMessage ||
-            msg.message?.documentMessage ||
-            msg.message?.videoMessage ||
-            msg.message?.audioMessage
+            realM?.imageMessage ||
+            realM?.documentMessage ||
+            realM?.videoMessage ||
+            realM?.audioMessage
           );
 
           if (hasMedia) {
             try {
               const downloadFn = baileys.downloadMediaMessage || baileys.default?.downloadMediaMessage;
               if (downloadFn) {
-                const buffer: Buffer = await downloadFn(msg, "buffer", {}, { reuploadRequest: this.sock?.updateMediaMessage });
+                let buffer: Buffer;
+                try {
+                  buffer = await downloadFn(msg, "buffer", {}, { reuploadRequest: this.sock?.updateMediaMessage });
+                } catch {
+                  // Fallback for wrapped messages
+                  buffer = await downloadFn({ key: msg.key, message: realM }, "buffer", {}, { reuploadRequest: this.sock?.updateMediaMessage });
+                }
                 if (buffer && buffer.length > 0) {
-                  const isVoice = !!msg.message?.audioMessage;
-                  const isPhoto = !!msg.message?.imageMessage;
-                  const isDoc = !!msg.message?.documentMessage;
-                  const isVideo = !!msg.message?.videoMessage;
+                  const isVoice = !!realM?.audioMessage;
+                  const isPhoto = !!realM?.imageMessage;
+                  const isDoc = !!realM?.documentMessage;
+                  const isVideo = !!realM?.videoMessage;
                   const mimeType =
-                    msg.message?.imageMessage?.mimetype ||
-                    msg.message?.documentMessage?.mimetype ||
-                    msg.message?.videoMessage?.mimetype ||
-                    msg.message?.audioMessage?.mimetype ||
+                    realM?.imageMessage?.mimetype ||
+                    realM?.documentMessage?.mimetype ||
+                    realM?.videoMessage?.mimetype ||
+                    realM?.audioMessage?.mimetype ||
                     (isVideo ? "video/mp4" : isVoice ? "audio/ogg" : isDoc ? "application/pdf" : "image/jpeg");
                   const caption =
-                    msg.message?.imageMessage?.caption ||
-                    msg.message?.documentMessage?.caption ||
-                    msg.message?.videoMessage?.caption ||
+                    realM?.imageMessage?.caption ||
+                    realM?.documentMessage?.caption ||
+                    realM?.videoMessage?.caption ||
                     "";
-                  const fileName = msg.message?.documentMessage?.fileName;
+                  const fileName = realM?.documentMessage?.fileName;
 
                   // ── Safe Media Vault Ingestion for Boss Forwarding ──
                   try {
