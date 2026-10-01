@@ -1,5 +1,6 @@
 import { db } from "../firebaseAdmin";
 import { IncomingMessage } from "./whatsappTypes";
+import { baileysLiveStore } from "./baileysLiveStore";
 
 const inboxCol = () => db.collection("whatsapp_inbox");
 
@@ -14,6 +15,7 @@ export class WhatsAppHistoryEngine {
 
   /**
    * Preloads latest messages from Firestore so that server restarts retain active memory.
+   * Also primes the Baileys live store so in-memory queries are instant right upon launch.
    */
   public async warmUpCacheFromFirestore(limit = 150): Promise<void> {
     if (this.isWarmedUp) return;
@@ -28,12 +30,24 @@ export class WhatsAppHistoryEngine {
             if (!this.messageCache.some((m) => m.id === msg.id)) {
               this.messageCache.push(msg);
             }
+            // Prime Baileys Live Store as well
+            if (msg.senderPhone === "me" || msg.senderPhone === "bot") {
+              baileysLiveStore.recordOutgoing(
+                msg.replyJid || "",
+                msg.text,
+                msg.senderName,
+                msg.senderPhone === "bot",
+                msg.id
+              );
+            } else {
+              baileysLiveStore.recordIncoming(msg);
+            }
           }
           this.messageCache.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
           if (this.messageCache.length > 500) {
             this.messageCache = this.messageCache.slice(0, 500);
           }
-          console.log(`[WhatsAppHistory] 🔥 Cache warmed up with ${fetched.length} persistent messages from Firestore.`);
+          console.log(`[WhatsAppHistory] 🔥 Cache & BaileysLiveStore warmed up with ${fetched.length} messages from Firestore.`);
         }
         this.isWarmedUp = true;
       } catch (err) {
@@ -47,6 +61,7 @@ export class WhatsAppHistoryEngine {
   }
 
   public recordIncomingMessage(msg: IncomingMessage) {
+    baileysLiveStore.recordIncoming(msg);
     if (!this.messageCache.some((m) => m.id === msg.id)) {
       this.messageCache.unshift(msg);
       if (this.messageCache.length > 500) {
@@ -64,6 +79,18 @@ export class WhatsAppHistoryEngine {
   }
 
   public unshiftMessage(msg: IncomingMessage) {
+    if (msg.senderPhone === "me" || msg.senderPhone === "bot") {
+      baileysLiveStore.recordOutgoing(
+        msg.replyJid || "",
+        msg.text,
+        msg.senderName,
+        msg.senderPhone === "bot",
+        msg.id
+      );
+    } else {
+      baileysLiveStore.recordIncoming(msg);
+    }
+
     if (!this.messageCache.some((m) => m.id === msg.id)) {
       this.messageCache.unshift(msg);
       if (this.messageCache.length > 500) {
@@ -73,9 +100,14 @@ export class WhatsAppHistoryEngine {
   }
 
   /**
-   * Returns recent messages from a specific group in chronological order
+   * Returns recent messages from a specific group in chronological order.
+   * Checks Baileys Live Store first, falls back to memory cache.
    */
   public getRecentGroupMessages(groupJid: string, limit: number = 25): IncomingMessage[] {
+    const liveGroup = baileysLiveStore.getLiveGroupMessages(groupJid, limit);
+    if (liveGroup && liveGroup.messages.length > 0) {
+      return liveGroup.messages;
+    }
     const cleanJid = (groupJid || "").trim();
     return this.messageCache
       .filter((m) => m.isGroup && (m.groupId === cleanJid || m.replyJid === cleanJid))
@@ -85,9 +117,14 @@ export class WhatsAppHistoryEngine {
 
   /**
    * Retrieves persistent conversation context between Boss (DK) and Friday.
-   * If cache is cold or insufficient, queries Firestore for historical turns.
+   * Checks Baileys Live Store first for zero-latency direct retrieval, then falls back to Firestore.
    */
   public async getRecentBossContext(replyJid = "", limit = 15): Promise<IncomingMessage[]> {
+    const liveMsgs = baileysLiveStore.getLiveMessages("me", limit);
+    if (liveMsgs && liveMsgs.length >= 3) {
+      return liveMsgs;
+    }
+
     await this.warmUpCacheFromFirestore();
 
     const isBossMatch = (m: IncomingMessage) => {
@@ -130,8 +167,14 @@ export class WhatsAppHistoryEngine {
 
   /**
    * Retrieves persistent conversation context for a specific contact phone or JID.
+   * Checks Baileys Live Store first, then falls back to cache/Firestore.
    */
   public async getRecentContactContext(senderPhone: string, limit = 8): Promise<IncomingMessage[]> {
+    const liveMsgs = baileysLiveStore.getLiveMessages(senderPhone, limit);
+    if (liveMsgs && liveMsgs.length > 0) {
+      return liveMsgs;
+    }
+
     await this.warmUpCacheFromFirestore();
     const clean = (senderPhone || "").replace(/\D/g, "");
 
@@ -377,6 +420,30 @@ export class WhatsAppHistoryEngine {
     const qLower = (query || "").toLowerCase().trim();
     const contactLower = (options?.contact || "").toLowerCase().trim();
 
+    // ── 1. BAILEYS LIVE SEARCH FIRST ──
+    const liveMatches = baileysLiveStore.searchLiveMessages(contactLower || qLower, limit);
+    if (liveMatches.length > 0) {
+      let filtered = liveMatches;
+      if (contactLower && qLower && contactLower !== qLower) {
+        filtered = filtered.filter((m) => m.text.toLowerCase().includes(qLower));
+      }
+      if (filtered.length > 0) {
+        let summary = `⚡💬 *WhatsApp Live Search (Baileys Store, ${filtered.length} found):*\n\n`;
+        filtered.forEach((m, i) => {
+          const who = m.senderPhone === "me" ? "👤 Aap (DK)" : `📩 ${m.senderName} (+${m.senderPhone})`;
+          summary += `${i + 1}. *${who}* [📅 ${m.dateStr || "Abhi"}]\n   • _"${m.text.slice(0, 160)}"_\n\n`;
+        });
+        summary += `_⚡ Source: Real-time Baileys live memory_\n`;
+        return {
+          success: true,
+          count: filtered.length,
+          results: filtered,
+          summary: summary.trim(),
+        };
+      }
+    }
+
+    // ── 2. FIRESTORE ARCHIVE SEARCH FALLBACK ──
     try {
       let docs: IncomingMessage[] = [];
       try {
@@ -428,9 +495,10 @@ export class WhatsAppHistoryEngine {
 
       let summary = `💬 *WhatsApp Messages History (Pichle ${days} din, ${filtered.length} found):*\n\n`;
       filtered.forEach((m, i) => {
-        const who = m.senderPhone === "me" ? "👤 Aap (Sent)" : `📩 ${m.senderName} (+${m.senderPhone})`;
-        summary += `${i + 1}. *${who}* [📅 ${m.dateStr}]\n   • _"${m.text.slice(0, 160)}"_\n\n`;
+        const who = m.senderPhone === "me" ? "👤 Aap (DK)" : `📩 ${m.senderName} (+${m.senderPhone})`;
+        summary += `${i + 1}. *${who}* [📅 ${m.dateStr || "Recent"}]\n   • _"${m.text.slice(0, 160)}"_\n\n`;
       });
+      summary += `_📁 Source: Firestore cloud archive_\n`;
 
       return {
         success: true,
@@ -449,6 +517,11 @@ export class WhatsAppHistoryEngine {
     }
   }
 
+  /**
+   * Retrieves conversation summary and history.
+   * BAILEYS FIRST: In-memory live Baileys store delivers immediate results with exact date, day, and time.
+   * FIRESTORE FALLBACK: Queries Firestore only when Baileys live memory does not have the target conversation.
+   */
   public async getConversationSummaryAndHistory(
     targetQuery?: string,
     limit = 30,
@@ -456,6 +529,149 @@ export class WhatsAppHistoryEngine {
   ): Promise<{ success: boolean; summary: string; count: number; unreadCount?: number }> {
     const rawQ = (targetQuery || "").toLowerCase().trim();
     const startTs = Date.now() - daysBack * 86400000;
+
+    const isUnknownSearch =
+      rawQ.includes("unknown") ||
+      rawQ.includes("anpadh") ||
+      rawQ.includes("stranger") ||
+      rawQ.includes("naye number") ||
+      rawQ.includes("anjaan");
+
+    const isAllSearch =
+      !rawQ ||
+      rawQ === "all" ||
+      rawQ === "sab" ||
+      rawQ === "kisi" ||
+      rawQ === "everything" ||
+      rawQ === "all chats" ||
+      rawQ === "sabka";
+
+    // ── 1. GROUP CHAT CHECK ──
+    const nameMatch = rawQ.match(/(?:kya\s+)?([a-zA-Z0-9\u0900-\u097F\s\-_\.]+?)\s*(?:ne\s*msg|ne\s*message|se\s*kya|ka\s*msg|ka\s*message|se\s*baat|ne\s*kya|group|grup)/i);
+    const candidateName = nameMatch ? nameMatch[1].trim() : rawQ;
+
+    const isGroupQuery =
+      rawQ.includes("group") ||
+      rawQ.includes("grup") ||
+      candidateName.toLowerCase().includes("group");
+
+    if (isGroupQuery && candidateName && !isAllSearch) {
+      return await this.getGroupMessagesWithSummary(candidateName, limit, daysBack);
+    }
+
+    // ── 2. CONTACT RESOLUTION ──
+    let targetContactPhone = "";
+    let targetContactName = "";
+
+    if (!isUnknownSearch && !isAllSearch && candidateName) {
+      try {
+        const { contactsService } = await import("../contactsService");
+        const contact = await contactsService.findContact(candidateName);
+        if (contact && contact.id !== "owner_default" && contact.id !== "temp") {
+          targetContactPhone = contact.phone;
+          targetContactName = contact.name;
+        } else if (candidateName.length >= 2 && !["kisi", "kya", "msg", "message", "whatsapp", "batao", "bheja", "hua"].includes(candidateName)) {
+          targetContactName = candidateName;
+        }
+      } catch {}
+    }
+
+    // ── 3. BAILEYS LIVE STORE (PRIMARY INSTANT RETRIEVAL) ──
+    if (!isUnknownSearch) {
+      if (isAllSearch) {
+        const activeConvs = baileysLiveStore.getAllActiveConversations(Math.min(limit, 6));
+        if (activeConvs.length > 0) {
+          let card = `⚡ *WhatsApp Live Conversations (Baileys Store, ${activeConvs.length} active chats):*\n\n`;
+          let totalCount = 0;
+          for (const conv of activeConvs) {
+            totalCount += conv.messages.length;
+            const last = conv.messages[conv.messages.length - 1];
+            const isGrp = conv.isGroup;
+            const icon = isGrp ? "👥" : "👤";
+            card += `━━━━━━━━━━━━━━━━━━━━━\n`;
+            card += `${icon} *${conv.displayName}* ${isGrp ? "[Group]" : ""}\n`;
+            card += `📅 _Last Active: ${last.dateStr || "Abhi"}_\n\n`;
+
+            conv.messages.slice(-5).forEach((m) => {
+              if (m.senderPhone === "me") {
+                card += `  👤 *Aap (DK):* _"${m.text}"_\n`;
+              } else {
+                card += `  📩 *${m.senderName}:* _"${m.text}"_\n`;
+                if (m.botReply) {
+                  card += `  🤖 *Friday (Auto-Reply):* _"${m.botReply}"_\n`;
+                }
+              }
+            });
+            card += `\n`;
+          }
+
+          card += `\n_⚡ Source: Real-time Baileys in-memory live store_\n`;
+
+          return {
+            success: true,
+            count: totalCount,
+            summary: card.trim(),
+          };
+        }
+      } else {
+        // Specific contact search in Baileys Live Store
+        const targetLookupKey = targetContactPhone || targetContactName || candidateName;
+        const liveMsgs = baileysLiveStore.getLiveMessages(targetLookupKey, limit);
+
+        if (liveMsgs && liveMsgs.length > 0) {
+          const displayName = targetContactName || liveMsgs[0]?.senderName || candidateName;
+          const displayPhone = targetContactPhone || liveMsgs[0]?.senderPhone || "";
+          const phoneBadge = displayPhone && displayPhone !== "me" ? ` (+${displayPhone})` : "";
+          const lastMsg = liveMsgs[liveMsgs.length - 1];
+
+          let card = `⚡ *WhatsApp Live Chat: ${displayName}*${phoneBadge}\n`;
+          card += `━━━━━━━━━━━━━━━━━━━━━\n`;
+          card += `📅 _Last Active: ${lastMsg.dateStr || "Abhi"}_\n`;
+          card += `💬 _Total recent messages: ${liveMsgs.length}_\n\n`;
+
+          liveMsgs.forEach((m) => {
+            const timeTag = m.dateStr ? `[${m.dateStr}] ` : "";
+            if (m.senderPhone === "me") {
+              card += `  👤 *Aap (DK):* ${timeTag}_"${m.text}"_\n`;
+            } else {
+              card += `  📩 *${m.senderName}:* ${timeTag}_"${m.text}"_\n`;
+              if (m.botReply) {
+                card += `  🤖 *Friday:* _"${m.botReply}"_\n`;
+              }
+            }
+          });
+
+          // Check if there are any pending questions for this contact
+          try {
+            const { dailyUpdateService } = await import("../dailyUpdateService");
+            const pendingQuestions = await dailyUpdateService.getQuestionsAwaitingDK();
+            const relevant = pendingQuestions.filter(
+              (q) =>
+                (targetContactPhone && q.senderPhone.includes(targetContactPhone)) ||
+                (displayName && q.senderName.toLowerCase().includes(displayName.toLowerCase()))
+            );
+            if (relevant.length > 0) {
+              card += `\n━━━━━━━━━━━━━━━━━━━━━\n`;
+              card += `❓ *Pending Question Awaiting DK Reply:*\n`;
+              relevant.forEach((q) => {
+                card += `  • _"${q.question}"_ (Poocha: ${q.senderName})\n`;
+              });
+            }
+          } catch {}
+
+          card += `\n_⚡ Source: Real-time Baileys live memory_\n`;
+
+          return {
+            success: true,
+            count: liveMsgs.length,
+            summary: card.trim(),
+          };
+        }
+      }
+    }
+
+    // ── 4. FIRESTORE FALLBACK (ARCHIVE QUERY) ──
+    console.log(`[WhatsAppHistory] 🔄 Target "${candidateName || targetQuery}" not in live Baileys buffer. Falling back to Firestore archive...`);
 
     let docs: IncomingMessage[] = [];
     try {
@@ -469,45 +685,21 @@ export class WhatsAppHistoryEngine {
       docs = this.messageCache.filter((m) => m.timestamp >= startTs);
     }
 
+    // Backfill fetched docs into Baileys Live Store for immediate warm caching
+    for (const d of docs) {
+      if (d.senderPhone === "me" || d.senderPhone === "bot") {
+        baileysLiveStore.recordOutgoing(d.replyJid || "", d.text, d.senderName, d.senderPhone === "bot", d.id);
+      } else {
+        baileysLiveStore.recordIncoming(d);
+      }
+    }
+
     if (docs.length === 0) {
       return {
         success: true,
         count: 0,
         summary: `Boss, pichle ${daysBack} dino me WhatsApp par koi incoming/outgoing message nahi mila.`,
       };
-    }
-
-    const isUnknownSearch =
-      rawQ.includes("unknown") ||
-      rawQ.includes("anpadh") ||
-      rawQ.includes("stranger") ||
-      rawQ.includes("naye number") ||
-      rawQ.includes("anjaan");
-
-    let targetContactPhone = "";
-    let targetContactName = "";
-
-    const nameMatch = rawQ.match(/(?:kya\s+)?([a-zA-Z0-9\u0900-\u097F\s\-_\.]+?)\s*(?:ne\s*msg|ne\s*message|se\s*kya|ka\s*msg|ka\s*message|se\s*baat|ne\s*kya|group|grup)/i);
-    const candidateName = nameMatch ? nameMatch[1].trim() : rawQ;
-
-    const isGroupQuery =
-      rawQ.includes("group") ||
-      rawQ.includes("grup") ||
-      docs.some((m) => m.isGroup && (m.groupName?.toLowerCase().includes(candidateName.toLowerCase()) || m.groupId?.toLowerCase().includes(candidateName.toLowerCase())));
-
-    if (isGroupQuery) {
-      return await this.getGroupMessagesWithSummary(candidateName, limit, daysBack);
-    }
-
-    if (!isUnknownSearch && candidateName && candidateName !== "all" && candidateName !== "sab" && candidateName !== "kisi" && !candidateName.includes("kisi ne")) {
-      const { contactsService } = await import("../contactsService");
-      const contact = await contactsService.findContact(candidateName);
-      if (contact && contact.id !== "owner_default" && contact.id !== "temp") {
-        targetContactPhone = contact.phone;
-        targetContactName = contact.name;
-      } else if (candidateName.length >= 2 && !["kisi", "kya", "msg", "message", "whatsapp", "batao", "bheja", "hua"].includes(candidateName)) {
-        targetContactName = candidateName;
-      }
     }
 
     let filtered = docs.filter((m) => !m.isGroup);
@@ -536,7 +728,7 @@ export class WhatsAppHistoryEngine {
       return {
         success: true,
         count: 0,
-        summary: `Boss, "${targetContactName || targetQuery || "contact"}" se pichle ${daysBack} dino me koi message nahi aaya hai.`,
+        summary: `Boss, "${targetContactName || targetQuery || "contact"}" se pichle ${daysBack} dino me koi message nahi mila.`,
       };
     }
 
@@ -558,7 +750,7 @@ export class WhatsAppHistoryEngine {
 
       card += `━━━━━━━━━━━━━━━━━━━━━\n`;
       card += `👤 *${displayName}* ${displayPhone}${statusTag}\n`;
-      card += `📅 _Last Active: ${sorted[sorted.length - 1].dateStr}_\n\n`;
+      card += `📅 _Last Active: ${sorted[sorted.length - 1].dateStr || "Recent"}_\n\n`;
 
       sorted.slice(-6).forEach((m) => {
         if (m.senderPhone === "me") {
@@ -586,6 +778,8 @@ export class WhatsAppHistoryEngine {
       }
     } catch {}
 
+    card += `\n_📁 Source: Firestore cloud archive_\n`;
+
     return {
       success: true,
       count: filtered.length,
@@ -594,7 +788,8 @@ export class WhatsAppHistoryEngine {
   }
 
   /**
-   * Retrieves messages and executive summary for a specific WhatsApp group
+   * Retrieves messages and executive summary for a specific WhatsApp group.
+   * BAILEYS FIRST: Checks live memory first, then falls back to Firestore archive.
    */
   public async getGroupMessagesWithSummary(
     groupNameQuery?: string,
@@ -603,6 +798,30 @@ export class WhatsAppHistoryEngine {
   ): Promise<{ success: boolean; count: number; groupName: string; summary: string; messages: any[] }> {
     const rawQ = (groupNameQuery || "").toLowerCase().trim();
     const cleanQ = rawQ.replace(/group|grup|ka|ki|ke|last|msg|message|messages|batao|bataiye|chahiye/gi, "").trim();
+
+    // ── 1. BAILEYS LIVE GROUP FIRST ──
+    const liveGroup = baileysLiveStore.getLiveGroupMessages(cleanQ || rawQ, limit);
+    if (liveGroup && liveGroup.messages.length > 0) {
+      const targetGroupName = liveGroup.groupName || groupNameQuery || "WhatsApp Group";
+      let summaryCard = `⚡👥 *Group Conversation: ${targetGroupName}* (Live Baileys Store, ${liveGroup.messages.length} msgs):\n━━━━━━━━━━━━━━━━━━━━━\n\n`;
+      liveGroup.messages.forEach((m, idx) => {
+        const time = m.dateStr || "Recent";
+        const sender = m.senderPhone === "me" ? "Aap (DK)" : m.senderName;
+        summaryCard += `${idx + 1}. [${time}] *${sender}:* _"${m.text}"_\n`;
+      });
+      summaryCard += `\n_⚡ Source: Real-time Baileys live memory_\n`;
+
+      return {
+        success: true,
+        count: liveGroup.messages.length,
+        groupName: targetGroupName,
+        summary: summaryCard.trim(),
+        messages: liveGroup.messages.map((m) => ({ sender: m.senderName, text: m.text, time: m.dateStr, phone: m.senderPhone })),
+      };
+    }
+
+    // ── 2. FIRESTORE ARCHIVE FALLBACK ──
+    console.log(`[WhatsAppHistory] 🔄 Group "${groupNameQuery}" not in live Baileys buffer. Falling back to Firestore archive...`);
     const startTs = Date.now() - daysBack * 86400000;
 
     let docs: IncomingMessage[] = [];
@@ -617,6 +836,11 @@ export class WhatsAppHistoryEngine {
 
     if (docs.length === 0 && this.messageCache.length > 0) {
       docs = this.messageCache.filter((m) => m.isGroup && m.timestamp >= startTs);
+    }
+
+    // Backfill into Baileys Live Store
+    for (const d of docs) {
+      baileysLiveStore.recordIncoming(d);
     }
 
     let matching = docs;
@@ -648,6 +872,7 @@ export class WhatsAppHistoryEngine {
       const sender = m.senderPhone === "me" ? "Aap (DK)" : m.senderName;
       summaryCard += `${idx + 1}. [${time}] *${sender}:* _"${m.text}"_\n`;
     });
+    summaryCard += `\n_📁 Source: Firestore cloud archive_\n`;
 
     return {
       success: true,

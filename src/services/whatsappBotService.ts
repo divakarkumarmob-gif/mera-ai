@@ -12,6 +12,7 @@ import { visionMemoryService } from "./visionMemoryService";
 // Sub-engine imports
 import type { QuotedMessageContext, IncomingMessage, WhatsAppStatus } from "./whatsapp/whatsappTypes";
 import { whatsappHistoryEngine } from "./whatsapp/whatsappHistoryEngine";
+import { baileysLiveStore } from "./whatsapp/baileysLiveStore";
 import { whatsappGirlfriendEngine } from "./whatsapp/whatsappGirlfriendEngine";
 import { whatsappBossAiEngine } from "./whatsapp/whatsappBossAiEngine";
 import { whatsappAutoReplyEngine } from "./whatsapp/whatsappAutoReplyEngine";
@@ -306,6 +307,7 @@ class WhatsAppBotService {
   }
 
   public recordIncomingMessage(msg: IncomingMessage) {
+    baileysLiveStore.recordIncoming(msg);
     whatsappHistoryEngine.recordIncomingMessage(msg);
   }
 
@@ -664,6 +666,8 @@ class WhatsAppBotService {
               isRead: true,
             };
             if (!whatsappGirlfriendEngine.isGirlfriendModeActive(remoteJid)) {
+              baileysLiveStore.recordOutgoing(remoteJid, text, "Aap (DK)", false, outgoing.id);
+              whatsappHistoryEngine.unshiftMessage(outgoing);
               whatsappHistoryEngine.saveToFirestore(outgoing).catch(() => {});
             }
 
@@ -756,6 +760,7 @@ class WhatsAppBotService {
             quotedMessage,
           };
 
+          baileysLiveStore.recordIncoming(incoming);
           whatsappHistoryEngine.unshiftMessage(incoming);
           whatsappHistoryEngine.saveToFirestore(incoming).catch(() => {});
 
@@ -1971,6 +1976,7 @@ class WhatsAppBotService {
         }),
         isRead: true,
       };
+      baileysLiveStore.recordOutgoing(jid, trimmed, "Friday", true, result.key.id);
       whatsappHistoryEngine.unshiftMessage(botOutgoing);
       whatsappHistoryEngine.saveToFirestore(botOutgoing).catch(() => {});
     }
