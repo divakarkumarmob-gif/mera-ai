@@ -308,21 +308,14 @@ class TelegramBotService {
       console.warn("[TelegramBot] Girlfriend Open model query failed:", e);
     }
 
-    try {
-      const encPrompt = encodeURIComponent(text);
-      const encSys = encodeURIComponent(prompt.slice(0, 300));
-      const res = await fetch(`https://text.pollinations.ai/${encPrompt}?model=openai-fast&system=${encSys}`);
-      if (res.ok) {
-        const t = (await res.text()).trim();
-        if (t) {
-          learnIntimate(t);
-          stampClimax(t);
-          return t;
-        }
-      }
-    } catch {}
+    if (wge?.generateContextualRomanticFallback) {
+      const fallback = wge.generateContextualRomanticFallback(text, "mode_b");
+      learnIntimate(fallback);
+      stampClimax(fallback);
+      return fallback;
+    }
 
-    return "";
+    return "Arey mere handsome, main yahin hoon! Bolo na baby, kya chal raha hai dimaag me? 😘❤️";
   }
 
   // Multi-tier model fallback chain (Top-tier reasoning models first)
