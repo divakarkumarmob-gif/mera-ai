@@ -52,6 +52,14 @@ class WhatsAppBotService {
   private autoReplyEnabled = true;
   private baileysEnabled = true;
   private botSentMessageIds: Set<string> = new Set();
+  private trackSentMessageId(id?: string | null) {
+    if (!id) return;
+    this.botSentMessageIds.add(id);
+    if (this.botSentMessageIds.size > 500) {
+      const oldest = Array.from(this.botSentMessageIds).slice(0, 100);
+      oldest.forEach((mid) => this.botSentMessageIds.delete(mid));
+    }
+  }
   private recentActiveJids: Set<string> = new Set();
   private pendingVoiceDebounce: Map<
     string,
@@ -1931,11 +1939,7 @@ class WhatsAppBotService {
     }
 
     if (result?.key?.id) {
-      this.botSentMessageIds.add(result.key.id);
-      if (this.botSentMessageIds.size > 500) {
-        const oldest = Array.from(this.botSentMessageIds).slice(0, 100);
-        oldest.forEach((id) => this.botSentMessageIds.delete(id));
-      }
+      this.trackSentMessageId(result.key.id);
 
       // Record Friday's reply in whatsappHistoryEngine cache so chat context knows what Friday already said!
       const ts = Date.now();
@@ -2114,7 +2118,7 @@ class WhatsAppBotService {
       }
 
       if (sendRes?.key?.id) {
-        this.botSentMessageIds.add(sendRes.key.id);
+        this.trackSentMessageId(sendRes.key.id);
       }
 
       if (caption && caption.trim()) {
@@ -2158,7 +2162,7 @@ class WhatsAppBotService {
       }
 
       if (sendRes?.key?.id) {
-        this.botSentMessageIds.add(sendRes.key.id);
+        this.trackSentMessageId(sendRes.key.id);
       }
 
       const recipientKey = jid.replace(/@.*$/, "");
@@ -2216,7 +2220,7 @@ class WhatsAppBotService {
       }
 
       if (sendRes?.key?.id) {
-        this.botSentMessageIds.add(sendRes.key.id);
+        this.trackSentMessageId(sendRes.key.id);
       }
 
       const recipientKey = jid.replace(/@.*$/, "");
@@ -2272,7 +2276,7 @@ class WhatsAppBotService {
       }
 
       if (sendRes?.key?.id) {
-        this.botSentMessageIds.add(sendRes.key.id);
+        this.trackSentMessageId(sendRes.key.id);
       }
 
       const recipientKey = jid.replace(/@.*$/, "");
@@ -2608,7 +2612,7 @@ class WhatsAppBotService {
 
         case "play_music": {
           const { whatsappFeatureEngine } = await import("./whatsappFeatureEngine");
-          const musicRes = await whatsappFeatureEngine.searchAndPlayMusic(replyJid, parameters.songQuery, senderName);
+          const musicRes = await whatsappFeatureEngine.searchMusicWithLyrics(parameters.songQuery, senderName, replyJid);
           if (musicRes.audioBuffer && this.sock) {
             await this.sock.sendMessage(replyJid, { audio: musicRes.audioBuffer, mimetype: "audio/mp4", ptt: false });
           }
@@ -2618,21 +2622,23 @@ class WhatsAppBotService {
 
         case "get_weather": {
           const { weatherService } = await import("./weatherService");
-          const weather = await weatherService.getWeather(parameters.place);
-          await this.sendHumanLikeMessage(replyJid, weather || "Weather fetch nahi ho paya.", rawText, messageKey);
-          return { handled: true, replyText: weather };
+          const weatherRes = await weatherService.getCurrentWeather(parameters.place || "Patna");
+          const replyText = weatherRes.message || "Weather fetch nahi ho paya.";
+          await this.sendHumanLikeMessage(replyJid, replyText, rawText, messageKey);
+          return { handled: true, replyText };
         }
 
         case "get_news": {
           const { newsService } = await import("./newsService");
-          const news = await newsService.getNews(parameters.topic, "in", parameters.count || 10);
-          await this.sendHumanLikeMessage(replyJid, news || "News fetch nahi ho payi.", rawText, messageKey);
-          return { handled: true, replyText: news };
+          const newsRes = await newsService.getLatestNews(parameters.topic, undefined, "in", "en", parameters.count || 5);
+          const replyText = newsRes.message || "News fetch nahi ho payi.";
+          await this.sendHumanLikeMessage(replyJid, replyText, rawText, messageKey);
+          return { handled: true, replyText };
         }
 
         case "set_reminder": {
-          const { reminderScheduler } = await import("./reminderScheduler");
-          await reminderScheduler.addReminder(parameters.title, parameters.timeString);
+          const { toolsEngine } = await import("./toolsEngine");
+          await toolsEngine.addReminder(parameters.title, parameters.timeString);
           const replyText = `⏰ Reminder set: "${parameters.title}" for ${parameters.timeString}`;
           await this.sendHumanLikeMessage(replyJid, replyText, rawText, messageKey);
           return { handled: true, replyText };
@@ -2672,9 +2678,9 @@ class WhatsAppBotService {
         }
 
         case "translate_text": {
-          const { toolsEngine } = await import("./toolsEngine");
-          const translated = await toolsEngine.translateText(parameters.text, parameters.targetLanguage);
-          const replyText = `🌐 *Translation (${parameters.targetLanguage}):*\n${translated}`;
+          const { whatsappFeatureEngine } = await import("./whatsappFeatureEngine");
+          const translated = await whatsappFeatureEngine.translateText(parameters.text, parameters.targetLanguage || "english");
+          const replyText = `🌐 *Translation (${parameters.targetLanguage || "english"}):*\n${translated}`;
           await this.sendHumanLikeMessage(replyJid, replyText, rawText, messageKey);
           return { handled: true, replyText };
         }
@@ -2714,15 +2720,15 @@ class WhatsAppBotService {
         case "search_web": {
           const { humanBrowserService } = await import("./humanBrowserService");
           const browseRes = await humanBrowserService.searchGoogleAndInspect(parameters.query);
-          const replyText = browseRes.success ? browseRes.summary : `❌ ${browseRes.message}`;
+          const replyText = browseRes.success ? (browseRes.summary || "Search complete.") : `❌ ${browseRes.error || "Web search me error aaya."}`;
           await this.sendHumanLikeMessage(replyJid, replyText, rawText, messageKey);
           return { handled: true, replyText };
         }
 
         case "schedule_message": {
           const { whatsappFeatureEngine: wfe } = await import("./whatsappFeatureEngine");
-          await wfe.scheduleContactMessage(parameters.contactNameOrPhone, parameters.messageBody, parameters.timeInstruction);
-          const replyText = `📅 Message scheduled for ${parameters.timeInstruction}!`;
+          const schedRes = await wfe.scheduleMessage(parameters.contactNameOrPhone, parameters.messageBody, parameters.timeInstruction);
+          const replyText = schedRes.message || `📅 Message scheduled for ${parameters.timeInstruction}!`;
           await this.sendHumanLikeMessage(replyJid, replyText, rawText, messageKey);
           return { handled: true, replyText };
         }

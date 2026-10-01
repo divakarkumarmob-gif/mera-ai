@@ -483,7 +483,7 @@ export async function dispatchLiveToolCall(call: any, context: ToolDispatchConte
                   clientWs.send(JSON.stringify({ type: "primary_whatsapp_channel_updated", channel: setRes.channel, message: setRes.message }));
                 } else if (call.name === "get_primary_whatsapp_channel") {
                   const currentChannel = await getPrimaryWhatsAppChannel();
-                  const channelLabel = currentChannel === "whatsapp2" ? "WhatsApp 2 (Baileys Dedicated Bot)" : currentChannel === "whatsapp1" ? "WhatsApp 1 (Official Meta Cloud API)" : "Auto (Smart Dual Failover)";
+                  const channelLabel = currentChannel === "baileys" ? "WhatsApp (Baileys Dedicated Bot)" : "Auto (Baileys Bot)";
                   result = {
                     success: true,
                     channel: currentChannel,
@@ -2283,7 +2283,7 @@ export async function dispatchLiveToolCall(call: any, context: ToolDispatchConte
                           result = {
                             success: true,
                             via: "baileys",
-                            message: `Boss, "${songTitle}" ka YouTube link aapke WhatsApp par bhej diya! \uD83C\uDFB5`,
+                            message: `Boss, "${songTitle}" ka YouTube link aapke WhatsApp par bhej diya! 🎵`,
                             youtubeLink: ytLink, songTitle, sentTo: sendToPhone,
                           };
                         } else {
@@ -2292,7 +2292,6 @@ export async function dispatchLiveToolCall(call: any, context: ToolDispatchConte
                             message: `Boss, WhatsApp (Baileys) se message nahi jaa paya: ${baileysRes.message}`,
                             youtubeLink: ytLink, songTitle,
                           };
-                        }
                         }
                       }
                     }

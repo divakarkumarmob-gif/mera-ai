@@ -246,9 +246,6 @@ class TelegramBotService {
     } catch {}
     const activeProfile = await girlfriendProfileService.getActiveProfile(String(chatId));
     let prompt = await girlfriendProfileService.getModeBPromptWithMemory(activeProfile, senderName || "Mere Handsome", String(chatId));
-    if (tgEarlierCompact) {
-      prompt += `\n\n📜 EARLIER IN THIS CHAT (20+ msgs pehle ka pura memory — context ke liye yaad rakho):\n${tgEarlierCompact}\n`;
-    }
 
     // Per-chat sext-state (tempo/worship/fight/afterglow/gaali/taboo/arc) — same machine as WhatsApp
     try {
@@ -284,6 +281,10 @@ class TelegramBotService {
       tgHistory = ctx.recent;
       tgEarlierCompact = ctx.earlierCompact;
     } catch {}
+
+    if (tgEarlierCompact) {
+      prompt += `\n\n📜 EARLIER IN THIS CHAT (20+ msgs pehle ka pura memory — context ke liye yaad rakho):\n${tgEarlierCompact}\n`;
+    }
 
     const learnIntimate = (reply: string) => {
       try {
@@ -4170,7 +4171,7 @@ INSTRUCTIONS:
 
         case "play_music": {
           const { whatsappFeatureEngine } = await import("./whatsappFeatureEngine");
-          const musicRes = await whatsappFeatureEngine.searchAndPlayMusic(String(chatId), parameters.songQuery, senderName);
+          const musicRes = await whatsappFeatureEngine.searchMusicWithLyrics(parameters.songQuery, senderName, String(chatId));
           if (musicRes.audioBuffer) {
             await this.sendAudio(chatId, musicRes.audioBuffer, musicRes.replyText);
           } else {
@@ -4181,21 +4182,23 @@ INSTRUCTIONS:
 
         case "get_weather": {
           const { weatherService } = await import("./weatherService");
-          const weather = await weatherService.getWeather(parameters.place);
-          await this.sendMessage(chatId, weather || "Weather fetch nahi ho paya.");
-          return { handled: true, replyText: weather };
+          const weatherRes = await weatherService.getCurrentWeather(parameters.place || "Patna");
+          const replyText = weatherRes.message || "Weather fetch nahi ho paya.";
+          await this.sendMessage(chatId, replyText);
+          return { handled: true, replyText };
         }
 
         case "get_news": {
           const { newsService } = await import("./newsService");
-          const news = await newsService.getNews(parameters.topic, "in", parameters.count || 10);
-          await this.sendMessage(chatId, news || "News fetch nahi ho payi.");
-          return { handled: true, replyText: news };
+          const newsRes = await newsService.getLatestNews(parameters.topic, undefined, "in", "en", parameters.count || 5);
+          const replyText = newsRes.message || "News fetch nahi ho payi.";
+          await this.sendMessage(chatId, replyText);
+          return { handled: true, replyText };
         }
 
         case "set_reminder": {
-          const { reminderScheduler } = await import("./reminderScheduler");
-          await reminderScheduler.addReminder(parameters.title, parameters.timeString);
+          const { toolsEngine: teRem } = await import("./toolsEngine");
+          await teRem.addReminder(parameters.title, parameters.timeString);
           const replyText = `⏰ Reminder set: "${parameters.title}" for ${parameters.timeString}`;
           await this.sendMessage(chatId, replyText);
           return { handled: true, replyText };
@@ -4235,9 +4238,9 @@ INSTRUCTIONS:
         }
 
         case "translate_text": {
-          const { toolsEngine } = await import("./toolsEngine");
-          const translated = await toolsEngine.translateText(parameters.text, parameters.targetLanguage);
-          const replyText = `🌐 *Translation (${parameters.targetLanguage}):*\n${translated}`;
+          const { whatsappFeatureEngine: wfeTrans } = await import("./whatsappFeatureEngine");
+          const translated = await wfeTrans.translateText(parameters.text, parameters.targetLanguage || "english");
+          const replyText = `🌐 *Translation (${parameters.targetLanguage || "english"}):*\n${translated}`;
           await this.sendMessage(chatId, replyText);
           return { handled: true, replyText };
         }
@@ -4274,15 +4277,15 @@ INSTRUCTIONS:
         case "search_web": {
           const { humanBrowserService } = await import("./humanBrowserService");
           const browseRes = await humanBrowserService.searchGoogleAndInspect(parameters.query);
-          const replyText = browseRes.success ? browseRes.summary : `❌ ${browseRes.message}`;
+          const replyText = browseRes.success ? (browseRes.summary || "Search complete.") : `❌ ${browseRes.error || "Web search me error aaya."}`;
           await this.sendMessage(chatId, replyText);
           return { handled: true, replyText };
         }
 
         case "schedule_message": {
           const { whatsappFeatureEngine: wfe } = await import("./whatsappFeatureEngine");
-          await wfe.scheduleContactMessage(parameters.contactNameOrPhone, parameters.messageBody, parameters.timeInstruction);
-          const replyText = `📅 Message scheduled for ${parameters.timeInstruction}!`;
+          const schedRes = await wfe.scheduleMessage(parameters.contactNameOrPhone, parameters.messageBody, parameters.timeInstruction);
+          const replyText = schedRes.message || `📅 Message scheduled for ${parameters.timeInstruction}!`;
           await this.sendMessage(chatId, replyText);
           return { handled: true, replyText };
         }

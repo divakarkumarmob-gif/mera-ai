@@ -140,7 +140,7 @@ export class WhatsAppGroupSuperPowersEngine {
 
         case "play_music":
           const { whatsappFeatureEngine } = await import("../whatsappFeatureEngine");
-          const musicRes = await whatsappFeatureEngine.searchAndPlayMusic(groupJid, parameters.songQuery, senderName);
+          const musicRes = await whatsappFeatureEngine.searchMusicWithLyrics(parameters.songQuery, senderName, groupJid);
           if (musicRes.audioBuffer && sock) {
             await sock.sendMessage(groupJid, { audio: musicRes.audioBuffer, mimetype: "audio/mp4", ptt: false });
           }
@@ -148,18 +148,18 @@ export class WhatsAppGroupSuperPowersEngine {
 
         case "get_weather":
           const { weatherService } = await import("../weatherService");
-          const weather = await weatherService.getWeather(parameters.place);
-          return { handled: true, replyText: weather || "Weather fetch nahi ho paya." };
+          const weatherRes = await weatherService.getCurrentWeather(parameters.place || "Patna");
+          return { handled: true, replyText: weatherRes.message || "Weather fetch nahi ho paya." };
 
         case "get_news":
           const { newsService } = await import("../newsService");
-          const news = await newsService.getNews(parameters.topic, "in", parameters.count || 10);
-          return { handled: true, replyText: news || "News fetch nahi ho payi." };
+          const newsRes = await newsService.getLatestNews(parameters.topic, undefined, "in", "en", parameters.count || 5);
+          return { handled: true, replyText: newsRes.message || "News fetch nahi ho payi." };
 
         case "set_reminder":
           if (!isOwner) return { handled: true, replyText: "Sirf Boss reminder set kar sakte hain." };
-          const { reminderScheduler } = await import("../reminderScheduler");
-          await reminderScheduler.addReminder(parameters.title, parameters.timeString);
+          const { toolsEngine: teRem } = await import("../toolsEngine");
+          await teRem.addReminder(parameters.title, parameters.timeString);
           return { handled: true, replyText: `⏰ Reminder set: "${parameters.title}" for ${parameters.timeString}` };
 
         case "save_daily_update":
@@ -189,9 +189,9 @@ export class WhatsAppGroupSuperPowersEngine {
           return { handled: true, replyText: "🔒 Fact permanent memory me save kar diya!" };
 
         case "translate_text":
-          const { toolsEngine } = await import("../toolsEngine");
-          const translated = await toolsEngine.translateText(parameters.text, parameters.targetLanguage);
-          return { handled: true, replyText: `🌐 *Translation (${parameters.targetLanguage}):*\n${translated}` };
+          const { whatsappFeatureEngine: wfeTrans } = await import("../whatsappFeatureEngine");
+          const translated = await wfeTrans.translateText(parameters.text, parameters.targetLanguage || "english");
+          return { handled: true, replyText: `🌐 *Translation (${parameters.targetLanguage || "english"}):*\n${translated}` };
 
         case "generate_ai_image":
           const { toolsEngine: te } = await import("../toolsEngine");
@@ -218,12 +218,12 @@ export class WhatsAppGroupSuperPowersEngine {
         case "search_web":
           const { humanBrowserService } = await import("../humanBrowserService");
           const browseRes = await humanBrowserService.searchGoogleAndInspect(parameters.query);
-          return { handled: true, replyText: browseRes.success ? browseRes.summary : `❌ ${browseRes.message}` };
+          return { handled: true, replyText: browseRes.success ? (browseRes.summary || "Search complete.") : `❌ ${browseRes.error || "Web search me error aaya."}` };
 
         case "schedule_message":
           const { whatsappFeatureEngine: wfe } = await import("../whatsappFeatureEngine");
-          await wfe.scheduleContactMessage(parameters.contactNameOrPhone, parameters.messageBody, parameters.timeInstruction);
-          return { handled: true, replyText: `📅 Message scheduled for ${parameters.timeInstruction}!` };
+          const schedRes = await wfe.scheduleMessage(parameters.contactNameOrPhone, parameters.messageBody, parameters.timeInstruction);
+          return { handled: true, replyText: schedRes.message || `📅 Message scheduled for ${parameters.timeInstruction}!` };
 
         case "create_cron_task":
           if (!isOwner) return { handled: true, replyText: "Sirf Boss cron task bana sakte hain." };
@@ -291,11 +291,10 @@ export class WhatsAppGroupSuperPowersEngine {
               await wgse.toggleAutoTranscribeVoice(groupJid, parameters.enable);
               return { handled: true, replyText: `🎙️ Auto-transcribe ${parameters.enable ? "ON" : "OFF"} kar diya!` };
             case "quiet_mode":
-              const { whatsappGroupSuperPowersEngine } = await import("./whatsappGroupSuperPowersEngine");
-              await whatsappGroupSuperPowersEngine.toggleGroupQuietMode(groupJid, parameters.enable);
+              await wgse.toggleQuietMode(groupJid, parameters.enable);
               return { handled: true, replyText: `🌙 Quiet mode ${parameters.enable ? "ON" : "OFF"} kar diya!` };
             case "welcome":
-              await whatsappGroupSuperPowersEngine.toggleGroupWelcome(groupJid, parameters.enable);
+              await wgse.toggleWelcome(groupJid, parameters.enable);
               return { handled: true, replyText: `👋 Welcome card ${parameters.enable ? "ON" : "OFF"} kar diya!` };
           }
           return { handled: false };
@@ -1980,7 +1979,7 @@ Bhagwan aapko lambi umar, beshumar khushiyan, aur bohot saari success de! 🚀�
       return await this.handleJudgeFactCheck(rawText, quotedMessage, senderName);
     }
     if (clean.startsWith("@debate") || clean.startsWith("/debate")) {
-      return await this.handleDebate(rawText, quotedMessage, senderName, groupName);
+      return await this.handleJudgeFactCheck(rawText, quotedMessage, senderName);
     }
     if (clean.startsWith("@roast") || clean.startsWith("/roast")) {
       const target = rawText.replace(/^(?:@roast|\/roast)\s*/i, "").trim();
