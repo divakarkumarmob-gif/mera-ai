@@ -109,15 +109,44 @@ export class WhatsAppGroupSuperPowersEngine {
 
     try {
       switch (action) {
-        case "make_phone_call":
+        case "make_phone_call": {
           if (!isOwner) return { handled: true, replyText: "Sirf Boss call laga sakte hain." };
           const { exotelService } = await import("../exotelService");
+          const { contactsService } = await import("../contactsService");
           const config = exotelService.getConfig();
-          const targetPhone = parameters.targetPhone || config.bossNotificationNumber || process.env.BOSS_WHATSAPP_NUMBER || "919315570187";
-          const callRes = await exotelService.makeOutboundCall({ to: targetPhone, customMessage: parameters.reason || "Group se call request" });
-          return { handled: true, replyText: callRes.success 
-            ? `📞 Ji Boss! Main abhi aapko (+${targetPhone}) par call laga rahi hoon...` 
-            : `⚠️ Call connect nahi ho paayi: ${callRes.message}` };
+          const bossNumber = config.bossNotificationNumber || process.env.BOSS_WHATSAPP_NUMBER || "919315570187";
+
+          let targetNumber = bossNumber;
+          let displayName = "Boss";
+
+          const rawTarget = String(parameters.targetPhone || parameters.contactName || "").trim();
+          const isBossTarget = !rawTarget || /^(me|boss|mujhe|khud|self|owner)$/i.test(rawTarget);
+
+          if (!isBossTarget) {
+            const contact = await contactsService.findContact(rawTarget);
+            if (contact && contact.phone) {
+              targetNumber = contact.phone.replace(/[\s\-\(\)\+]/g, "");
+              displayName = contact.name;
+            } else {
+              const cleaned = rawTarget.replace(/[\s\-\(\)\+]/g, "");
+              if (/^[6-9]\d{9}$/.test(cleaned) || /^91[6-9]\d{9}$/.test(cleaned)) {
+                targetNumber = cleaned;
+                displayName = cleaned;
+              }
+            }
+          }
+
+          const callRes = await exotelService.makeOutboundCall({
+            to: targetNumber,
+            customMessage: parameters.reason || "Group se call request"
+          });
+          return {
+            handled: true,
+            replyText: callRes.success 
+              ? `📞 Ji Boss! Main abhi ${displayName} (+${targetNumber}) par call laga rahi hoon...` 
+              : `⚠️ Call connect nahi ho paayi: ${callRes.message}`
+          };
+        }
 
         case "send_whatsapp_message":
           if (!isOwner) return { handled: true, replyText: "Sirf Boss message bhej sakte hain." };

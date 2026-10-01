@@ -1479,6 +1479,16 @@ class WhatsAppBotService {
       console.warn("[WhatsAppBot] Website scan fast-path failed:", scanErr?.message || scanErr);
     }
 
+    // 0. Quoted Swipe-to-Reply Media / Document / Photo Summary Engine (Priority Interceptor for Quoted Media)
+    if (quotedMessage && quotedMessage.isReply) {
+      try {
+        const handledQuoted = await this.handleQuotedMediaSummary(replyJid, rawText, quotedMessage, messageKey);
+        if (handledQuoted) return;
+      } catch (recentMediaErr) {
+        console.warn("[WhatsAppBot] Direct quoted media handler error:", recentMediaErr);
+      }
+    }
+
     // ── LLM-Driven Intent Classification (Replaces Hardcoded Regex Patterns) ──
     try {
       const intentResult = await this.classifyAndExecuteOwnerIntent(
@@ -1489,16 +1499,6 @@ class WhatsAppBotService {
       }
     } catch (intentErr: any) {
       console.warn("[WhatsAppBot] Intent classifier failed, falling through to legacy handlers:", intentErr?.message || intentErr);
-    }
-
-    // 0. Quoted Swipe-to-Reply Media / Document / Photo Summary Engine
-    if (quotedMessage && quotedMessage.isReply) {
-      try {
-        const handledQuoted = await this.handleQuotedMediaSummary(replyJid, rawText, quotedMessage, messageKey);
-        if (handledQuoted) return;
-      } catch (recentMediaErr) {
-        console.warn("[WhatsAppBot] Direct recent media Q&A notice:", recentMediaErr);
-      }
     }
 
     // 0.05 Recent Media Follow-Up Q&A
@@ -2560,14 +2560,39 @@ class WhatsAppBotService {
       switch (action) {
         case "make_phone_call": {
           const { exotelService } = await import("./exotelService");
+          const { contactsService } = await import("./contactsService");
           const config = exotelService.getConfig();
-          const targetPhone = parameters.targetPhone || config.bossNotificationNumber || process.env.BOSS_WHATSAPP_NUMBER || "919315570187";
-          const callRes = await exotelService.makeOutboundCall({ to: targetPhone, customMessage: parameters.reason || "WhatsApp se call request" });
-          
+          const bossNumber = config.bossNotificationNumber || process.env.BOSS_WHATSAPP_NUMBER || "919315570187";
+
+          let targetNumber = bossNumber;
+          let displayName = "Boss";
+
+          const rawTarget = String(parameters.targetPhone || parameters.contactName || "").trim();
+          const isBossTarget = !rawTarget || /^(me|boss|mujhe|khud|self|owner)$/i.test(rawTarget);
+
+          if (!isBossTarget) {
+            const contact = await contactsService.findContact(rawTarget);
+            if (contact && contact.phone) {
+              targetNumber = contact.phone.replace(/[\s\-\(\)\+]/g, "");
+              displayName = contact.name;
+            } else {
+              const cleaned = rawTarget.replace(/[\s\-\(\)\+]/g, "");
+              if (/^[6-9]\d{9}$/.test(cleaned) || /^91[6-9]\d{9}$/.test(cleaned)) {
+                targetNumber = cleaned;
+                displayName = cleaned;
+              }
+            }
+          }
+
+          const callRes = await exotelService.makeOutboundCall({
+            to: targetNumber,
+            customMessage: parameters.reason || "WhatsApp se call request"
+          });
+
           const replyText = callRes.success 
-            ? `📞 *Ji Boss! Main abhi aapko (+${targetPhone}) par Exotel Telephony se call laga rahi hoon... Phone uthaiye!* ⚡`
+            ? `📞 *Ji Boss! Main abhi ${displayName} (+${targetNumber}) par Exotel Telephony se call laga rahi hoon... Phone uthaiye!* ⚡`
             : `⚠️ *Call connect nahi ho paayi:* ${callRes.message}\n_Kripya Exotel settings me API keys aur Virtual number check karein._`;
-          
+
           await this.sendHumanLikeMessage(replyJid, replyText, rawText, messageKey);
           return { handled: true, replyText };
         }
@@ -2745,16 +2770,20 @@ class WhatsAppBotService {
         }
 
         case "get_whatsapp_messages": {
-          const { whatsappBotService } = await import("./whatsappBotService");
-          const msgs = await whatsappBotService.getMessages({ messageType: parameters.messageType || "all", senderName: parameters.senderName, groupName: parameters.groupName, dateFilter: parameters.dateFilter, limit: parameters.limit });
-          const replyText = msgs.length === 0 ? "📭 Koi message nahi mila." : msgs.slice(0,10).map(m => `[${m.dateStr}] ${m.senderName}: ${m.text}`).join("\n");
+          const msgs = await this.getMessages({
+            messageType: parameters.messageType || "all",
+            senderName: parameters.senderName,
+            groupName: parameters.groupName,
+            dateFilter: parameters.dateFilter,
+            limit: parameters.limit
+          });
+          const replyText = msgs.length === 0 ? "📭 Koi message nahi mila." : msgs.slice(0, 10).map(m => `[${m.dateStr}] ${m.senderName}: ${m.text}`).join("\n");
           await this.sendHumanLikeMessage(replyJid, replyText, rawText, messageKey);
           return { handled: true, replyText };
         }
 
         case "get_conversation_history": {
-          const { whatsappBotService: wbs } = await import("./whatsappBotService");
-          const conv = await wbs.getConversationSummaryAndHistory(parameters.contactNameOrPhone, parameters.limit || 30, parameters.daysBack || 7);
+          const conv = await this.getConversationSummaryAndHistory(parameters.contactNameOrPhone, parameters.limit || 30, parameters.daysBack || 7);
           const replyText = conv.summary || "Conversation history nahi mili.";
           await this.sendHumanLikeMessage(replyJid, replyText, rawText, messageKey);
           return { handled: true, replyText };
@@ -2827,6 +2856,100 @@ class WhatsAppBotService {
           const { voiceBridgeService } = await import("./voiceBridgeService");
           await voiceBridgeService.setBossGlobalVoice(parameters.voiceTone);
           const replyText = `🎙️ Voice tone "${parameters.voiceTone}" set kar diya!`;
+          await this.sendHumanLikeMessage(replyJid, replyText, rawText, messageKey);
+          return { handled: true, replyText };
+        }
+
+        case "create_poll": {
+          const { whatsappFeatureEngine } = await import("./whatsappFeatureEngine");
+          const pollText = await whatsappFeatureEngine.generatePoll(parameters.topicOrQuestion || parameters.topic || rawText);
+          await this.sendHumanLikeMessage(replyJid, pollText, rawText, messageKey);
+          return { handled: true, replyText: pollText };
+        }
+
+        case "generate_quiz": {
+          const { whatsappFeatureEngine } = await import("./whatsappFeatureEngine");
+          const quizText = await whatsappFeatureEngine.generateQuiz(parameters.topic || "general knowledge");
+          await this.sendHumanLikeMessage(replyJid, quizText, rawText, messageKey);
+          return { handled: true, replyText: quizText };
+        }
+
+        case "identify_song": {
+          const { musicRecognitionService } = await import("./musicRecognitionService");
+          const songClue = parameters.songClue || parameters.clue || rawText;
+          const res = await musicRecognitionService.identifyHummingOrTune(songClue);
+          let replyText = "";
+          if (res.success && res.identifiedSong) {
+            replyText = `🎵 *Song Identified!*\n\n🎶 *Track:* ${res.identifiedSong.trackName}\n🎤 *Artist:* ${res.identifiedSong.artistName}${res.identifiedSong.albumName ? `\n💿 *Album:* ${res.identifiedSong.albumName}` : ""}\n🔗 *YouTube Music:* ${res.identifiedSong.youtubeMusicUrl || "N/A"}`;
+          } else {
+            replyText = res.message || "🎵 Voice note ya gaane ke kuch bol batayein taaki main gaana pehchaan sakun!";
+          }
+          await this.sendHumanLikeMessage(replyJid, replyText, rawText, messageKey);
+          return { handled: true, replyText };
+        }
+
+        case "analyze_media": {
+          const { visionMemoryService } = await import("./visionMemoryService");
+          const recentChatMedia = visionMemoryService.getChatMediaContext(replyJid);
+          let replyText = "";
+          if (recentChatMedia) {
+            const ans = await visionMemoryService.answerQuestionOnMedia({
+              question: parameters.query || rawText,
+              chatId: replyJid,
+            });
+            replyText = ans || "Media analyze nahi ho paya.";
+          } else {
+            const mediaRes = await visionMemoryService.getLatestMediaInfo(parameters.query || rawText);
+            replyText = mediaRes.analysis || "Boss, abhi koi recent image/media nahi mila. Kripya pehle photo ya document share karein.";
+          }
+          await this.sendHumanLikeMessage(replyJid, replyText, rawText, messageKey);
+          return { handled: true, replyText };
+        }
+
+        case "group_admin_action": {
+          if (parameters.action === "kick") {
+            const res = await this.kickGroupMember(parameters.groupName || replyJid, parameters.targetMember);
+            await this.sendHumanLikeMessage(replyJid, res.message, rawText, messageKey);
+            return { handled: true, replyText: res.message };
+          }
+          const replyText = `👮 Group action "${parameters.action}" for member "${parameters.targetMember}" in group "${parameters.groupName || "current"}": Only 'kick' is currently automated.`;
+          await this.sendHumanLikeMessage(replyJid, replyText, rawText, messageKey);
+          return { handled: true, replyText };
+        }
+
+        case "group_safety_toggle": {
+          const { whatsappGroupSafetyEngine: wgse } = await import("./whatsapp/whatsappGroupSafetyEngine");
+          let targetGroupJid = replyJid;
+          let targetGroupName = parameters.groupName || "Group";
+          if (parameters.groupName) {
+            const grp = await this.findGroup(parameters.groupName);
+            if (grp) {
+              targetGroupJid = grp.groupId;
+              targetGroupName = grp.groupName;
+            }
+          }
+          let replyText = "";
+          switch (parameters.feature) {
+            case "block_safe":
+              if (parameters.enable) await wgse.enableGroupSafety(targetGroupJid, targetGroupName);
+              else await wgse.disableGroupSafety(targetGroupJid);
+              replyText = `🛡️ @block safe "${targetGroupName}" ke liye ${parameters.enable ? "ON" : "OFF"} kar diya!`;
+              break;
+            case "auto_transcribe":
+              await wgse.toggleAutoTranscribeVoice(targetGroupJid, parameters.enable);
+              replyText = `🎙️ Auto-transcribe "${targetGroupName}" ke liye ${parameters.enable ? "ON" : "OFF"} kar diya!`;
+              break;
+            case "quiet_mode":
+              await wgse.toggleQuietMode(targetGroupJid, parameters.enable);
+              replyText = `🌙 Quiet mode "${targetGroupName}" ke liye ${parameters.enable ? "ON" : "OFF"} kar diya!`;
+              break;
+            case "welcome":
+              await wgse.toggleWelcome(targetGroupJid, parameters.enable);
+              replyText = `👋 Welcome card "${targetGroupName}" ke liye ${parameters.enable ? "ON" : "OFF"} kar diya!`;
+              break;
+            default:
+              replyText = `⚙️ Feature "${parameters.feature}" update kar diya.`;
+          }
           await this.sendHumanLikeMessage(replyJid, replyText, rawText, messageKey);
           return { handled: true, replyText };
         }

@@ -28,7 +28,7 @@ const INTENT_FUNCTION_DECLARATIONS = [
     parameters: {
       type: Type.OBJECT,
       properties: {
-        targetPhone: { type: Type.STRING, description: "10-digit phone number to call. If not specified, call the owner/boss." },
+        targetPhone: { type: Type.STRING, description: "10-digit phone number or contact name (e.g. 'Rahul', 'Ram') to call. If not specified or 'call me', call the owner/boss." },
         reason: { type: Type.STRING, description: "Why the call is being made (user's stated reason)" }
       },
       required: []
@@ -470,61 +470,87 @@ const INTENT_FUNCTION_DECLARATIONS = [
 
 class IntentClassifierService {
   private ai: GoogleGenAI | null = null;
-  private model = "gemini-3.5-flash-lite";
+  private readonly models = [
+    "gemini-2.5-flash",
+    "gemini-3.5-flash",
+    "gemini-3.6-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-3.5-flash-lite",
+  ];
 
-  constructor() {
-    const apiKey = process.env.GEMINI_API_KEY?.trim();
-    if (apiKey) {
+  private getAI(): GoogleGenAI | null {
+    const apiKey = process.env.GEMINI_API_KEY?.trim() || process.env.VITE_GEMINI_API_KEY?.trim();
+    if (!apiKey) return null;
+    if (!this.ai) {
       this.ai = new GoogleGenAI({ apiKey });
     }
+    return this.ai;
   }
 
   async classifyIntent(userText: string, context: IntentContext): Promise<ClassifiedIntent> {
-    if (!this.ai) {
+    const ai = this.getAI();
+    if (!ai) {
       return this.fallbackClassification(userText, context);
     }
 
     const systemPrompt = this.buildSystemPrompt(context);
-    
-    try {
-      const response = await this.ai.models.generateContent({
-        model: this.model,
-        contents: [{ role: "user", parts: [{ text: userText }] }],
-        config: {
-          systemInstruction: systemPrompt,
-          tools: [{ functionDeclarations: INTENT_FUNCTION_DECLARATIONS as any }],
-          toolConfig: { functionCallingConfig: { mode: "ANY" as any } },
-          temperature: 0.1,
-          maxOutputTokens: 1024,
-        },
-      });
 
-      const functionCall = response.candidates?.[0]?.content?.parts?.[0]?.functionCall;
-      
-      if (functionCall) {
+    // Try each model in the 5-model chain sequentially if rate limits or errors occur
+    for (const model of this.models) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: [{ role: "user", parts: [{ text: userText }] }],
+          config: {
+            systemInstruction: systemPrompt,
+            tools: [{ functionDeclarations: INTENT_FUNCTION_DECLARATIONS as any }],
+            toolConfig: { functionCallingConfig: { mode: "ANY" as any } },
+            temperature: 0.1,
+            maxOutputTokens: 1024,
+          },
+        });
+
+        // Robust functionCall extraction:
+        // 1. response.functionCalls accessor in @google/genai
+        // 2. Search parts array for any part containing functionCall (handles thinking/prelude parts)
+        let functionCall: any = null;
+        if (response.functionCalls && response.functionCalls.length > 0) {
+          functionCall = response.functionCalls[0];
+        } else {
+          const parts = response.candidates?.[0]?.content?.parts || [];
+          const partWithCall = parts.find((p: any) => p && p.functionCall);
+          if (partWithCall) {
+            functionCall = partWithCall.functionCall;
+          }
+        }
+
+        if (functionCall && functionCall.name) {
+          return {
+            action: functionCall.name,
+            confidence: 0.95,
+            parameters: (functionCall.args as Record<string, any>) || {},
+            reasoning: `LLM (${model}) classified intent as ${functionCall.name} based on natural language understanding`,
+            originalText: userText
+          };
+        }
+
+        // If no function call, it's general chat
+        const textResponse = response.text?.trim() || "";
         return {
-          action: functionCall.name,
-          confidence: 0.95,
-          parameters: functionCall.args as Record<string, any>,
-          reasoning: `LLM classified intent as ${functionCall.name} based on natural language understanding`,
+          action: "general_chat",
+          confidence: 0.9,
+          parameters: { response: textResponse },
+          reasoning: `LLM (${model}) responded naturally without tool call - general conversation`,
           originalText: userText
         };
+      } catch (error: any) {
+        console.warn(`[IntentClassifier] Model ${model} failed, trying next:`, error?.message || error);
+        // Continue to next model in the chain
       }
-
-      // If no function call, it's general chat
-      const textResponse = response.text?.trim() || "";
-      return {
-        action: "general_chat",
-        confidence: 0.9,
-        parameters: { response: textResponse },
-        reasoning: "LLM responded naturally without tool call - general conversation",
-        originalText: userText
-      };
-
-    } catch (error: any) {
-      console.warn("[IntentClassifier] LLM classification failed, using fallback:", error?.message);
-      return this.fallbackClassification(userText, context);
     }
+
+    console.warn("[IntentClassifier] All 5 LLM models failed or exhausted, using fallback classification.");
+    return this.fallbackClassification(userText, context);
   }
 
   private buildSystemPrompt(context: IntentContext): string {
@@ -562,30 +588,251 @@ Be decisive. One function call per classification.`;
 
   private fallbackClassification(userText: string, context: IntentContext): ClassifiedIntent {
     const clean = userText.toLowerCase().trim();
-    
-    // Minimal fallback patterns only for critical functions when LLM fails
-    if (/\b(call\s*(?:me|karo|lagao)|mujhe\s*call|phone\s*(?:karo|lagao)|ring\s*me)\b/i.test(clean)) {
+
+    // 1. Phone Call Intent
+    if (
+      !/\b(?:remind|alarm|yaad\s*dila)\b/i.test(clean) &&
+      (/\b(call\s*(?:me|karo|lagao|karna)|mujhe\s*call|phone\s*(?:karo|lagao)|ring\s*me)\b/i.test(clean) ||
+      /(?:ko|par)\s*(?:call|phone)\s*(?:lagao|karo)/i.test(clean) ||
+      /\bcall\s+(?:(?:\+?91[\s-]?)?[6-9]\d{9}|[a-zA-Z\u0900-\u097F]+)/i.test(clean))
+    ) {
       const phoneMatch = userText.match(/(?:\+91[\s-]?)?[6-9]\d{9}/);
+      const nameMatch = userText.match(/([a-zA-Z\u0900-\u097F]+)\s*ko\s*(?:call|phone)/i) ||
+                        userText.match(/\bcall\s+([a-zA-Z\u0900-\u097F]+)/i);
+      const target = phoneMatch ? phoneMatch[0].replace(/\D/g, "") : (nameMatch ? nameMatch[1].trim() : undefined);
       return {
         action: "make_phone_call",
-        confidence: 0.7,
-        parameters: { targetPhone: phoneMatch ? phoneMatch[0].replace(/\D/g, "") : undefined, reason: userText },
-        reasoning: "Fallback regex match for call intent",
+        confidence: 0.8,
+        parameters: { targetPhone: target, reason: userText },
+        reasoning: "Fallback offline regex match for call intent",
         originalText: userText
       };
     }
 
-    if (/\b(?:msg|message|whatsapp|bhej|send)\b/i.test(clean) && /\b(?:ko|to)\b/i.test(clean)) {
+    // 2. Send WhatsApp Message Intent
+    if (/\b(?:msg|message|whatsapp|bhej|send)\b/i.test(clean) && (/\b(?:ko|to)\b/i.test(clean) || /:\s*.+/i.test(userText))) {
+      const contactMatch = userText.match(/([a-zA-Z0-9+\s]+)\s*(?:ko|to)\s*(?:msg|message|whatsapp|bhejo|karo)/i) ||
+                           userText.match(/(?:msg|message|whatsapp)\s*(?:to|karo)\s*([a-zA-Z0-9+\s]+?)(?::|\s+ki\s+|\s+bolo\s+|$)/i);
+      const msgMatch = userText.match(/:\s*(.+)$/i) ||
+                       userText.match(/\b(?:ki|that|bolo)\s+(.+)$/i) ||
+                       userText.match(/(?:msg|message)\s*:\s*(.+)$/i);
+      const targetContact = contactMatch ? contactMatch[1].replace(/^(send|bhejo|karo)\s+/i, "").trim() : "contact";
+      const messageBody = msgMatch ? msgMatch[1].trim() : userText;
+
       return {
-        action: "general_chat",
-        confidence: 0.6,
-        parameters: { response: "Samajh gayi boss. Kaun ko message karna hai aur kya likhna hai, bataiye?" },
-        reasoning: "Fallback: detected message intent but need clarification",
+        action: "send_whatsapp_message",
+        confidence: 0.75,
+        parameters: { contactNameOrPhone: targetContact, messageText: messageBody },
+        reasoning: "Fallback offline regex match for WhatsApp messaging intent",
         originalText: userText
       };
     }
 
-    // Website security scan fallback (works even when LLM is down)
+    // 3. Music / Songs Intent
+    if (/\b(?:gaana|gana|song|music)\s*(?:bajao|play|chalu|lagao|sunao)\b/i.test(clean) || /\b(?:play|bajao)\s+(?:song|music|gaana)\b/i.test(clean) || /^(?:play|gaana)\s+(.+)/i.test(clean)) {
+      const songQuery = userText
+        .replace(/^(?:play|gaana\s*bajao|song\s*play\s*karo|music\s*chalu\s*karo|gaana\s*lagao|suno|sunao)\s*/i, "")
+        .replace(/\s*(?:ka\s*gaana|ka\s*song|song|gaana|bajao|chalu\s*karo|play\s*karo)$/i, "")
+        .trim();
+      return {
+        action: "play_music",
+        confidence: 0.85,
+        parameters: { songQuery: songQuery || "Arijit Singh" },
+        reasoning: "Fallback offline regex match for music playback intent",
+        originalText: userText
+      };
+    }
+
+    // 4. Weather Forecast Intent
+    if (/\b(?:mausam|weather|temperature|barish)\b/i.test(clean)) {
+      const placeMatch = userText.match(/([a-zA-Z]+)\s+(?:ka|ki|me|ke)\s+(?:mausam|weather)/i) ||
+                        userText.match(/(?:in|of)\s+([a-zA-Z]+)/i) ||
+                        userText.match(/([a-zA-Z]+)\s+me\b/i) ||
+                        userText.match(/(?:mausam|weather)\s+(?:in|of|ka)?\s*([a-zA-Z]+)/i);
+      const rawPlace = placeMatch ? placeMatch[1].trim() : "Patna";
+      const place = /\b(aaj|kal|parso|abhi|barish|kya)\b/i.test(rawPlace) ? "Patna" : rawPlace;
+      return {
+        action: "get_weather",
+        confidence: 0.85,
+        parameters: { place },
+        reasoning: "Fallback offline regex match for weather intent",
+        originalText: userText
+      };
+    }
+
+    // 5. News Headlines Intent
+    if (/\b(?:news|khabar|headlines|samachar)\b/i.test(clean) && !/\b(?:google|search\s*karo|browse\s*web|web\s*search)\b/i.test(clean)) {
+      let topic = "top 10";
+      if (/sports|cricket/i.test(clean)) topic = "sports";
+      else if (/tech|technology/i.test(clean)) topic = "tech";
+      else if (/politics|rajniti/i.test(clean)) topic = "politics";
+      else if (/business|market/i.test(clean)) topic = "business";
+      return {
+        action: "get_news",
+        confidence: 0.85,
+        parameters: { topic, count: 5 },
+        reasoning: "Fallback offline regex match for news intent",
+        originalText: userText
+      };
+    }
+
+    // 6. Reminder / Alarm Intent
+    if (/\b(?:remind|reminder|alarm|yaad\s*dila(?:na|o))\b/i.test(clean)) {
+      const timeMatch = userText.match(/(?:at|ko|baje|in|after)\s*([0-9]+(?::[0-9]+)?\s*(?:am|pm|baje|minute|min|hour|ghante)?)/i) ||
+                        userText.match(/([0-9]+(?::[0-9]+)?\s*(?:am|pm|baje))/i);
+      const timeString = timeMatch ? timeMatch[0].trim() : "in 15 minutes";
+      const title = userText.replace(/^(?:remind\s*me|reminder\s*lagao|alarm\s*laga\s*do|yaad\s*dilana)\s*/i, "").trim() || "Reminder";
+      return {
+        action: "set_reminder",
+        confidence: 0.8,
+        parameters: { title, timeString },
+        reasoning: "Fallback offline regex match for reminder intent",
+        originalText: userText
+      };
+    }
+
+    // 7. Save Daily Update Intent
+    if (/\b(?:aaj\s*ka\s*update\s*(?:note|save|likho)|update\s*(?:note|save|log)\s*karo|log\s*karo)\b/i.test(clean)) {
+      const updateText = userText.replace(/^.*?(?:note|save|log|likho)\s*(?:karo)?:?\s*/i, "").trim() || userText;
+      return {
+        action: "save_daily_update",
+        confidence: 0.85,
+        parameters: { updateText },
+        reasoning: "Fallback offline regex match for daily update logging",
+        originalText: userText
+      };
+    }
+
+    // 8. Recall Daily Update Intent
+    if (/\b(?:(?:aaj|kal|parso|\d+\s*din\s*pehle)\s*(?:ka\s*)?(?:kya\s*update\s*tha|update\s*kya\s*tha|update\s*(?:batao|dikhao))|update\s*(?:kya\s*tha|batao|dikhao)|(?:kya|koi)\s*update\s*tha)\b/i.test(clean)) {
+      let dateWord = "aaj";
+      if (/kal/i.test(clean)) dateWord = "kal";
+      else if (/parso/i.test(clean)) dateWord = "parso";
+      else if (/(\d+)\s*din\s*pehle/i.test(clean)) dateWord = clean.match(/(\d+\s*din\s*pehle)/i)?.[1] || "kal";
+      return {
+        action: "get_daily_update",
+        confidence: 0.85,
+        parameters: { dateWord },
+        reasoning: "Fallback offline regex match for recalling daily update",
+        originalText: userText
+      };
+    }
+
+    // 9. Memory Search Intent
+    if (/\b(?:purani\s*baat\s*(?:dhundho|batao)|memory\s*me\s*search\s*karo|yaad\s*hai\s*maine\s*(?:kya|kab)|kya\s*discuss\s*kiya\s*tha)\b/i.test(clean)) {
+      const searchQuery = userText.replace(/^(?:purani\s*baat\s*dhundho|memory\s*me\s*search\s*karo|yaad\s*hai)\s*:?\s*/i, "").trim();
+      return {
+        action: "search_memory",
+        confidence: 0.8,
+        parameters: { searchQuery: searchQuery || userText },
+        reasoning: "Fallback offline regex match for memory search intent",
+        originalText: userText
+      };
+    }
+
+    // 10. Remember Permanent Fact Intent
+    if (/\b(?:yaad\s*rakhna|note\s*kar\s*lo|don'?t\s*forget|permanent\s*(?:memory\s*)?(?:note|save))\b/i.test(clean)) {
+      const factText = userText.replace(/^.*?(?:yaad\s*rakhna|note\s*kar\s*lo|don'?t\s*forget)\s*:?\s*/i, "").trim();
+      return {
+        action: "remember_fact",
+        confidence: 0.85,
+        parameters: { factText: factText || userText, category: "general_personal_info" },
+        reasoning: "Fallback offline regex match for remembering personal fact",
+        originalText: userText
+      };
+    }
+
+    // 11. Routine Get/Set Intent
+    if (/\b(?:mera\s*routine|timetable|schedule\s*dikhao|routine\s*batao|abhi\s*kya\s*(?:karna\s*hai|routine\s*hai))\b/i.test(clean)) {
+      return {
+        action: "get_routine",
+        confidence: 0.85,
+        parameters: {},
+        reasoning: "Fallback offline regex match for routine query",
+        originalText: userText
+      };
+    }
+    if (/\b(?:routine\s*(?:me\s*set|update|badlo))\b/i.test(clean)) {
+      return {
+        action: "set_routine",
+        confidence: 0.8,
+        parameters: { activity: userText },
+        reasoning: "Fallback offline regex match for routine update",
+        originalText: userText
+      };
+    }
+
+    // 12. Translation Intent
+    if (/\b(?:translate\s*(?:to|karo|into)|is\s*ka\s*(?:hindi|english)\s*matlab)\b/i.test(clean)) {
+      const targetLanguage = /hindi/i.test(clean) ? "Hindi" : /spanish/i.test(clean) ? "Spanish" : /french/i.test(clean) ? "French" : "English";
+      const textToTranslate = userText.replace(/^.*?translate\s*(?:to\s*[a-zA-Z]+)?\s*:?\s*/i, "").trim() || userText;
+      return {
+        action: "translate_text",
+        confidence: 0.85,
+        parameters: { text: textToTranslate, targetLanguage },
+        reasoning: "Fallback offline regex match for translation",
+        originalText: userText
+      };
+    }
+
+    // 13. AI Image Generation Intent
+    if (/\b(?:(?:photo|image|picture|pic)\s*(?:banao|generate\s*karo)|generate\s*(?:ai\s*)?image)\b/i.test(clean)) {
+      const prompt = userText.replace(/^.*?(?:photo\s*banao|image\s*generate\s*karo|generate\s*image)\s*:?\s*/i, "").trim() || userText;
+      return {
+        action: "generate_ai_image",
+        confidence: 0.85,
+        parameters: { prompt, aspectRatio: "9:16", sendToWhatsApp: true },
+        reasoning: "Fallback offline regex match for AI image generation",
+        originalText: userText
+      };
+    }
+
+    // 14. Cricket Scores Intent
+    if (/\b(?:cricket\s*score|match\s*score|india\s*score|live\s*score)\b/i.test(clean)) {
+      return {
+        action: "get_cricket_scores",
+        confidence: 0.85,
+        parameters: { team: /india/i.test(clean) ? "India" : undefined },
+        reasoning: "Fallback offline regex match for cricket score query",
+        originalText: userText
+      };
+    }
+
+    // 15. Google Web Search Intent
+    if (/\b(?:google\s*(?:par|pe)?\s*search\s*karo|web\s*(?:par|pe)?\s*dhundho|search\s*on\s*google)\b/i.test(clean)) {
+      const query = userText.replace(/^.*?(?:search\s*karo|dhundho|search\s*on\s*google)\s*:?\s*/i, "").trim() || userText;
+      return {
+        action: "search_web",
+        confidence: 0.8,
+        parameters: { query, action: "google_search" },
+        reasoning: "Fallback offline regex match for web search",
+        originalText: userText
+      };
+    }
+
+    // 16. Session Health Intent
+    if (/\b(?:session\s*health|ban\s*risk|whatsapp\s*safe\s*hai|account\s*health)\b/i.test(clean)) {
+      return {
+        action: "check_session_health",
+        confidence: 0.85,
+        parameters: {},
+        reasoning: "Fallback offline regex match for session health check",
+        originalText: userText
+      };
+    }
+
+    // 16b. Unpause Bot Intent
+    if (/\b(?:unpause|bot\s*(?:chalu|resume|start)|resume\s*bot|start\s*bot)\b/i.test(clean)) {
+      return {
+        action: "unpause_bot",
+        confidence: 0.85,
+        parameters: {},
+        reasoning: "Fallback offline regex match for unpause bot",
+        originalText: userText
+      };
+    }
+
+    // 17. Website security scan fallback (works even when LLM is down)
     if (/\b(find\s+(vulnerabilit|vuln|weak\s*point|weakness|data\s*leak|leak|bug|error|issue)|vulnerability\s*scan|deep\s*scan|nikto|website\s*security|domain\s*audit|security\s*audit|link\s*scan|scan.*(url|link|website|domain)|audit\s*(website|domain|url|site)|phishing)\b/i.test(clean)) {
       const urlMatch =
         userText.match(/https?:\/\/[^\s"'<>\]\)]+/i) ||
@@ -594,7 +841,7 @@ Be decisive. One function call per classification.`;
         userText.match(/\b((?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^\s"'<>\]\)]*)?)/i);
       const scanTarget = (urlMatch?.[1] || urlMatch?.[0] || "").replace(/[.,;:!?'"\])]+$/g, "").trim();
       if (scanTarget) {
-        const scanMode = /find\s+(vulnerabilit|vuln|weak|data\s*leak|bug|error)|nikto|deep\s*scan|vulnerability\s*scan/i.test(clean)
+        const scanMode = /(?:vulnerabilit|vuln|weak|data\s*leak|bug|error|nikto|deep\s*scan)/i.test(clean)
           ? "deep"
           : /audit|website\s*security|domain|grade|security\s*check/i.test(clean)
             ? "audit"
@@ -609,6 +856,7 @@ Be decisive. One function call per classification.`;
       }
     }
 
+    // 18. Default natural chat fallback
     return {
       action: "general_chat",
       confidence: 0.5,
