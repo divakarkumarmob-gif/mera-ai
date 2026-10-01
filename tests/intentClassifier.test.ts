@@ -102,6 +102,38 @@ describe("IntentClassifierService - Fallback & Core Classification Suite", () =>
       expect(res.action).toBe("get_routine");
     });
 
+    it("should classify routine confirmation from photo suggestion ('haan set kar do')", async () => {
+      const res = await intentClassifierService.classifyIntent("haan set kar do", mockContext);
+      expect(res.action).toBe("set_routine");
+      expect(res.confidence).toBeGreaterThanOrEqual(0.8);
+    });
+
+    it("should classify photo routine save intent ('photo wala routine save karo')", async () => {
+      const res = await intentClassifierService.classifyIntent("photo wala routine save karo", mockContext);
+      expect(res.action).toBe("set_routine");
+      expect(res.confidence).toBeGreaterThanOrEqual(0.8);
+    });
+
+    it("should correctly extract routine slots and strip machine tag in visionMemoryService", async () => {
+      const { visionMemoryService } = await import("../src/services/visionMemoryService");
+      const sampleAIOutput = `📌 *Main Subject:* Daily Routine Schedule
+⏰ *Timetable / Routine Detected:*
+• 04:00 AM - 05:00 AM: Jagna / Wake Up
+• 08:00 AM - 09:00 AM: Breakfast / Khana
+
+👉 *Boss, kya main is schedule ke daily reminders ya Friday routine me set kar doon?*
+[ROUTINE_DATA: [{"title": "Jagna", "startTimeStr": "04:00 AM", "endTimeStr": "05:00 AM", "activity": "Wake up"}, {"title": "Khana", "startTimeStr": "08:00 AM", "endTimeStr": "09:00 AM", "activity": "Breakfast"}]]`;
+
+      const extracted = visionMemoryService.extractRoutineSlots(sampleAIOutput);
+      expect(extracted.slots).toHaveLength(2);
+      expect(extracted.slots[0].title).toBe("Jagna");
+      expect(extracted.slots[0].startTimeStr).toBe("04:00 AM");
+      expect(extracted.slots[1].title).toBe("Khana");
+      expect(extracted.slots[1].startTimeStr).toBe("08:00 AM");
+      expect(extracted.cleanedText).not.toContain("[ROUTINE_DATA:");
+      expect(extracted.cleanedText).toContain("Timetable / Routine Detected");
+    });
+
     it("should classify memory recall/search", async () => {
       const res = await intentClassifierService.classifyIntent("purani baat dhundho pichle hafte ki", mockContext);
       expect(res.action).toBe("search_memory");

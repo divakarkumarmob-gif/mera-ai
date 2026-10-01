@@ -281,7 +281,7 @@ const INTENT_FUNCTION_DECLARATIONS = [
   },
   {
     name: "set_routine",
-    description: "Set/update daily routine. Examples: 'mera routine note karo: 7 bje uthna', 'gym ka time 7 bje kar do', 'routine me lunch 2 bje set karo'.",
+    description: "Set/update daily routine or confirm routine/reminder suggestions from photos/documents. Examples: 'mera routine note karo: 7 bje uthna', 'gym ka time 7 bje kar do', 'routine me lunch 2 bje set karo', 'haan set kar do', 'routine set karo', 'photo wala routine save karo', 'schedule set kar do', 'haan routine bana do'.",
     parameters: {
       type: Type.OBJECT,
       properties: {
@@ -585,7 +585,10 @@ CRITICAL RULES:
    - If user asks about ban risk, account safety, session health, or bot health ("whatsapp ban status", "session health kaisa hai", "whatsapp safe hai na", "account ban risk") → check_session_health.
    - If user asks about their personal WhatsApp Story/Status post ("mera status laga do", "whatsapp par status dalo", "status post karo", "story update") → Personal WhatsApp Story/Status, NOT check_session_health.
 
-8. **NO FUNCTION MATCH**: If no function fits, use general_chat with a natural response.
+8. **ROUTINE / SCHEDULE CONFIRMATION**:
+   - If user confirms routine/timetable suggestions or says "haan set kar do", "routine set karo", "photo wala routine save karo", "schedule set kar do", "haan routine bana do", "set routine", "reminders set kar do" → call set_routine!
+
+9. **NO FUNCTION MATCH**: If no function fits, use general_chat with a natural response.
 
 Be decisive. One function call per classification.`;
   }
@@ -756,12 +759,16 @@ Be decisive. One function call per classification.`;
         originalText: userText
       };
     }
-    if (/\b(?:routine\s*(?:me\s*set|update|badlo))\b/i.test(clean)) {
+    if (
+      /\b(?:(?:haan\s*)?(?:set\s*kar\s*do|routine\s*(?:me\s*set|set\s*karo|save\s*karo|bana\s*do|banao)|photo\s*(?:ka|wala)?\s*routine|schedule\s*set\s*karo|reminders?\s*set\s*kar\s*do)|save\s*routine|set\s*routine)\b/i.test(clean) ||
+      /^(?:haan\s*,?\s*)?(?:set\s*kar\s*do|routine\s*set\s*karo|routine\s*bana\s*do|reminders?\s*set\s*karo|kar\s*do\s*set)$/i.test(clean) ||
+      /\b(?:routine\s*(?:me\s*set|update|badlo))\b/i.test(clean)
+    ) {
       return {
         action: "set_routine",
-        confidence: 0.8,
+        confidence: 0.85,
         parameters: { activity: userText },
-        reasoning: "Fallback offline regex match for routine update",
+        reasoning: "Fallback offline regex match for routine confirmation/update",
         originalText: userText
       };
     }

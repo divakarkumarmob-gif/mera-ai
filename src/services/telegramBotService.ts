@@ -4382,6 +4382,16 @@ INSTRUCTIONS:
             await this.sendMessage(chatId, `📅 ${parameters.slotQuery} routine update kar diya!`);
             return { handled: true, replyText: "Routine updated" };
           }
+          const recentMedia = visionMemoryService.getChatMediaContext(String(chatId));
+          if (recentMedia?.detectedScheduleSlots?.length) {
+            await bossRoutineService.setFullRoutine(recentMedia.detectedScheduleSlots);
+            const slotSummary = recentMedia.detectedScheduleSlots
+              .map((s) => `• <b>${s.startTimeStr} - ${s.endTimeStr}</b>: ${s.title} (${s.activity})`)
+              .join("\n");
+            const replyMsg = `✅ <b>Done Boss! Photo/Doc se daily routine successfully set ho gaya hai:</b>\n\n${slotSummary}\n\nAb Friday aapko har slot par timely reminders deti rahegi! 🚀`;
+            await this.sendMessage(chatId, replyMsg);
+            return { handled: true, replyText: replyMsg };
+          }
           return { handled: false };
         }
 

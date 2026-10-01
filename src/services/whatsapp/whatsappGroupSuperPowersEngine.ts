@@ -284,6 +284,18 @@ export class WhatsAppGroupSuperPowersEngine {
             await bossRoutineService.updateRoutineSlot(parameters.slotQuery, { startTimeStr: parameters.startTimeStr, endTimeStr: parameters.endTimeStr, activity: parameters.activity });
             return { handled: true, replyText: `📅 ${parameters.slotQuery} routine update kar diya!` };
           }
+          const { visionMemoryService: vms } = await import("../visionMemoryService");
+          const groupRecentMedia = vms.getChatMediaContext(groupJid);
+          if (groupRecentMedia?.detectedScheduleSlots?.length) {
+            await bossRoutineService.setFullRoutine(groupRecentMedia.detectedScheduleSlots);
+            const slotSummary = groupRecentMedia.detectedScheduleSlots
+              .map((s) => `• *${s.startTimeStr} - ${s.endTimeStr}*: ${s.title} (${s.activity})`)
+              .join("\n");
+            return {
+              handled: true,
+              replyText: `✅ *Done Boss! Photo/Doc se daily routine successfully set ho gaya hai:*\n\n${slotSummary}\n\nAb Friday aapko har slot par timely reminders deti rahegi! 🚀`
+            };
+          }
           return { handled: false };
 
         case "get_routine":

@@ -7,6 +7,7 @@ import { contactsService } from "./contactsService";
 import { dailyUpdateService } from "./dailyUpdateService";
 import { humanBotFirewallService } from "./humanBotFirewallService";
 import { intentClassifierService, ClassifiedIntent, IntentContext } from "./intentClassifierService";
+import { visionMemoryService } from "./visionMemoryService";
 
 // Sub-engine imports
 import type { QuotedMessageContext, IncomingMessage, WhatsAppStatus } from "./whatsapp/whatsappTypes";
@@ -1140,7 +1141,8 @@ class WhatsAppBotService {
                     const cap = (caption || "").trim();
 
                     const isSummaryRequested =
-                      /\b(summary|summarize|summarise|friday\s*summary|analysis|analyze|analyse|photo\s*analyze|ocr|dekho|check|batao|kya\s*hai|padho|scan|explain)\b/i.test(cap) ||
+                      (isFromOwner && !isGroup) ||
+                      /\b(summary|summarize|summarise|friday\s*summary|analysis|analyze|analyse|photo\s*analyze|ocr|dekho|check|batao|kya\s*hai|padho|scan|explain|routine|schedule|time\s*table|timetable|remind|reminder)\b/i.test(cap) ||
                       cap.startsWith("@summary") ||
                       cap.startsWith("/summary") ||
                       cap.startsWith("@friday");
@@ -1155,7 +1157,12 @@ class WhatsAppBotService {
 
                   if (isDoc) {
                     const cap = (caption || "").trim();
-                    const isDocSummaryReq = isFromOwner || /\b(summary|summarize|summarise|friday\s*summary|analysis|analyze|padho|check|batao|kya\s*hai|explain)\b/i.test(cap) || cap.startsWith("@friday");
+                    const isDocSummaryReq =
+                      (isFromOwner && !isGroup) ||
+                      /\b(summary|summarize|summarise|friday\s*summary|analysis|analyze|padho|check|batao|kya\s*hai|explain|routine|schedule|time\s*table|timetable|remind|reminder)\b/i.test(cap) ||
+                      cap.startsWith("@friday") ||
+                      cap.startsWith("@summary") ||
+                      cap.startsWith("/summary");
                     if (isDocSummaryReq) {
                       await this.sendHumanLikeMessage(replyJid, `📄 *Document / PDF (${fileName || "file"}) analyze & summarize ho raha hai...* ⚡`, "", msg.key);
                       const summaryRes = await visionMemoryService.generateMediaSummary(buffer, mimeType, cap, fileName, replyJid);
@@ -2800,6 +2807,17 @@ class WhatsAppBotService {
             await bossRoutineService.updateRoutineSlot(parameters.slotQuery, { startTimeStr: parameters.startTimeStr, endTimeStr: parameters.endTimeStr, activity: parameters.activity });
             await this.sendHumanLikeMessage(replyJid, `📅 ${parameters.slotQuery} routine update kar diya!`, rawText, messageKey);
             return { handled: true, replyText: "Routine updated" };
+          }
+          // Check recent media context for detected timetable / schedule slots
+          const recentMedia = visionMemoryService.getChatMediaContext(replyJid);
+          if (recentMedia?.detectedScheduleSlots?.length) {
+            await bossRoutineService.setFullRoutine(recentMedia.detectedScheduleSlots);
+            const slotSummary = recentMedia.detectedScheduleSlots
+              .map((s) => `• *${s.startTimeStr} - ${s.endTimeStr}*: ${s.title} (${s.activity})`)
+              .join("\n");
+            const replyMsg = `✅ *Done Boss! Photo/Doc se daily routine successfully set ho gaya hai:*\n\n${slotSummary}\n\nAb Friday aapko har slot par timely reminders deti rahegi! 🚀`;
+            await this.sendHumanLikeMessage(replyJid, replyMsg, rawText, messageKey);
+            return { handled: true, replyText: replyMsg };
           }
           return { handled: false };
         }

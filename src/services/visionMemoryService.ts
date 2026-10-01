@@ -24,6 +24,13 @@ export interface StoredMediaItem {
   photoBase64?: string;
 }
 
+export interface RoutineSlotDraft {
+  title: string;
+  startTimeStr: string;
+  endTimeStr: string;
+  activity: string;
+}
+
 export interface CachedMediaContext {
   buffer: Buffer;
   mimeType: string;
@@ -34,6 +41,8 @@ export interface CachedMediaContext {
   ocrText?: string;
   timestamp: number;
   shortSummary?: string;
+  detectedScheduleSlots?: RoutineSlotDraft[];
+  isScheduleOrTimetable?: boolean;
 }
 
 class VisionMemoryService {
@@ -79,6 +88,38 @@ class VisionMemoryService {
   }
 
   /**
+   * Parses machine-readable [ROUTINE_DATA: [...]] from AI output,
+   * cleans the tag from the user-facing text, and returns structured slots.
+   */
+  public extractRoutineSlots(text: string): { cleanedText: string; slots: RoutineSlotDraft[] } {
+    if (!text) return { cleanedText: text || "", slots: [] };
+    const routineMatch = text.match(/\[ROUTINE_DATA:\s*(\[\s*\{.*?\}\s*\])\s*\]/s);
+    if (!routineMatch) {
+      return { cleanedText: text, slots: [] };
+    }
+
+    let slots: RoutineSlotDraft[] = [];
+    try {
+      const parsed = JSON.parse(routineMatch[1]);
+      if (Array.isArray(parsed)) {
+        slots = parsed
+          .filter((s: any) => s && (s.title || s.activity) && (s.startTimeStr || s.timeString))
+          .map((s: any) => ({
+            title: String(s.title || s.activity || "Routine Slot").trim(),
+            startTimeStr: String(s.startTimeStr || s.timeString || "09:00 AM").trim(),
+            endTimeStr: String(s.endTimeStr || "10:00 AM").trim(),
+            activity: String(s.activity || s.title || "").trim(),
+          }));
+      }
+    } catch (e) {
+      console.warn("[VisionMemoryService] Failed to parse [ROUTINE_DATA] JSON:", e);
+    }
+
+    const cleanedText = text.replace(/\[ROUTINE_DATA:\s*\[\s*\{.*?\}\s*\]\s*\]/s, "").trim();
+    return { cleanedText, slots };
+  }
+
+  /**
    * Processes and stores an incoming WhatsApp photo, image, video, PDF, document, or audio.
    */
   public async processIncomingMedia(
@@ -93,6 +134,7 @@ class VisionMemoryService {
     let analysis = "Media received.";
     let ocrText = "";
     let shortSummary = "";
+    let detectedSlots: RoutineSlotDraft[] = [];
 
     const lowerMime = (mimeType || "").toLowerCase();
     const isDoc = lowerMime.includes("pdf") || lowerMime.includes("document") || lowerMime.includes("text") || lowerMime.includes("sheet") || lowerMime.includes("presentation") || lowerMime.includes("msword");
@@ -112,7 +154,11 @@ class VisionMemoryService {
 1. Document Type & Title:
 2. Full Text / Key Content (OCR):
 3. Key Financials, Dates, Names, Terms, or Action Items:
-4. Short 2-sentence conversational summary in Hindi/Hinglish for Boss DK:
+4. ROUTINE / TIMETABLE DETECTION: If this contains a daily routine, timetable, workout plan, or schedule (e.g. 4 bje jagna, 8 bje khana, study, etc.):
+   - List the timetable slots.
+   - Proactively suggest: "👉 *Boss, kya main iska daily reminder ya Friday routine set kar doon?* Bas reply karein: _'Haan set kar do'_ ya _'Set routine'_"
+   - Append machine tag at the end: [ROUTINE_DATA: [{"title": "Jagna", "startTimeStr": "04:00 AM", "endTimeStr": "05:00 AM", "activity": "Morning Routine"}, ...]]
+5. Short 2-sentence conversational summary in Hindi/Hinglish for Boss DK:
 ${caption ? `User caption: "${caption}"` : ""}`;
         } else if (isVideo) {
           prompt = `You are Friday AI. Analyze this received video:
@@ -131,7 +177,11 @@ ${caption ? `User caption: "${caption}"` : ""}`;
 1. What is in this photo (people, objects, scene, setting, emotions)?
 2. If there are people, describe their physical appearance (approx age, gender, hair, clothing, distinct traits) for identification.
 3. If there is text in the image, extract all readable text (OCR).
-4. Short 2-sentence summary in Hindi/Hinglish for Boss DK:
+4. ROUTINE / TIMETABLE DETECTION: If this photo contains a daily routine, timetable, workout plan, or schedule (e.g. 4 bje jagna, 8 bje khana, study/gym slots, etc.):
+   - List the timetable slots clearly.
+   - Proactively suggest: "👉 *Boss, kya main iska daily reminder ya Friday routine set kar doon?* Bas reply karein: _'Haan set kar do'_ ya _'Set routine'_"
+   - Append machine tag at the end: [ROUTINE_DATA: [{"title": "Jagna", "startTimeStr": "04:00 AM", "endTimeStr": "05:00 AM", "activity": "Morning Routine"}, ...]]
+5. Short 2-sentence summary in Hindi/Hinglish for Boss DK:
 ${caption ? `User caption: "${caption}"` : ""}`;
         }
 
@@ -179,6 +229,11 @@ ${caption ? `User caption: "${caption}"` : ""}`;
           }
         }
 
+        // Parse routine slots and clean machine tag
+        const routineExtracted = this.extractRoutineSlots(analysis);
+        analysis = routineExtracted.cleanedText;
+        detectedSlots = routineExtracted.slots;
+
         if (isDoc || analysis.toLowerCase().includes("text:") || analysis.toLowerCase().includes("ocr")) {
           ocrText = analysis;
         }
@@ -204,6 +259,8 @@ ${caption ? `User caption: "${caption}"` : ""}`;
       ocrText,
       timestamp: Date.now(),
       shortSummary,
+      detectedScheduleSlots: detectedSlots.length > 0 ? detectedSlots : undefined,
+      isScheduleOrTimetable: detectedSlots.length > 0,
     };
     this.latestMedia = cachedItem;
     if (chatId) {
@@ -317,11 +374,27 @@ The user requested an executive summary of this attached ${isDoc ? `document/PDF
 
 USER INSTRUCTION/NOTE: "${userInstruction || "Provide a complete and structured executive summary."}"
 
+CRITICAL INSTRUCTION - TIMETABLE / DAILY SCHEDULE DETECTION:
+Check if this photo, PDF, document, or image contains a daily routine, timetable, study schedule, workout plan, or daily time-slots (e.g. "4:00 AM Jagna / Uthna", "8:00 AM Khana / Breakfast", "10:00 AM Study", "6:00 PM Gym", "10:00 PM Sona", etc.).
+
+If a timetable or routine IS detected:
+1. List the schedule slots cleanly under a dedicated section:
+   ⏰ *Timetable / Routine Detected:*
+   • 04:00 AM - 05:00 AM: Jagna / Morning Routine
+   • 08:00 AM - 09:00 AM: Breakfast / Khana
+2. Add an explicit, proactive suggestion for Boss DK:
+   👉 *Boss, kya main is schedule ke daily reminders ya Friday routine me set kar doon?*
+   Bas reply karein: _"Haan set kar do"_ ya _"Set routine"_ aur Friday aapko timely reminders deti rahegi!
+3. AT THE VERY END OF YOUR RESPONSE, append this exact machine-readable tag containing the JSON array of slots so Friday can automatically parse and set it:
+   [ROUTINE_DATA: [{"title": "Jagna", "startTimeStr": "04:00 AM", "endTimeStr": "05:00 AM", "activity": "Morning Routine"}, {"title": "Khana", "startTimeStr": "08:00 AM", "endTimeStr": "09:00 AM", "activity": "Breakfast"}]]
+   (Rules for [ROUTINE_DATA]: title should be short, startTimeStr and endTimeStr in 12h format like '04:00 AM' or '08:00 PM', activity should be clear).
+
 STRUCTURE YOUR RESPONSE IN CLEAN WHATSAPP FORMAT:
 1. 📌 *Main Subject / Heading:* (What is this photo/document about?)
 2. 📝 *Key Summary Points:* (3-6 bullet points covering the core takeaways, facts, message, or OCR text)
 3. 🔍 *Important Specifics:* (Names, dates, amounts, links, or action items if present)
 4. 💡 *Executive Takeaway (in natural Hinglish):* (1-2 lines summarizing the whole thing for quick reading)
+(If timetable detected, include the Timetable & Suggestion sections described above!)
 
 Use WhatsApp markdown (*bold*, _italic_, bullet points). Keep it clean, accurate, and easy to read.`;
 
@@ -359,6 +432,9 @@ Use WhatsApp markdown (*bold*, _italic_, bullet points). Keep it clean, accurate
 
         const reply = response.text?.trim();
         if (reply) {
+          const { cleanedText, slots } = this.extractRoutineSlots(reply);
+          const finalReply = cleanedText;
+
           // Cache this summary in the chat context
           const cachedItem: CachedMediaContext = {
             buffer,
@@ -366,15 +442,17 @@ Use WhatsApp markdown (*bold*, _italic_, bullet points). Keep it clean, accurate
             sender: "User",
             caption: userInstruction || fileName,
             fileName,
-            analysis: reply,
+            analysis: finalReply,
             timestamp: Date.now(),
-            shortSummary: reply.slice(0, 180),
+            shortSummary: finalReply.slice(0, 180),
+            detectedScheduleSlots: slots.length > 0 ? slots : undefined,
+            isScheduleOrTimetable: slots.length > 0,
           };
           this.latestMedia = cachedItem;
           if (chatId) {
             this.latestMediaPerChat.set(chatId, cachedItem);
           }
-          return reply;
+          return finalReply;
         }
       } catch (err: any) {
         console.warn(`[VisionMemoryService] Summary generation model ${model} failed: ${err?.message || err}`);
@@ -478,7 +556,17 @@ INSTRUCTIONS:
           });
 
           const reply = response.text?.trim();
-          if (reply) return reply;
+          if (reply) {
+            const { cleanedText, slots } = this.extractRoutineSlots(reply);
+            if (slots.length > 0) {
+              const existing = this.getChatMediaContext(chatId);
+              if (existing) {
+                existing.detectedScheduleSlots = slots;
+                existing.isScheduleOrTimetable = true;
+              }
+            }
+            return cleanedText;
+          }
         } catch (err: any) {
           console.warn(`[VisionMemoryService] Media Q&A model ${model} failed: ${err?.message || err}`);
         }
@@ -502,7 +590,8 @@ INSTRUCTIONS:
 1. Extract the exact answer to the user's question from the provided summary/content.
 2. Provide a direct, helpful, and concise response in friendly Hindi/Hinglish using WhatsApp formatting (*bold*, bullet points).
 3. If the user asked "meeting kab hai", find and specify the meeting date, time, link/location.
-4. If not found in the summary, state clearly what the summary contains.`;
+4. If this is about a schedule or routine, list the slots and append [ROUTINE_DATA: [{"title": "...", "startTimeStr": "...", "endTimeStr": "...", "activity": "..."}]] and suggest: "👉 *Boss, kya main iska daily reminder ya Friday routine set kar doon?* Bas reply karein: _'Haan set kar do'_".
+5. If not found in the summary, state clearly what the summary contains.`;
 
       const TEXT_MODELS = [
         "gemini-3.1-flash-lite",
@@ -523,7 +612,17 @@ INSTRUCTIONS:
             contents: [{ role: "user", parts: [{ text: prompt }] }],
           });
           const reply = response.text?.trim();
-          if (reply) return reply;
+          if (reply) {
+            const { cleanedText, slots } = this.extractRoutineSlots(reply);
+            if (slots.length > 0) {
+              const existing = this.getChatMediaContext(chatId);
+              if (existing) {
+                existing.detectedScheduleSlots = slots;
+                existing.isScheduleOrTimetable = true;
+              }
+            }
+            return cleanedText;
+          }
         } catch (err: any) {
           console.warn(`[VisionMemoryService] Text Q&A model ${model} failed: ${err?.message || err}`);
         }

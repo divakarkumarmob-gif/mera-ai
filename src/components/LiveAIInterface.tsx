@@ -43,6 +43,7 @@ import {
 import VoiceBiometricsManager from './live/VoiceBiometricsManager';
 import InstagramBotCard from './live/InstagramBotCard';
 import HangingRopeCapsule from './live/HangingRopeCapsule';
+import StarryBackground from './StarryBackground';
 
 interface LiveAIInterfaceProps {
     onClose: () => void;
