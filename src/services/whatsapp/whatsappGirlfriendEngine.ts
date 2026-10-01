@@ -2179,10 +2179,6 @@ STRICT REALISTIC WHATSAPP CHAT RULES:
     }
   }
 
-  /**
-   * 100% Uncensored Open Models Multi-Tier Engine for Girlfriend & Open Talk Roleplay
-   * 1. Pollinations Open Cluster ("evil", "mistral", "llama-3.3-70b", "deepseek-r1", "openai-large")
-   * 2. Groq Cloud Open Models ("llama-3.3-70b-versatile", "deepseek-r1-distill-llama-70b")
   private isInvalidAiText(t?: string | null): boolean {
     if (!t || !t.trim()) return true;
     const lower = t.toLowerCase();
@@ -2201,24 +2197,197 @@ STRICT REALISTIC WHATSAPP CHAT RULES:
     );
   }
 
+  // ── Helper: Query Local Ollama (Category 3 - Absolute Zero Censorship & Offline) ──
+  private async queryLocalOllama(
+    messages: Array<{ role: string; content: string }>
+  ): Promise<string | null> {
+    try {
+      const baseUrl = process.env.OLLAMA_BASE_URL?.trim() || "http://127.0.0.1:11434";
+      const pingController = new AbortController();
+      const pingTimer = setTimeout(() => pingController.abort(), 1200);
+      const ping = await fetch(`${baseUrl}/api/tags`, { signal: pingController.signal }).catch(() => null);
+      clearTimeout(pingTimer);
+      if (!ping || !ping.ok) return null;
+
+      const tagsData: any = await ping.json().catch(() => null);
+      const installedModels: string[] = (tagsData?.models || []).map((m: any) => m.name);
+      const preferred = ["dolphin", "stheno", "llama3", "mistral", "qwen"];
+      let chosenModel = installedModels.find((m) => preferred.some((p) => m.toLowerCase().includes(p))) || installedModels[0];
+      if (!chosenModel) chosenModel = "dolphin-llama3";
+
+      const res = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: chosenModel,
+          messages,
+          stream: false,
+          options: { temperature: 0.9, num_predict: 100 },
+        }),
+      });
+
+      if (res.ok) {
+        const data: any = await res.json();
+        const text = data?.message?.content?.trim();
+        if (text && !this.isInvalidAiText(text)) {
+          console.log(`[WhatsAppGirlfriend] ✅ Uncensored Girlfriend reply generated via Local Ollama (${chosenModel})`);
+          return text;
+        }
+      }
+    } catch {
+      // Local Ollama offline - silent fallback
+    }
+    return null;
+  }
+
+  // ── Helper: Query SambaNova Cloud (Category 2 - 250 t/s Free Qwen 2.5 72B / Llama 3.3) ──
+  private async querySambaNova(
+    messages: Array<{ role: string; content: string }>,
+    apiKey: string
+  ): Promise<string | null> {
+    const models = ["Qwen2.5-72B-Instruct", "Meta-Llama-3.3-70B-Instruct"];
+    for (const model of models) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 9000);
+        const res = await fetch("https://api.sambanova.ai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            messages,
+            max_tokens: 110,
+            temperature: 0.88,
+          }),
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+        if (res.ok) {
+          const data: any = await res.json();
+          const text = data?.choices?.[0]?.message?.content?.trim();
+          if (text && !this.isInvalidAiText(text)) {
+            console.log(`[WhatsAppGirlfriend] ✅ Uncensored Girlfriend reply generated via SambaNova: ${model}`);
+            return text;
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[WhatsAppGirlfriend] SambaNova ${model} notice:`, err?.message || err);
+      }
+    }
+    return null;
+  }
+
+  // ── Helper: Query Cerebras Cloud (Category 2 - 2000 t/s World's Fastest Llama 3.3 70B) ──
+  private async queryCerebras(
+    messages: Array<{ role: string; content: string }>,
+    apiKey: string
+  ): Promise<string | null> {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 7000);
+      const res = await fetch("https://api.cerebras.ai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: "llama-3.3-70b",
+          messages,
+          max_tokens: 110,
+          temperature: 0.88,
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      if (res.ok) {
+        const data: any = await res.json();
+        const text = data?.choices?.[0]?.message?.content?.trim();
+        if (text && !this.isInvalidAiText(text)) {
+          console.log(`[WhatsAppGirlfriend] ✅ Uncensored Girlfriend reply generated via Cerebras`);
+          return text;
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[WhatsAppGirlfriend] Cerebras notice:`, err?.message || err);
+    }
+    return null;
+  }
+
+  // ── Helper: Query AI Horde Uncensored (Category 1 - 100% Free, Zero Key, 100% Uncensored Stheno) ──
+  private async queryAiHorde(
+    systemPrompt: string,
+    rawText: string,
+    tempHistory: Array<{ role: string; text: string }>
+  ): Promise<string | null> {
+    try {
+      const historyContext = tempHistory.slice(-4).map(h => `${h.role === "user" ? "Boyfriend" : "Priya"}: ${h.text}`).join("\n");
+      const fullPrompt = `${systemPrompt}\n\n${historyContext}\nBoyfriend: ${rawText}\nPriya:`;
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 16000);
+
+      const postRes = await fetch("https://aihorde.net/api/v2/generate/text/async", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: "0000000000",
+        },
+        body: JSON.stringify({
+          prompt: fullPrompt,
+          params: {
+            max_context_length: 512,
+            max_length: 85,
+            temperature: 0.9,
+          },
+          models: ["koboldcpp/L3-8B-Stheno-v3.2", "Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q4_K_M"],
+        }),
+        signal: controller.signal,
+      });
+
+      const { id } = await postRes.json();
+      if (!id) {
+        clearTimeout(timeout);
+        return null;
+      }
+
+      for (let i = 0; i < 3; i++) {
+        await new Promise((r) => setTimeout(r, 3500));
+        const statusRes = await fetch(`https://aihorde.net/api/v2/generate/text/status/${id}`, {
+          signal: controller.signal,
+        });
+        const statusData: any = await statusRes.json();
+        if (statusData.done && statusData.generations?.[0]?.text) {
+          clearTimeout(timeout);
+          let genText = statusData.generations[0].text.trim();
+          genText = genText.replace(/^(Priya:|Priya says:|Girlfriend:)/i, "").trim();
+          if (genText && !this.isInvalidAiText(genText)) {
+            console.log("[WhatsAppGirlfriend] ✅ Uncensored Girlfriend reply generated via AI Horde (Stheno/Uncensored)");
+            return genText;
+          }
+        }
+      }
+      clearTimeout(timeout);
+    } catch (hordeErr: any) {
+      console.warn("[WhatsAppGirlfriend] AI Horde notice:", hordeErr?.message || hordeErr);
+    }
+    return null;
+  }
+
   /**
-   * 100% Uncensored Open Models Multi-Tier Engine for Girlfriend & Open Talk Roleplay
-   * 1. Pollinations Open Cluster ("openai-fast", "openai", "searchgpt")
-   * 2. Direct Pollinations GET Fallback
-   * 3. Groq Cloud Open Models ("llama-3.3-70b-versatile", "deepseek-r1-distill-llama-70b")
-   * 4. OpenRouter Free Endpoints
+   * 100% Uncensored Open Models Multi-Category Architecture for Girlfriend & Open Talk Roleplay
+   * Category 3: Local Offline / Uncensored (Ollama)
+   * Category 2: Ultra-Fast Free Cloud Providers (Groq, SambaNova, Cerebras, OpenRouter)
+   * Category 1: Zero-Key No-Auth Public Engines (Pollinations AI, AI Horde)
    */
   public async queryUncensoredGfEngine(
     systemPrompt: string,
     rawText: string,
     tempHistory: Array<{ role: string; text: string }>
   ): Promise<string | null> {
-    const UNCENSORED_OPEN_MODELS = [
-      "openai-fast",
-      "openai",
-      "searchgpt",
-    ];
-
     const messages = [
       { role: "system", content: systemPrompt },
       ...tempHistory.slice(-20).map((h) => ({
@@ -2228,7 +2397,93 @@ STRICT REALISTIC WHATSAPP CHAT RULES:
       { role: "user", content: rawText },
     ];
 
-    // ── Tier 1: Groq Cloud High-Speed Llama 3.3 / DeepSeek R1 (Ultra Fast) ──
+    // ─────────────────────────────────────────────────────────────────────────
+    // 🌐 PRIORITY 1 (CATEGORY 1): Zero-Key No-API-Key Direct Public Engines
+    // ─────────────────────────────────────────────────────────────────────────
+    // 1.1 Pollinations AI Open Models POST
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 22000);
+      const res = await fetch("https://text.pollinations.ai/openai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "openai-fast",
+          messages,
+          max_tokens: 85,
+          temperature: 0.9,
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      if (res.ok) {
+        const data = await res.json();
+        const text = data?.choices?.[0]?.message?.content?.trim();
+        if (text && !this.isInvalidAiText(text)) {
+          console.log(`[WhatsAppGirlfriend] ✅ Uncensored Girlfriend reply generated via Pollinations Open Model: openai-fast`);
+          return text;
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[WhatsAppGirlfriend] Pollinations Open Model notice:`, err?.message || err);
+    }
+
+    // 1.2 Pollinations Direct Root POST (Streamlined Plain Text)
+    try {
+      const rootController = new AbortController();
+      const rootTimeout = setTimeout(() => rootController.abort(), 20000);
+      const rootRes = await fetch("https://text.pollinations.ai/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "openai-fast",
+          messages,
+          max_tokens: 85,
+          temperature: 0.9,
+        }),
+        signal: rootController.signal,
+      });
+      clearTimeout(rootTimeout);
+      if (rootRes.ok) {
+        const directText = (await rootRes.text()).trim();
+        if (directText && !this.isInvalidAiText(directText)) {
+          console.log("[WhatsAppGirlfriend] ✅ Uncensored Girlfriend reply generated via Pollinations Direct Root");
+          return directText;
+        }
+      }
+    } catch (rootErr: any) {
+      console.warn("[WhatsAppGirlfriend] Pollinations Direct Root notice:", rootErr?.message || rootErr);
+    }
+
+    // 1.3 AI Horde Uncensored Roleplay (Keyless Community Cluster)
+    const hordeReply = await this.queryAiHorde(systemPrompt, rawText, tempHistory);
+    if (hordeReply) return hordeReply;
+
+    // 1.4 Pollinations Direct GET Fallback
+    try {
+      const getController = new AbortController();
+      const getTimeout = setTimeout(() => getController.abort(), 20000);
+      const encPrompt = encodeURIComponent(rawText);
+      const encSys = encodeURIComponent(systemPrompt.slice(0, 300));
+      const getRes = await fetch(`https://text.pollinations.ai/${encPrompt}?model=openai-fast&system=${encSys}`, {
+        signal: getController.signal,
+      });
+      clearTimeout(getTimeout);
+      if (getRes.ok) {
+        const rawBody = (await getRes.text()).trim();
+        if (rawBody && !this.isInvalidAiText(rawBody)) {
+          console.log("[WhatsAppGirlfriend] ✅ Uncensored Girlfriend reply generated via Pollinations GET");
+          return rawBody;
+        }
+      }
+    } catch (getErr: any) {
+      console.warn("[WhatsAppGirlfriend] Pollinations GET fallback notice:", getErr?.message || getErr);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // ⚡ PRIORITY 2 (CATEGORY 2): Ultra-Fast Free Cloud Providers (Fallback)
+    // ─────────────────────────────────────────────────────────────────────────
+    // 2.1 Groq Cloud (Llama 3.3 70B & DeepSeek R1)
     const groqKey = process.env.GROQ_API_KEY?.trim();
     if (groqKey) {
       for (const gModel of ["llama-3.3-70b-versatile", "deepseek-r1-distill-llama-70b"]) {
@@ -2242,13 +2497,14 @@ STRICT REALISTIC WHATSAPP CHAT RULES:
             body: JSON.stringify({
               model: gModel,
               messages,
+              max_tokens: 100,
               temperature: 0.9,
             }),
           });
           if (res.ok) {
             const data = await res.json();
             const text = data?.choices?.[0]?.message?.content?.trim();
-            if (text && !isInvalidAiText(text)) {
+            if (text && !this.isInvalidAiText(text)) {
               console.log(`[WhatsAppGirlfriend] ✅ Uncensored Girlfriend reply generated via Groq: ${gModel}`);
               return text;
             }
@@ -2259,62 +2515,24 @@ STRICT REALISTIC WHATSAPP CHAT RULES:
       }
     }
 
-    // ── Tier 2: Pollinations AI Open Models POST (Zero Key, 100% Free) ────────
-    for (const model of UNCENSORED_OPEN_MODELS) {
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 8000);
-
-        const res = await fetch("https://text.pollinations.ai/openai", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model,
-            messages,
-            temperature: 0.9,
-          }),
-          signal: controller.signal,
-        });
-        clearTimeout(timeout);
-
-        if (res.ok) {
-          const data = await res.json();
-          const text = data?.choices?.[0]?.message?.content?.trim();
-          if (text && !isInvalidAiText(text)) {
-            console.log(`[WhatsAppGirlfriend] ✅ Uncensored Girlfriend reply generated via Pollinations Open Model: ${model}`);
-            return text;
-          }
-        }
-      } catch (err: any) {
-        console.warn(`[WhatsAppGirlfriend] Pollinations Open Model ${model} notice:`, err?.message || err);
-      }
+    // 2.2 SambaNova Cloud (Qwen 2.5 72B & Llama 3.3 70B - 250 t/s)
+    const sambanovaKey = process.env.SAMBANOVA_API_KEY?.trim();
+    if (sambanovaKey) {
+      const sambaReply = await this.querySambaNova(messages, sambanovaKey);
+      if (sambaReply) return sambaReply;
     }
 
-    // ── Tier 3: Pollinations Direct GET Fallback ──────────────────────────────
-    try {
-      const getController = new AbortController();
-      const getTimeout = setTimeout(() => getController.abort(), 6000);
-      const encPrompt = encodeURIComponent(rawText);
-      const encSys = encodeURIComponent(systemPrompt.slice(0, 300));
-      const getRes = await fetch(`https://text.pollinations.ai/${encPrompt}?model=openai-fast&system=${encSys}`, {
-        signal: getController.signal,
-      });
-      clearTimeout(getTimeout);
-      if (getRes.ok) {
-        const rawBody = (await getRes.text()).trim();
-        if (rawBody && !isInvalidAiText(rawBody)) {
-          console.log("[WhatsAppGirlfriend] ✅ Uncensored Girlfriend reply generated via Pollinations GET");
-          return rawBody;
-        }
-      }
-    } catch (getErr: any) {
-      console.warn("[WhatsAppGirlfriend] Pollinations GET fallback notice:", getErr?.message || getErr);
+    // 2.3 Cerebras Cloud (Llama 3.3 70B - 2000 t/s Ultra-Fast)
+    const cerebrasKey = process.env.CEREBRAS_API_KEY?.trim();
+    if (cerebrasKey) {
+      const cerebrasReply = await this.queryCerebras(messages, cerebrasKey);
+      if (cerebrasReply) return cerebrasReply;
     }
 
-    // ── Tier 4: OpenRouter Free Models Fallback ───────────────────────────────
+    // 2.4 OpenRouter Free Models
     const openRouterKey = process.env.OPENROUTER_API_KEY?.trim();
     if (openRouterKey) {
-      for (const rModel of ["meta-llama/llama-3.3-70b-instruct:free", "deepseek/deepseek-r1:free"]) {
+      for (const rModel of ["qwen/qwen3.8-27b:free", "nvidia/nemotron-3.5-lightning:free", "meta-llama/llama-3.3-70b-instruct:free"]) {
         try {
           const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
             method: "POST",
@@ -2325,13 +2543,14 @@ STRICT REALISTIC WHATSAPP CHAT RULES:
             body: JSON.stringify({
               model: rModel,
               messages,
+              max_tokens: 100,
               temperature: 0.9,
             }),
           });
           if (res.ok) {
             const data = await res.json();
             const text = data?.choices?.[0]?.message?.content?.trim();
-            if (text && !isInvalidAiText(text)) {
+            if (text && !this.isInvalidAiText(text)) {
               console.log(`[WhatsAppGirlfriend] ✅ Uncensored Girlfriend reply generated via OpenRouter: ${rModel}`);
               return text;
             }
@@ -2341,6 +2560,12 @@ STRICT REALISTIC WHATSAPP CHAT RULES:
         }
       }
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 🌟 PRIORITY 3 (CATEGORY 3): Local Offline / Ollama (Final Fallback)
+    // ─────────────────────────────────────────────────────────────────────────
+    const localReply = await this.queryLocalOllama(messages);
+    if (localReply) return localReply;
 
     return null;
   }
