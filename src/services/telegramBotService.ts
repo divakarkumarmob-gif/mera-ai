@@ -341,20 +341,30 @@ class TelegramBotService {
     return `Haan mere handsome ${senderName}... Main toh sirf aapke baare me soch rahi hoon! Bolo baby kya keh rahe the? 😘❤️`;
   }
 
-  // Multi-tier model fallback chain
+  // Multi-tier model fallback chain (Top-tier reasoning models first)
   private static readonly MODEL_FALLBACK_CHAIN = [
-    "gemini-3.1-flash-lite",
-    "gemini-3.5-flash-lite",
-    "gemini-3.5-flash",
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
     "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-3-flash",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
   ];
 
   // Chat & Group Summaries model fallback chain
   private static readonly SUMMARY_MODEL_CHAIN = [
-    "gemini-3.1-flash-lite",
-    "gemini-3.5-flash-lite",
-    "gemini-3.5-flash",
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
     "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-3-flash",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
   ];
 
   constructor() {
@@ -2174,6 +2184,10 @@ CHAT CONTEXT:
 Sender: "${senderName.replace(/"/g, "'")}"
 Is Sender Boss (DK)?: ${isOwner ? "YES (Talk directly to Boss with affection/respect)" : "NO (This is someone messaging DK/Friday on Telegram)"}
 ${customBusy ? `Boss Custom Status / Busy Note: "${customBusy}"` : ""}
+
+🔮 BEST-NEXT-REPLY & ANTICIPATORY CO-INTELLIGENCE MANDATE:
+- Deliver direct, high-value, crisp answers first without fluff.
+- Anticipate Boss's immediate next move (Agla Kadam) and proactively propose 1-2 sharp, actionable next steps so Boss never has to ask twice.
 
 <incoming_message>
 ${messageText}

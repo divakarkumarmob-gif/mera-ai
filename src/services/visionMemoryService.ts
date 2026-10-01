@@ -216,10 +216,15 @@ ${caption ? `User caption: "${caption}"` : ""}`;
               : (lowerMime.includes("png") ? "image/png" : lowerMime.includes("webp") ? "image/webp" : "image/jpeg");
 
         const VISION_FALLBACK_MODELS = [
-          "gemini-3.1-flash-lite",
-          "gemini-3.5-flash-lite",
-          "gemini-3.5-flash",
+          "gemini-3.8-flash",
+          "gemini-3.7-flash",
           "gemini-3.6-flash",
+          "gemini-3.5-flash",
+          "gemini-3.5-flash-lite",
+          "gemini-3.1-flash-lite",
+          "gemini-3-flash",
+          "gemini-2.5-flash",
+          "gemini-2.5-flash-lite",
         ];
 
         for (const model of VISION_FALLBACK_MODELS) {
@@ -461,16 +466,16 @@ STRUCTURE YOUR RESPONSE IN CLEAN WHATSAPP FORMAT:
 Use WhatsApp markdown (*bold*, _italic_, bullet points). Keep it clean, accurate, and easy to read.`;
 
     const VISION_FALLBACK_MODELS = [
-          "gemini-3.1-flash-lite",
-          "gemini-3.5-flash-lite",
-          "gemini-3.5-flash",
-          "gemini-3.1-flash-lite",
-          "gemini-3.6-flash",
-          "gemini-3.5-flash",
-          "gemini-3.5-flash",
-          "gemini-3.5-flash-lite",
-          "gemini-3.1-flash-lite",
-        ];
+      "gemini-3.8-flash",
+      "gemini-3.7-flash",
+      "gemini-3.6-flash",
+      "gemini-3.5-flash",
+      "gemini-3.5-flash-lite",
+      "gemini-3.1-flash-lite",
+      "gemini-3-flash",
+      "gemini-2.5-flash",
+      "gemini-2.5-flash-lite",
+    ];
 
     for (const model of VISION_FALLBACK_MODELS) {
       try {

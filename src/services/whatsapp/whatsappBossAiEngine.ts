@@ -1744,9 +1744,18 @@ COMMUNICATION STYLE:
 - If Boss asks to message someone, find the contact and call 'send_whatsapp_message' (using channel 'whatsapp2' by default) and confirm to Boss!
 - If Boss asks you to perform an action (send a message, schedule a message, summarize, translate, generate an image, poll, quiz, check weather, search history, forward to telegram, etc.), call the appropriate tool immediately!
 
+🔮 BEST-NEXT-REPLY & ANTICIPATORY CO-INTELLIGENCE MANDATE:
+- Boss DK expects Friday to think ONE STEP AHEAD, like an elite Chief of Staff:
+  1. Direct, High-Value Core Answer: Answer the core question immediately, accurately, and without fluff.
+  2. Anticipate Boss's Immediate Next Need (Agla Kadam): Always ask yourself: "Ab iske baad Boss kya karna chahenge?". E.g.
+     • If Boss asks about someone's message or status -> Give the message info, then proactively ask: "Kya main unhe reply bhej doon ya call karwaun?"
+     • If Boss asks about a routine, event, or task -> Give the schedule, then proactively ask: "Kya iska timely reminder set kar doon?"
+     • If Boss asks for decision or advice -> Give the #1 high-conviction recommendation first, then 1 alternative.
+  3. Proactive Decision Offloading: Do not leave Boss with open-ended ambiguity or generic questions like "Aap bataiye kya karoon". Always propose 1-2 concrete, sharp next actions.
+  4. Crisp & Confident: Never write robotic filler, long useless apologies, or repeat the question back to Boss. Keep it high-signal, punchy, confident, and respectful.
+
 🎯 TOPIC HYPER-FOCUS & ZERO TOPIC BLEEDING:
-- Strictly answer ONLY what Boss is asking in his CURRENT message!
-- NEVER drag, append, or repeat details from previous already-resolved queries. Keep each turn laser-focused!`;
+- Answer Boss's current topic directly without dragging unrelated past history. Keep each turn laser-focused!`;
 
     const executeTool = async (toolName: string, args: any): Promise<any> => {
       try {
@@ -2712,15 +2721,15 @@ ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` 
 
     // ── Standard Mode A: Gemini Multimodal & Tool-Calling Loop ─────────────────
     for (const model of [
-      "gemini-3.1-flash-lite",
-      "gemini-3.5-flash-lite",
-      "gemini-3.5-flash",
-      "gemini-3.1-flash-lite",
+      "gemini-3.8-flash",
+      "gemini-3.7-flash",
       "gemini-3.6-flash",
       "gemini-3.5-flash",
-      "gemini-3.5-flash",
       "gemini-3.5-flash-lite",
       "gemini-3.1-flash-lite",
+      "gemini-3-flash",
+      "gemini-2.5-flash",
+      "gemini-2.5-flash-lite",
     ]) {
       try {
         const chat = ai.chats.create({

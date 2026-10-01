@@ -215,6 +215,21 @@ class HumanComprehensionEngine {
       actionableGoal = "Invoke 'set_reminder_or_alarm' or 'create_automated_cron_task' tool.";
     }
 
+    // 3. Anticipatory Next-Step Prediction (Agla Kadam)
+    let predictedNextNeed = "Direct, crisp answer to Boss's query.";
+    let proactiveProposal = "State the answer clearly, then offer 1 concrete next step.";
+
+    if (/\b(msg|message|messages|chat|history|kya\s*aaya|kya\s*bola|bheja|unread)\b/i.test(clean)) {
+      predictedNextNeed = "Boss is checking communication; likely needs to reply, confirm, or follow up.";
+      proactiveProposal = "After sharing the status/message, proactively ask: 'Boss, kya main inko confirm reply ya message bhej doon?'";
+    } else if (/\b(meeting|routine|schedule|time\s*table|timetable|plan|kal|aaj|baje|alarm|remind)\b/i.test(clean)) {
+      predictedNextNeed = "Boss is managing time/routine; likely needs an automated reminder or task scheduled.";
+      proactiveProposal = "After explaining the schedule, proactively ask: 'Boss, kya iska reminder ya recurring routine set kar doon?'";
+    } else if (/\b(kya\s*karein|kya\s*karu|kaise|suggest|advice|raasta|solution|problem|idea)\b/i.test(clean)) {
+      predictedNextNeed = "Boss is seeking strategic clarity; needs a decisive, high-conviction recommendation.";
+      proactiveProposal = "Give the #1 best recommendation with confidence first, avoiding open-ended ambiguity.";
+    }
+
     const checkpointGuidance = analysis.continuityType === "plan_modification"
       ? "🚨 PLAN MODIFICATION / CONFLICT DETECTED: Boss is updating or replacing an earlier stated plan for the same time slot! PRIORITY-OVERWRITE with this new command and naturally acknowledge the change (e.g. 'Theek hai Boss! Purana plan update karke naya task schedule kar diya hai!')."
       : analysis.continuityType === "follow_up"
@@ -229,6 +244,8 @@ class HumanComprehensionEngine {
 • Deep Subtext & Intent: "${analysis.implicitIntent}"
 • Actionable Mandate: "${actionableGoal}"
 • Human Reaction Guidance: "${analysis.suggestedHumanReaction}"
+• 🔮 Predicted Next Need (Agla Kadam): "${predictedNextNeed}"
+• 🎯 Anticipatory Proactive Proposal: "${proactiveProposal}"
 ${analysis.anaphoraResolution ? `• Anaphora / Reference Resolution: ${analysis.anaphoraResolution}` : ""}
 `;
 
