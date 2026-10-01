@@ -387,7 +387,7 @@ const INTENT_FUNCTION_DECLARATIONS = [
   },
   {
     name: "check_session_health",
-    description: "Check WhatsApp session health/ban risk. Examples: 'session health kaisa hai', 'ban risk check karo', 'whatsapp safe hai kya', 'account health'.",
+    description: "Check WhatsApp bot session health, ban risk, or account safety status. Examples: 'session health kaisa hai', 'ban risk check karo', 'whatsapp ban status kya hai', 'whatsapp safe hai kya', 'account health'. Note: Do NOT use for posting/viewing personal WhatsApp Story/Status feed.",
     parameters: {
       type: Type.OBJECT,
       properties: {},
@@ -581,7 +581,11 @@ CRITICAL RULES:
    - "Ram ko contact karo" → Could be call OR message. Check context: if urgent/immediate → call. If info-sharing → message.
    - "number do" → Could be save contact OR lookup. Check: "save karo" = save, "kiska hai" = lookup.
 
-7. **NO FUNCTION MATCH**: If no function fits, use general_chat with a natural response.
+7. **WHATSAPP STATUS vs BAN HEALTH DISAMBIGUATION**:
+   - If user asks about ban risk, account safety, session health, or bot health ("whatsapp ban status", "session health kaisa hai", "whatsapp safe hai na", "account ban risk") → check_session_health.
+   - If user asks about their personal WhatsApp Story/Status post ("mera status laga do", "whatsapp par status dalo", "status post karo", "story update") → Personal WhatsApp Story/Status, NOT check_session_health.
+
+8. **NO FUNCTION MATCH**: If no function fits, use general_chat with a natural response.
 
 Be decisive. One function call per classification.`;
   }
@@ -810,8 +814,11 @@ Be decisive. One function call per classification.`;
       };
     }
 
-    // 16. Session Health Intent
-    if (/\b(?:session\s*health|ban\s*risk|whatsapp\s*safe\s*hai|account\s*health)\b/i.test(clean)) {
+    // 16. Session Health / Ban Risk Status Intent (Guarded against Boss's personal WhatsApp Story/Status)
+    if (
+      /\b(?:session\s*health|ban\s*(?:risk|status)|whatsapp\s*(?:ban\s*status|safe\s*hai)|account\s*health|bot\s*health)\b/i.test(clean) &&
+      !/\b(?:mera\s*status|status\s*(?:lagao|dalo|post|bhejo|update)|story)\b/i.test(clean)
+    ) {
       return {
         action: "check_session_health",
         confidence: 0.85,

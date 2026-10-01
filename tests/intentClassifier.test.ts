@@ -134,6 +134,16 @@ describe("IntentClassifierService - Fallback & Core Classification Suite", () =>
       expect(res.action).toBe("unpause_bot");
     });
 
+    it("should classify WhatsApp ban status check", async () => {
+      const res = await intentClassifierService.classifyIntent("whatsapp ban status check karo", mockContext);
+      expect(res.action).toBe("check_session_health");
+    });
+
+    it("should not misclassify personal WhatsApp story status as session health", async () => {
+      const res = await intentClassifierService.classifyIntent("mera whatsapp status laga do: good morning", mockContext);
+      expect(res.action).not.toBe("check_session_health");
+    });
+
     it("should classify deep website vulnerability scan intent", async () => {
       const res = await intentClassifierService.classifyIntent("scan website https://example.com for vulnerabilities", mockContext);
       expect(res.action).toBe("scan_website_security");
