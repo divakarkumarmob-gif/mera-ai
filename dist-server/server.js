@@ -23459,8 +23459,8 @@ ${ytUrl}
         const apiKey = process.env.GEMINI_API_KEY;
         if (apiKey) {
           try {
-            const { GoogleGenAI: GoogleGenAI41 } = await import("@google/genai");
-            const ai3 = new GoogleGenAI41({ apiKey });
+            const { GoogleGenAI: GoogleGenAI42 } = await import("@google/genai");
+            const ai3 = new GoogleGenAI42({ apiKey });
             const rejectedStr = seenList.map((s, i) => `${i + 1}. "${s.title}" by ${s.artist}`).join("\n");
             const prompt = `You are an elite music DJ & song identification engine for Friday AI.
 User originally searched for song: "${query}".
@@ -23737,8 +23737,8 @@ ${ytUrl}
           const apiKey2 = process.env.GEMINI_API_KEY;
           if (apiKey2) {
             try {
-              const { GoogleGenAI: GoogleGenAI41 } = await import("@google/genai");
-              const ai3 = new GoogleGenAI41({ apiKey: apiKey2 });
+              const { GoogleGenAI: GoogleGenAI42 } = await import("@google/genai");
+              const ai3 = new GoogleGenAI42({ apiKey: apiKey2 });
               const prompt = `You are an elite music DJ & Spotify/YouTube curation expert for Friday AI.
 User requested: "${searchClean}".
 
@@ -23881,8 +23881,8 @@ ${playlistLines}
         const apiKey = process.env.GEMINI_API_KEY;
         if (apiKey) {
           try {
-            const { GoogleGenAI: GoogleGenAI41 } = await import("@google/genai");
-            const ai3 = new GoogleGenAI41({ apiKey });
+            const { GoogleGenAI: GoogleGenAI42 } = await import("@google/genai");
+            const ai3 = new GoogleGenAI42({ apiKey });
             const prompt = `You are a music recognition expert for Friday AI.
 Identify this song request from user "${searchClean}".
 If it's in Hindi/Bollywood/Punjabi/English/Regional, identify the exact canonical Track Title, Singers/Artists, Movie/Album, Release Year, and 2-3 iconic lines of lyrics in Hinglish/Roman script.
@@ -24005,8 +24005,8 @@ ${ytSearchUrl}
         let identifiedSnippet = "";
         if (apiKey && audioBuffer && audioBuffer.length > 0) {
           try {
-            const { GoogleGenAI: GoogleGenAI41 } = await import("@google/genai");
-            const ai3 = new GoogleGenAI41({ apiKey });
+            const { GoogleGenAI: GoogleGenAI42 } = await import("@google/genai");
+            const ai3 = new GoogleGenAI42({ apiKey });
             const base64Audio = audioBuffer.toString("base64");
             const prompt = `You are an elite music recognition AI Shazam engine for Friday AI.
 Listen to this user audio recording where a person is singing, humming (e.g. "hmm hmm", "na na re", tune rhythm), or playing a background song.
@@ -24101,8 +24101,8 @@ Respond ONLY with valid JSON in this exact structure:
         let iconicDrop = "";
         if (apiKey) {
           try {
-            const { GoogleGenAI: GoogleGenAI41 } = await import("@google/genai");
-            const ai3 = new GoogleGenAI41({ apiKey });
+            const { GoogleGenAI: GoogleGenAI42 } = await import("@google/genai");
+            const ai3 = new GoogleGenAI42({ apiKey });
             const prompt = `You are a social media & viral Reel/Shorts music analyst for Friday AI.
 User provided Instagram Reel / Shorts link or description: "${rawClean}".
 Identify the famous background soundtrack / viral trending audio / BGM used in this reel or trend.
@@ -26732,8 +26732,8 @@ ${summary}`;
           const key = process.env.GEMINI_API_KEY;
           if (key) {
             try {
-              const { GoogleGenAI: GoogleGenAI41 } = await import("@google/genai");
-              const ai3 = new GoogleGenAI41({ apiKey: key });
+              const { GoogleGenAI: GoogleGenAI42 } = await import("@google/genai");
+              const ai3 = new GoogleGenAI42({ apiKey: key });
               const promptResp = await ai3.models.generateContent({
                 model: "gemini-3.5-flash-lite",
                 contents: `Generate a 1-line text-to-image prompt to generate an authentic, stunning visual photo for the search query: "${cleanQuery}".
@@ -26791,8 +26791,8 @@ Rules:
         const combinedSnippets = rawSnippets.map((s) => this.unescapeHtml(s)).filter(Boolean).join("\n\n").slice(0, 3500);
         if (key) {
           try {
-            const { GoogleGenAI: GoogleGenAI41 } = await import("@google/genai");
-            const ai3 = new GoogleGenAI41({ apiKey: key });
+            const { GoogleGenAI: GoogleGenAI42 } = await import("@google/genai");
+            const ai3 = new GoogleGenAI42({ apiKey: key });
             const prompt = `You are a Google Chrome Search & AI Overview formatter.
 Your task is to present the search results for "${cleanQuery}" EXACTLY as they appear on Google Chrome (verbatim, factual, and clean).
 
@@ -37877,6 +37877,183 @@ var init_predictiveWorldTwinEngine = __esm({
   }
 });
 
+// src/services/chatGptMemoryEngine.ts
+var chatGptMemoryEngine_exports = {};
+__export(chatGptMemoryEngine_exports, {
+  ChatGptMemoryEngine: () => ChatGptMemoryEngine,
+  chatGptMemoryEngine: () => chatGptMemoryEngine
+});
+var import_genai25, vaultCol, EXTRACTION_MODELS, ChatGptMemoryEngine, chatGptMemoryEngine;
+var init_chatGptMemoryEngine = __esm({
+  "src/services/chatGptMemoryEngine.ts"() {
+    import_genai25 = require("@google/genai");
+    init_memoryEngine();
+    init_vectorMemoryService();
+    init_firebaseAdmin();
+    init_cryptoVault();
+    vaultCol = () => db.collection("memory").doc("personalVault").collection("entries");
+    EXTRACTION_MODELS = [
+      "gemini-2.5-flash",
+      "gemini-3.5-flash",
+      "gemini-3.1-flash-lite",
+      "gemini-3.5-flash-lite"
+    ];
+    ChatGptMemoryEngine = class {
+      constructor() {
+        this.recentFactCache = /* @__PURE__ */ new Set();
+      }
+      /**
+       * 1. RECALL PHASE (Pre-Inference):
+       * Searches past memories, personal vault, and semantic vector database for facts relevant
+       * to the user's incoming message, exactly like ChatGPT's Memory recall.
+       */
+      async recallRelevantMemories(queryText) {
+        const clean = (queryText || "").trim();
+        if (!clean || clean.length < 5 || clean.startsWith("@") || clean.startsWith("/")) {
+          return "";
+        }
+        if (/^(hi|hello|hey|ok|okay|hmm|haan|nahi|theek|suno|kya\s*haal|good\s*morning|good\s*night)\b/i.test(clean) && clean.length < 20) {
+          return "";
+        }
+        try {
+          const recalledPoints = [];
+          const vectorRes = await vectorMemoryService.searchSemanticMemory(clean, 4, 0.4);
+          if (vectorRes && vectorRes.results && vectorRes.results.length > 0) {
+            for (const item of vectorRes.results) {
+              const text = item.summary || item.snippet;
+              if (text && !recalledPoints.some((p) => p.toLowerCase().includes(text.toLowerCase().slice(0, 30)))) {
+                recalledPoints.push(`[${item.dateRange || item.createdDateStr || "Past"}] ${text}`);
+              }
+            }
+          }
+          const words = clean.toLowerCase().replace(/[^\w\s\u0900-\u097F]/g, "").split(/\s+/).filter((w) => w.length >= 3 && !["kya", "hai", "nahi", "raha", "hoga", "mera", "meri", "mere", "aaj", "kal", "bhi", "tha", "thi", "the"].includes(w));
+          if (words.length > 0) {
+            try {
+              const vaultSnap = await vaultCol().limit(40).get();
+              if (!vaultSnap.empty) {
+                for (const doc of vaultSnap.docs) {
+                  const data = doc.data();
+                  const factText = decryptData(data.exactFact || "");
+                  if (!factText) continue;
+                  const lowerFact = factText.toLowerCase();
+                  const matchCount = words.filter((w) => lowerFact.includes(w)).length;
+                  if (matchCount >= 1) {
+                    if (!recalledPoints.some((p) => p.toLowerCase().includes(factText.toLowerCase().slice(0, 30)))) {
+                      recalledPoints.push(`[${data.category || "vault"} (${data.date || "Prior"})] ${factText}`);
+                    }
+                  }
+                }
+              }
+            } catch {
+            }
+          }
+          if (recalledPoints.length === 0) {
+            return "";
+          }
+          return `
+\u{1F9E0} [CHATGPT-STYLE LIFELONG MEMORY RECALL (RELEVANT PAST CONTEXT)]:
+The following verified past memories from Boss DK directly relate to what he is saying right now:
+${recalledPoints.slice(0, 4).map((p, idx) => `\u2022 ${p}`).join("\n")}
+
+\u{1F449} CHATGPT INTUITION MANDATE:
+- Naturally connect this past context in your response if appropriate (e.g. if Boss mentions visiting a city/doing something, and a past memory connects to it like his friend being there or his previous plan, bring it up affectionately and intelligently)!
+- NEVER say robotic phrases like "As per my database", "According to stored memory", or "I searched my records". Speak naturally as a loyal companion who genuinely remembered!`;
+        } catch (err) {
+          console.warn("[ChatGptMemoryEngine] Recall error:", err);
+          return "";
+        }
+      }
+      /**
+       * 2. LEARN PHASE (Post-Reply Background Worker):
+       * Runs asynchronously in the background. Analyzes user statement and extracts long-term facts,
+       * life events, relationships, habits, preferences, and locations into Firestore Vault + Vector DB.
+       */
+      async learnFromMessageTurn(senderName, userText, botReplyText, channel = "whatsapp") {
+        const cleanUser = (userText || "").trim();
+        if (!cleanUser || cleanUser.length < 12) return;
+        if (cleanUser.startsWith("@") || cleanUser.startsWith("/") || cleanUser.startsWith("http")) return;
+        if (/^(play|bajao|search|kya|kaun|kab|kahan|weather|mausam|news|khabar|joke|shayari|calculate)\b/i.test(cleanUser) && !cleanUser.includes("mera") && !cleanUser.includes("meri") && !cleanUser.includes("dost") && !cleanUser.includes("hum") && !cleanUser.includes("mujhe")) {
+          return;
+        }
+        const apiKey = process.env.GEMINI_API_KEY;
+        if (!apiKey) return;
+        const extractionPrompt = `You are Friday AI's silent lifelong memory extractor (matching ChatGPT's continuous memory engine).
+Analyze this statement from user Boss DK:
+<statement>
+"${cleanUser}"
+</statement>
+(Assistant reply for context: "${(botReplyText || "").slice(0, 150)}")
+
+TASK:
+Determine if this statement contains any enduring facts about Boss DK, his family, friends, relationships, travels, locations, health, preferences, work, or personal life that a smart assistant should remember forever (even 1 year later).
+
+EXAMPLES OF WHAT TO EXTRACT:
+- "Mera dost Rahul Patna gaya hai" -> hasFact: true, category: "friends_and_relations", fact: "DK ka dost Rahul Patna gaya hua hai.", keywords: ["rahul", "dost", "patna"]
+- "Mujhe cold coffee bahut pasand hai" -> hasFact: true, category: "personal_preferences", fact: "DK ko cold coffee pasand hai.", keywords: ["coffee", "cold coffee"]
+- "Mummy ki tabiyat theek nahi hai" -> hasFact: true, category: "lifestyle_and_health", fact: "DK ki mummy ki tabiyat kharab thi.", keywords: ["mummy", "tabiyat", "health"]
+- "Main kal Delhi jaunga meeting ke liye" -> hasFact: true, category: "plans_and_travel", fact: "DK meeting ke liye Delhi jaane ka plan tha.", keywords: ["delhi", "meeting", "travel"]
+
+EXAMPLES OF WHAT NOT TO EXTRACT (hasFact: false):
+- "Acha theek hai", "Gaana bajao", "Mausam kaisa hai", "Kya chal raha hai", "Hahaha mast joke tha", "Code theek karo".
+
+RETURN ONLY VALID JSON matching this exact schema:
+{
+  "hasFact": true or false,
+  "category": "friends_and_relations | plans_and_travel | personal_preferences | lifestyle_and_health | career_and_business | general_personal_info",
+  "fact": "Clear, concise fact in natural Hinglish or English describing the state or event.",
+  "keywords": ["list", "of", "searchable", "keywords"]
+}`;
+        const ai3 = new import_genai25.GoogleGenAI({ apiKey });
+        for (const model of EXTRACTION_MODELS) {
+          try {
+            const resp = await ai3.models.generateContent({
+              model,
+              contents: extractionPrompt,
+              config: {
+                responseMimeType: "application/json"
+              }
+            });
+            const rawJson = resp.text?.trim() || "{}";
+            const parsed = JSON.parse(rawJson);
+            if (parsed && parsed.hasFact && parsed.fact && parsed.fact.trim()) {
+              const cleanFact = parsed.fact.trim();
+              const factKey = cleanFact.toLowerCase();
+              if (this.recentFactCache.has(factKey)) return;
+              this.recentFactCache.add(factKey);
+              if (this.recentFactCache.size > 200) {
+                const oldest = Array.from(this.recentFactCache).slice(0, 50);
+                oldest.forEach((k) => this.recentFactCache.delete(k));
+              }
+              const category = parsed.category || "general_personal_info";
+              const now = Date.now();
+              const dateStr = new Date(now).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" });
+              await memoryEngine.addPersonalVaultFact(category, cleanFact);
+              await vectorMemoryService.archiveToVectorStore({
+                originalText: cleanUser,
+                summary: cleanFact,
+                sourceType: "session_dialogue",
+                dateRangeStr: dateStr,
+                startTimestamp: now,
+                endTimestamp: now,
+                metadata: {
+                  channel,
+                  category,
+                  keywords: parsed.keywords || [],
+                  source: "chatgpt_auto_memory"
+                }
+              });
+              console.log(`[ChatGPTMemory] \u{1F9E0}\u2728 Learned lifelong fact [${category}]: "${cleanFact}" (Channel: ${channel})`);
+            }
+            return;
+          } catch (err) {
+          }
+        }
+      }
+    };
+    chatGptMemoryEngine = new ChatGptMemoryEngine();
+  }
+});
+
 // src/services/frontierHumanEngines.ts
 var frontierHumanEngines_exports = {};
 __export(frontierHumanEngines_exports, {
@@ -41444,10 +41621,10 @@ __export(youtubeService_exports, {
   YouTubeService: () => YouTubeService,
   youtubeService: () => youtubeService
 });
-var import_genai25, YouTubeService, youtubeService;
+var import_genai26, YouTubeService, youtubeService;
 var init_youtubeService = __esm({
   "src/services/youtubeService.ts"() {
-    import_genai25 = require("@google/genai");
+    import_genai26 = require("@google/genai");
     YouTubeService = class _YouTubeService {
       static {
         this.MODEL_FALLBACK_CHAIN = [
@@ -41595,7 +41772,7 @@ var init_youtubeService = __esm({
             totalCues: cues.length
           };
         }
-        const ai3 = new import_genai25.GoogleGenAI({ apiKey: key });
+        const ai3 = new import_genai26.GoogleGenAI({ apiKey: key });
         const prompt = `You are FRIDAY \u2014 Boss Divakar Kumar's (DK's) elite AI Video Intelligence specialist.
 Analyze this YouTube video:
 \u2022 Title: "${meta.title}"
@@ -41682,7 +41859,7 @@ Provide output strictly formatted in valid JSON with this exact schema:
             contextFound: false
           };
         }
-        const ai3 = new import_genai25.GoogleGenAI({ apiKey: key });
+        const ai3 = new import_genai26.GoogleGenAI({ apiKey: key });
         const prompt = `You are FRIDAY \u2014 YouTube "Ask Gemini" Real-Time Video Assistant.
 The user (Boss DK) is asking a specific question about the video "${meta.title}" (by ${meta.authorName}).
 
@@ -41739,10 +41916,10 @@ __export(whatsappGroupSuperPowersEngine_exports, {
   WhatsAppGroupSuperPowersEngine: () => WhatsAppGroupSuperPowersEngine,
   whatsappGroupSuperPowersEngine: () => whatsappGroupSuperPowersEngine
 });
-var import_genai26, bdayCol, decisionCol, expenseCol, WhatsAppGroupSuperPowersEngine, whatsappGroupSuperPowersEngine;
+var import_genai27, bdayCol, decisionCol, expenseCol, WhatsAppGroupSuperPowersEngine, whatsappGroupSuperPowersEngine;
 var init_whatsappGroupSuperPowersEngine = __esm({
   "src/services/whatsapp/whatsappGroupSuperPowersEngine.ts"() {
-    import_genai26 = require("@google/genai");
+    import_genai27 = require("@google/genai");
     init_firebaseAdmin();
     init_whatsappHistoryEngine();
     init_intentClassifierService();
@@ -42168,7 +42345,7 @@ ${memberTagsList}${extraCount}`;
           };
         }
         try {
-          const ai3 = new import_genai26.GoogleGenAI({ apiKey });
+          const ai3 = new import_genai27.GoogleGenAI({ apiKey });
           const prompt = `You are Friday AI acting as the Chief Supreme Court Judge & High-Accuracy Fact-Checker in a lively WhatsApp Group.
 Members are having a debate.
 Claim / Argument to verify:
@@ -42219,7 +42396,7 @@ Structure your response EXACTLY like this:
           };
         }
         try {
-          const ai3 = new import_genai26.GoogleGenAI({ apiKey });
+          const ai3 = new import_genai27.GoogleGenAI({ apiKey });
           const prompt = isPraise ? `You are Friday AI, the ultimate hype-man in a WhatsApp group.
 Write a wildly enthusiastic, hilarious, superhero-style appreciation praise for "${targetPerson}" in rich, modern Hinglish.
 Context: ${targetContext}
@@ -42362,7 +42539,7 @@ ${question.question}
         const apiKey = process.env.GEMINI_API_KEY;
         if (apiKey) {
           try {
-            const ai3 = new import_genai26.GoogleGenAI({ apiKey });
+            const ai3 = new import_genai27.GoogleGenAI({ apiKey });
             const prompt = `Generate 1 unique, fun, high-energy multiple choice trivia question for an Indian WhatsApp group.
 Topic: "${topic}".
 Output MUST be strict JSON only in this schema:
@@ -42420,7 +42597,7 @@ ${lines.join("\n")}`;
           };
         }
         try {
-          const ai3 = new import_genai26.GoogleGenAI({ apiKey });
+          const ai3 = new import_genai27.GoogleGenAI({ apiKey });
           const prompt = `You are Friday AI, an intelligent group expense and Splitwise manager.
 Input text from user: "${clean}"
 Payer / Requested By: "${senderName}"
@@ -42478,7 +42655,7 @@ Format a clean, crystal-clear WhatsApp Expense Card in natural Hinglish:
           };
         }
         try {
-          const ai3 = new import_genai26.GoogleGenAI({ apiKey });
+          const ai3 = new import_genai27.GoogleGenAI({ apiKey });
           const prompt = `You are Friday AI, acting as the Executive Meeting Secretary for a WhatsApp Group.
 Here is the recent group conversation history:
 """
@@ -42610,7 +42787,7 @@ Friday theek 12:00 AM par group me custom celebration poster aur sweet wish post
         let customPoem = `Aapko janamdin ki dheron shubhkaamnayein! Har din khushiyon se bhara rahe! \u{1F382}\u2728`;
         if (apiKey) {
           try {
-            const ai3 = new import_genai26.GoogleGenAI({ apiKey });
+            const ai3 = new import_genai27.GoogleGenAI({ apiKey });
             const prompt = `Write a super sweet, warm, high-energy, 4-line Birthday Celebration Poem + funny blessing in natural Hinglish for "${targetPerson}" in a WhatsApp group. Use emojis.`;
             const resp = await ai3.models.generateContent({ model: "gemini-3.5-flash", contents: prompt });
             if (resp.text) customPoem = resp.text.trim();
@@ -42637,7 +42814,7 @@ ${customPoem}
 "${target}"`;
         if (apiKey) {
           try {
-            const ai3 = new import_genai26.GoogleGenAI({ apiKey });
+            const ai3 = new import_genai27.GoogleGenAI({ apiKey });
             const res = await ai3.models.generateContent({
               model: "gemini-3.5-flash",
               contents: `Create a super funny, relatable Indian Hinglish meme punchline about: "${target}".
@@ -42684,7 +42861,7 @@ ${capMatch[1].trim()}
         const apiKey = process.env.GEMINI_API_KEY;
         if (apiKey) {
           try {
-            const ai3 = new import_genai26.GoogleGenAI({ apiKey });
+            const ai3 = new import_genai27.GoogleGenAI({ apiKey });
             const prompt = `Extract a clear poll question and 2 to 6 crisp poll options from this user request for a WhatsApp group poll.
 Input: "${clean || "Sunday Cricket match"}"
 
@@ -42746,7 +42923,7 @@ _Apna option chunein!_`
         const apiKey = process.env.GEMINI_API_KEY;
         if (apiKey) {
           try {
-            const ai3 = new import_genai26.GoogleGenAI({ apiKey });
+            const ai3 = new import_genai27.GoogleGenAI({ apiKey });
             const prompt = `Translate the following message into ${targetLanguage} accurately and naturally.
 Original Text: "${textToTranslate}"
 Requested by: ${senderName}
@@ -42784,7 +42961,7 @@ Format Output:
           };
         }
         try {
-          const ai3 = new import_genai26.GoogleGenAI({ apiKey });
+          const ai3 = new import_genai27.GoogleGenAI({ apiKey });
           const prompt = isJoke ? `Tell 1 super fresh, hilarious, modern Indian stand-up style Hindi/Hinglish comedy joke for a WhatsApp group. Keep it clean, clever, and extremely funny. 3-4 lines.` : isFightCooler ? `Two people or members are arguing in this WhatsApp group. Write a hilarious, witty, lighthearted intervention that immediately diffuses the tension and makes everyone laugh. Use Bollywood punchlines or relatable banter.` : `You are Friday AI, checking the vibe of WhatsApp group "${groupName}".
 Drop an irresistible, hilarious, ultra-engaging icebreaker question or "Would You Rather" scenario that forces all silent group members to reply and start chatting! Use emojis.`;
           const resp = await ai3.models.generateContent({ model: "gemini-3.5-flash", contents: prompt });
@@ -42824,7 +43001,7 @@ _Mahaul set hai, sab log participate karein!_ \u{1F525}`
           };
         }
         try {
-          const ai3 = new import_genai26.GoogleGenAI({ apiKey });
+          const ai3 = new import_genai27.GoogleGenAI({ apiKey });
           const prompt = `You are Friday AI running an ultra-cool, high-tech, cinematic Psychological Lie Detector & Polygraph scan on a statement in a WhatsApp group.
 Statement by ${targetSender}: "${targetText}"
 
@@ -42861,7 +43038,7 @@ Structure output EXACTLY like this:
           };
         }
         try {
-          const ai3 = new import_genai26.GoogleGenAI({ apiKey });
+          const ai3 = new import_genai27.GoogleGenAI({ apiKey });
           const prompt = `Write a super fiery, hilarious, energetic 6 to 8-line Desi Hip-Hop / Gully Boy style Rap Cypher about "${targetPerson}" in a WhatsApp group.
 Include funny Indian references (chai, bike, late aana, excuses, swag, gaming, dosti).
 Rhymes must be tight and catchy in authentic Hinglish slang (hard, bantai, scene, boss).
@@ -42897,7 +43074,7 @@ ${text}
           };
         }
         try {
-          const ai3 = new import_genai26.GoogleGenAI({ apiKey });
+          const ai3 = new import_genai27.GoogleGenAI({ apiKey });
           const prompt = `You are Friday AI, looking through the cosmic time-machine 5 to 10 years into the future (Year 2031-2035).
 Create a hilarious, ultra-detailed, witty "Future Biography & Destiny Card" for "${targetPerson}" in their WhatsApp group.
 Predict their future career, hilarious habits (that never changed), relationship status, and wealth in funny Hinglish.
@@ -42942,7 +43119,7 @@ ${text}
           };
         }
         try {
-          const ai3 = new import_genai26.GoogleGenAI({ apiKey });
+          const ai3 = new import_genai27.GoogleGenAI({ apiKey });
           const prompt = `You are a legendary voice and persona impersonator of "${celeb}".
 Respond to this WhatsApp group topic: "${topic}".
 User speaking: ${senderName}.
@@ -42977,7 +43154,7 @@ ${text}
           };
         }
         try {
-          const ai3 = new import_genai26.GoogleGenAI({ apiKey });
+          const ai3 = new import_genai27.GoogleGenAI({ apiKey });
           const prompt = `You are Friday AI doing a funny, hyper-accurate impersonation of a typical college/friend group member named "${targetPerson}".
 Context message / query: "${quotedMessage ? quotedMessage.text : rawText}".
 
@@ -43013,7 +43190,7 @@ ${text}
         let imagePrompt = `Epic cinematic blockbuster movie poster of ${topic}, Bollywood Hollywood crossover, 8k resolution, dramatic lighting`;
         if (apiKey) {
           try {
-            const ai3 = new import_genai26.GoogleGenAI({ apiKey });
+            const ai3 = new import_genai27.GoogleGenAI({ apiKey });
             const res = await ai3.models.generateContent({
               model: "gemini-3.5-flash",
               contents: `Create an epic Bollywood/Hollywood crossover blockbuster movie cast and plot synopsis for: "${topic}".
@@ -43065,7 +43242,7 @@ ${synMatch[1].trim()}
           };
         }
         try {
-          const ai3 = new import_genai26.GoogleGenAI({ apiKey });
+          const ai3 = new import_genai27.GoogleGenAI({ apiKey });
           const prompt = `Write a high-voltage, laugh-out-loud funny cricket/sports live commentary for: "${topic}".
 Use authentic high-energy Bhojpuri & Sidhuisms punchlines ("Eee dekhi babua", "Thoko taali", "Dhuaan nikaal diye", "Gagan-chumbi chhakka").
 3-4 lines of pure adrenaline and entertainment.`;
@@ -43369,7 +43546,7 @@ Bhagwan aapko lambi umar, beshumar khushiyan, aur bohot saari success de! \u{1F6
           const apiKey = process.env.GEMINI_API_KEY;
           if (apiKey) {
             try {
-              const ai3 = new import_genai26.GoogleGenAI({ apiKey });
+              const ai3 = new import_genai27.GoogleGenAI({ apiKey });
               const prompt = `You are Friday AI, analyzing whether a user's natural language group message was attempting to trigger one of the available group features/commands.
 
 User message in group: "${rawText}"
@@ -43462,14 +43639,14 @@ var freeFireGamingService_exports = {};
 __export(freeFireGamingService_exports, {
   freeFireGamingService: () => freeFireGamingService
 });
-var import_child_process4, import_util2, import_fs5, import_path5, import_genai27, execAsync, FreeFireGamingService, freeFireGamingService;
+var import_child_process4, import_util2, import_fs5, import_path5, import_genai28, execAsync, FreeFireGamingService, freeFireGamingService;
 var init_freeFireGamingService = __esm({
   "src/services/freeFireGamingService.ts"() {
     import_child_process4 = require("child_process");
     import_util2 = require("util");
     import_fs5 = __toESM(require("fs"), 1);
     import_path5 = __toESM(require("path"), 1);
-    import_genai27 = require("@google/genai");
+    import_genai28 = require("@google/genai");
     execAsync = (0, import_util2.promisify)(import_child_process4.exec);
     FreeFireGamingService = class {
       constructor() {
@@ -43583,7 +43760,7 @@ var init_freeFireGamingService = __esm({
       getGenAI() {
         const key = process.env.GEMINI_API_KEY;
         if (!key) return null;
-        return new import_genai27.GoogleGenAI({ apiKey: key });
+        return new import_genai28.GoogleGenAI({ apiKey: key });
       }
       /**
        * Resolve best ADB binary path (Local project portable binary or System PATH)
@@ -44461,15 +44638,15 @@ var multiAgentSpecialistSwarm_exports = {};
 __export(multiAgentSpecialistSwarm_exports, {
   multiAgentSpecialistSwarm: () => multiAgentSpecialistSwarm
 });
-var import_genai28, MultiAgentSpecialistSwarm, multiAgentSpecialistSwarm;
+var import_genai29, MultiAgentSpecialistSwarm, multiAgentSpecialistSwarm;
 var init_multiAgentSpecialistSwarm = __esm({
   "src/services/multiAgentSpecialistSwarm.ts"() {
-    import_genai28 = require("@google/genai");
+    import_genai29 = require("@google/genai");
     MultiAgentSpecialistSwarm = class {
       getAI() {
         const key = process.env.GEMINI_API_KEY;
         if (!key) return null;
-        return new import_genai28.GoogleGenAI({ apiKey: key });
+        return new import_genai29.GoogleGenAI({ apiKey: key });
       }
       /**
        * 🛡️ Sentinel Safety Agent
@@ -44637,10 +44814,10 @@ Return JSON:
 });
 
 // src/services/whatsapp/whatsappBossAiEngine.ts
-var import_genai29, WhatsAppBossAiEngine, whatsappBossAiEngine;
+var import_genai30, WhatsAppBossAiEngine, whatsappBossAiEngine;
 var init_whatsappBossAiEngine = __esm({
   "src/services/whatsapp/whatsappBossAiEngine.ts"() {
-    import_genai29 = require("@google/genai");
+    import_genai30 = require("@google/genai");
     init_whatsappHistoryEngine();
     init_fridayModeService();
     WhatsAppBossAiEngine = class {
@@ -44819,6 +44996,8 @@ _Example: UNPAUSE friday2026_ \u2728`;
         const directivesContext = await bossDirectivesService2.compileDirectivesPrompt();
         const trainingLessonsContext = await fridayChildTrainingService2.compileTrainingPrompt(messageText);
         const memoryContext = await memoryEngine2.compileLeanMemoryPrompt();
+        const { chatGptMemoryEngine: chatGptMemoryEngine2 } = await Promise.resolve().then(() => (init_chatGptMemoryEngine(), chatGptMemoryEngine_exports));
+        const chatGptRecallContext = await chatGptMemoryEngine2.recallRelevantMemories(messageText);
         const humanComprehensionContext = await humanComprehensionEngine2.compileHumanComprehensionPrompt("boss_dk", "DK (Boss)", "boss");
         const circadianContext = circadianEnergyEngine2.compileCircadianPrompt();
         const opinionsContext = personalOpinionsEngine2.compileOpinionsPrompt();
@@ -44954,7 +45133,7 @@ _Example: UNPAUSE friday2026_ \u2728`;
         const lateralAnalogyContext = lateralCreativeAnalogyEngine2.compileAnalogyPrompt(messageText);
         const coConspiratorContext = rideOrDieCoConspiratorEngine2.compileCoConspiratorPrompt(messageText);
         const triumphCelebrationContext = sharedTriumphCelebrationEngine2.compileTriumphPrompt(messageText);
-        const ai3 = new import_genai29.GoogleGenAI({ apiKey });
+        const ai3 = new import_genai30.GoogleGenAI({ apiKey });
         const functionDeclarations = [
           {
             name: "search_or_play_music",
@@ -46140,6 +46319,8 @@ ${trainingLessonsContext}
 
 ${memoryContext}
 
+${chatGptRecallContext}
+
 ${crossPlatformMemoryContext}
 
 ${humanComprehensionContext}
@@ -47232,6 +47413,8 @@ ${extractedPhone ? `\u{1F4F1} EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPho
             cognitiveScaffoldingEngine3.addMasteryPoints(2).catch(() => {
             });
             neurotransmitterEngine3.updateEmotionalMomentum(messageText, cleanText);
+            chatGptMemoryEngine2.learnFromMessageTurn("Boss DK", messageText, cleanText, "whatsapp").catch(() => {
+            });
             return cleanText;
           }
         }
@@ -47333,6 +47516,8 @@ ${extractedPhone ? `\u{1F4F1} EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPho
               cognitiveScaffoldingEngine3.addMasteryPoints(2).catch(() => {
               });
               neurotransmitterEngine3.updateEmotionalMomentum(messageText, cleanText);
+              chatGptMemoryEngine2.learnFromMessageTurn("Boss DK", messageText, cleanText, "whatsapp").catch(() => {
+              });
               return cleanText;
             }
           } catch (e) {
@@ -48066,10 +48251,10 @@ var init_perchanceService = __esm({
 });
 
 // src/services/whatsapp/whatsappAutoReplyEngine.ts
-var import_genai30, WhatsAppAutoReplyEngine, whatsappAutoReplyEngine;
+var import_genai31, WhatsAppAutoReplyEngine, whatsappAutoReplyEngine;
 var init_whatsappAutoReplyEngine = __esm({
   "src/services/whatsapp/whatsappAutoReplyEngine.ts"() {
-    import_genai30 = require("@google/genai");
+    import_genai31 = require("@google/genai");
     init_firebaseAdmin();
     init_contactsService();
     init_whatsappHistoryEngine();
@@ -48372,7 +48557,7 @@ var init_whatsappAutoReplyEngine = __esm({
           console.error("[WhatsAppAutoReply] GEMINI_API_KEY not set \u2014 using fallback.");
           return fallbackText();
         }
-        const ai3 = new import_genai30.GoogleGenAI({ apiKey });
+        const ai3 = new import_genai31.GoogleGenAI({ apiKey });
         const quotedSnippet = quotedMessage && quotedMessage.isReply ? `
 - PREVIOUS QUOTED MESSAGE (Sender: ${quotedMessage.sender}, Type: ${quotedMessage.mediaType}): "${quotedMessage.text}"` : "";
         const { humanComprehensionEngine: humanComprehensionEngine2 } = await Promise.resolve().then(() => (init_humanComprehensionEngine(), humanComprehensionEngine_exports));
@@ -48781,7 +48966,7 @@ Status: \u2705 Safe & Verified. No malicious phishing detected.`;
           await sendMsgFn(groupJid, fallbackText(), text, messageKey);
           return;
         }
-        const ai3 = new import_genai30.GoogleGenAI({ apiKey });
+        const ai3 = new import_genai31.GoogleGenAI({ apiKey });
         const quotedSnippet = quotedMessage && quotedMessage.isReply ? `
 - PREVIOUS QUOTED MESSAGE IN GROUP (From: ${quotedMessage.sender}, Type: ${quotedMessage.mediaType}): "${quotedMessage.text}"` : "";
         const recentGroupMsgs = whatsappHistoryEngine.getRecentGroupMessages(groupJid, 25).filter((m) => {
@@ -48865,15 +49050,15 @@ __export(mediaToolsService_exports, {
   MediaToolsService: () => MediaToolsService,
   mediaToolsService: () => mediaToolsService
 });
-var import_genai31, MediaToolsService, mediaToolsService;
+var import_genai32, MediaToolsService, mediaToolsService;
 var init_mediaToolsService = __esm({
   "src/services/mediaToolsService.ts"() {
-    import_genai31 = require("@google/genai");
+    import_genai32 = require("@google/genai");
     MediaToolsService = class {
       getGeminiClient() {
         const apiKey = process.env.GEMINI_API_KEY?.trim() || process.env.GOOGLE_API_KEY?.trim() || process.env.VITE_GEMINI_API_KEY?.trim();
         if (!apiKey) return null;
-        return new import_genai31.GoogleGenAI({ apiKey });
+        return new import_genai32.GoogleGenAI({ apiKey });
       }
       // =========================================================================
       // ANTI-BOT & RESIDENTIAL PROXY / COOKIES BYPASS INFRASTRUCTURE
@@ -49429,11 +49614,11 @@ Respond ONLY with valid JSON matching this exact schema:
 });
 
 // src/services/whatsapp/whatsappMediaRouter.ts
-var BaileysModule2, import_genai32, baileys2, WhatsAppMediaRouter, whatsappMediaRouter;
+var BaileysModule2, import_genai33, baileys2, WhatsAppMediaRouter, whatsappMediaRouter;
 var init_whatsappMediaRouter = __esm({
   "src/services/whatsapp/whatsappMediaRouter.ts"() {
     BaileysModule2 = __toESM(require("@whiskeysockets/baileys"), 1);
-    import_genai32 = require("@google/genai");
+    import_genai33 = require("@google/genai");
     baileys2 = BaileysModule2;
     WhatsAppMediaRouter = class {
       constructor() {
@@ -49597,7 +49782,7 @@ var init_whatsappMediaRouter = __esm({
                   let replyText = "";
                   let speechScript = "";
                   if (apiKey) {
-                    const ai3 = new import_genai32.GoogleGenAI({ apiKey });
+                    const ai3 = new import_genai33.GoogleGenAI({ apiKey });
                     const prompt = `You are Friday AI, DK's (Divakar Kumar) warm, affectionate, intelligent assistant.
 Boss (DK) swiped-up / replied to an audio recording and asked: "${rawText}".
 
@@ -49848,7 +50033,7 @@ _"${transcribed}"_
             const { voiceBridgeService: voiceBridgeService2 } = await Promise.resolve().then(() => (init_voiceBridgeService(), voiceBridgeService_exports));
             const apiKey = process.env.GEMINI_API_KEY;
             if (apiKey) {
-              const ai3 = new import_genai32.GoogleGenAI({ apiKey });
+              const ai3 = new import_genai33.GoogleGenAI({ apiKey });
               const prompt = `You are Friday AI, DK's (Divakar Kumar) warm, affectionate, ultra-intelligent companion.
 Boss (DK) swiped-up / quoted a message and asked for analysis/summary: "${rawText}".
 
@@ -49906,11 +50091,11 @@ var groupCollectiveLearningService_exports = {};
 __export(groupCollectiveLearningService_exports, {
   groupCollectiveLearningService: () => groupCollectiveLearningService
 });
-var import_genai33, COLLECTION_NAME4, GroupCollectiveLearningService, groupCollectiveLearningService;
+var import_genai34, COLLECTION_NAME4, GroupCollectiveLearningService, groupCollectiveLearningService;
 var init_groupCollectiveLearningService = __esm({
   "src/services/groupCollectiveLearningService.ts"() {
     init_firebaseAdmin();
-    import_genai33 = require("@google/genai");
+    import_genai34 = require("@google/genai");
     COLLECTION_NAME4 = "group_learning_profiles";
     GroupCollectiveLearningService = class {
       constructor() {
@@ -50041,7 +50226,7 @@ ${recentSnip || "No recent messages"}
 
 Total ${profile.recentConversations.length} recent messages recorded from members: ${Object.values(profile.members).map((m) => m.name).join(", ")}.`;
         }
-        const ai3 = new import_genai33.GoogleGenAI({ apiKey });
+        const ai3 = new import_genai34.GoogleGenAI({ apiKey });
         const prompt = `You are Friday, DK's ultra-intelligent AI companion. Summarize this recent group chat transcript in natural, friendly Hinglish with structured bullet points.
 
 GROUP NAME: "${profile.groupTitle}"
@@ -50086,18 +50271,18 @@ var cyberSecurityService_exports = {};
 __export(cyberSecurityService_exports, {
   cyberSecurityService: () => cyberSecurityService
 });
-var import_dns2, import_fs7, import_path7, import_genai34, CyberSecurityService, cyberSecurityService;
+var import_dns2, import_fs7, import_path7, import_genai35, CyberSecurityService, cyberSecurityService;
 var init_cyberSecurityService = __esm({
   "src/services/cyberSecurityService.ts"() {
     import_dns2 = __toESM(require("dns"), 1);
     import_fs7 = __toESM(require("fs"), 1);
     import_path7 = __toESM(require("path"), 1);
-    import_genai34 = require("@google/genai");
+    import_genai35 = require("@google/genai");
     CyberSecurityService = class {
       getGenAI() {
         const key = process.env.GEMINI_API_KEY;
         if (!key) return null;
-        return new import_genai34.GoogleGenAI({ apiKey: key });
+        return new import_genai35.GoogleGenAI({ apiKey: key });
       }
       /**
        * 1. Phishing & Malicious URL Inspector
@@ -54724,10 +54909,10 @@ var voiceBiometricsService_exports = {};
 __export(voiceBiometricsService_exports, {
   voiceBiometricsService: () => voiceBiometricsService
 });
-var import_genai35, MAX_PROFILES, SENSITIVE_ACTIONS, VoiceBiometricsService, voiceBiometricsService;
+var import_genai36, MAX_PROFILES, SENSITIVE_ACTIONS, VoiceBiometricsService, voiceBiometricsService;
 var init_voiceBiometricsService = __esm({
   "src/services/voiceBiometricsService.ts"() {
-    import_genai35 = require("@google/genai");
+    import_genai36 = require("@google/genai");
     init_firebaseAdmin();
     init_dspBiometricsEngine();
     MAX_PROFILES = 10;
@@ -54759,7 +54944,7 @@ var init_voiceBiometricsService = __esm({
       getGenAI() {
         const key = process.env.GEMINI_API_KEY;
         if (!key) return null;
-        return new import_genai35.GoogleGenAI({ apiKey: key });
+        return new import_genai36.GoogleGenAI({ apiKey: key });
       }
       /**
        * Checks if an action is authorized for a specific speaker role.
@@ -55825,7 +56010,7 @@ async function callModel(prompt, id, service) {
     if (id && service) await service.addLog(id, "GEMINI_API_KEY not configured in environment.", "error", "ai_model");
     return null;
   }
-  const ai3 = new import_genai36.GoogleGenAI({ apiKey });
+  const ai3 = new import_genai37.GoogleGenAI({ apiKey });
   for (let i = 0; i < MODEL_CHAIN2.length; i++) {
     const model = MODEL_CHAIN2[i];
     console.log(`[CodeAgent] Trying model ${i + 1}/${MODEL_CHAIN2.length}: ${model}`);
@@ -55859,12 +56044,12 @@ async function callModel(prompt, id, service) {
   if (id && service) await service.addLog(id, "All AI models in fallback chain failed.", "error", "ai_model");
   return null;
 }
-var import_fs8, import_path8, import_genai36, MODEL_CHAIN2, APPROVE_WORDS, requestsCol, CodeAgentService, codeAgentService;
+var import_fs8, import_path8, import_genai37, MODEL_CHAIN2, APPROVE_WORDS, requestsCol, CodeAgentService, codeAgentService;
 var init_codeAgentService = __esm({
   "src/services/codeAgentService.ts"() {
     import_fs8 = __toESM(require("fs"), 1);
     import_path8 = __toESM(require("path"), 1);
-    import_genai36 = require("@google/genai");
+    import_genai37 = require("@google/genai");
     init_firebaseAdmin();
     init_githubService();
     MODEL_CHAIN2 = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.6-flash", "gemini-3.5-flash"];
@@ -56608,10 +56793,10 @@ var telegramBotService_exports = {};
 __export(telegramBotService_exports, {
   telegramBotService: () => telegramBotService
 });
-var import_genai37, TelegramBotService, telegramBotService;
+var import_genai38, TelegramBotService, telegramBotService;
 var init_telegramBotService = __esm({
   "src/services/telegramBotService.ts"() {
-    import_genai37 = require("@google/genai");
+    import_genai38 = require("@google/genai");
     init_firebaseAdmin();
     init_contactsService();
     init_visionMemoryService();
@@ -56838,7 +57023,7 @@ Usse pehle ka memory:
 ${tgEarlierCompact}` : ""}
 
 Ab is naye message ka jawab do: ` : "";
-            const ai3 = new import_genai37.GoogleGenAI({ apiKey });
+            const ai3 = new import_genai38.GoogleGenAI({ apiKey });
             for (const model of _TelegramBotService.MODEL_FALLBACK_CHAIN) {
               try {
                 const resp = await ai3.models.generateContent({
@@ -57603,7 +57788,7 @@ _Aap kisi bhi photo, video ya PDF ke bare me Friday se bolkar ya likhkar poochh 
         const key = process.env.GEMINI_API_KEY;
         if (!key) return;
         try {
-          const ai3 = new import_genai37.GoogleGenAI({ apiKey: key });
+          const ai3 = new import_genai38.GoogleGenAI({ apiKey: key });
           const prompt = `Summarize this 1-on-1 Telegram conversation between DK (Boss) and ${fullName} (@${username || "user"}).
 Recent Messages:
 ${messages.map((m) => `[${m.timeStr}] ${m.sender}: ${m.text}`).join("\n")}
@@ -57644,7 +57829,7 @@ Provide a clear 2-3 sentence executive summary of what was discussed, any decisi
         const key = process.env.GEMINI_API_KEY;
         if (!key) return;
         try {
-          const ai3 = new import_genai37.GoogleGenAI({ apiKey: key });
+          const ai3 = new import_genai38.GoogleGenAI({ apiKey: key });
           const prompt = `Summarize current activity in Telegram Group "${groupTitle}".
 Recent Messages:
 ${messages.map((m) => `[${m.timeStr}] ${m.sender}: ${m.text}`).join("\n")}
@@ -58279,9 +58464,11 @@ _Aap kisi bhi rule ko "[Naam] wala rule hata do" bolkar cancel kar sakte hain._`
           }
           return `Haanji ${senderName} ji! Main Friday hoon \u2014 DK Boss abhi busy hain, jaise hi wo aayenge main aapka message unko bata dungi \u{1F44D}`;
         }
-        const ai3 = new import_genai37.GoogleGenAI({ apiKey });
+        const ai3 = new import_genai38.GoogleGenAI({ apiKey });
         const recentDialogue = await _TelegramBotService.getRecentDialogueTranscript(chatId, senderName, 15);
         const crossPlatformMemory = await unifiedMemoryService2.getCrossPlatformWorkingMemoryPrompt();
+        const { chatGptMemoryEngine: chatGptMemoryEngine2 } = await Promise.resolve().then(() => (init_chatGptMemoryEngine(), chatGptMemoryEngine_exports));
+        const chatGptRecallContext = await chatGptMemoryEngine2.recallRelevantMemories(messageText);
         const prompt = `YOU ARE FRIDAY: DK's (Divakar Kumar) ultra-intelligent, loyal, warm, human-like AI companion.
 
 ${directivesContext}
@@ -58289,6 +58476,8 @@ ${directivesContext}
 ${trainingContext}
 
 ${crossPlatformMemory}
+
+${chatGptRecallContext}
 
 ${rlhfContext}
 
@@ -58503,6 +58692,10 @@ ${bossStyleContext}`,
             });
             neurotransmitterEngine2.updateEmotionalMomentum(messageText, cleanText);
             _TelegramBotService.recordChatTurn(chatId, "Friday (You)", cleanText);
+            if (isOwner) {
+              chatGptMemoryEngine2.learnFromMessageTurn("Boss DK", messageText, cleanText, "telegram").catch(() => {
+              });
+            }
             return cleanText;
           }
         }
@@ -58578,6 +58771,10 @@ ${bossStyleContext}`,
               });
               neurotransmitterEngine2.updateEmotionalMomentum(messageText, cleanText);
               _TelegramBotService.recordChatTurn(chatId, "Friday (You)", cleanText);
+              if (isOwner) {
+                chatGptMemoryEngine2.learnFromMessageTurn("Boss DK", messageText, cleanText, "telegram").catch(() => {
+                });
+              }
               return cleanText;
             }
           } catch (err) {
@@ -59681,7 +59878,7 @@ _"${transcribedText}"_`
               const targetLanguage = targetLangMatch ? targetLangMatch[1].trim() : null;
               const key = process.env.GEMINI_API_KEY;
               if (key) {
-                const ai3 = new import_genai37.GoogleGenAI({ apiKey: key });
+                const ai3 = new import_genai38.GoogleGenAI({ apiKey: key });
                 const prompt = `You are Friday AI, DK's ultra-intelligent audio decoder and voice summarizer.
 The user replied to an audio recording asking: "${text}".
 
@@ -60761,7 +60958,7 @@ var memoryEngine_exports = {};
 __export(memoryEngine_exports, {
   memoryEngine: () => memoryEngine
 });
-var DEFAULT_VAULT_ENTRY, vaultCol, pinnedCol, profileDoc, sessionsCol, MemoryEngine, memoryEngine;
+var DEFAULT_VAULT_ENTRY, vaultCol2, pinnedCol, profileDoc, sessionsCol, MemoryEngine, memoryEngine;
 var init_memoryEngine = __esm({
   "src/services/memoryEngine.ts"() {
     init_firebaseAdmin();
@@ -60776,7 +60973,7 @@ var init_memoryEngine = __esm({
       date: "Core Identity",
       timestamp: Date.now()
     };
-    vaultCol = () => db.collection("memory").doc("personalVault").collection("entries");
+    vaultCol2 = () => db.collection("memory").doc("personalVault").collection("entries");
     pinnedCol = () => db.collection("memory").doc("pinnedMemories").collection("entries");
     profileDoc = () => db.collection("memory").doc("profile");
     sessionsCol = () => db.collection("memory").doc("sessions").collection("entries");
@@ -60787,9 +60984,9 @@ var init_memoryEngine = __esm({
       }
       async ensureDefaultVaultEntry() {
         try {
-          const snap = await vaultCol().doc(DEFAULT_VAULT_ENTRY.id).get();
+          const snap = await vaultCol2().doc(DEFAULT_VAULT_ENTRY.id).get();
           if (!snap.exists) {
-            await vaultCol().doc(DEFAULT_VAULT_ENTRY.id).set(DEFAULT_VAULT_ENTRY);
+            await vaultCol2().doc(DEFAULT_VAULT_ENTRY.id).set(DEFAULT_VAULT_ENTRY);
           }
         } catch (e) {
           console.error("[MemoryEngine] Failed to seed default vault entry in Firestore:", e);
@@ -60846,7 +61043,7 @@ var init_memoryEngine = __esm({
           timestamp: now
         };
         try {
-          await vaultCol().doc(id).set(entry);
+          await vaultCol2().doc(id).set(entry);
         } catch (e) {
           console.warn("[MemoryEngine] Failed to save vault fact:", e);
         }
@@ -61039,7 +61236,7 @@ ${transcript}`;
       /** Writes a parsed extraction result to Firestore (vault/pinned/profile), deduping by exact text. */
       async applyExtraction(parsed, dateStr, timestamp) {
         if (Array.isArray(parsed.exactPersonalFacts) && parsed.exactPersonalFacts.length > 0) {
-          const existingVault = await vaultCol().get();
+          const existingVault = await vaultCol2().get();
           const existingFacts = new Set(
             existingVault.docs.map((d) => decryptData(d.data().exactFact || "").toLowerCase().trim())
           );
@@ -61047,7 +61244,7 @@ ${transcript}`;
             const cleanFact = (item?.exactFact || "").trim();
             if (cleanFact && !existingFacts.has(cleanFact.toLowerCase())) {
               const id = Math.random().toString(36).substring(2, 9);
-              await vaultCol().doc(id).set({
+              await vaultCol2().doc(id).set({
                 id,
                 category: item.category || "general_personal_info",
                 exactFact: encryptData(cleanFact),
@@ -61146,7 +61343,7 @@ ${transcript}`;
         const now = Date.now();
         const id = Math.random().toString(36).substring(2, 9);
         try {
-          await vaultCol().doc(id).set({
+          await vaultCol2().doc(id).set({
             id,
             category: category || "personal_secrets_and_facts",
             exactFact: encryptData(exactFact.trim()),
@@ -61160,7 +61357,7 @@ ${transcript}`;
       async getMemories() {
         try {
           const [vaultSnap, pinnedSnap, profileSnap, sessionsSnap] = await Promise.all([
-            vaultCol().get(),
+            vaultCol2().get(),
             pinnedCol().orderBy("timestamp", "asc").get(),
             profileDoc().get(),
             sessionsCol().orderBy("startTime", "desc").limit(10).get()
@@ -61202,7 +61399,7 @@ ${transcript}`;
       async clearAll() {
         try {
           await Promise.all([
-            this.deleteAllInCollection(vaultCol()),
+            this.deleteAllInCollection(vaultCol2()),
             this.deleteAllInCollection(pinnedCol()),
             this.deleteAllInCollection(sessionsCol()),
             profileDoc().set({ profileFacts: [], knownMistakes: [] })
@@ -61232,7 +61429,7 @@ ${transcript}`;
         const sections = [];
         try {
           const [vaultSnap, pinnedSnap, profileSnap, recentSessionsSnap, recentTurns, recentSummaries] = await Promise.all([
-            vaultCol().limit(25).get(),
+            vaultCol2().limit(25).get(),
             pinnedCol().orderBy("timestamp", "desc").limit(15).get(),
             profileDoc().get(),
             sessionsCol().orderBy("startTime", "desc").limit(5).get().catch(() => ({ docs: [], empty: true })),
@@ -61340,7 +61537,7 @@ ${recentSessionDocs}`);
         const sections = [];
         try {
           const [vaultSnap, pinnedSnap, profileSnap, allSessionsSnap] = await Promise.all([
-            vaultCol().get(),
+            vaultCol2().get(),
             pinnedCol().orderBy("timestamp", "asc").get(),
             profileDoc().get(),
             sessionsCol().orderBy("startTime", "asc").get()
@@ -61430,11 +61627,11 @@ var nightlyDreamingService_exports = {};
 __export(nightlyDreamingService_exports, {
   nightlyDreamingService: () => nightlyDreamingService
 });
-var import_genai39, dreamsCol, NightlyDreamingService, nightlyDreamingService;
+var import_genai40, dreamsCol, NightlyDreamingService, nightlyDreamingService;
 var init_nightlyDreamingService = __esm({
   "src/services/nightlyDreamingService.ts"() {
     init_firebaseAdmin();
-    import_genai39 = require("@google/genai");
+    import_genai40 = require("@google/genai");
     dreamsCol = () => db.collection("memory").doc("nightlyDreaming").collection("insights");
     NightlyDreamingService = class {
       /**
@@ -61444,7 +61641,7 @@ var init_nightlyDreamingService = __esm({
         const apiKey = process.env.GEMINI_API_KEY;
         if (!apiKey) return null;
         const dateStr = forcedDate || (/* @__PURE__ */ new Date()).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" });
-        const ai3 = new import_genai39.GoogleGenAI({ apiKey });
+        const ai3 = new import_genai40.GoogleGenAI({ apiKey });
         let dailyContext = "";
         try {
           const snap = await db.collection("memory").doc("lifeStories").collection("events").orderBy("timestamp", "desc").limit(20).get();
@@ -61552,7 +61749,7 @@ var import_ws = require("ws");
 var import_dotenv = __toESM(require("dotenv"), 1);
 var import_cors = __toESM(require("cors"), 1);
 var import_express_rate_limit = __toESM(require("express-rate-limit"), 1);
-var import_genai40 = require("@google/genai");
+var import_genai41 = require("@google/genai");
 init_memoryEngine();
 
 // src/services/reminderScheduler.ts
@@ -75205,8 +75402,8 @@ init_youtubeMusicService();
 init_voicePersonaService();
 init_toolsEngine();
 init_publicApisService();
-var import_genai38 = require("@google/genai");
-var ai = new import_genai38.GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "placeholder-gemini-key" });
+var import_genai39 = require("@google/genai");
+var ai = new import_genai39.GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "placeholder-gemini-key" });
 function createMultimediaRouter() {
   const router = (0, import_express4.Router)();
   const VOICE_CATEGORIES_API = {
@@ -76683,7 +76880,7 @@ if (!process.env.GEMINI_API_KEY) {
   console.warn("WARNING: GEMINI_API_KEY is not set. The AI agent will not work until you set it.");
 }
 var baileysEnabled = true;
-var ai2 = new import_genai40.GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "placeholder-gemini-key" });
+var ai2 = new import_genai41.GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "placeholder-gemini-key" });
 async function startServer() {
   const app = (0, import_express8.default)();
   app.set("trust proxy", 1);
@@ -77004,15 +77201,15 @@ async function startServer() {
               }
             },
             config: {
-              responseModalities: [import_genai40.Modality.AUDIO],
+              responseModalities: [import_genai41.Modality.AUDIO],
               outputAudioTranscription: {},
               inputAudioTranscription: {},
               speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice || "Aoede" } } },
               thinkingConfig: { thinkingLevel: ["low", "medium", "high"].includes(effectiveThinking) ? effectiveThinking : "high" },
               realtimeInputConfig: {
                 automaticActivityDetection: {
-                  startOfSpeechSensitivity: import_genai40.StartSensitivity.START_SENSITIVITY_HIGH,
-                  endOfSpeechSensitivity: import_genai40.EndSensitivity.END_SENSITIVITY_LOW,
+                  startOfSpeechSensitivity: import_genai41.StartSensitivity.START_SENSITIVITY_HIGH,
+                  endOfSpeechSensitivity: import_genai41.EndSensitivity.END_SENSITIVITY_LOW,
                   silenceDurationMs: 500,
                   prefixPaddingMs: 160
                 }

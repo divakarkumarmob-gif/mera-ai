@@ -220,6 +220,8 @@ export class WhatsAppBossAiEngine {
     const directivesContext = await bossDirectivesService.compileDirectivesPrompt();
     const trainingLessonsContext = await fridayChildTrainingService.compileTrainingPrompt(messageText);
     const memoryContext = await memoryEngine.compileLeanMemoryPrompt();
+    const { chatGptMemoryEngine } = await import("../chatGptMemoryEngine");
+    const chatGptRecallContext = await chatGptMemoryEngine.recallRelevantMemories(messageText);
     const humanComprehensionContext = await humanComprehensionEngine.compileHumanComprehensionPrompt("boss_dk", "DK (Boss)", "boss");
     const circadianContext = circadianEnergyEngine.compileCircadianPrompt();
     const opinionsContext = personalOpinionsEngine.compileOpinionsPrompt();
@@ -1574,6 +1576,8 @@ ${trainingLessonsContext}
 
 ${memoryContext}
 
+${chatGptRecallContext}
+
 ${crossPlatformMemoryContext}
 
 ${humanComprehensionContext}
@@ -2695,6 +2699,7 @@ ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` 
         const { cleanText } = machineUnlearningSentinel.scrubRoboticArtifacts(finalReply);
         cognitiveScaffoldingEngine.addMasteryPoints(2).catch(() => {});
         neurotransmitterEngine.updateEmotionalMomentum(messageText, cleanText);
+        chatGptMemoryEngine.learnFromMessageTurn("Boss DK", messageText, cleanText, "whatsapp").catch(() => {});
         return cleanText;
       }
     }
@@ -2821,6 +2826,7 @@ ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` 
           }
           cognitiveScaffoldingEngine.addMasteryPoints(2).catch(() => {});
           neurotransmitterEngine.updateEmotionalMomentum(messageText, cleanText);
+          chatGptMemoryEngine.learnFromMessageTurn("Boss DK", messageText, cleanText, "whatsapp").catch(() => {});
           return cleanText;
         }
       } catch (e: any) {

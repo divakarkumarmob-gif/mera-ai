@@ -2027,6 +2027,8 @@ Provide a 2-4 sentence executive digest of main topics, project updates, member 
     const ai = new GoogleGenAI({ apiKey });
     const recentDialogue = await TelegramBotService.getRecentDialogueTranscript(chatId, senderName, 15);
     const crossPlatformMemory = await unifiedMemoryService.getCrossPlatformWorkingMemoryPrompt();
+    const { chatGptMemoryEngine } = await import("./chatGptMemoryEngine");
+    const chatGptRecallContext = await chatGptMemoryEngine.recallRelevantMemories(messageText);
 
     const prompt = `YOU ARE FRIDAY: DK's (Divakar Kumar) ultra-intelligent, loyal, warm, human-like AI companion.
 
@@ -2035,6 +2037,8 @@ ${directivesContext}
 ${trainingContext}
 
 ${crossPlatformMemory}
+
+${chatGptRecallContext}
 
 ${rlhfContext}
 
@@ -2259,6 +2263,9 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
         cognitiveScaffoldingEngine.addMasteryPoints(2).catch(() => {});
         neurotransmitterEngine.updateEmotionalMomentum(messageText, cleanText);
         TelegramBotService.recordChatTurn(chatId, "Friday (You)", cleanText);
+        if (isOwner) {
+          chatGptMemoryEngine.learnFromMessageTurn("Boss DK", messageText, cleanText, "telegram").catch(() => {});
+        }
         return cleanText;
       }
     }
@@ -2343,6 +2350,9 @@ IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with
           cognitiveScaffoldingEngine.addMasteryPoints(2).catch(() => {});
           neurotransmitterEngine.updateEmotionalMomentum(messageText, cleanText);
           TelegramBotService.recordChatTurn(chatId, "Friday (You)", cleanText);
+          if (isOwner) {
+            chatGptMemoryEngine.learnFromMessageTurn("Boss DK", messageText, cleanText, "telegram").catch(() => {});
+          }
           return cleanText;
         }
       } catch (err: any) {
