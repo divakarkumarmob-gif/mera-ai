@@ -642,7 +642,7 @@ STRICT RULES:
 - Always include the dividing line (──────────────────────) after each card.
 - Output clean readable text without raw HTML entities.`;
 
-        for (const model of ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-2.5-flash"]) {
+        for (const model of ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]) {
           try {
             const resp = await ai.models.generateContent({
               model,

@@ -117,7 +117,7 @@ Return valid JSON only:
     try {
       const ai = new GoogleGenAI({ apiKey });
       const res = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-3.8-flash",
         contents: auditPrompt,
         config: {
           responseMimeType: "application/json",

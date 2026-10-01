@@ -25,16 +25,17 @@ const MODEL_CHAIN = [
   "gemini-3.1-flash-lite",
 ];
 
-// Map Grounding Chain: 3.1 flash lite -> 2.5 flash -> 2.5 flash lite -> 2.0 flash
+// Map Grounding Chain: 3.8 flash -> 3.5 flash -> 3.1 flash lite
 const MAP_GROUNDING_CHAIN = [
-  "gemini-3.1-flash-lite",
+  "gemini-3.8-flash",
   "gemini-3.5-flash",
   "gemini-3.1-flash-lite",
   "gemini-3.5-flash-lite",
 ];
 
-// Search Grounding Chain: 2.5 flash -> 2.0 flash
+// Search Grounding Chain: 3.8 flash -> 3.5 flash
 const SEARCH_GROUNDING_CHAIN = [
+  "gemini-3.8-flash",
   "gemini-3.5-flash",
   "gemini-3.5-flash-lite",
 ];
