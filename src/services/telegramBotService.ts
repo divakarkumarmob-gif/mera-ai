@@ -299,7 +299,7 @@ class TelegramBotService {
     try {
       const { whatsappGirlfriendEngine } = await import("./whatsapp/whatsappGirlfriendEngine");
       const openReply = await whatsappGirlfriendEngine.queryUncensoredGfEngine(prompt, text, tgHistory);
-      if (openReply) {
+      if (openReply && !whatsappGirlfriendEngine.isInvalidAiText(openReply)) {
         learnIntimate(openReply);
         stampClimax(openReply);
         return openReply;
