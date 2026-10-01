@@ -132,14 +132,23 @@ export async function useFirestoreAuthState() {
     clearAuth: async () => {
       try {
         await credsDoc().delete().catch(() => {});
-        // Best-effort: delete known key-type subcollections in batches.
-        const keyTypes = ["pre-key", "session", "sender-key", "app-state-sync-key", "app-state-sync-version", "sender-key-memory"];
+        // Delete all known key-type subcollections in batches until completely empty
+        const keyTypes = [
+          "pre-key",
+          "session",
+          "sender-key",
+          "app-state-sync-key",
+          "app-state-sync-version",
+          "sender-key-memory",
+        ];
         for (const type of keyTypes) {
-          const snap = await keysCol(type).limit(500).get();
-          if (!snap.empty) {
+          while (true) {
+            const snap = await keysCol(type).limit(500).get();
+            if (snap.empty) break;
             const batch = db.batch();
             snap.docs.forEach((d) => batch.delete(d.ref));
             await batch.commit();
+            if (snap.size < 500) break;
           }
         }
       } catch (e) {
