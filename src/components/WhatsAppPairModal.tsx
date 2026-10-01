@@ -129,9 +129,9 @@ export default function WhatsAppPairModal({ isOpen, onClose }: WhatsAppPairModal
                             </div>
                             <div>
                                 <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
-                                    WhatsApp Manager (1 & 2)
+                                    WhatsApp Bot Manager
                                 </h2>
-                                <p className="text-xs text-slate-400">WhatsApp 1 (Official Cloud API) & WhatsApp 2 (Baileys)</p>
+                                <p className="text-xs text-slate-400">Baileys Dedicated Multi-Device Bot</p>
                             </div>
                         </div>
                         <div className="flex items-center gap-1">
@@ -152,27 +152,15 @@ export default function WhatsAppPairModal({ isOpen, onClose }: WhatsAppPairModal
                         </div>
                     </div>
 
-                    {/* Dual Channel Status Badges */}
-                    <div className="grid grid-cols-2 gap-2 text-[11px]">
-                        {/* WhatsApp 1 (Cloud API) */}
-                        <div className={`p-2.5 rounded-xl border flex flex-col gap-0.5 ${isCloudConfigured ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300' : 'bg-slate-950/60 border-slate-800 text-slate-400'}`}>
-                            <div className="flex items-center gap-1.5 font-semibold">
-                                <Cloud className="w-3.5 h-3.5 text-emerald-400" />
-                                <span>WhatsApp 1 (Official)</span>
+                    {/* WhatsApp Status Badge */}
+                    <div className="text-[11px]">
+                        <div className={`p-2.5 rounded-xl border flex items-center justify-between ${isBaileysConnected ? 'bg-cyan-950/40 border-cyan-500/30 text-cyan-300' : 'bg-amber-950/40 border-amber-500/30 text-amber-300'}`}>
+                            <div className="flex items-center gap-2 font-semibold">
+                                <Zap className="w-4 h-4 text-cyan-400" />
+                                <span>WhatsApp Dedicated Bot</span>
                             </div>
-                            <span className="text-[10px] text-slate-400 truncate">
-                                {isCloudConfigured ? `Active (${cloudPhone ? `+${cloudPhone}` : 'Configured'})` : 'Not configured'}
-                            </span>
-                        </div>
-
-                        {/* WhatsApp 2 (Baileys) */}
-                        <div className={`p-2.5 rounded-xl border flex flex-col gap-0.5 ${isBaileysConnected ? 'bg-cyan-950/40 border-cyan-500/30 text-cyan-300' : 'bg-amber-950/40 border-amber-500/30 text-amber-300'}`}>
-                            <div className="flex items-center gap-1.5 font-semibold">
-                                <Zap className="w-3.5 h-3.5 text-cyan-400" />
-                                <span>WhatsApp 2 (Baileys)</span>
-                            </div>
-                            <span className="text-[10px] truncate">
-                                {isBaileysConnected ? `Linked (+${baileysPhone})` : 'Not Linked (Pair below)'}
+                            <span className="text-[11px] font-medium">
+                                {isBaileysConnected ? `Linked (+${baileysPhone}) ✅` : 'Not Linked — Pair below ⚡'}
                             </span>
                         </div>
                     </div>

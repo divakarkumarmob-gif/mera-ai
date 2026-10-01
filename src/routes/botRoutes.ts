@@ -1,6 +1,5 @@
 import express, { Router } from "express";
 import { whatsappBotService } from "../services/whatsappBotService";
-import { whatsappCloudService } from "../services/whatsappCloudService";
 import { getPrimaryWhatsAppChannel, setPrimaryWhatsAppChannel } from "../services/whatsappService";
 import { whatsappSessionHealthEngine } from "../services/whatsapp/whatsappSessionHealthEngine";
 import { telegramBotService } from "../services/telegramBotService";
@@ -42,18 +41,17 @@ export function createBotRouter(context?: BotRoutesContext): Router {
 
   router.get("/api/whatsapp/status", (_req, res) => {
     const baileysStatus = whatsappBotService.getStatus();
-    const cloudStatus = whatsappCloudService.getStatus();
     const baileysEnabled = getBaileysEnabled();
     res.json({
       isConnected: baileysStatus.isConnected,
       isBaileysConnected: baileysStatus.isConnected,
-      isCloudConfigured: cloudStatus.configured,
+      isCloudConfigured: false,
       dedicatedPhone: baileysStatus.dedicatedPhone,
-      cloudPhone: cloudStatus.configured ? cloudStatus.fromNumber : null,
+      cloudPhone: null,
       qrCodeDataUrl: baileysStatus.qrCodeDataUrl,
       pairingCode: baileysStatus.pairingCode,
       baileys: baileysStatus,
-      cloud: cloudStatus,
+      cloud: { configured: false, phoneId: "", fromNumber: "" },
       baileysEnabled,
     });
   });
@@ -95,34 +93,7 @@ export function createBotRouter(context?: BotRoutesContext): Router {
     }
   });
 
-  router.get("/api/whatsapp/cloud/webhook", (req, res) => {
-    const mode = req.query["hub.mode"] as string;
-    const challenge = req.query["hub.challenge"] as string;
-    const verifyToken = req.query["hub.verify_token"] as string;
-    const result = whatsappCloudService.verifyWebhook(mode, challenge, verifyToken);
-    if (result !== null) {
-      res.status(200).send(result);
-    } else {
-      console.warn("[Server] WhatsApp Cloud webhook verify failed — wrong token?");
-      res.status(403).send("Forbidden");
-    }
-  });
 
-  router.post("/api/whatsapp/cloud/webhook", express.json(), (req, res) => {
-    res.sendStatus(200);
-    whatsappCloudService.handleWebhook(req.body);
-  });
-
-  router.get("/api/whatsapp/cloud/status", (_req, res) => {
-    res.json(whatsappCloudService.getStatus());
-  });
-
-  router.post("/api/whatsapp/cloud/send", async (req, res) => {
-    const { phone, message } = req.body;
-    if (!phone || !message) return res.status(400).json({ error: "phone and message required" });
-    const result = await whatsappCloudService.sendMessage(phone, message);
-    res.json(result);
-  });
 
   router.get("/api/whatsapp/health", (_req, res) => {
     try {

@@ -578,11 +578,7 @@ class AppSecurityService {
         const { whatsappBotService } = await import("./whatsappBotService");
         if (whatsappBotService.getStatus().isConnected) {
           await whatsappBotService.sendMessage(ownerPhone, alertMessage);
-          console.log(`[AppSecurity] Login notification delivered to WhatsApp (+${ownerPhone}).`);
-        } else {
-          const { whatsappCloudService } = await import("./whatsappCloudService");
-          await whatsappCloudService.sendMessage(ownerPhone, alertMessage);
-          console.log(`[AppSecurity] Login notification delivered via WhatsApp Cloud API.`);
+          console.log(`[AppSecurity] Login notification delivered to WhatsApp (+${ownerPhone}) via Baileys.`);
         }
       }
     } catch (e) {
@@ -873,10 +869,6 @@ ya
         if (whatsappBotService.getStatus().isConnected) {
           await whatsappBotService.sendMessage(ownerPhone, alertMessage);
           console.log(`[AppSecurity] WhatsApp alert delivered to owner (+${ownerPhone}) via Baileys.`);
-        } else {
-          const { whatsappCloudService } = await import("./whatsappCloudService");
-          await whatsappCloudService.sendMessage(ownerPhone, alertMessage);
-          console.log(`[AppSecurity] WhatsApp alert delivered to owner (+${ownerPhone}) via Cloud API.`);
         }
       }
     } catch (e) {

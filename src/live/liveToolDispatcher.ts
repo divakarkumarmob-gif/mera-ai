@@ -7,7 +7,6 @@ import { memoryEngine } from "../services/memoryEngine";
 import { toolsEngine } from "../services/toolsEngine";
 import { contactsService } from "../services/contactsService";
 import { whatsappBotService } from "../services/whatsappBotService";
-import { whatsappCloudService } from "../services/whatsappCloudService";
 import { sendWhatsAppUnified, setPrimaryWhatsAppChannel, getPrimaryWhatsAppChannel } from "../services/whatsappService";
 import { dailyUpdateService, resolveRelativeDateIST } from "../services/dailyUpdateService";
 import { codeAgentService } from "../services/codeAgentService";
@@ -2277,47 +2276,23 @@ export async function dispatchLiveToolCall(call: any, context: ToolDispatchConte
                       } else {
                         const waMsg = `\uD83C\uDFB5 *${songTitle}*\n\n${ytLink}\n\n_Friday se bheja gaya_ \u2728`;
 
-                        // ── Primary: WhatsApp Cloud API (official, ban-safe) ────────
-                        const cloudRes = await whatsappCloudService.sendMessage(sendToPhone, waMsg);
+                        // ── Send directly via Baileys WhatsApp Bot ────────
+                        const baileysRes = await whatsappBotService.sendMessage(sendToPhone, waMsg);
 
-                        if (cloudRes.success) {
+                        if (baileysRes.success) {
                           result = {
                             success: true,
-                            via: "cloud_api",
+                            via: "baileys",
                             message: `Boss, "${songTitle}" ka YouTube link aapke WhatsApp par bhej diya! \uD83C\uDFB5`,
                             youtubeLink: ytLink, songTitle, sentTo: sendToPhone,
                           };
                         } else {
-                          // ── Cloud API failed ──────────────────────────────
-                          if (getBaileysEnabled()) {
-                            // ── Fallback: Baileys (only if boss has enabled it) ─
-                            console.warn("[Server] Cloud API failed, falling back to Baileys...");
-                            const baileysRes = await whatsappBotService.sendMessage(sendToPhone, waMsg);
-                            if (baileysRes.success) {
-                              result = {
-                                success: true,
-                                via: "baileys_fallback",
-                                message: `Boss, Cloud API se nahi gaya tha, Baileys se bhej diya "${songTitle}" ka link! \uD83C\uDFB5`,
-                                youtubeLink: ytLink, songTitle, sentTo: sendToPhone,
-                              };
-                            } else {
-                              result = {
-                                success: false,
-                                message: `Boss, Cloud API aur Baileys dono se message nahi gaya. Cloud: ${cloudRes.message} | Baileys: ${baileysRes.message}`,
-                                youtubeLink: ytLink, songTitle,
-                              };
-                            }
-                          } else {
-                            // Baileys OFF — honest message, offer to enable
-                            result = {
-                              success: false,
-                              cloudError: cloudRes.message,
-                              youtubeLink: ytLink,
-                              songTitle,
-                              baileysEnabled: false,
-                              message: `Boss, Cloud API se message nahi gaya (${cloudRes.message}). Baileys system abhi OFF hai. Kya Baileys on karun backup ke liye? Bolo "Baileys on karo".`,
-                            };
-                          }
+                          result = {
+                            success: false,
+                            message: `Boss, WhatsApp (Baileys) se message nahi jaa paya: ${baileysRes.message}`,
+                            youtubeLink: ytLink, songTitle,
+                          };
+                        }
                         }
                       }
                     }

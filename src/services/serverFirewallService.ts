@@ -335,7 +335,7 @@ class ServerFirewallService {
 
       // ── Layer 5: Automated Scraper & Wrapper Script Blacklist ──────────────
       // Block unauthenticated headless browsers and generic request libraries from scraping API
-      if (reqPath.startsWith("/api/") && !reqPath.startsWith("/api/whatsapp/cloud/webhook") && !reqPath.startsWith("/api/telegram/webhook")) {
+      if (reqPath.startsWith("/api/") && !reqPath.startsWith("/api/telegram/webhook")) {
         for (const scraperRegex of ServerFirewallService.SCRAPER_USER_AGENTS) {
           if (scraperRegex.test(userAgent)) {
             const authHeader = (req.headers["x-app-key-token"] as string) || (req.headers["authorization"] as string);

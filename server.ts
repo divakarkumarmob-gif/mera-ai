@@ -23,7 +23,6 @@ import { memoryEngine } from "./src/services/memoryEngine";
 import { reminderScheduler } from "./src/services/reminderScheduler";
 import { dailyUpdateReminderScheduler } from "./src/services/dailyUpdateReminderScheduler";
 import { whatsappBotService } from "./src/services/whatsappBotService";
-import { whatsappCloudService } from "./src/services/whatsappCloudService";
 import { codeAgentService } from "./src/services/codeAgentService";
 import { saveMessage } from "./src/services/historyService";
 import { voiceBiometricsService } from "./src/services/voiceBiometricsService";
@@ -91,7 +90,6 @@ async function startServer() {
       reqPath.startsWith("/api/perchance/") ||
       reqPath.startsWith("/api/gaming/freefire/helper/download") ||
       reqPath.startsWith("/api/instagram/webhook") ||
-      reqPath.startsWith("/api/whatsapp/cloud/webhook") ||
       reqPath.startsWith("/api/telegram/webhook") ||
       reqPath.startsWith("/api/exotel/") ||
       reqPath.startsWith("/api/location/") ||
@@ -233,41 +231,7 @@ async function startServer() {
     }
   });
 
-  whatsappCloudService.setMessageCallback((msg) => {
-    const payload = JSON.stringify({
-      type: "whatsapp_incoming",
-      sender: msg.name,
-      text: msg.text,
-      time: new Date(msg.timestamp).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" }),
-      isGroup: false,
-    });
-    for (const client of connectedClients) {
-      if (client.readyState === client.OPEN) client.send(payload);
-    }
-    const ownerPhones = [
-      process.env.OWNER_WHATSAPP_NUMBER,
-      process.env.BOSS_WHATSAPP_PHONE,
-      process.env.BOSS_WHATSAPP_NUMBER,
-      process.env.WHATSAPP_OWNER_NUMBER,
-      process.env.WHATSAPP_BOSS_PHONE,
-    ].filter(Boolean).map((p) => (p || "").replace(/\D/g, "")).filter(Boolean);
 
-    const senderDigits = (msg.from || "").replace(/\D/g, "");
-    const isOwner = ownerPhones.some((p) => p && (senderDigits === p || senderDigits.endsWith(p) || p.endsWith(senderDigits)));
-    if (isOwner) {
-      voiceBiometricsService.handleWhatsAppVoicePinMessage(msg.text, msg.name, "whatsapp_cloud")
-        .then(async (pinRes) => {
-          if (pinRes.handled && pinRes.replyText) {
-            await whatsappCloudService.sendMessage(msg.from, pinRes.replyText);
-          } else {
-            codeAgentService.handleWhatsAppApprovalReply(msg.text).catch((e) =>
-              console.error("[Server] Failed to handle Cloud WhatsApp approval reply:", e)
-            );
-          }
-        })
-        .catch((e) => console.error("[Server] Voice PIN Cloud handler error:", e));
-    }
-  });
 
   telegramBotService.start().catch((err) =>
     console.error("[Server] Telegram Bot start error:", err)

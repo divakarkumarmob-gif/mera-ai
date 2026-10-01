@@ -420,8 +420,8 @@ class WhatsAppBotService {
 
   public isOwnerSender(
     senderPhone: string,
-    senderDisplayName = "",
-    senderJid = "",
+    _senderDisplayName = "",
+    _senderJid = "",
     contact?: any
   ): boolean {
     const envNumbers = [
@@ -438,28 +438,26 @@ class WhatsAppBotService {
     const cleanSender = (senderPhone || "").replace(/\D/g, "");
     const last10Sender = cleanSender.slice(-10);
 
-    for (const envNum of envNumbers) {
-      const cleanEnv = envNum.replace(/\D/g, "");
-      if (!cleanEnv) continue;
-      if (cleanSender === cleanEnv) return true;
-      const last10Env = cleanEnv.slice(-10);
-      if (last10Sender.length === 10 && last10Env.length === 10 && last10Sender === last10Env) {
-        return true;
+    // 1. Strict Phone Number Matching against configured Boss/Owner numbers
+    if (last10Sender.length === 10) {
+      for (const envNum of envNumbers) {
+        const cleanEnv = envNum.replace(/\D/g, "");
+        if (!cleanEnv) continue;
+        if (cleanSender === cleanEnv) return true;
+        const last10Env = cleanEnv.slice(-10);
+        if (last10Env.length === 10 && last10Sender === last10Env) {
+          return true;
+        }
       }
     }
 
-    if (contact) {
+    // 2. Verified database contact with explicit owner/boss relation
+    if (contact && last10Sender.length === 10) {
       const rel = (contact.relation || "").toLowerCase().trim();
-      const name = (contact.name || "").toLowerCase().trim();
       if (rel === "owner" || rel === "boss" || rel === "self") return true;
-      if (name === "dk" || name === "boss" || name === "dk (boss)" || name.includes("divakar") || name.includes("shiva")) return true;
     }
 
-    const lowerDisplay = (senderDisplayName || "").toLowerCase().trim();
-    if (lowerDisplay === "dk (boss)" || lowerDisplay === "divakar kumar (boss)" || lowerDisplay === "boss" || lowerDisplay.includes("divakar") || lowerDisplay === "shiva") {
-      return true;
-    }
-
+    // CRITICAL SECURITY FIX: Never authenticate Boss by user-controlled pushName/displayName!
     return false;
   }
 
