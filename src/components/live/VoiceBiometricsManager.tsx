@@ -265,3 +265,5 @@ export function VoiceBiometricsManager() {
     </div>
   );
 }
+
+export default VoiceBiometricsManager;
