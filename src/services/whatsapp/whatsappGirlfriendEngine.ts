@@ -2377,11 +2377,119 @@ STRICT REALISTIC WHATSAPP CHAT RULES:
     return null;
   }
 
+  // ── Helper: Query GitHub Models (Category 2 - Free Llama 3.3 / DeepSeek R1 via GitHub Token) ──
+  private async queryGitHubModels(
+    messages: Array<{ role: string; content: string }>,
+    token: string
+  ): Promise<string | null> {
+    for (const gModel of ["Meta-Llama-3.3-70B-Instruct", "DeepSeek-R1"]) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 9000);
+        const res = await fetch("https://models.inference.ai.azure.com/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            model: gModel,
+            messages,
+            max_tokens: 100,
+            temperature: 0.9,
+          }),
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+        if (res.ok) {
+          const data: any = await res.json();
+          const text = data?.choices?.[0]?.message?.content?.trim();
+          if (text && !this.isInvalidAiText(text)) {
+            console.log(`[WhatsAppGirlfriend] ✅ Uncensored Girlfriend reply generated via GitHub Models: ${gModel}`);
+            return text;
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[WhatsAppGirlfriend] GitHub Models notice:`, err?.message || err);
+      }
+    }
+    return null;
+  }
+
+  // ── Helper: Query Mistral AI Free (Category 2 - Mistral Small Latest) ──
+  private async queryMistralAi(
+    messages: Array<{ role: string; content: string }>,
+    apiKey: string
+  ): Promise<string | null> {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch("https://api.mistral.ai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: "mistral-small-latest",
+          messages,
+          max_tokens: 100,
+          temperature: 0.88,
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      if (res.ok) {
+        const data: any = await res.json();
+        const text = data?.choices?.[0]?.message?.content?.trim();
+        if (text && !this.isInvalidAiText(text)) {
+          console.log(`[WhatsAppGirlfriend] ✅ Uncensored Girlfriend reply generated via Mistral AI`);
+          return text;
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[WhatsAppGirlfriend] Mistral AI notice:`, err?.message || err);
+    }
+    return null;
+  }
+
+  // ── Helper: Query Local LM Studio (Category 3 - Local Port 1234) ──
+  private async queryLocalLmStudio(
+    messages: Array<{ role: string; content: string }>
+  ): Promise<string | null> {
+    try {
+      const pingController = new AbortController();
+      const pingTimer = setTimeout(() => pingController.abort(), 1200);
+      const ping = await fetch("http://127.0.0.1:1234/v1/models", { signal: pingController.signal }).catch(() => null);
+      clearTimeout(pingTimer);
+      if (!ping || !ping.ok) return null;
+
+      const res = await fetch("http://127.0.0.1:1234/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages,
+          max_tokens: 100,
+          temperature: 0.9,
+        }),
+      });
+      if (res.ok) {
+        const data: any = await res.json();
+        const text = data?.choices?.[0]?.message?.content?.trim();
+        if (text && !this.isInvalidAiText(text)) {
+          console.log("[WhatsAppGirlfriend] ✅ Uncensored Girlfriend reply generated via Local LM Studio");
+          return text;
+        }
+      }
+    } catch {}
+    return null;
+  }
+
   /**
    * 100% Uncensored Open Models Multi-Category Architecture for Girlfriend & Open Talk Roleplay
-   * Category 3: Local Offline / Uncensored (Ollama)
-   * Category 2: Ultra-Fast Free Cloud Providers (Groq, SambaNova, Cerebras, OpenRouter)
-   * Category 1: Zero-Key No-Auth Public Engines (Pollinations AI, AI Horde)
+   * Priority 1: Zero-Key No-Auth Public Engines (Pollinations AI, AI Horde)
+   * Priority 2: Ultra-Fast Free Cloud Providers (Groq, SambaNova, Cerebras, GitHub Models, Mistral AI, OpenRouter)
+   * Priority 3: Local Offline / Uncensored (Ollama, LM Studio)
    */
   public async queryUncensoredGfEngine(
     systemPrompt: string,
@@ -2529,7 +2637,21 @@ STRICT REALISTIC WHATSAPP CHAT RULES:
       if (cerebrasReply) return cerebrasReply;
     }
 
-    // 2.4 OpenRouter Free Models
+    // 2.4 GitHub Models (Llama 3.3 70B & DeepSeek R1 Free via GITHUB_TOKEN)
+    const githubToken = (process.env.GITHUB_TOKEN || process.env.GH_TOKEN)?.trim();
+    if (githubToken) {
+      const ghReply = await this.queryGitHubModels(messages, githubToken);
+      if (ghReply) return ghReply;
+    }
+
+    // 2.5 Mistral AI Free Tier (mistral-small-latest)
+    const mistralKey = process.env.MISTRAL_API_KEY?.trim();
+    if (mistralKey) {
+      const mistralReply = await this.queryMistralAi(messages, mistralKey);
+      if (mistralReply) return mistralReply;
+    }
+
+    // 2.6 OpenRouter Free Models
     const openRouterKey = process.env.OPENROUTER_API_KEY?.trim();
     if (openRouterKey) {
       for (const rModel of ["qwen/qwen3.8-27b:free", "nvidia/nemotron-3.5-lightning:free", "meta-llama/llama-3.3-70b-instruct:free"]) {
@@ -2562,10 +2684,13 @@ STRICT REALISTIC WHATSAPP CHAT RULES:
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 🌟 PRIORITY 3 (CATEGORY 3): Local Offline / Ollama (Final Fallback)
+    // 🌟 PRIORITY 3 (CATEGORY 3): Local Offline / Ollama & LM Studio (Final Fallback)
     // ─────────────────────────────────────────────────────────────────────────
     const localReply = await this.queryLocalOllama(messages);
     if (localReply) return localReply;
+
+    const lmStudioReply = await this.queryLocalLmStudio(messages);
+    if (lmStudioReply) return lmStudioReply;
 
     return null;
   }
