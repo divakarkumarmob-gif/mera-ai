@@ -21,6 +21,14 @@
  *  5. Last Known Cache      → final fallback, Firestore/localStorage cached point
  */
 
+import { registerPlugin } from '@capacitor/core';
+
+const WifiScanner = registerPlugin<any>('WifiScanner', {
+  web: {
+    getAvailableNetworks: async () => ({ networks: [] }),
+  },
+});
+
 // ── Storage Keys ──────────────────────────────────────────────────────────────
 
 const KEY_WIFI_FINGERPRINTS  = 'friday_wifi_fingerprints';   // local WiFi DB
@@ -333,10 +341,9 @@ class OfflineFallbackLocationService {
   public async scanWifiNetworks(): Promise<WifiNetwork[]> {
     const networks: WifiNetwork[] = [];
 
-    // Try Capacitor WiFi plugin (native APK)
+    // Try native Friday WifiScanner plugin (injected in Capacitor APK)
     try {
-      const { Wifi } = await import('capacitor-wifi');
-      const scanResult = await (Wifi as any).getAvailableNetworks?.();
+      const scanResult = await WifiScanner.getAvailableNetworks();
       if (scanResult?.networks?.length) {
         for (const n of scanResult.networks) {
           if (n.ssid && n.bssid) {

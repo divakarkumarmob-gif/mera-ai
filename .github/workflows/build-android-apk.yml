@@ -46,6 +46,8 @@ jobs:
 
       - name: 📱 Initialize & Sync Capacitor Android Project
         run: |
+          npm uninstall capacitor-wifi --no-save || true
+          rm -rf node_modules/capacitor-wifi || true
           npx cap add android || true
           npx cap sync android
 
@@ -145,7 +147,7 @@ jobs:
             sed -i '/<application/i '"$OVERRIDE_SDK"'' "$MANIFEST"
 
             # 1. Add All Required Android Permissions (100% Android 14/15 Compliant)
-            PERMS='    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />\n    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />\n    <uses-permission android:name="android.permission.VIBRATE" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />\n    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />\n    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />\n    <uses-feature android:name="android.hardware.microphone" android:required="false" />'
+            PERMS='    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />\n    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />\n    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />\n    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />\n    <uses-permission android:name="android.permission.VIBRATE" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />\n    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />\n    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />\n    <uses-feature android:name="android.hardware.microphone" android:required="false" />'
             
             # Remove any duplicate permissions before re-injecting
             sed -i '/android.permission.INTERNET/d' "$MANIFEST"
@@ -276,6 +278,72 @@ jobs:
                       call.resolve(result);
                   } catch (Exception e) {
                       call.reject("SMS failed: " + e.getMessage());
+                  }
+              }
+          }
+          EOF
+
+          # ── WifiScannerPlugin.java (Crash-Proof Native Offline WiFi Scanner) ──
+          cat << 'EOF' > "$PACKAGE_DIR/plugins/WifiScannerPlugin.java"
+          package com.friday.ai.plugins;
+
+          import android.Manifest;
+          import android.content.Context;
+          import android.content.pm.PackageManager;
+          import android.net.wifi.ScanResult;
+          import android.net.wifi.WifiManager;
+          import androidx.core.content.ContextCompat;
+          import com.getcapacitor.JSArray;
+          import com.getcapacitor.JSObject;
+          import com.getcapacitor.Plugin;
+          import com.getcapacitor.PluginCall;
+          import com.getcapacitor.PluginMethod;
+          import com.getcapacitor.annotation.CapacitorPlugin;
+          import java.util.List;
+
+          @CapacitorPlugin(name = "WifiScanner")
+          public class WifiScannerPlugin extends Plugin {
+
+              @PluginMethod
+              public void getAvailableNetworks(PluginCall call) {
+                  try {
+                      Context context = getContext();
+                      if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
+                              != PackageManager.PERMISSION_GRANTED) {
+                          JSObject ret = new JSObject();
+                          ret.put("networks", new JSArray());
+                          call.resolve(ret);
+                          return;
+                      }
+
+                      WifiManager wifiManager = (WifiManager) context.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+                      if (wifiManager == null) {
+                          JSObject ret = new JSObject();
+                          ret.put("networks", new JSArray());
+                          call.resolve(ret);
+                          return;
+                      }
+
+                      List<ScanResult> scanResults = wifiManager.getScanResults();
+                      JSArray networks = new JSArray();
+                      if (scanResults != null) {
+                          for (ScanResult r : scanResults) {
+                              if (r.SSID != null && !r.SSID.isEmpty()) {
+                                  JSObject net = new JSObject();
+                                  net.put("ssid", r.SSID);
+                                  net.put("bssid", r.BSSID);
+                                  net.put("rssi", r.level);
+                                  networks.put(net);
+                              }
+                          }
+                      }
+                      JSObject ret = new JSObject();
+                      ret.put("networks", networks);
+                      call.resolve(ret);
+                  } catch (Exception e) {
+                      JSObject ret = new JSObject();
+                      ret.put("networks", new JSArray());
+                      call.resolve(ret);
                   }
               }
           }
@@ -510,12 +578,14 @@ jobs:
           import androidx.core.content.ContextCompat;
           import com.getcapacitor.BridgeActivity;
           import com.friday.ai.plugins.SmsSenderPlugin;
+          import com.friday.ai.plugins.WifiScannerPlugin;
 
           public class MainActivity extends BridgeActivity {
               @Override
               public void onCreate(Bundle savedInstanceState) {
                   // Register native Capacitor plugins
                   registerPlugin(SmsSenderPlugin.class);
+                  registerPlugin(WifiScannerPlugin.class);
                   super.onCreate(savedInstanceState);
 
                   // 1. Safe Screen & Lockscreen Wake Flags
