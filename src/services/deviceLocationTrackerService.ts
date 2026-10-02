@@ -183,6 +183,43 @@ const GEOCODE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const STALE_LOCATION_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 24 hours - location considered stale
 const MAX_CACHED_LOCATION_AGE_MS = 48 * 60 * 60 * 1000; // 48 hours - cached position valid up to this age
 
+// ── ⭐ Server-side RAM cache (zero-latency fallback when Firestore fails) ─────
+// Key = label.toLowerCase() (e.g. "boss phone", "bhai")
+// Updated on every successful ping — no external dependency needed
+const locationRamCache = new Map<string, DeviceLocationEntry>();
+
+function updateRamCache(entry: DeviceLocationEntry): void {
+  const keys = new Set<string>();
+  if (entry.label)     keys.add(entry.label.toLowerCase());
+  if (entry.ownerName) keys.add(entry.ownerName.toLowerCase());
+  if (entry.username)  keys.add(entry.username.toLowerCase());
+  if (entry.deviceId)  keys.add(entry.deviceId.toLowerCase());
+  for (const k of keys) locationRamCache.set(k, entry);
+  console.log(`[LocationTracker] 🗂️ RAM cache updated for keys: ${[...keys].join(", ")}`);
+}
+
+function getRamCacheEntry(rawQuery: string): DeviceLocationEntry | null {
+  const q = rawQuery.toLowerCase();
+  // Direct match
+  if (locationRamCache.has(q)) return locationRamCache.get(q)!;
+  // Boss/self aliases
+  const bossAliases = ["boss", "dk", "divakar", "mera", "me", "self", "apna", "owner", "admin"];
+  const isBossQuery = !q || bossAliases.some(a => q === a || q.includes(a));
+  if (isBossQuery) {
+    for (const [key, entry] of locationRamCache) {
+      if (["boss", "dk", "divakar"].some(a => key.includes(a))) return entry;
+    }
+    // If only one device is cached, return it
+    if (locationRamCache.size === 1) return [...locationRamCache.values()][0];
+  }
+  // Partial match
+  for (const [key, entry] of locationRamCache) {
+    if (key.includes(q) || q.includes(key)) return entry;
+  }
+  return null;
+}
+
+
 // ── Service Class ────────────────────────────────────────────────────────────
 
 class DeviceLocationTrackerService {
@@ -359,14 +396,35 @@ class DeviceLocationTrackerService {
       console.log(`[LocationTracker] ✅ Ping saved: deviceId=${deviceId}, lat=${lat}, lon=${lon}`);
     } catch (err: any) {
       console.error("[LocationTracker] ❌ Firestore write FAILED for ping:", err?.message || err);
-      return { success: false, message: `Firestore write failed: ${err?.message || "Unknown error"}` };
+      // Even if Firestore fails, still update RAM cache so queries work!
     }
+
+    // ⭐ Always update RAM cache immediately (works even if Firestore fails)
+    updateRamCache({
+      deviceId,
+      label: (data.label || "Boss").trim(),
+      ownerName: (data.label || "Boss").trim(),
+      username: (data.username || "").toLowerCase(),
+      lat, lon,
+      accuracy: data.accuracy || 0,
+      altitude: data.altitude ?? null,
+      speed: data.speed ?? null,
+      heading: data.heading ?? null,
+      address: fallbackAddress,
+      lastUpdatedAt: now,
+      registeredAt: now,
+      batteryLevel: data.batteryLevel ?? null,
+      isCharging: data.isCharging ?? null,
+      networkType: data.networkType ?? null,
+      isCachedLastKnown: isCached,
+    });
 
     // Async geocoding — update address in background (non-blocking)
     this.reverseGeocode(lat, lon).then(async (address) => {
       try {
         await locationsCollection().doc(deviceId).update({ address });
-        // Also update TG backup with proper address
+        // Also update RAM cache with real address
+        updateRamCache({ ...locationRamCache.get(deviceId.toLowerCase()) ?? {}, deviceId, label: (data.label || "Boss").trim(), ownerName: (data.label || "Boss").trim(), username: (data.username || "").toLowerCase(), lat, lon, accuracy: data.accuracy || 0, altitude: data.altitude ?? null, speed: data.speed ?? null, heading: data.heading ?? null, address, lastUpdatedAt: now, registeredAt: now, batteryLevel: data.batteryLevel ?? null, isCharging: data.isCharging ?? null, networkType: data.networkType ?? null });
         savePingToTelegram((data.label || "Boss").trim(), lat, lon, address, now).catch(() => {});
       } catch { /* non-critical */ }
     }).catch(() => {
@@ -510,27 +568,34 @@ class DeviceLocationTrackerService {
         bestMatch.address !== "Location not yet received" &&
         bestMatch.address !== "0.0000, 0.0000";
 
-      // If no valid coords AND no valid address → try Telegram fallback
+      // If no valid coords AND no valid address → try RAM cache first, then TG
       if (!hasValidCoords && !hasValidAddress) {
-        try {
-          const tgEntry = await fetchLocationFromTelegram(bestMatch.label || rawQuery || "boss");
-          if (tgEntry) {
-            // Got data from TG — use it as bestMatch
-            bestMatch = tgEntry;
-          } else {
+        // 1️⃣ RAM cache (instant — always updated on every ping)
+        const ramEntry = getRamCacheEntry(bestMatch.label || rawQuery || "boss");
+        if (ramEntry && ramEntry.lat && ramEntry.lon && !(ramEntry.lat === 0 && ramEntry.lon === 0)) {
+          console.log(`[LocationTracker] ✅ Serving from RAM cache for "${rawQuery}"`);
+          bestMatch = ramEntry;
+        } else {
+          // 2️⃣ TG fallback (may not work if memory bot consumed updates)
+          try {
+            const tgEntry = await fetchLocationFromTelegram(bestMatch.label || rawQuery || "boss");
+            if (tgEntry) {
+              bestMatch = tgEntry;
+            } else {
+              return {
+                success: false,
+                deviceId: bestMatch.deviceId,
+                label: bestMatch.label,
+                ownerName: bestMatch.ownerName,
+                message: `Boss, "${bestMatch.label || bestMatch.ownerName}" phone system me registered hai, lekin abhi tak live GPS coordinates sync nahi hue hain.\n\n📱 FRIDAY app/web open karein aur location permission dein — location turant update ho jayegi!`,
+              };
+            }
+          } catch {
             return {
               success: false,
-              deviceId: bestMatch.deviceId,
-              label: bestMatch.label,
-              ownerName: bestMatch.ownerName,
               message: `Boss, "${bestMatch.label || bestMatch.ownerName}" phone system me registered hai, lekin abhi tak live GPS coordinates sync nahi hue hain.\n\n📱 FRIDAY app/web open karein aur location permission dein — location turant update ho jayegi!`,
             };
           }
-        } catch {
-          return {
-            success: false,
-            message: `Boss, "${bestMatch.label || bestMatch.ownerName}" phone system me registered hai, lekin abhi tak live GPS coordinates sync nahi hue hain.\n\n📱 FRIDAY app/web open karein aur location permission dein — location turant update ho jayegi!`,
-          };
         }
       }
 
