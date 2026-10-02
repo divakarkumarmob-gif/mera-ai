@@ -1,4 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
+import { geminiKeyPoolService } from "./geminiKeyPoolService";
 
 export interface YouTubeTimedCue {
   start: number; // in seconds
@@ -202,8 +203,7 @@ export class YouTubeService {
     }
 
     // Build prompt for Gemini Multi-Tier fallback
-    const key = process.env.GEMINI_API_KEY;
-    if (!key) {
+    if (!geminiKeyPoolService.hasAvailableKey()) {
       return {
         videoId,
         url: videoUrl,
@@ -211,7 +211,7 @@ export class YouTubeService {
         channelName: meta.authorName,
         thumbnailUrl: meta.thumbnailUrl,
         summary: `YouTube video "${meta.title}" by ${meta.authorName}. (${cues.length} transcript lines extracted).`,
-        keyTakeaways: ["Key insights require GEMINI_API_KEY."],
+        keyTakeaways: ["Key insights require Gemini API key configuration."],
         chapters: cues.slice(0, 5).map((c) => ({
           title: c.text.slice(0, 40),
           start: c.start,
@@ -224,7 +224,7 @@ export class YouTubeService {
       };
     }
 
-    const ai = new GoogleGenAI({ apiKey: key });
+    const { client: ai } = geminiKeyPoolService.getOptimalClient({ priority: "background" });
 
     const prompt = `You are FRIDAY — Boss Divakar Kumar's (DK's) elite AI Video Intelligence specialist.
 Analyze this YouTube video:
@@ -325,15 +325,14 @@ Provide output strictly formatted in valid JSON with this exact schema:
     const meta = await this.getVideoMetadata(videoId);
     const fullTranscriptText = cues.map((c) => `[${c.startFormatted}] ${c.text}`).join("\n");
 
-    const key = process.env.GEMINI_API_KEY;
-    if (!key) {
+    if (!geminiKeyPoolService.hasAvailableKey()) {
       return {
-        answer: `Boss, YouTube timestamp answer karne ke liye GEMINI_API_KEY zaroori hai.`,
+        answer: `Boss, YouTube timestamp answer karne ke liye Gemini API key zaroori hai.`,
         contextFound: false,
       };
     }
 
-    const ai = new GoogleGenAI({ apiKey: key });
+    const { client: ai } = geminiKeyPoolService.getOptimalClient({ priority: "background" });
 
     const prompt = `You are FRIDAY — YouTube "Ask Gemini" Real-Time Video Assistant.
 The user (Boss DK) is asking a specific question about the video "${meta.title}" (by ${meta.authorName}).

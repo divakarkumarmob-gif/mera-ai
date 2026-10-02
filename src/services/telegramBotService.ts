@@ -1,4 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
+import { geminiKeyPoolService } from "./geminiKeyPoolService";
 import { db } from "./firebaseAdmin";
 import { contactsService } from "./contactsService";
 import { visionMemoryService } from "./visionMemoryService";
@@ -1235,10 +1236,10 @@ class TelegramBotService {
     username: string,
     messages: Array<{ text: string; sender: string; timeStr: string }>
   ): Promise<void> {
-    const key = process.env.GEMINI_API_KEY;
-    if (!key) return;
+    if (!geminiKeyPoolService.hasAvailableKey()) return;
     try {
-      const ai = new GoogleGenAI({ apiKey: key });
+      const allocation = geminiKeyPoolService.getOptimalClient({ priority: "background" });
+      const ai = allocation.client;
       const prompt = `Summarize this 1-on-1 Telegram conversation between DK (Boss) and ${fullName} (@${username || "user"}).
 Recent Messages:
 ${messages.map((m) => `[${m.timeStr}] ${m.sender}: ${m.text}`).join("\n")}
@@ -1253,9 +1254,14 @@ Provide a clear 2-3 sentence executive summary of what was discussed, any decisi
             new Promise<any>((_, reject) => setTimeout(() => reject(new Error("Timeout")), 8000)),
           ]);
           summary = resp.text?.trim();
-          if (summary) break;
-        } catch (e) {
-          // Try next model in chain
+          if (summary) {
+            geminiKeyPoolService.recordSuccess(allocation.keyIndex);
+            break;
+          }
+        } catch (e: any) {
+          if (e?.status === 429 || String(e?.message || e).includes("429")) {
+            geminiKeyPoolService.recordRateLimitError(allocation.keyIndex);
+          }
         }
       }
 
@@ -1283,10 +1289,10 @@ Provide a clear 2-3 sentence executive summary of what was discussed, any decisi
     groupTitle: string,
     messages: Array<{ text: string; sender: string; timeStr: string }>
   ): Promise<void> {
-    const key = process.env.GEMINI_API_KEY;
-    if (!key) return;
+    if (!geminiKeyPoolService.hasAvailableKey()) return;
     try {
-      const ai = new GoogleGenAI({ apiKey: key });
+      const allocation = geminiKeyPoolService.getOptimalClient({ priority: "background" });
+      const ai = allocation.client;
       const prompt = `Summarize current activity in Telegram Group "${groupTitle}".
 Recent Messages:
 ${messages.map((m) => `[${m.timeStr}] ${m.sender}: ${m.text}`).join("\n")}
@@ -1301,9 +1307,14 @@ Provide a 2-4 sentence executive digest of main topics, project updates, member 
             new Promise<any>((_, reject) => setTimeout(() => reject(new Error("Timeout")), 8000)),
           ]);
           summary = resp.text?.trim();
-          if (summary) break;
-        } catch (e) {
-          // Try next model in chain
+          if (summary) {
+            geminiKeyPoolService.recordSuccess(allocation.keyIndex);
+            break;
+          }
+        } catch (e: any) {
+          if (e?.status === 429 || String(e?.message || e).includes("429")) {
+            geminiKeyPoolService.recordRateLimitError(allocation.keyIndex);
+          }
         }
       }
 
@@ -2041,15 +2052,16 @@ Provide a 2-4 sentence executive digest of main topics, project updates, member 
     // Stream of consciousness logging
     frontierCognitionService.recordStreamEvent(senderName, messageText, isOwner ? 6 : 4).catch(() => {});
 
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
+    if (!geminiKeyPoolService.hasAvailableKey()) {
       if (customBusy) {
         return `Haanji ${senderName} ji! Main Friday hoon — DK Boss (Divakar Kumar) ka AI assistant. ${customBusy} 👍`;
       }
       return `Haanji ${senderName} ji! Main Friday hoon — DK Boss abhi busy hain, jaise hi wo aayenge main aapka message unko bata dungi 👍`;
     }
 
-    const ai = new GoogleGenAI({ apiKey });
+    const priority = isOwner ? "boss" : isGroup ? "public" : "public";
+    let allocation = geminiKeyPoolService.getOptimalClient({ priority });
+    let ai = allocation.client;
     const recentDialogue = await TelegramBotService.getRecentDialogueTranscript(chatId, senderName, 15);
     const crossPlatformMemory = await unifiedMemoryService.getCrossPlatformWorkingMemoryPrompt();
     const { chatGptMemoryEngine } = await import("./chatGptMemoryEngine");
@@ -2466,10 +2478,19 @@ This format MUST be used:
           if (isOwner) {
             chatGptMemoryEngine.learnFromMessageTurn("Boss DK", messageText, cleanText, "telegram").catch(() => {});
           }
+          geminiKeyPoolService.recordSuccess(allocation.keyIndex);
           return cleanText;
         }
       } catch (err: any) {
-        console.warn(`[TelegramBot] ${model} failed (${err?.message || err}), falling back to next model...`);
+        console.warn(`[TelegramBot] ${model} on Key #${allocation.keyIndex + 1} failed (${err?.message || err}), falling back to next model...`);
+        const errMsg = String(err?.message || err);
+        if (err?.status === 429 || errMsg.includes("429") || errMsg.includes("RESOURCE_EXHAUSTED")) {
+          geminiKeyPoolService.recordRateLimitError(allocation.keyIndex);
+          allocation = geminiKeyPoolService.getOptimalClient({ priority });
+          ai = allocation.client;
+        } else {
+          geminiKeyPoolService.recordGenericError(allocation.keyIndex);
+        }
       }
     }
 
@@ -2767,6 +2788,13 @@ This format MUST be used:
     if (isStartCmd) {
       const welcomeCard = `👋 *Namaste ${senderName}! Main Friday AI hoon — DK Boss (Divakar Kumar) ka Assistant.* 🚀⚡\n\nMain is chat / group me live tasks, voice translation, media cataloging aur autonomous AI execution sambhalti hoon.\n\n👇 *Neeche se apna mode ya workspace action choose karein:*`;
       await this.sendMessage(chatId, welcomeCard, getMasterMenuMarkup(chatId));
+      return;
+    }
+
+    // ── Command: /keys or /keypool (Live Zero-429 Multi-Key Health Monitor) ───
+    if (/^\/(?:keys|keypool|pool|status_keys)\b/i.test(text.trim()) || /^(?:key\s*status|pool\s*status)$/i.test(text.trim())) {
+      const card = geminiKeyPoolService.getStatusCard();
+      await this.sendMessage(chatId, card);
       return;
     }
 
@@ -3669,9 +3697,9 @@ This format MUST be used:
           const targetLangMatch = cleanReplyText.match(/\b(?:in|to|me|mein)?\s*(hindi|english|bengali|bangla|marathi|gujarati|punjabi|urdu|tamil|telugu|kannada|malayalam|french|spanish|german|japanese|russian|arabic|chinese)\b/i);
           const targetLanguage = targetLangMatch ? targetLangMatch[1].trim() : null;
 
-          const key = process.env.GEMINI_API_KEY;
-          if (key) {
-            const ai = new GoogleGenAI({ apiKey: key });
+          if (geminiKeyPoolService.hasAvailableKey()) {
+            const allocation = geminiKeyPoolService.getOptimalClient({ priority: "background" });
+            const ai = allocation.client;
             const prompt = `You are Friday AI, DK's ultra-intelligent audio decoder and voice summarizer.
 The user replied to an audio recording asking: "${text}".
 
@@ -3695,10 +3723,15 @@ INSTRUCTIONS:
               try {
                 const resp = await ai.models.generateContent({ model, contents: prompt });
                 if (resp.text && resp.text.trim()) {
+                  geminiKeyPoolService.recordSuccess(allocation.keyIndex);
                   resultReply = resp.text.trim();
                   break;
                 }
-              } catch {}
+              } catch (modelErr: any) {
+                if (modelErr?.status === 429 || String(modelErr?.message || modelErr).includes("429")) {
+                  geminiKeyPoolService.recordRateLimitError(allocation.keyIndex);
+                }
+              }
             }
 
             await this.sendHumanLikeMessage(chatId, resultReply || `🎙️ *Voice Note Transcription:*\n_"${transcribed}"_`);

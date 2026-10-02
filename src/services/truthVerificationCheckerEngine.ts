@@ -15,6 +15,7 @@
  */
 
 import { GoogleGenAI } from "@google/genai";
+import { geminiKeyPoolService } from "./geminiKeyPoolService";
 import { unifiedMemoryService } from "./unifiedMemoryService";
 
 export interface TruthAuditResult {
@@ -55,8 +56,7 @@ class TruthVerificationCheckerEngine {
     recentContext: string,
     lastFridayReply?: string
   ): Promise<TruthAuditResult> {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
+    if (!geminiKeyPoolService.hasAvailableKey()) {
       return {
         isTruthChallenge: true,
         verdict: "uncertain_unverified",
@@ -115,7 +115,7 @@ Return valid JSON only:
 }`;
 
     try {
-      const ai = new GoogleGenAI({ apiKey });
+      const { client: ai } = geminiKeyPoolService.getOptimalClient({ priority: "boss" });
       const res = await ai.models.generateContent({
         model: "gemini-3.8-flash",
         contents: auditPrompt,

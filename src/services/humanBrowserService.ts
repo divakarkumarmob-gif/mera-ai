@@ -532,28 +532,31 @@ class HumanBrowserService {
 
       // Context-aware visual prompt synthesis
       let visualPrompt = `Authentic, high quality 4k photograph of ${cleanQuery}, realistic, highly detailed`;
-      const key = process.env.GEMINI_API_KEY;
-
-      if (key) {
-        try {
-          const { GoogleGenAI } = await import("@google/genai");
-          const ai = new GoogleGenAI({ apiKey: key });
-          const promptResp = await ai.models.generateContent({
-            model: "gemini-3.5-flash-lite",
-            contents: `Generate a 1-line text-to-image prompt to generate an authentic, stunning visual photo for the search query: "${cleanQuery}".
+      try {
+        const { geminiKeyPoolService } = await import("./geminiKeyPoolService");
+        if (geminiKeyPoolService.hasAvailableKey()) {
+          const generatedPrompt = await geminiKeyPoolService.executeWithRetry(
+            async (ai) => {
+              const promptResp = await ai.models.generateContent({
+                model: "gemini-3.5-flash-lite",
+                contents: `Generate a 1-line text-to-image prompt to generate an authentic, stunning visual photo for the search query: "${cleanQuery}".
 Rules:
 - If shopping/products (e.g. shirts, shoes, phones): "A curated commercial catalog photo of various stylish [items] displayed in a modern boutique/studio, multi-product collection".
 - If historical/legal/constitutional (e.g. Indian Constitution, laws, treaties): "Official dignified book of the Constitution of India with the national golden emblem and preamble on an executive wooden desk, realistic historical document photograph".
 - If person/leader/scientist: "Official formal portrait photograph of [Name], clean studio lighting".
 - If monument/place/city: "Scenic 4k travel photography of [Place]".
 - Output ONLY the 1-line image prompt without quotes or explanation.`,
-          });
-          const generatedPrompt = promptResp.text?.trim();
+              });
+              return promptResp.text?.trim();
+            },
+            { priority: "background", taskName: "SearchThumbnailPrompt" }
+          );
+
           if (generatedPrompt && generatedPrompt.length > 10) {
             visualPrompt = generatedPrompt;
           }
-        } catch {}
-      }
+        }
+      } catch {}
 
       const imgRes = await imageGenerationService.generateImage(visualPrompt, {
         enhancePrompt: false,
@@ -602,18 +605,15 @@ Rules:
       return productCards.join("\n\n");
     }
 
-    const key = process.env.GEMINI_API_KEY;
     const combinedSnippets = rawSnippets
       .map((s) => this.unescapeHtml(s))
       .filter(Boolean)
       .join("\n\n")
       .slice(0, 3500);
 
-    if (key) {
-      try {
-        const { GoogleGenAI } = await import("@google/genai");
-        const ai = new GoogleGenAI({ apiKey: key });
-
+    try {
+      const { geminiKeyPoolService } = await import("./geminiKeyPoolService");
+      if (geminiKeyPoolService.hasAvailableKey()) {
         const prompt = `You are an elite Knowledge & Search Results formatter for WhatsApp.
 Your task is to present search results for "${cleanQuery}" formatted for maximum readability on WhatsApp mobile.
 
@@ -659,22 +659,32 @@ STRICT RULES:
 - Output clean readable text with blank lines between every numbered step and section.
 - NEVER squash text into a single paragraph or line.`;
 
-        for (const model of ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]) {
-          try {
-            const resp = await ai.models.generateContent({
-              model,
-              contents: prompt,
-            });
-
-            const text = resp.text?.trim();
-            if (text && text.length > 30) {
-              return this.unescapeHtml(text);
+        const models = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"];
+        const overview = await geminiKeyPoolService.executeWithRetry(
+          async (ai) => {
+            for (const model of models) {
+              try {
+                const resp = await ai.models.generateContent({
+                  model,
+                  contents: prompt,
+                });
+                const text = resp.text?.trim();
+                if (text && text.length > 30) {
+                  return this.unescapeHtml(text);
+                }
+              } catch {}
             }
-          } catch {}
+            return "";
+          },
+          { priority: "background", taskName: "ChromeAiOverview" }
+        );
+
+        if (overview && overview.length > 30) {
+          return overview;
         }
-      } catch (err) {
-        console.warn("[HumanBrowser] Chrome AI Overview generation error:", err);
       }
+    } catch (err) {
+      console.warn("[HumanBrowser] Chrome AI Overview generation error:", err);
     }
 
     return combinedSnippets.slice(0, 1000);

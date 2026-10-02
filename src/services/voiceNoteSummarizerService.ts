@@ -1,4 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
+import { geminiKeyPoolService } from "./geminiKeyPoolService";
 
 export interface VoiceNoteSummaryResult {
   success: boolean;
@@ -31,10 +32,9 @@ class VoiceNoteSummarizerService {
     }
 
     // 1. Semantic Gemini AI Analysis
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (apiKey) {
+    if (geminiKeyPoolService.hasAvailableKey()) {
       try {
-        const ai = new GoogleGenAI({ apiKey });
+        const { client: ai } = geminiKeyPoolService.getOptimalClient({ priority: "background" });
         const prompt = `You are Friday AI, DK's voice note executive summarizer.
 Sender: "${senderName}"
 Voice Note Transcript:

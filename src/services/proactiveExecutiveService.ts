@@ -7,7 +7,7 @@
  * 3. ☀️ Chief-of-Staff Morning Briefing Generator (Aggregates daily schedule, top unread, and tasks)
  */
 
-import { GoogleGenAI } from "@google/genai";
+import { geminiKeyPoolService } from "./geminiKeyPoolService";
 import { db } from "./firebaseAdmin";
 import { contactsService } from "./contactsService";
 
@@ -308,11 +308,10 @@ class ProactiveExecutiveService {
   }
 
   private async generateQuickSuggestedDraft(senderName: string, messageText: string): Promise<string> {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (apiKey) {
+    if (geminiKeyPoolService.hasAvailableKey()) {
       try {
-        const ai = new GoogleGenAI({ apiKey });
-        const res = await ai.models.generateContent({
+        const { client } = geminiKeyPoolService.getOptimalClient({ priority: "background" });
+        const res = await client.models.generateContent({
           model: "gemini-3.1-flash-lite",
           contents: `You are Friday AI, executive assistant to Boss DK.
 Draft a polite, natural, concise 1-sentence WhatsApp reply on Boss's behalf to ${senderName} who sent:
@@ -345,11 +344,10 @@ Respond with ONLY the suggested 1-sentence reply in natural Hinglish or English.
       return null;
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) return null;
+    if (!geminiKeyPoolService.hasAvailableKey()) return null;
 
     try {
-      const ai = new GoogleGenAI({ apiKey });
+      const { client } = geminiKeyPoolService.getOptimalClient({ priority: "background" });
       const prompt = `Analyze this message and detect if there is an explicit promise, commitment, or scheduled event:
 Message: "${clean}"
 
@@ -362,7 +360,7 @@ If an event is present, return JSON:
 }
 Otherwise return {"hasEvent": false}`;
 
-      const res = await ai.models.generateContent({
+      const res = await client.models.generateContent({
         model: "gemini-3.1-flash-lite",
         contents: prompt,
         config: { responseMimeType: "application/json" },
@@ -403,12 +401,11 @@ Otherwise return {"hasEvent": false}`;
     const facts = await unifiedMemoryService.listAllFacts();
     const topFacts = facts.slice(0, 5).map((f) => `- [${f.category}] ${f.fact}`).join("\n");
 
-    const apiKey = process.env.GEMINI_API_KEY;
     let dynamicBody = `👑 *Boss Divakar Kumar (DK), Good Morning!*\nAapka personal AI intelligence suite 100% active aur synced hai.`;
 
-    if (apiKey) {
+    if (geminiKeyPoolService.hasAvailableKey()) {
       try {
-        const ai = new GoogleGenAI({ apiKey });
+        const { client } = geminiKeyPoolService.getOptimalClient({ priority: "background" });
         const prompt = `You are Friday, Boss DK's (Divakar Kumar) personal Chief of Staff AI companion.
 Generate an empowering, sharp, energetic morning executive briefing for today (${todayStr}).
 Context:
@@ -418,7 +415,7 @@ ${topFacts || "Focus on personal growth and high leverage tech projects."}
 
 Format with crisp emoji bullet points, action items, and a powerful punchy daily motivation line for Boss.`;
 
-        const res = await ai.models.generateContent({
+        const res = await client.models.generateContent({
           model: "gemini-3.5-flash",
           contents: prompt,
         });

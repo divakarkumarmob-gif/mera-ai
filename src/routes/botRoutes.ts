@@ -4,6 +4,7 @@ import { getPrimaryWhatsAppChannel, setPrimaryWhatsAppChannel } from "../service
 import { whatsappSessionHealthEngine } from "../services/whatsapp/whatsappSessionHealthEngine";
 import { telegramBotService } from "../services/telegramBotService";
 import { instagramBotService } from "../services/instagramBotService";
+import { geminiKeyPoolService } from "../services/geminiKeyPoolService";
 
 export interface BotRoutesContext {
   getBaileysEnabled?: () => boolean;
@@ -239,6 +240,31 @@ export function createBotRouter(context?: BotRoutesContext): Router {
     const username = String(req.query.username || req.query.u || "");
     const result = await instagramBotService.getUserInfoLive(username);
     res.json(result);
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ZERO-429 GEMINI MULTI-KEY MESH MONITOR & CONTROL ENDPOINTS
+  // ══════════════════════════════════════════════════════════════════════════
+
+  router.get("/api/keys/status", (_req, res) => {
+    res.json({ ok: true, ...geminiKeyPoolService.getDetailedStatus() });
+  });
+
+  router.post("/api/keys/reload", (_req, res) => {
+    geminiKeyPoolService.reloadKeysFromEnv();
+    res.json({ ok: true, message: "Keys reloaded successfully from environment", ...geminiKeyPoolService.getDetailedStatus() });
+  });
+
+  router.post("/api/keys/add", (req, res) => {
+    const { apiKey } = req.body || {};
+    if (!apiKey || typeof apiKey !== "string" || apiKey.trim().length < 10) {
+      return res.status(400).json({ ok: false, error: "valid_apiKey_required" });
+    }
+    const added = geminiKeyPoolService.addKey(apiKey);
+    if (!added) {
+      return res.status(400).json({ ok: false, error: "key_already_exists_or_invalid" });
+    }
+    res.json({ ok: true, message: "Key added to pool successfully", ...geminiKeyPoolService.getDetailedStatus() });
   });
 
   return router;

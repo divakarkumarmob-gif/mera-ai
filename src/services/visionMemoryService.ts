@@ -1,5 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import { db } from "./firebaseAdmin";
+import { geminiKeyPoolService } from "./geminiKeyPoolService";
 
 export interface StoredPersonMemory {
   id: string;
@@ -89,9 +90,9 @@ class VisionMemoryService {
   }
 
   private getGenAI(): GoogleGenAI | null {
-    const key = process.env.GEMINI_API_KEY;
-    if (!key) return null;
-    return new GoogleGenAI({ apiKey: key });
+    if (!geminiKeyPoolService.hasAvailableKey()) return null;
+    const allocation = geminiKeyPoolService.getOptimalClient({ priority: "background" });
+    return allocation.client;
   }
 
   /**

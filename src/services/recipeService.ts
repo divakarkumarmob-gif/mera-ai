@@ -5,6 +5,7 @@
  */
 
 import { GoogleGenAI } from "@google/genai";
+import { geminiKeyPoolService } from "./geminiKeyPoolService";
 
 export interface RecipeSearchResult {
   success: boolean;
@@ -90,9 +91,8 @@ export class RecipeService {
   }
 
   private getGenAI(): GoogleGenAI | null {
-    const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
-    if (!key) return null;
-    return new GoogleGenAI({ apiKey: key });
+    if (!geminiKeyPoolService.hasAvailableKey()) return null;
+    return geminiKeyPoolService.getOptimalClient({ priority: "background" }).client;
   }
 
   /**

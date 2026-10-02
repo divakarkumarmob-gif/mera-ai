@@ -12,6 +12,7 @@
 
 import { GoogleGenAI } from "@google/genai";
 import { UNCENSORED_SAFETY_SETTINGS } from "./fridayModeService";
+import { geminiKeyPoolService } from "./geminiKeyPoolService";
 
 export interface GeneratedImageResult {
   success: boolean;
@@ -285,12 +286,12 @@ class ImageGenerationService {
     }
 
     // ── Tier 3: Google Imagen 3 via @google/genai ───────────────────────────
-    const geminiKey = process.env.GEMINI_API_KEY;
-    if (geminiKey) {
+    if (geminiKeyPoolService.hasAvailableKey()) {
       for (const modelName of ["imagen-3.0-generate-002", "imagen-3.0-fast-generate-001"]) {
+        const allocation = geminiKeyPoolService.getOptimalClient({ priority: "background" });
+        const ai = allocation.client;
         try {
-          const ai = new GoogleGenAI({ apiKey: geminiKey });
-          console.log(`[ImageGen] Trying Google Imagen 3 (${modelName}) for prompt: "${rawPrompt.slice(0, 60)}..."`);
+          console.log(`[ImageGen] Trying Google Imagen 3 (${modelName}) on Key #${allocation.keyIndex + 1} for prompt: "${rawPrompt.slice(0, 60)}..."`);
 
           const response: any = await Promise.race([
             ai.models.generateImages({
@@ -309,6 +310,7 @@ class ImageGenerationService {
 
           const imageBase64 = response?.generatedImages?.[0]?.image?.imageBytes;
           if (imageBase64) {
+            geminiKeyPoolService.recordSuccess(allocation.keyIndex);
             const rawBuffer = Buffer.from(imageBase64, "base64");
             const validated = extractValidImageBuffer(rawBuffer) || { buffer: rawBuffer, mimeType: "image/jpeg" };
             console.log(`[ImageGen] Successfully generated image using Google ${modelName} (${validated.buffer.length} bytes)`);
@@ -321,7 +323,13 @@ class ImageGenerationService {
             };
           }
         } catch (err: any) {
-          console.warn(`[ImageGen] Google ${modelName} failed (${err?.message || err}), trying fallback...`);
+          console.warn(`[ImageGen] Google ${modelName} on Key #${allocation.keyIndex + 1} failed (${err?.message || err}), trying fallback...`);
+          const errMsg = String(err?.message || err);
+          if (err?.status === 429 || errMsg.includes("429") || errMsg.includes("RESOURCE_EXHAUSTED")) {
+            geminiKeyPoolService.recordRateLimitError(allocation.keyIndex);
+          } else {
+            geminiKeyPoolService.recordGenericError(allocation.keyIndex);
+          }
         }
       }
     }
@@ -490,17 +498,13 @@ class ImageGenerationService {
       };
     }
 
-    const apiKey =
-      process.env.GEMINI_API_KEY?.trim() ||
-      process.env.GOOGLE_API_KEY?.trim() ||
-      process.env.VITE_GEMINI_API_KEY?.trim();
     let enhancedPrompt = rawInstruction;
-
     const hasValidImage = imageBuffer && Buffer.isBuffer(imageBuffer) && imageBuffer.length > 0;
 
-    if (apiKey && hasValidImage) {
+    if (geminiKeyPoolService.hasAvailableKey() && hasValidImage) {
+      const allocation = geminiKeyPoolService.getOptimalClient({ priority: "background" });
+      const ai = allocation.client;
       try {
-        const ai = new GoogleGenAI({ apiKey });
         const base64Data = imageBuffer.toString("base64");
         const cleanMime = (mimeType || "image/jpeg").split(";")[0].trim() || "image/jpeg";
 
@@ -550,12 +554,17 @@ Output ONLY the raw descriptive prompt text.`;
             });
             const text = resp.text?.trim();
             if (text && text.length > 10) {
+              geminiKeyPoolService.recordSuccess(allocation.keyIndex);
               enhancedPrompt = text;
-              console.log(`[ImageGen] Biometric Edit Prompt formulated (${model}): "${enhancedPrompt.slice(0, 80)}..."`);
+              console.log(`[ImageGen] Biometric Edit Prompt formulated (${model}) on Key #${allocation.keyIndex + 1}: "${enhancedPrompt.slice(0, 80)}..."`);
               break;
             }
           } catch (modelErr: any) {
-            console.warn(`[ImageGen] Vision model ${model} failed for edit prompt (${modelErr?.message || modelErr})`);
+            console.warn(`[ImageGen] Vision model ${model} on Key #${allocation.keyIndex + 1} failed for edit prompt (${modelErr?.message || modelErr})`);
+            const errMsg = String(modelErr?.message || modelErr);
+            if (modelErr?.status === 429 || errMsg.includes("429") || errMsg.includes("RESOURCE_EXHAUSTED")) {
+              geminiKeyPoolService.recordRateLimitError(allocation.keyIndex);
+            }
           }
         }
       } catch (err: any) {
@@ -649,14 +658,10 @@ Output ONLY the raw descriptive prompt text.`;
     mimeType2 = "image/jpeg"
   ): Promise<GeneratedImageResult> {
     const rawInstruction = (userInstruction || "Seamlessly blend the two photos").trim();
-    const apiKey =
-      process.env.GEMINI_API_KEY?.trim() ||
-      process.env.GOOGLE_API_KEY?.trim() ||
-      process.env.VITE_GEMINI_API_KEY?.trim();
     let enhancedPrompt = rawInstruction;
 
     if (
-      apiKey &&
+      geminiKeyPoolService.hasAvailableKey() &&
       image1Buffer &&
       image2Buffer &&
       Buffer.isBuffer(image1Buffer) &&
@@ -664,8 +669,9 @@ Output ONLY the raw descriptive prompt text.`;
       image1Buffer.length > 0 &&
       image2Buffer.length > 0
     ) {
+      const allocation = geminiKeyPoolService.getOptimalClient({ priority: "background" });
+      const ai = allocation.client;
       try {
-        const ai = new GoogleGenAI({ apiKey });
         const b64_1 = image1Buffer.toString("base64");
         const b64_2 = image2Buffer.toString("base64");
         const cleanMime1 = (mimeType1 || "image/jpeg").split(";")[0].trim() || "image/jpeg";
@@ -714,12 +720,17 @@ Output ONLY the raw descriptive prompt string without quotes.`;
             });
             const text = resp.text?.trim();
             if (text && text.length > 10) {
+              geminiKeyPoolService.recordSuccess(allocation.keyIndex);
               enhancedPrompt = text;
-              console.log(`[ImageGen] Dual Image Fusion Prompt formulated (${model}): "${enhancedPrompt.slice(0, 80)}..."`);
+              console.log(`[ImageGen] Dual Image Fusion Prompt formulated (${model}) on Key #${allocation.keyIndex + 1}: "${enhancedPrompt.slice(0, 80)}..."`);
               break;
             }
           } catch (modelErr: any) {
-            console.warn(`[ImageGen] Dual Image Fusion model ${model} failed (${modelErr?.message || modelErr})`);
+            console.warn(`[ImageGen] Dual Image Fusion model ${model} on Key #${allocation.keyIndex + 1} failed (${modelErr?.message || modelErr})`);
+            const errMsg = String(modelErr?.message || modelErr);
+            if (modelErr?.status === 429 || errMsg.includes("429") || errMsg.includes("RESOURCE_EXHAUSTED")) {
+              geminiKeyPoolService.recordRateLimitError(allocation.keyIndex);
+            }
           }
         }
       } catch (err: any) {

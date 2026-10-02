@@ -2,6 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 import { QuotedMessageContext } from "./whatsappTypes";
 import { whatsappHistoryEngine } from "./whatsappHistoryEngine";
 import { fridayModeService, UNCENSORED_SAFETY_SETTINGS } from "../fridayModeService";
+import { geminiKeyPoolService } from "../geminiKeyPoolService";
 
 export class WhatsAppBossAiEngine {
   private callTriggerCallback: ((data: { callerName: string; isOwner: boolean; callId: string }) => void) | null = null;
@@ -25,8 +26,7 @@ export class WhatsAppBossAiEngine {
     sendVideoFn?: (target: string, videoSource: string | Buffer, caption?: string, key?: any, gifPlayback?: boolean) => Promise<any>,
     sock?: any
   ): Promise<string> {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
+    if (!geminiKeyPoolService.hasAvailableKey()) {
       return `Haanji Boss! Main Friday hoon. API Key abhi configure nahi hai, par main aapki baat note kar rahi hoon!`;
     }
 
@@ -47,7 +47,10 @@ export class WhatsAppBossAiEngine {
     const { whatsappFeatureEngine } = await import("../whatsappFeatureEngine");
 
     // Strict slash command fast-paths (only when Boss explicitly types a leading slash)
-    if (/^\/(?:link|next|voice|lookup)\b/i.test(messageText.trim())) {
+    if (/^\/(?:link|next|voice|lookup|keys|keypool|pool)\b/i.test(messageText.trim()) || /^(?:key\s*status|api\s*key\s*status|pool\s*status)$/i.test(messageText.trim())) {
+      if (/^\/(?:keys|keypool|pool)\b/i.test(messageText.trim()) || /^(?:key\s*status|api\s*key\s*status|pool\s*status)$/i.test(messageText.trim())) {
+        return geminiKeyPoolService.getStatusCard();
+      }
       if (/^\/link\b/i.test(messageText.trim())) {
         const followUp = whatsappFeatureEngine.handleSongLinkFollowUp(replyJid, messageText, quotedMessage?.text);
         if (followUp) return followUp;
@@ -401,7 +404,8 @@ ${recentChatMedia.ocrText ? `- Extracted OCR Text: ${recentChatMedia.ocrText}` :
 `;
     }
 
-    const ai = new GoogleGenAI({ apiKey });
+    let allocation = geminiKeyPoolService.getOptimalClient({ priority: "boss" });
+    let ai = allocation.client;
 
     const functionDeclarations: any[] = [
       {
@@ -3029,10 +3033,19 @@ ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` 
           cognitiveScaffoldingEngine.addMasteryPoints(2).catch(() => {});
           neurotransmitterEngine.updateEmotionalMomentum(messageText, cleanText);
           chatGptMemoryEngine.learnFromMessageTurn("Boss DK", messageText, cleanText, "whatsapp").catch(() => {});
+          geminiKeyPoolService.recordSuccess(allocation.keyIndex);
           return cleanText;
         }
       } catch (e: any) {
-        console.warn(`[WhatsAppBossAI] Model ${model} failed (${e?.message || e}), trying next model...`);
+        console.warn(`[WhatsAppBossAI] Model ${model} on Key #${allocation.keyIndex + 1} failed (${e?.message || e}), trying next model...`);
+        const errMsg = String(e?.message || e);
+        if (e?.status === 429 || errMsg.includes("429") || errMsg.includes("RESOURCE_EXHAUSTED")) {
+          geminiKeyPoolService.recordRateLimitError(allocation.keyIndex);
+          allocation = geminiKeyPoolService.getOptimalClient({ priority: "boss" });
+          ai = allocation.client;
+        } else {
+          geminiKeyPoolService.recordGenericError(allocation.keyIndex);
+        }
       }
     }
 

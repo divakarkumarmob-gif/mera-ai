@@ -1,4 +1,5 @@
 import { GoogleGenAI, Type } from "@google/genai";
+import { geminiKeyPoolService } from "./geminiKeyPoolService";
 
 export interface ClassifiedIntent {
   action: string;
@@ -469,7 +470,6 @@ const INTENT_FUNCTION_DECLARATIONS = [
 ];
 
 class IntentClassifierService {
-  private ai: GoogleGenAI | null = null;
   private readonly models = [
     "gemini-3.8-flash",
     "gemini-3.5-flash",
@@ -478,25 +478,19 @@ class IntentClassifierService {
     "gemini-3.5-flash-lite",
   ];
 
-  private getAI(): GoogleGenAI | null {
-    const apiKey = process.env.GEMINI_API_KEY?.trim() || process.env.VITE_GEMINI_API_KEY?.trim();
-    if (!apiKey) return null;
-    if (!this.ai) {
-      this.ai = new GoogleGenAI({ apiKey });
-    }
-    return this.ai;
-  }
-
   async classifyIntent(userText: string, context: IntentContext): Promise<ClassifiedIntent> {
-    const ai = this.getAI();
-    if (!ai) {
+    if (!geminiKeyPoolService.hasAvailableKey()) {
       return this.fallbackClassification(userText, context);
     }
 
+    const priority = context.isOwner ? "boss" : context.isGroup ? "public" : "background";
     const systemPrompt = this.buildSystemPrompt(context);
 
-    // Try each model in the 5-model chain sequentially if rate limits or errors occur
+    // Try each model in the 5-model chain sequentially with predictive key allocation
     for (const model of this.models) {
+      const allocation = geminiKeyPoolService.getOptimalClient({ priority });
+      const ai = allocation.client;
+
       try {
         const response = await ai.models.generateContent({
           model,
@@ -509,6 +503,8 @@ class IntentClassifierService {
             maxOutputTokens: 1024,
           },
         });
+
+        geminiKeyPoolService.recordSuccess(allocation.keyIndex);
 
         // Robust functionCall extraction:
         // 1. response.functionCalls accessor in @google/genai
@@ -544,7 +540,13 @@ class IntentClassifierService {
           originalText: userText
         };
       } catch (error: any) {
-        console.warn(`[IntentClassifier] Model ${model} failed, trying next:`, error?.message || error);
+        console.warn(`[IntentClassifier] Model ${model} on Key #${allocation.keyIndex + 1} failed, trying next:`, error?.message || error);
+        const errMsg = String(error?.message || error);
+        if (error?.status === 429 || errMsg.includes("429") || errMsg.includes("RESOURCE_EXHAUSTED")) {
+          geminiKeyPoolService.recordRateLimitError(allocation.keyIndex);
+        } else {
+          geminiKeyPoolService.recordGenericError(allocation.keyIndex);
+        }
         // Continue to next model in the chain
       }
     }

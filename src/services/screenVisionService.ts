@@ -1,4 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
+import { geminiKeyPoolService } from "./geminiKeyPoolService";
 
 export interface ScreenAnalysisResult {
   success: boolean;
@@ -11,9 +12,8 @@ export interface ScreenAnalysisResult {
 
 class ScreenVisionService {
   private getGenAI(): GoogleGenAI | null {
-    const key = process.env.GEMINI_API_KEY;
-    if (!key) return null;
-    return new GoogleGenAI({ apiKey: key });
+    if (!geminiKeyPoolService.hasAvailableKey()) return null;
+    return geminiKeyPoolService.getClient({ priority: "boss" }).client;
   }
 
   /**

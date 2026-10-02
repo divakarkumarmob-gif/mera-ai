@@ -4,9 +4,7 @@ import { youtubeMusicService } from "../services/youtubeMusicService";
 import { voicePersonaService } from "../services/voicePersonaService";
 import { toolsEngine } from "../services/toolsEngine";
 import { publicApisService } from "../services/publicApisService";
-import { GoogleGenAI } from "@google/genai";
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "placeholder-gemini-key" });
+import { geminiKeyPoolService } from "../services/geminiKeyPoolService";
 
 export function createMultimediaRouter(): Router {
   const router = Router();
@@ -383,14 +381,26 @@ export function createMultimediaRouter(): Router {
         genOptions.tools = [{ googleSearch: {} }];
       }
 
+      const allocation = geminiKeyPoolService.getOptimalClient({ priority: "background" });
+      const ai = allocation.client;
+
       try {
         const response = await ai.models.generateContent(genOptions);
+        geminiKeyPoolService.recordSuccess(allocation.keyIndex);
         responseText = response.text || "(No response text returned by model)";
       } catch (primaryErr: any) {
-        console.warn(`[ModelTester] Direct call failed for '${actualModelUsed}':`, primaryErr?.message || primaryErr);
+        console.warn(`[ModelTester] Direct call failed for '${actualModelUsed}' on Key #${allocation.keyIndex + 1}:`, primaryErr?.message || primaryErr);
+        const errMsg = String(primaryErr?.message || primaryErr);
+        if (primaryErr?.status === 429 || errMsg.includes("429") || errMsg.includes("RESOURCE_EXHAUSTED")) {
+          geminiKeyPoolService.recordRateLimitError(allocation.keyIndex);
+        } else {
+          geminiKeyPoolService.recordGenericError(allocation.keyIndex);
+        }
+
+        const fallbackClient = geminiKeyPoolService.getOptimalClient({ priority: "background" }).client;
         const fallbackModel = "gemini-3.6-flash";
         const fallbackOptions: any = { model: fallbackModel, contents };
-        const fallbackRes = await ai.models.generateContent(fallbackOptions);
+        const fallbackRes = await fallbackClient.models.generateContent(fallbackOptions);
         responseText = fallbackRes.text || "(Response generated via fallback engine)";
         actualModelUsed = `${model} (via ${fallbackModel})`;
       }

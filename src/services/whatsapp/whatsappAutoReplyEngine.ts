@@ -1,4 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
+import { geminiKeyPoolService } from "../geminiKeyPoolService";
 import { db } from "../firebaseAdmin";
 import { contactsService } from "../contactsService";
 import { dailyUpdateService } from "../dailyUpdateService";
@@ -391,13 +392,13 @@ export class WhatsAppAutoReplyEngine {
       return `Boss 🧑‍🦱 abhi busy hain, unke aate hi unko bataunga aapka msg aaya hai, reply jaldi milega 😊😶‍🌫️`;
     };
 
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      console.error("[WhatsAppAutoReply] GEMINI_API_KEY not set — using fallback.");
+    if (!geminiKeyPoolService.hasAvailableKey()) {
+      console.error("[WhatsAppAutoReply] No Gemini API key available — using fallback.");
       return fallbackText();
     }
 
-    const ai = new GoogleGenAI({ apiKey });
+    const allocation = geminiKeyPoolService.getOptimalClient({ priority: "non-boss" });
+    const ai = allocation.client;
     const quotedSnippet = quotedMessage && quotedMessage.isReply
       ? `\n- PREVIOUS QUOTED MESSAGE (Sender: ${quotedMessage.sender}, Type: ${quotedMessage.mediaType}): "${quotedMessage.text}"`
       : "";
@@ -898,13 +899,13 @@ TONE & STYLE (STRICT WHATSAPP FORMATTING):
       }
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
+    if (!geminiKeyPoolService.hasAvailableKey()) {
       await sendMsgFn(groupJid, fallbackText(), text, messageKey);
       return;
     }
 
-    const ai = new GoogleGenAI({ apiKey });
+    const groupAlloc = geminiKeyPoolService.getOptimalClient({ priority: "non-boss" });
+    const ai = groupAlloc.client;
     const quotedSnippet = quotedMessage && quotedMessage.isReply
       ? `\n- PREVIOUS QUOTED MESSAGE IN GROUP (From: ${quotedMessage.sender}, Type: ${quotedMessage.mediaType}): "${quotedMessage.text}"`
       : "";
