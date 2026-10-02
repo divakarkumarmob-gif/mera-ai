@@ -17,6 +17,7 @@
 import { getApiUrl } from './api';
 import { getStoredUser } from './appSecurityClient';
 import { offlineFallbackLocationService } from './offlineFallbackLocationService';
+import { sendLocationSms } from './smsSenderPlugin';
 
 
 // ── Adaptive Ping Configuration ───────────────────────────────────────────────
@@ -39,7 +40,9 @@ const STORAGE_KEY_DEVICE_LABEL = 'friday_location_device_label';
 const STORAGE_KEY_TRACKING_ON  = 'friday_location_tracking_enabled';
 const STORAGE_KEY_LAST_KNOWN   = 'friday_last_known_location';
 const STORAGE_KEY_OFFLINE_Q    = 'friday_offline_ping_queue';  // queued pings when data is off
+const STORAGE_KEY_SMS_RECIPIENT = 'friday_sms_recipient';      // boss's phone number for SMS fallback
 const MAX_OFFLINE_QUEUE        = 10;  // max queued pings (oldest dropped when full)
+
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -165,6 +168,26 @@ class BackgroundLocationService {
   public setDeviceLabel(label: string): void {
     this.deviceLabel = label.trim();
     this.writeStorage(STORAGE_KEY_DEVICE_LABEL, this.deviceLabel);
+  }
+
+  /**
+   * Set the boss/recipient phone number for SMS location fallback.
+   * Number must include country code (e.g. "919876543210" for India).
+   * When GPS is ON + Data is OFF, coordinates are sent via SMS to this number.
+   */
+  public setSmsRecipient(number: string): void {
+    const clean = number.replace(/\s+|-/g, '').trim();
+    this.writeStorage(STORAGE_KEY_SMS_RECIPIENT, clean);
+    console.log('[BGLocation] 📱 SMS recipient set:', clean);
+  }
+
+  public getSmsRecipient(): string {
+    return this.readStorage(STORAGE_KEY_SMS_RECIPIENT) || '';
+  }
+
+  public isSmsConfigured(): boolean {
+    const n = this.getSmsRecipient();
+    return n.length >= 10;
   }
 
   /** Auto-resume on app load if previously enabled */
@@ -678,9 +701,27 @@ class BackgroundLocationService {
   private async sendPingWithAdaptiveRetry(payload: GpsPingPayload): Promise<string> {
     const url = getApiUrl('/api/location/ping');
 
-    // ── L1: Offline fast-path ─────────────────────────────────────────────────
+    // ── L1: Offline fast-path + SMS fallback ──────────────────────────────────
+    // GPS ON + Data OFF → queue ping + fire SMS (zero cost via SIM)
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       this.queueOfflinePing(payload);
+
+      // 📱 SMS FALLBACK: send coordinates via native SMS (no internet needed)
+      const smsRecipient = this.getSmsRecipient();
+      if (smsRecipient && payload.lat && payload.lon) {
+        sendLocationSms({
+          lat:             payload.lat,
+          lon:             payload.lon,
+          accuracy:        payload.accuracy ?? 999,
+          deviceId:        payload.deviceId,
+          recipientNumber: smsRecipient,
+        }).then(result => {
+          console.log(`[BGLocation] 📱 SMS fallback: ${result}`);
+        }).catch(() => {});
+      } else if (!smsRecipient) {
+        console.log('[BGLocation] ℹ️ SMS fallback not configured (no recipient set)');
+      }
+
       return 'queued';
     }
 
@@ -694,7 +735,8 @@ class BackgroundLocationService {
     const freshQuality = this.getNetworkQuality();
     console.log(`[BGLocation] 📶 Network: ${freshQuality} | RTT: ${this.lastRttMs}ms`);
 
-    // ── Offline after probe ────────────────────────────────────────────────────
+    // ── Offline after probe (data died during probe) ───────────────────────────
+
     if (freshQuality === 'offline' || this.lastRttMs >= 9000) {
       this.queueOfflinePing(payload);
       return 'queued';
