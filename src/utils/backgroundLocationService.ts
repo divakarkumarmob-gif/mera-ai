@@ -193,6 +193,10 @@ class BackgroundLocationService {
   /** Auto-resume on app load if previously enabled */
   public async autoResumeIfEnabled(): Promise<void> {
     if (typeof window === 'undefined' || this.isRunning) return;
+
+    // 📱 Fetch SMS recipient (boss's number) from server env — zero hardcoding
+    this.fetchAndApplySmsRecipient().catch(() => {});
+
     const user  = getStoredUser();
     const label = this.getDeviceLabel() || user?.displayName || user?.username || 'Boss Device';
     if (this.isTrackingEnabled()) {
@@ -202,6 +206,37 @@ class BackgroundLocationService {
       await this.requestPermissionAndStart(label).catch(() => {});
     }
   }
+
+  /**
+   * Fetches the SMS recipient number from the Render server's env variables.
+   * Called at app startup — silently stores the number in localStorage.
+   *
+   * Server env:  BOSS_WHATSAPP_NUMBER or OWNER_WHATSAPP_NUMBER
+   * Endpoint:    GET /api/config/app
+   * Security:    Number never in APK or repo — only on Render
+   */
+  private async fetchAndApplySmsRecipient(): Promise<void> {
+    try {
+      const url = getApiUrl('/config/app');
+      const res = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(8000) });
+      if (!res.ok) return;
+
+      const data: { smsRecipient?: string; smsFallbackEnabled?: boolean } = await res.json();
+      const number = data?.smsRecipient?.trim() || '';
+
+      if (number && number.length >= 10) {
+        this.setSmsRecipient(number);
+        console.log('[BGLocation] 📱 SMS recipient synced from server ✅');
+      } else {
+        console.log('[BGLocation] ℹ️ No SMS recipient configured on server (BOSS_WHATSAPP_NUMBER not set in Render env)');
+      }
+    } catch (err) {
+      // Non-fatal — SMS fallback simply stays disabled if server unreachable
+      console.log('[BGLocation] ⚠️ Could not fetch SMS config (offline or server error)');
+    }
+  }
+
+
 
   /** Request GPS permission and start tracking */
   public async requestPermissionAndStart(customLabel?: string): Promise<{ success: boolean; message: string }> {
