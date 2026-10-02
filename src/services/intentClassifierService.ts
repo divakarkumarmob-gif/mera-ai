@@ -140,8 +140,19 @@ const INTENT_FUNCTION_DECLARATIONS = [
     }
   },
   {
+    name: "get_device_location",
+    description: "Get the live GPS location / address of a tracked family device. Use when user asks WHERE someone is, their location, address, or live tracking. Examples: 'boss location', 'mera location kya hai', 'main kahan hoon', 'bhai kahan hai', 'papa ki location batao', 'mummy kahan hain', 'location batao', 'mera address', 'kahan hoon main', 'apna location batao', 'live location batao', 'track karo'. IMPORTANT: ALWAYS use this for location/address/kahan queries — NEVER use search_memory for these.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        personNameOrLabel: { type: Type.STRING, description: "Who to locate: 'boss', 'bhai', 'papa', 'mummy', 'wife', or device label. Default: 'boss' for self-location queries." }
+      },
+      required: []
+    }
+  },
+  {
     name: "search_memory",
-    description: "Search long-term memory/vector database for past conversations, decisions, facts. Examples: 'pichle mahine kya discuss kiya tha', 'purani baat dhundho', '25 August ko kya bola tha'.",
+    description: "Search long-term memory/vector database for past CONVERSATIONS, DECISIONS, and TEXT FACTS only. Examples: 'pichle mahine kya discuss kiya tha', 'purani baat dhundho', '25 August ko kya bola tha'. IMPORTANT: Do NOT use this for location/GPS/address queries — use get_device_location instead.",
     parameters: {
       type: Type.OBJECT,
       properties: {
@@ -734,6 +745,24 @@ Be decisive. One function call per classification.`;
         confidence: 0.85,
         parameters: { dateWord },
         reasoning: "Fallback offline regex match for recalling daily update",
+        originalText: userText
+      };
+    }
+
+    // 0. ⭐ LOCATION / GPS TRACKING INTENT (must be before memory search!)
+    if (
+      /\b(?:location|live\s*location|gps|track|tracking|address|kahan\s*(?:hai|hoon|ho|hain)|kahan\s*(?:pe|par)\s*(?:hai|hoon)|apna\s*(?:location|address|pata)|mera\s*(?:location|address|pata)|main\s*kahan|mera\s*location|boss\s*location|location\s*batao|location\s*kya\s*hai|abhi\s*kahan|location\s*dhuncho|live\s*track)\b/i.test(clean)
+    ) {
+      // Extract person name from query
+      const personMatch =
+        userText.match(/\b(bhai|bhaiya|papa|mummy|maa|wife|biwi|husband|pati|didi|behen|boss|dk|divakar)\b/i)?.[1] ||
+        userText.match(/([a-zA-Z\u0900-\u097F]+)\s+(?:ki\s+location|ki\s+location\s+batao|kahan\s+(?:hai|hain))/i)?.[1];
+      const label = personMatch?.toLowerCase() || "boss";
+      return {
+        action: "get_device_location",
+        confidence: 0.9,
+        parameters: { personNameOrLabel: label },
+        reasoning: "Fallback offline regex match for device location/GPS tracking intent",
         originalText: userText
       };
     }

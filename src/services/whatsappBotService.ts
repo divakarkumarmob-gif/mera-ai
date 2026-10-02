@@ -2929,6 +2929,17 @@ class WhatsAppBotService {
           return { handled: true, replyText };
         }
 
+        case "get_device_location": {
+          const { deviceLocationTrackerService } = await import("./deviceLocationTrackerService");
+          const queryTarget = String(parameters?.personNameOrLabel || "boss").trim();
+          const locationRes = await deviceLocationTrackerService.getDeviceLocation(queryTarget);
+          const replyText = locationRes.success
+            ? locationRes.message
+            : `📍 Location nahi mili: ${locationRes.message}`;
+          await this.sendHumanLikeMessage(replyJid, replyText, rawText, messageKey);
+          return { handled: true, replyText };
+        }
+
         case "search_memory": {
           const { vectorMemoryService } = await import("./vectorMemoryService");
           const results = await vectorMemoryService.searchSemanticMemory(parameters.searchQuery, 5, 0.15, parameters.filterDate ? { exactDate: parameters.filterDate } : undefined);
