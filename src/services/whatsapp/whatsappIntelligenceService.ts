@@ -467,14 +467,7 @@ class WhatsAppIntelligenceService {
 
       if (isMeQuery) {
         const ownerClean = (process.env.OWNER_WHATSAPP_NUMBER || process.env.BOSS_WHATSAPP_NUMBER || "").replace(/\D/g, "");
-        list = list.filter((s) => s.isFromMe || (s.senderName && s.senderName.toLowerCase().includes("boss")) || (ownerClean && s.senderPhone.includes(ownerClean)));
-        // Fallback: If no explicit isFromMe match found, check if the single most recent status is from the owner's active LID session
-        if (list.length === 0 && this.statusStories.length > 0) {
-          const first = this.statusStories[0];
-          if (first.senderName?.toLowerCase().includes("dk") || first.senderName?.toLowerCase().includes("boss")) {
-            list = [first];
-          }
-        }
+        list = list.filter((s) => s.isFromMe || (ownerClean && s.senderPhone === ownerClean));
       } else {
         let resolvedPhone = cleanDigits;
         try {
@@ -532,11 +525,24 @@ class WhatsAppIntelligenceService {
     phoneOrQuery: string,
     typeFilter?: "photo" | "video" | "document" | "voice" | "any"
   ): ReceivedMediaItem[] {
-    const q = (phoneOrQuery || "").toLowerCase().replace(/\D/g, "");
+    const raw = (phoneOrQuery || "").trim().toLowerCase();
+    const isMe = ["me", "mera", "meri", "my", "mine", "boss", "dk", "apna", "self"].includes(raw);
+    const ownerClean = (process.env.OWNER_WHATSAPP_NUMBER || process.env.BOSS_WHATSAPP_NUMBER || "").replace(/\D/g, "");
+    const q = raw.replace(/\D/g, "");
+
     return this.receivedMediaVault.filter((m) => {
-      const matchesPhone = q ? m.senderPhone.includes(q) : true;
+      let matches = false;
+      if (isMe) {
+        matches = (ownerClean && m.senderPhone.includes(ownerClean)) || m.senderName.toLowerCase().includes("boss") || m.senderName.toLowerCase().includes("dk");
+      } else if (q) {
+        matches = m.senderPhone.includes(q);
+      } else if (raw) {
+        matches = m.senderName.toLowerCase().includes(raw);
+      } else {
+        matches = true;
+      }
       const matchesType = !typeFilter || typeFilter === "any" || m.type === typeFilter;
-      return matchesPhone && matchesType;
+      return matches && matchesType;
     });
   }
 

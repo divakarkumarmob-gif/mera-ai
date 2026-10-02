@@ -1189,6 +1189,34 @@ class WhatsAppBotService {
                             finalTranscribed = `${existingPending.transcribed} ${transcribed}`;
                           }
 
+                          // Register transcribed voice note in visionMemoryService so Friday AI has chat voice note memory!
+                          visionMemoryService
+                            .processIncomingMedia(
+                              buffer,
+                              mimeType,
+                              senderName,
+                              finalTranscribed,
+                              fileName || "voice_note.ogg",
+                              replyJid
+                            )
+                            .catch(() => {});
+
+                          // Update whatsappIntelligenceService media record with transcription
+                          try {
+                            const { whatsappIntelligenceService } = await import("./whatsapp/whatsappIntelligenceService");
+                            whatsappIntelligenceService.recordReceivedMedia({
+                              jid: replyJid,
+                              senderPhone,
+                              senderName,
+                              type: "voice",
+                              mimeType,
+                              buffer,
+                              caption: finalTranscribed,
+                              fileName: fileName || "voice_note.ogg",
+                              timestamp: Date.now(),
+                            });
+                          } catch {}
+
                           // 5-second buffer: wait 5s to see if user sends follow-up text or requests transcription
                           const timer = setTimeout(async () => {
                             const pending = this.pendingVoiceDebounce.get(replyJid);
@@ -1221,6 +1249,32 @@ class WhatsAppBotService {
                             quotedMessage,
                           });
                           continue;
+                        } else {
+                          // Non-owner 1-on-1 voice note: register into visionMemoryService and intelligence service with transcribed text
+                          visionMemoryService
+                            .processIncomingMedia(
+                              buffer,
+                              mimeType,
+                              senderName,
+                              transcribed,
+                              fileName || "voice_note.ogg",
+                              replyJid
+                            )
+                            .catch(() => {});
+                          try {
+                            const { whatsappIntelligenceService } = await import("./whatsapp/whatsappIntelligenceService");
+                            whatsappIntelligenceService.recordReceivedMedia({
+                              jid: replyJid,
+                              senderPhone,
+                              senderName,
+                              type: "voice",
+                              mimeType,
+                              buffer,
+                              caption: transcribed,
+                              fileName: fileName || "voice_note.ogg",
+                              timestamp: Date.now(),
+                            });
+                          } catch {}
                         }
                       }
                     } catch (sttErr) {

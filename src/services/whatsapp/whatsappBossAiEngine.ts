@@ -378,6 +378,29 @@ export class WhatsAppBossAiEngine {
     const coConspiratorContext = rideOrDieCoConspiratorEngine.compileCoConspiratorPrompt(messageText);
     const triumphCelebrationContext = sharedTriumphCelebrationEngine.compileTriumphPrompt(messageText);
 
+    const { visionMemoryService } = await import("../visionMemoryService");
+    const recentChatMedia = visionMemoryService.getChatMediaContext(replyJid) || (visionMemoryService as any).latestMedia;
+    let chatMediaContext = "";
+    if (recentChatMedia && !recentChatMedia.isStatusMedia && Date.now() - recentChatMedia.timestamp < 3 * 60 * 60 * 1000) {
+      const timeAgoMins = Math.max(1, Math.round((Date.now() - recentChatMedia.timestamp) / 60000));
+      const mediaTypeStr = recentChatMedia.fileName ? "Document / PDF" : recentChatMedia.mimeType?.includes("video") ? "Video" : recentChatMedia.mimeType?.includes("audio") ? "Voice Note" : "Photo / Image";
+      chatMediaContext = `
+🖼️ DIRECT CHAT MEDIA DETECTED (Sent directly in this WhatsApp Chat conversation ${timeAgoMins} mins ago):
+- Media Type: ${mediaTypeStr}
+${recentChatMedia.fileName ? `- File Name: ${recentChatMedia.fileName}` : ""}
+${recentChatMedia.caption ? `- User Caption / Context: "${recentChatMedia.caption}"` : ""}
+- AI Visual Breakdown / Content: ${recentChatMedia.analysis}
+${recentChatMedia.ocrText ? `- Extracted OCR Text: ${recentChatMedia.ocrText}` : ""}
+- Short Summary: ${recentChatMedia.shortSummary || "Available"}
+
+🚨 STRICT ISOLATION LAW FOR CHAT MEDIA:
+1. The above media was sent DIRECTLY IN THIS CHAT CONVERSATION.
+2. It is 100% NOT A WHATSAPP STATUS / STORY!
+3. If Boss asks "photo me kya h", "maine kya bheja", "ye dekho", "file me kya h", "voice note me kya tha", or references what was sent, talk STRICTLY about this CHAT MEDIA!
+4. NEVER say "Aapke status me..." or claim it is a WhatsApp status story!
+`;
+    }
+
     const ai = new GoogleGenAI({ apiKey });
 
     const functionDeclarations: any[] = [
@@ -426,8 +449,19 @@ export class WhatsAppBossAiEngine {
         }
       },
       {
+        name: "get_recent_chat_media",
+        description: "Inspect and analyze the latest photo, image, PDF, document, file, or voice note sent directly in this WhatsApp chat conversation by Boss or contact. Use whenever Boss asks 'ye photo dekho', 'photo me kya hai', 'maine jo bheja', 'file me kya hai', 'ye kya hai', 'image explain karo', 'ye voice note me kya tha', 'document check karo', etc. NEVER call get_recent_whatsapp_statuses for chat media!",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            question: { type: "STRING", description: "Optional specific question regarding the photo/document/voice note (e.g. 'what is the total amount', 'who is in this photo', 'what date is written')" }
+          },
+          required: []
+        }
+      },
+      {
         name: "get_recent_whatsapp_statuses",
-        description: "View recent 24-hour WhatsApp status stories (photos, videos, captions) posted by contacts.",
+        description: "View recent 24-hour WhatsApp status stories (photos, videos, captions) posted by contacts on their 24h WhatsApp Status. STRICT RULE: NEVER call this when Boss asks about a photo, PDF, file, or voice note sent in the chat conversation! Only call this when Boss explicitly uses the word 'status' or 'story' (e.g. 'status me kya hai', 'kiska status aaya').",
         parameters: {
           type: "OBJECT",
           properties: {
@@ -1721,11 +1755,14 @@ ${triumphCelebrationContext}
   • Explain clearly what is inside the status using 'aiVisualDescription' (which contains the full AI vision summary of photos/videos), 'caption', and 'senderName'!
   • If Boss asks to forward the photo/video of the status, call 'forward_contact_media_or_messages' with mediaType: 'status'.
 
+${chatMediaContext}
+
 🚫 CRITICAL ISOLATION - CHAT PHOTOS/MEDIA VS WHATSAPP STATUS STORIES:
-- When Boss or any user sends a photo, image, screenshot, document, or PDF directly in chat, or asks about a chat image ("ye photo dekho", "photo me kya h", "isko check karo", "image explain karo"):
+- When Boss or any user sends a photo, image, screenshot, document, or PDF directly in chat, or asks about a chat image ("ye photo dekho", "photo me kya h", "isko check karo", "image explain karo", "maine jo bheja"):
   • YOU MUST FOCUS STRICTLY AND SOLELY ON THE MEDIA SENT DIRECTLY IN THE CHAT CONVERSATION!
-  • NEVER, UNDER ANY CIRCUMSTANCES, confuse, mix up, or substitute Boss's WhatsApp status story with a photo sent in chat!
-  • WhatsApp status stories must ONLY be referenced when Boss explicitly uses words like "status" or "story". If Boss sent a photo in chat, talk ONLY about that new chat photo!
+  • If chat media is present in prompt context above, answer directly using it! Or call 'get_recent_chat_media' tool!
+  • NEVER, UNDER ANY CIRCUMSTANCES, confuse, mix up, or substitute Boss's WhatsApp status story with a photo/file sent in chat!
+  • WhatsApp status stories must ONLY be referenced when Boss explicitly uses words like "status" or "story". If Boss sent a photo/file/voice in chat, talk ONLY about that chat media!
 
 🛡️ WHATSAPP SESSION BAN HEALTH MANDATE:
 - When Boss asks about WhatsApp ban health, ban risk, session safety, or account health (e.g. "whatsapp ban health", "ban risk kitna hai", "session health kaisa hai", "account safe hai kya"):
@@ -2057,6 +2094,73 @@ COMMUNICATION STYLE:
           const target = contact ? contact.phone : args.contactNameOrPhone;
           const bioRes = await whatsappIntelligenceService.fetchAboutStatus(target);
           return { contactName: contact?.name || target, ...bioRes };
+        }
+
+        if (toolName === "get_recent_chat_media") {
+          const { visionMemoryService } = await import("../visionMemoryService");
+          const media = visionMemoryService.getChatMediaContext(replyJid);
+          if (!media) {
+            const latest = (visionMemoryService as any).latestMedia;
+            if (latest && !latest.isStatusMedia && Date.now() - latest.timestamp < 2 * 60 * 60 * 1000) {
+              let answer = latest.analysis;
+              if (args.question) {
+                try {
+                  answer = await visionMemoryService.answerQuestionOnMedia({
+                    buffer: latest.buffer,
+                    mimeType: latest.mimeType,
+                    question: args.question,
+                    textContext: latest.analysis,
+                    fileName: latest.fileName,
+                    chatId: replyJid,
+                  });
+                } catch {}
+              }
+              return {
+                found: true,
+                mediaType: latest.fileName ? "document" : (latest.mimeType?.includes("video") ? "video" : latest.mimeType?.includes("audio") ? "voice" : "photo"),
+                fileName: latest.fileName,
+                caption: latest.caption,
+                visualAnalysis: latest.analysis,
+                ocrText: latest.ocrText || "",
+                shortSummary: latest.shortSummary,
+                detailedAnswer: answer,
+                timeAgoMinutes: Math.max(1, Math.round((Date.now() - latest.timestamp) / 60000)),
+                notice: "Direct Chat Media (Photo/Doc/Voice received in chat, NOT WhatsApp Status)",
+              };
+            }
+
+            return {
+              found: false,
+              message: "Chat me pichle 2 ghante me koi photo, document ya voice note receive nahi hua hai.",
+            };
+          }
+
+          let specificAnswer = media.analysis;
+          if (args.question) {
+            try {
+              specificAnswer = await visionMemoryService.answerQuestionOnMedia({
+                buffer: media.buffer,
+                mimeType: media.mimeType,
+                question: args.question,
+                textContext: media.analysis,
+                fileName: media.fileName,
+                chatId: replyJid,
+              });
+            } catch {}
+          }
+
+          return {
+            found: true,
+            mediaType: media.fileName ? "document" : (media.mimeType?.includes("video") ? "video" : media.mimeType?.includes("audio") ? "voice" : "photo"),
+            fileName: media.fileName,
+            caption: media.caption,
+            visualAnalysis: media.analysis,
+            ocrText: media.ocrText || "",
+            shortSummary: media.shortSummary,
+            detailedAnswer: specificAnswer,
+            timeAgoMinutes: Math.max(1, Math.round((Date.now() - media.timestamp) / 60000)),
+            notice: "Direct Chat Media (Photo/Doc/Voice received in chat, NOT WhatsApp Status)",
+          };
         }
 
         if (toolName === "get_recent_whatsapp_statuses") {
