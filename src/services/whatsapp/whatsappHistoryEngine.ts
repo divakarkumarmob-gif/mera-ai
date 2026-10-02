@@ -9,6 +9,127 @@ export class WhatsAppHistoryEngine {
   private isWarmedUp = false;
   private warmUpPromise: Promise<void> | null = null;
 
+  // Live Baileys WASocket — injected from whatsappBotService on connection
+  private waSocket: any = null;
+
+  /**
+   * Called by whatsappBotService once the Baileys socket is connected.
+   * Gives this engine direct access to WhatsApp's live message store.
+   */
+  public setSocket(sock: any): void {
+    this.waSocket = sock;
+    console.log("[WhatsAppHistory] ✅ Live Baileys socket registered. Direct WA fetch enabled.");
+  }
+
+  /**
+   * Fetches messages DIRECTLY from WhatsApp servers using the live Baileys socket.
+   * This is the most reliable source — works even if Firestore/RAM missed messages.
+   *
+   * @param jid   Full WhatsApp JID (e.g. "919XXXXXXXXX@s.whatsapp.net")
+   * @param count Number of messages to fetch (default 20)
+   * @param beforeTimestampMs Fetch messages before this time (default = now)
+   */
+  public async fetchChatHistoryFromWA(
+    jid: string,
+    count = 20,
+    beforeTimestampMs?: number
+  ): Promise<IncomingMessage[]> {
+    if (!this.waSocket || !jid) return [];
+
+    try {
+      // Baileys fetchMessages signature: fetchMessages(jid, count, cursor?)
+      const cursor = beforeTimestampMs
+        ? { before: { id: "0", fromMe: false } } // Baileys cursor stub
+        : undefined;
+
+      // Try sock.fetchMessages first (Baileys v6+ API)
+      if (typeof this.waSocket.fetchMessages === "function") {
+        const rawMsgs: any[] = await this.waSocket.fetchMessages(jid, count);
+        if (rawMsgs && rawMsgs.length > 0) {
+          return this._parseBaileysRawMessages(rawMsgs, jid);
+        }
+      }
+
+      // Fallback: try sock.chatHistory / loadMessages (older Baileys builds)
+      if (typeof this.waSocket.loadMessages === "function") {
+        const rawMsgs: any[] = await this.waSocket.loadMessages(jid, count);
+        if (rawMsgs && rawMsgs.length > 0) {
+          return this._parseBaileysRawMessages(rawMsgs, jid);
+        }
+      }
+
+      console.log("[WhatsAppHistory] ⚠️ Socket available but fetchMessages/loadMessages not supported on this Baileys build.");
+      return [];
+    } catch (err: any) {
+      console.warn("[WhatsAppHistory] WA live fetch failed (non-fatal):", err?.message || err);
+      return [];
+    }
+  }
+
+  /**
+   * Converts raw Baileys WAMessage objects into our IncomingMessage schema.
+   */
+  private _parseBaileysRawMessages(rawMsgs: any[], defaultJid: string): IncomingMessage[] {
+    const results: IncomingMessage[] = [];
+
+    for (const raw of rawMsgs) {
+      try {
+        const key = raw.key || {};
+        const msgContent = raw.message || {};
+        const tsSeconds = raw.messageTimestamp
+          ? (typeof raw.messageTimestamp === "object" ? raw.messageTimestamp.low : raw.messageTimestamp)
+          : 0;
+        const tsMs = tsSeconds > 1e9 ? tsSeconds * 1000 : tsSeconds;
+
+        const text =
+          msgContent.conversation ||
+          msgContent.extendedTextMessage?.text ||
+          msgContent.imageMessage?.caption ||
+          msgContent.videoMessage?.caption ||
+          (msgContent.audioMessage ? "[Voice Note]" : "") ||
+          "";
+
+        if (!text) continue;
+
+        const fromMe = key.fromMe || false;
+        const remoteJid = key.remoteJid || defaultJid;
+        const pushName = raw.pushName || (fromMe ? "Boss (DK)" : "Contact");
+
+        const timeInfo = baileysLiveStore.formatFriendlyIST(tsMs);
+
+        const parsed: IncomingMessage = {
+          id: key.id || `wa_${tsMs}_${Math.random().toString(36).slice(2, 6)}`,
+          senderPhone: fromMe ? "me" : remoteJid.split("@")[0],
+          senderName: fromMe ? "Boss (DK)" : pushName,
+          senderDisplayName: pushName,
+          replyJid: remoteJid,
+          groupId: remoteJid.endsWith("@g.us") ? remoteJid : null,
+          groupName: null,
+          isGroup: remoteJid.endsWith("@g.us"),
+          isUnknownContact: false,
+          text,
+          timestamp: tsMs,
+          dateStr: timeInfo.formattedBadge,
+          isRead: true,
+          botReply: fromMe ? text : undefined,
+        };
+
+        results.push(parsed);
+
+        // Also register into Baileys Live Store RAM so future calls are instant
+        if (fromMe) {
+          baileysLiveStore.recordOutgoing(remoteJid, text, "Boss (DK)", false, parsed.id);
+        } else {
+          baileysLiveStore.recordIncoming(parsed);
+        }
+      } catch {
+        // skip malformed message
+      }
+    }
+
+    return results.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+  }
+
   constructor() {
     this.warmUpCacheFromFirestore().catch(() => {});
   }
@@ -166,17 +287,39 @@ export class WhatsAppHistoryEngine {
   }
 
   /**
-   * Retrieves persistent conversation context for a specific contact phone or JID.
-   * Checks Baileys Live Store first, then falls back to cache/Firestore.
+   * Retrieves conversation history for a specific contact.
+   *
+   * 3-Layer Priority Fallback:
+   *   Layer 1 — Baileys RAM (baileysLiveStore): Zero-latency, instant if server is running
+   *   Layer 2 — Baileys Live WA Fetch (sock.fetchMessages): Direct from WhatsApp servers, never misses a message
+   *   Layer 3 — Firestore (whatsapp_inbox): Persistent DB fallback
    */
   public async getRecentContactContext(senderPhone: string, limit = 8): Promise<IncomingMessage[]> {
+    // ── Layer 1: Baileys RAM Store ────────────────────────────────────────────
     const liveMsgs = baileysLiveStore.getLiveMessages(senderPhone, limit);
-    if (liveMsgs && liveMsgs.length > 0) {
+    if (liveMsgs && liveMsgs.length >= Math.min(limit, 3)) {
+      console.log(`[WhatsAppHistory] ✅ Layer 1 (RAM): Found ${liveMsgs.length} msgs for ${senderPhone}`);
       return liveMsgs;
     }
 
-    await this.warmUpCacheFromFirestore();
+    // ── Layer 2: Baileys Live Socket — fetch directly from WhatsApp ───────────
     const clean = (senderPhone || "").replace(/\D/g, "");
+    if (clean.length >= 10 && this.waSocket) {
+      try {
+        // Build a valid WhatsApp JID from the phone number
+        const jid = clean.startsWith("91") ? `${clean}@s.whatsapp.net` : `91${clean.slice(-10)}@s.whatsapp.net`;
+        const waMsgs = await this.fetchChatHistoryFromWA(jid, Math.max(limit * 2, 20));
+        if (waMsgs && waMsgs.length > 0) {
+          console.log(`[WhatsAppHistory] ✅ Layer 2 (WA Live): Fetched ${waMsgs.length} msgs for ${jid}`);
+          return waMsgs.slice(-limit);
+        }
+      } catch (liveErr: any) {
+        console.warn("[WhatsAppHistory] Layer 2 WA fetch failed, falling to Firestore:", liveErr?.message);
+      }
+    }
+
+    // ── Layer 3: Firestore ────────────────────────────────────────────────────
+    await this.warmUpCacheFromFirestore();
 
     const isContactMatch = (m: IncomingMessage) => {
       if (m.isGroup) return false;
@@ -193,7 +336,7 @@ export class WhatsAppHistoryEngine {
         const snap = await inboxCol()
           .where("isGroup", "==", false)
           .orderBy("timestamp", "desc")
-          .limit(limit * 2)
+          .limit(limit * 3)
           .get();
         if (!snap.empty) {
           const docs = snap.docs.map((d) => d.data() as IncomingMessage);
@@ -203,6 +346,7 @@ export class WhatsAppHistoryEngine {
             }
           }
         }
+        console.log(`[WhatsAppHistory] ✅ Layer 3 (Firestore): Found ${matched.length} msgs for ${senderPhone}`);
       } catch {}
     }
 
@@ -212,18 +356,70 @@ export class WhatsAppHistoryEngine {
   }
 
   /**
-   * Formats a list of messages into a clean chronological context string.
+   * Formats a list of messages into a clean day-grouped chronological transcript.
+   * Format:
+   *   📋 *Rohit ke Last 5 Messages*
+   *   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   *
+   *           *Sunday, 28 Sep*
+   *
+   *   Rohit — "msg" (10:45 AM)
+   *
+   *   Aap — "msg" (10:47 AM)
    */
-  public formatConversationTranscript(messages: IncomingMessage[]): string {
+  public formatConversationTranscript(
+    messages: IncomingMessage[],
+    contactDisplayName = "",
+    title = ""
+  ): string {
     if (!messages || messages.length === 0) return "";
-    return messages
-      .map((m) => {
-        const sender = m.senderPhone === "bot" || m.senderName.toLowerCase().includes("friday")
-          ? "Friday (You)"
-          : (m.senderName.includes("Boss") || m.senderName.includes("DK") || m.senderPhone === "me" ? "Boss (DK)" : m.senderName);
-        return `• [${m.dateStr || "Recent"}] ${sender}: "${m.text}"`;
-      })
-      .join("\n");
+
+    const sorted = [...messages].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+    const divider = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+    const heading = title || (contactDisplayName ? `${contactDisplayName} ke Last ${sorted.length} Messages` : `Last ${sorted.length} Messages`);
+
+    let out = `📋 *${heading}*\n${divider}\n`;
+
+    let lastDayKey = "";
+
+    for (const m of sorted) {
+      const ts = m.timestamp || Date.now();
+      const msgDate = new Date(ts > 1e11 ? ts : ts * 1000);
+      const istStr = msgDate.toLocaleString("en-US", { timeZone: "Asia/Kolkata" });
+      const istDate = new Date(istStr);
+
+      // Day separator
+      const dayKey = istDate.toDateString();
+      if (dayKey !== lastDayKey) {
+        lastDayKey = dayKey;
+        const dayLabel = istDate.toLocaleDateString("en-IN", {
+          timeZone: "Asia/Kolkata",
+          weekday: "long",
+          day: "numeric",
+          month: "short",
+        });
+        out += `\n          *${dayLabel}*\n`;
+      }
+
+      // Time label
+      const timeLabel = istDate.toLocaleTimeString("en-IN", {
+        timeZone: "Asia/Kolkata",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      });
+
+      // Sender label
+      const isMe = m.senderPhone === "me" || m.senderPhone === "bot" ||
+        m.senderName.toLowerCase().includes("friday") ||
+        m.senderName.includes("DK") ||
+        m.senderName.includes("Boss");
+      const senderLabel = isMe ? "Aap" : (contactDisplayName || m.senderName);
+
+      out += `\n${senderLabel} — _"${m.text.replace(/\n/g, " ")}"_ (${timeLabel})\n`;
+    }
+
+    return out.trim();
   }
 
   /**
@@ -667,26 +863,43 @@ export class WhatsAppHistoryEngine {
           // Case A: Filtered messages exist for requested date / today!
           if (liveDetailed.hasFilteredMessages) {
             const msgs = liveDetailed.filteredMessages;
-            const lastMsg = msgs[msgs.length - 1];
 
-            let card = `⚡ *WhatsApp Live Chat: ${displayName}*${phoneBadge}\n`;
-            card += `━━━━━━━━━━━━━━━━━━━━━\n`;
-            card += `📅 _Date: ${dateBadge}_\n`;
-            card += `💬 _Messages found: ${msgs.length}_\n\n`;
+            const divider = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+            let card = `📋 *${displayName} ke Last ${msgs.length} Messages*\n${divider}\n`;
 
-            msgs.forEach((m) => {
-              const timeTag = m.dateStr ? `[${m.dateStr}] ` : "";
-              if (m.senderPhone === "me") {
-                card += `  👤 *Aap (DK):* ${timeTag}_"${m.text}"_\n`;
-              } else {
-                card += `  📩 *${m.senderName}:* ${timeTag}_"${m.text}"_\n`;
-                if (m.botReply) {
-                  card += `  🤖 *Friday:* _"${m.botReply}"_\n`;
-                }
+            let lastDayKey = "";
+            for (const m of msgs) {
+              const ts = m.timestamp || Date.now();
+              const msgDate = new Date(ts > 1e11 ? ts : ts * 1000);
+              const istStr = msgDate.toLocaleString("en-US", { timeZone: "Asia/Kolkata" });
+              const istDate = new Date(istStr);
+
+              const dayKey = istDate.toDateString();
+              if (dayKey !== lastDayKey) {
+                lastDayKey = dayKey;
+                const dayLabel = istDate.toLocaleDateString("en-IN", {
+                  timeZone: "Asia/Kolkata",
+                  weekday: "long",
+                  day: "numeric",
+                  month: "short",
+                });
+                card += `\n          *${dayLabel}*\n`;
               }
-            });
 
-            // Check if there are any pending questions for this contact
+              const timeLabel = istDate.toLocaleTimeString("en-IN", {
+                timeZone: "Asia/Kolkata",
+                hour: "2-digit",
+                minute: "2-digit",
+                hour12: true,
+              });
+
+              const isMe = m.senderPhone === "me" || m.senderName.includes("DK") || m.senderName.includes("Boss");
+              const senderLabel = isMe ? "Aap" : displayName;
+
+              card += `\n${senderLabel} — _"${m.text.replace(/\n/g, " ")}"_ (${timeLabel})\n`;
+            }
+
+            // Pending questions block
             try {
               const { dailyUpdateService } = await import("../dailyUpdateService");
               const pendingQuestions = await dailyUpdateService.getQuestionsAwaitingDK();
@@ -696,15 +909,15 @@ export class WhatsAppHistoryEngine {
                   (displayName && q.senderName.toLowerCase().includes(displayName.toLowerCase()))
               );
               if (relevant.length > 0) {
-                card += `\n━━━━━━━━━━━━━━━━━━━━━\n`;
-                card += `❓ *Pending Question Awaiting DK Reply:*\n`;
+                card += `\n${divider}\n`;
+                card += `❓ *Pending Questions Awaiting DK Reply:*\n`;
                 relevant.forEach((q) => {
                   card += `  • _"${q.question}"_ (Poocha: ${q.senderName})\n`;
                 });
               }
             } catch {}
 
-            card += `\n_⚡ Source: Real-time Baileys live memory_\n`;
+            card += `\n_⚡ Source: Real-time Baileys live memory_`;
 
             return {
               success: true,
@@ -827,6 +1040,13 @@ export class WhatsAppHistoryEngine {
       };
     }
 
+    const divider = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+
+    // Build the heading — use the main contact name if it's a single-contact result
+    const mainContactName = targetContactName || candidateName || "Contact";
+    let card = `📋 *${mainContactName} ke Last ${Math.min(filtered.length, limit)} Messages*\n${divider}\n`;
+
+    // Group by conversation thread (contact phone → msgs)
     const grouped = new Map<string, IncomingMessage[]>();
     for (const msg of filtered) {
       const key = msg.senderPhone === "me" ? msg.replyJid : msg.senderPhone || msg.senderName;
@@ -834,30 +1054,48 @@ export class WhatsAppHistoryEngine {
       grouped.get(key)!.push(msg);
     }
 
-    let card = `📱 *WhatsApp Conversation (${dateBadge}, ${filtered.length} messages found):*\n\n`;
-
     for (const [key, msgs] of grouped.entries()) {
       const sorted = msgs.sort((a, b) => a.timestamp - b.timestamp);
       const top = sorted[0];
-      const displayName = top.senderPhone === "me" ? "Direct Chat" : top.senderName;
-      const displayPhone = top.senderPhone === "me" ? "" : `(+${top.senderPhone})`;
-      const statusTag = top.isUnknownContact ? " [⚠️ UNKNOWN NUMBER]" : " [👤 SAVED CONTACT]";
+      const convName = top.senderPhone === "me" ? mainContactName : (top.senderName || mainContactName);
 
-      card += `━━━━━━━━━━━━━━━━━━━━━\n`;
-      card += `👤 *${displayName}* ${displayPhone}${statusTag}\n`;
-      card += `📅 _Last Active: ${sorted[sorted.length - 1].dateStr || "Recent"}_\n\n`;
+      // If multiple contacts, add a sub-header
+      if (grouped.size > 1) {
+        card += `\n━━━━━━━━━━━━━━━━━━━━━\n👤 *${convName}*\n`;
+      }
 
-      sorted.slice(-6).forEach((m) => {
-        if (m.senderPhone === "me") {
-          card += `  👤 *Aap (DK):* _"${m.text}"_\n`;
-        } else {
-          card += `  📩 *${m.senderName}:* _"${m.text}"_\n`;
-          if (m.botReply) {
-            card += `  🤖 *Friday (Auto-Reply):* _"${m.botReply}"_\n`;
-          }
+      let lastDayKey = "";
+      for (const m of sorted.slice(-limit)) {
+        const ts = m.timestamp || Date.now();
+        const msgDate = new Date(ts > 1e11 ? ts : ts * 1000);
+        const istStr = msgDate.toLocaleString("en-US", { timeZone: "Asia/Kolkata" });
+        const istDate = new Date(istStr);
+
+        const dayKey = istDate.toDateString();
+        if (dayKey !== lastDayKey) {
+          lastDayKey = dayKey;
+          const dayLabel = istDate.toLocaleDateString("en-IN", {
+            timeZone: "Asia/Kolkata",
+            weekday: "long",
+            day: "numeric",
+            month: "short",
+          });
+          card += `\n          *${dayLabel}*\n`;
         }
-      });
-      card += `\n`;
+
+        const timeLabel = istDate.toLocaleTimeString("en-IN", {
+          timeZone: "Asia/Kolkata",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: true,
+        });
+
+        const isMe = m.senderPhone === "me" || m.senderPhone === "bot" ||
+          m.senderName.includes("DK") || m.senderName.includes("Boss");
+        const senderLabel = isMe ? "Aap" : convName;
+
+        card += `\n${senderLabel} — _"${m.text.replace(/\n/g, " ")}"_ (${timeLabel})\n`;
+      }
     }
 
     try {

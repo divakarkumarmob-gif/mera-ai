@@ -597,6 +597,10 @@ class WhatsAppBotService {
   private setupMessageListener() {
     if (!this.sock) return;
 
+    // ── Inject live socket into WhatsApp History Engine for direct WA fetch ──
+    // This enables Layer 2 (Baileys live fetch) in getRecentContactContext()
+    whatsappHistoryEngine.setSocket(this.sock);
+
     // ── Listen for WhatsApp History Sync from Phone ──
     this.sock.ev.on("messaging-history.set", async ({ chats, contacts, messages }: any) => {
       try {
@@ -2946,28 +2950,51 @@ class WhatsAppBotService {
         case "set_routine": {
           const { bossRoutineService } = await import("./bossRoutineService");
           if (parameters.slots?.length) {
-            await bossRoutineService.setFullRoutine(parameters.slots);
-            await this.sendHumanLikeMessage(replyJid, "📅 Poora routine set kar diya!", rawText, messageKey);
-            return { handled: true, replyText: "Routine set" };
+            const result = await bossRoutineService.setFullRoutine(parameters.slots);
+            const divider = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+            const slotLines = result.slots
+              .map((s) => `• [${s.timeRangeStr}] → ${s.title}`)
+              .join("\n");
+            const replyMsg = `✅ *Schedule Set Ho Gaya, Boss!*\n${divider}\n${slotLines}\n${divider}\n🔔 Ab Friday timely reminders deti rahegi! 🚀`;
+            await this.sendHumanLikeMessage(replyJid, replyMsg, rawText, messageKey);
+            visionMemoryService.clearPendingTextSchedule(replyJid);
+            return { handled: true, replyText: replyMsg };
           }
           if (parameters.slotQuery) {
             await bossRoutineService.updateRoutineSlot(parameters.slotQuery, { startTimeStr: parameters.startTimeStr, endTimeStr: parameters.endTimeStr, activity: parameters.activity });
-            await this.sendHumanLikeMessage(replyJid, `📅 ${parameters.slotQuery} routine update kar diya!`, rawText, messageKey);
+            await this.sendHumanLikeMessage(replyJid, `📅 *${parameters.slotQuery}* routine update kar diya, Boss!`, rawText, messageKey);
             return { handled: true, replyText: "Routine updated" };
           }
-          // Check recent media context for detected timetable / schedule slots
+          // Fallback 1: Photo/Doc detected slots
           const recentMedia = visionMemoryService.getChatMediaContext(replyJid);
           if (recentMedia?.detectedScheduleSlots?.length) {
-            await bossRoutineService.setFullRoutine(recentMedia.detectedScheduleSlots);
-            const slotSummary = recentMedia.detectedScheduleSlots
-              .map((s) => `• *${s.startTimeStr} - ${s.endTimeStr}*: ${s.title} (${s.activity})`)
+            const result = await bossRoutineService.setFullRoutine(recentMedia.detectedScheduleSlots);
+            const divider = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+            const slotLines = result.slots
+              .map((s) => `• [${s.timeRangeStr}] → ${s.title}`)
               .join("\n");
-            const replyMsg = `✅ *Done Boss! Photo/Doc se daily routine successfully set ho gaya hai:*\n\n${slotSummary}\n\nAb Friday aapko har slot par timely reminders deti rahegi! 🚀`;
+            const replyMsg = `✅ *Photo/Doc wala Schedule Set Ho Gaya, Boss!*\n${divider}\n${slotLines}\n${divider}\n🔔 Ab Friday timely reminders deti rahegi! 🚀`;
             await this.sendHumanLikeMessage(replyJid, replyMsg, rawText, messageKey);
             return { handled: true, replyText: replyMsg };
           }
-          return { handled: false };
+          // Fallback 2: Text/Voice pending schedule
+          const pendingSlots = visionMemoryService.getPendingTextSchedule(replyJid);
+          if (pendingSlots?.length) {
+            const result = await bossRoutineService.setFullRoutine(pendingSlots);
+            const divider = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+            const slotLines = result.slots
+              .map((s) => `• [${s.timeRangeStr}] → ${s.title}`)
+              .join("\n");
+            const replyMsg = `✅ *Aapka Schedule Set Ho Gaya, Boss!*\n${divider}\n${slotLines}\n${divider}\n🔔 Ab Friday timely reminders deti rahegi! 🚀`;
+            await this.sendHumanLikeMessage(replyJid, replyMsg, rawText, messageKey);
+            visionMemoryService.clearPendingTextSchedule(replyJid);
+            return { handled: true, replyText: replyMsg };
+          }
+          // Nothing to set
+          await this.sendHumanLikeMessage(replyJid, "⚠️ Boss, koi schedule detect nahi hua. Pehle apna schedule text ya photo mein bhejo, phir 'Haan set kar do' bolein.", rawText, messageKey);
+          return { handled: true, replyText: "No schedule pending" };
         }
+
 
         case "get_routine": {
           const { bossRoutineService: brs } = await import("./bossRoutineService");

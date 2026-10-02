@@ -51,6 +51,42 @@ class VisionMemoryService {
   private latestMedia: CachedMediaContext | null = null;
   private latestMediaPerChat = new Map<string, CachedMediaContext>();
   private inMemoryPersonMemories = new Map<string, StoredPersonMemory>();
+  /** Pending schedule slots dictated by Boss via text/voice (not photo) — per chat */
+  private pendingTextSchedulePerChat = new Map<string, RoutineSlotDraft[]>();
+
+  /** Store a schedule extracted from Boss's text/voice message for later confirmation */
+  public setPendingTextSchedule(chatId: string, slots: RoutineSlotDraft[]): void {
+    if (chatId && slots?.length) {
+      this.pendingTextSchedulePerChat.set(chatId, slots);
+      const cleanPhone = chatId.replace(/@.*$/, "").replace(/\D/g, "");
+      if (cleanPhone) this.pendingTextSchedulePerChat.set(cleanPhone, slots);
+    }
+  }
+
+  /** Retrieve pending text/voice schedule slots (if any) for a chat */
+  public getPendingTextSchedule(chatId?: string): RoutineSlotDraft[] | null {
+    if (chatId) {
+      const direct = this.pendingTextSchedulePerChat.get(chatId);
+      if (direct?.length) return direct;
+      const cleanPhone = chatId.replace(/@.*$/, "").replace(/\D/g, "");
+      if (cleanPhone) {
+        const byPhone = this.pendingTextSchedulePerChat.get(cleanPhone);
+        if (byPhone?.length) return byPhone;
+      }
+    }
+    return null;
+  }
+
+  /** Clear pending text schedule after it's been confirmed/set */
+  public clearPendingTextSchedule(chatId?: string): void {
+    if (chatId) {
+      this.pendingTextSchedulePerChat.delete(chatId);
+      const cleanPhone = chatId.replace(/@.*$/, "").replace(/\D/g, "");
+      if (cleanPhone) this.pendingTextSchedulePerChat.delete(cleanPhone);
+    } else {
+      this.pendingTextSchedulePerChat.clear();
+    }
+  }
 
   private getGenAI(): GoogleGenAI | null {
     const key = process.env.GEMINI_API_KEY;
@@ -176,12 +212,24 @@ class VisionMemoryService {
 1. Document Type & Title:
 2. Full Text / Key Content (OCR):
 3. Key Financials, Dates, Names, Terms, or Action Items:
-4. ROUTINE / TIMETABLE DETECTION: If this contains a daily routine, timetable, workout plan, or schedule (e.g. 4 bje jagna, 8 bje khana, study, etc.):
-   - List the timetable slots.
-   - Proactively suggest: "👉 *Boss, kya main iska daily reminder ya Friday routine set kar doon?* Bas reply karein: _'Haan set kar do'_ ya _'Set routine'_"
-   - Append machine tag at the end: [ROUTINE_DATA: [{"title": "Jagna", "startTimeStr": "04:00 AM", "endTimeStr": "05:00 AM", "activity": "Morning Routine"}, ...]]
+4. ROUTINE / TIMETABLE DETECTION: If this document contains a daily routine, timetable, or schedule:
+   - Extract each slot and format EXACTLY like this:
+
+   *🗓️ Schedule Detected:*
+   Monday [9:00 AM] → School
+   Tuesday [7:00 AM] → Gym
+   Wednesday [8:00 PM] → Study
+   (Use actual day names and 12-hour time format.)
+
+   - Then add a divider and suggestion at the bottom:
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   🔔 *Boss, kya main yeh schedule set kar doon?*
+   Reply karo: _“Haan set kar do”_ ya _“Set routine”_
+
+   - Append machine tag: [ROUTINE_DATA: [{"title": "School", "startTimeStr": "09:00 AM", "endTimeStr": "01:00 PM", "activity": "School"}, ...]]
 5. Short 2-sentence conversational summary in Hindi/Hinglish for Boss DK:
 ${caption ? `User caption: "${caption}"` : ""}`;
+
         } else if (isVideo) {
           prompt = `You are Friday AI. Analyze this received video:
 1. Visual contents & key actions happening in the video:
@@ -199,12 +247,24 @@ ${caption ? `User caption: "${caption}"` : ""}`;
 1. What is in this photo (people, objects, scene, setting, emotions)?
 2. If there are people, describe their physical appearance (approx age, gender, hair, clothing, distinct traits) for identification.
 3. If there is text in the image, extract all readable text (OCR).
-4. ROUTINE / TIMETABLE DETECTION: If this photo contains a daily routine, timetable, workout plan, or schedule (e.g. 4 bje jagna, 8 bje khana, study/gym slots, etc.):
-   - List the timetable slots clearly.
-   - Proactively suggest: "👉 *Boss, kya main iska daily reminder ya Friday routine set kar doon?* Bas reply karein: _'Haan set kar do'_ ya _'Set routine'_"
-   - Append machine tag at the end: [ROUTINE_DATA: [{"title": "Jagna", "startTimeStr": "04:00 AM", "endTimeStr": "05:00 AM", "activity": "Morning Routine"}, ...]]
+4. ROUTINE / TIMETABLE DETECTION: If this photo contains a daily routine, timetable, workout plan, or schedule:
+   - Extract each slot and format EXACTLY like this (use actual day names if present, else use Mon/Tue or Daily):
+
+   *🗓️ Schedule Detected:*
+   Monday [9:00 AM] → School
+   Monday [1:00 PM] → Lunch Break
+   Tuesday [7:00 AM] → Gym
+   (Use the EXACT activity names from the photo. Use 12-hour time format.)
+
+   - Then at the very bottom add a clear divider and suggestion:
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   🔔 *Boss, kya main yeh schedule set kar doon?*
+   Reply karo: _“Haan set kar do”_ ya _“Set routine”_
+
+   - Append machine tag at the END: [ROUTINE_DATA: [{"title": "School", "startTimeStr": "09:00 AM", "endTimeStr": "01:00 PM", "activity": "School"}, ...]]
 5. Short 2-sentence summary in Hindi/Hinglish for Boss DK:
 ${caption ? `User caption: "${caption}"` : ""}`;
+
         }
 
         const normalizedMime = isDoc
@@ -458,12 +518,26 @@ If a timetable or routine IS detected:
 
 STRUCTURE YOUR RESPONSE IN CLEAN WHATSAPP FORMAT:
 1. 📌 *Main Subject / Heading:* (What is this photo/document about?)
-2. 📝 *Key Summary Points:* (3-6 bullet points covering the core takeaways, facts, message, or OCR text)
-3. 🔍 *Important Specifics:* (Names, dates, amounts, links, or action items if present)
-4. 💡 *Executive Takeaway (in natural Hinglish):* (1-2 lines summarizing the whole thing for quick reading)
-(If timetable detected, include the Timetable & Suggestion sections described above!)
+2. 📝 *Key Summary Points:* (3-6 bullet points covering the core takeaways)
+3. 🔍 *Important Specifics:* (Names, dates, amounts, action items if present)
+4. 💡 *Executive Takeaway (in natural Hinglish):* (1-2 lines for quick reading)
 
-Use WhatsApp markdown (*bold*, _italic_, bullet points). Keep it clean, accurate, and easy to read.`;
+IF TIMETABLE DETECTED — format the schedule section EXACTLY like this:
+
+🗓️ *Schedule Detected:*
+Monday [9:00 AM] → School
+Monday [1:00 PM] → Lunch Break
+Tuesday [7:00 AM] → Gym
+Wednesday [8:00 PM] → Study / Homework
+(One entry per line. Use actual activity names from the photo/doc. 12-hour format. If day not specified, use the activity timing only like: [9:00 AM] → School)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔔 *Boss, kya main yeh schedule set kar doon?*
+Reply karo: _“Haan set kar do”_ ya _“Set routine”_ — Friday timely reminders set kar degi!
+
+AT THE VERY END (hidden from view), append: [ROUTINE_DATA: [{"title": "School", "startTimeStr": "09:00 AM", "endTimeStr": "01:00 PM", "activity": "School"}, ...]]
+
+Use WhatsApp markdown (*bold*, _italic_, bullet points). Keep it clean and accurate.`;
 
     const VISION_FALLBACK_MODELS = [
       "gemini-3.8-flash",

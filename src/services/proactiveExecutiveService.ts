@@ -34,7 +34,83 @@ export interface DetectedCommitment {
 
 class ProactiveExecutiveService {
   /**
-   * Scans recent WhatsApp and Telegram message logs for high-priority messages that Boss hasn't replied to.
+   * Helper to identify if a phone, JID, name, or chatId belongs to Boss DK or Friday Bot.
+   * This guarantees Boss's own 1-on-1 chat with Friday is NEVER treated as an unanswered contact!
+   */
+  public isBossOrSelfChat(
+    phoneOrJid: string = "",
+    name: string = "",
+    chatId?: string | number
+  ): boolean {
+    // 1. Check Telegram Chat ID
+    const bossTgChatIds = [
+      process.env.TELEGRAM_OWNER_CHAT_ID,
+      process.env.TELEGRAM_BOSS_CHAT_ID,
+      process.env.BOSS_TELEGRAM_CHAT_ID,
+      process.env.TELEGRAM_OWNER_ID,
+      process.env.TELEGRAM_CHAT_ID,
+    ]
+      .filter(Boolean)
+      .map((id) => String(id).trim());
+
+    if (chatId && bossTgChatIds.includes(String(chatId).trim())) {
+      return true;
+    }
+
+    // 2. Check Boss & Dedicated Bot Phone Numbers (by full string and last 10 digits)
+    const bossNumbers = [
+      process.env.BOSS_WHATSAPP_PHONE,
+      process.env.WHATSAPP_OWNER_NUMBER,
+      process.env.WHATSAPP_BOSS_PHONE,
+      process.env.OWNER_WHATSAPP_NUMBER,
+      process.env.BOSS_WHATSAPP_NUMBER,
+      process.env.OWNER_PHONE,
+      process.env.BOSS_PHONE,
+      process.env.EMERGENCY_CONTACT_PHONE,
+      process.env.WHATSAPP_BOT_PHONE,
+      process.env.DEDICATED_WHATSAPP_PHONE,
+      "919315570187",
+      "9315570187",
+    ]
+      .filter(Boolean)
+      .map((p) => String(p).replace(/\D/g, ""))
+      .filter((p) => p.length >= 10);
+
+    const cleanDigits = (phoneOrJid || "").replace(/\D/g, "");
+    const last10 = cleanDigits.slice(-10);
+
+    if (last10.length === 10) {
+      for (const bn of bossNumbers) {
+        if (cleanDigits === bn || bn.endsWith(last10) || last10 === bn.slice(-10)) {
+          return true;
+        }
+      }
+    }
+
+    // 3. Check Special Sender Identifiers
+    const norm = (phoneOrJid || "").toLowerCase().trim();
+    if (norm === "me" || norm === "bot" || norm === "self" || norm.includes("broadcast") || norm.includes("status@")) {
+      return true;
+    }
+
+    // 4. Check Names / Display Names
+    const lowerName = (name || "").toLowerCase().trim();
+    if (
+      lowerName === "boss" ||
+      lowerName === "dk" ||
+      lowerName.includes("boss dk") ||
+      lowerName.includes("divakar") ||
+      lowerName.includes("friday")
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Scans recent WhatsApp and Telegram message logs for high-priority messages from EXTERNAL contacts that Boss hasn't replied to.
+   * Strictly filters out Boss's own chats with Friday, and checks whether Boss or Friday has already replied to each contact.
    */
   public async checkPendingUnansweredMessages(thresholdHours = 3): Promise<{
     count: number;
@@ -47,63 +123,148 @@ class ProactiveExecutiveService {
     const maxLookback = now - 48 * 60 * 60 * 1000;
 
     try {
-      // 1. Scan WhatsApp Inbox (In-memory filtering to avoid composite Firestore index requirement)
+      // 1. Scan WhatsApp Inbox (fetch recent 120 messages)
       const waSnap = await db.collection("whatsapp_inbox")
         .orderBy("timestamp", "desc")
-        .limit(60)
+        .limit(120)
         .get();
 
       if (!waSnap.empty) {
+        // Group messages by external contact conversation
+        const contactChats = new Map<string, any[]>();
+
         for (const doc of waSnap.docs) {
           const data = doc.data();
           if (data.isGroup) continue;
-          if (typeof data.timestamp === "number" && (data.timestamp < maxLookback || data.timestamp > cutoffTs)) continue;
 
-          const sName = String(data.senderName || "");
-          const isBoss = sName.includes("Boss") || sName.includes("DK") || data.senderPhone === "me";
-          if (!isBoss && !data.botReply && data.text && data.text.length > 5) {
-            const elapsed = Math.round((now - (data.timestamp || now)) / (1000 * 60 * 60));
-            const draft = await this.generateQuickSuggestedDraft(sName, data.text);
-            alerts.push({
-              senderName: sName,
-              senderPhone: data.senderPhone,
-              channel: "whatsapp",
-              messageText: data.text,
-              elapsedHours: elapsed,
-              timeStr: data.dateStr || `${elapsed}h ago`,
-              suggestedDraftReply: draft,
-            });
+          const replyJid = String(data.replyJid || "");
+          const senderPhone = String(data.senderPhone || "");
+          const senderName = String(data.senderName || "");
+
+          // Strictly ignore Boss's own 1-on-1 chat with Friday!
+          if (this.isBossOrSelfChat(replyJid, senderName) || this.isBossOrSelfChat(senderPhone, senderName)) {
+            continue;
           }
+
+          // Use the external contact's normalized JID/phone as the conversation key
+          const chatKey = replyJid.endsWith("@s.whatsapp.net") ? replyJid : senderPhone.replace(/\D/g, "");
+          if (!chatKey) continue;
+
+          if (!contactChats.has(chatKey)) {
+            contactChats.set(chatKey, []);
+          }
+          contactChats.get(chatKey)!.push(data);
+        }
+
+        // For each external contact's chat, inspect the latest message state
+        for (const [chatKey, msgs] of contactChats.entries()) {
+          // Sort messages by timestamp descending (newest first)
+          msgs.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+          const latestMsg = msgs[0];
+          if (!latestMsg) continue;
+
+          const isLatestFromBossOrBot =
+            latestMsg.senderPhone === "me" ||
+            latestMsg.senderPhone === "bot" ||
+            !!latestMsg.botReply ||
+            this.isBossOrSelfChat(latestMsg.senderPhone, latestMsg.senderName);
+
+          // If the latest message in this chat was sent by Boss or Friday, Boss already replied!
+          if (isLatestFromBossOrBot) {
+            continue;
+          }
+
+          // The latest message is an incoming message from the contact
+          const msgTs = typeof latestMsg.timestamp === "number" ? latestMsg.timestamp : 0;
+          if (msgTs < maxLookback || msgTs > cutoffTs) {
+            // Either older than 48h or fresher than thresholdHours (e.g. 3h)
+            continue;
+          }
+
+          const text = String(latestMsg.text || "").trim();
+          if (text.length <= 3) continue;
+
+          const sName = String(latestMsg.senderName || latestMsg.senderDisplayName || chatKey);
+          const elapsed = Math.round((now - msgTs) / (1000 * 60 * 60));
+          const draft = await this.generateQuickSuggestedDraft(sName, text);
+
+          alerts.push({
+            senderName: sName,
+            senderPhone: latestMsg.senderPhone || chatKey.replace(/\D/g, ""),
+            channel: "whatsapp",
+            messageText: text,
+            elapsedHours: elapsed,
+            timeStr: latestMsg.dateStr || `${elapsed}h ago`,
+            suggestedDraftReply: draft,
+          });
         }
       }
 
-      // 2. Scan Telegram Logs (In-memory filtering to avoid composite Firestore index requirement)
+      // 2. Scan Telegram Logs (fetch recent 80 messages)
       const tgSnap = await db.collection("telegramMessageLogs")
-        .orderBy("timestamp", "desc")
-        .limit(60)
+        .orderBy("createdAt", "desc")
+        .limit(80)
         .get();
 
       if (!tgSnap.empty) {
+        const tgChats = new Map<string, any[]>();
+
         for (const doc of tgSnap.docs) {
           const data = doc.data();
-          if (data.isGroup) continue;
-          if (typeof data.timestamp === "number" && (data.timestamp < maxLookback || data.timestamp > cutoffTs)) continue;
+          if (data.isGroup || data.chatType === "group" || data.chatType === "supergroup") continue;
 
-          const sName = String(data.senderName || "");
-          const isBoss = sName.includes("Boss") || sName.includes("DK");
-          if (!isBoss && !data.botReply && data.text && data.text.length > 5) {
-            const elapsed = Math.round((now - (data.timestamp || now)) / (1000 * 60 * 60));
-            const draft = await this.generateQuickSuggestedDraft(sName, data.text);
-            alerts.push({
-              senderName: sName,
-              chatId: data.chatId,
-              channel: "telegram",
-              messageText: data.text,
-              elapsedHours: elapsed,
-              timeStr: data.timeStr || `${elapsed}h ago`,
-              suggestedDraftReply: draft,
-            });
+          const chatId = data.chatId ? String(data.chatId) : "";
+          const sName = String(data.senderName || data.username || "");
+
+          // Strictly ignore Boss's own chat with the Telegram Bot!
+          if (this.isBossOrSelfChat("", sName, chatId)) {
+            continue;
           }
+
+          if (!chatId) continue;
+          if (!tgChats.has(chatId)) {
+            tgChats.set(chatId, []);
+          }
+          tgChats.get(chatId)!.push(data);
+        }
+
+        for (const [chatId, msgs] of tgChats.entries()) {
+          msgs.sort((a, b) => (b.createdAt || b.timestamp || 0) - (a.createdAt || a.timestamp || 0));
+          const latestMsg = msgs[0];
+          if (!latestMsg) continue;
+
+          const isLatestReplied =
+            !!latestMsg.botReply ||
+            latestMsg.isOutgoing ||
+            this.isBossOrSelfChat("", latestMsg.senderName, chatId);
+
+          if (isLatestReplied) {
+            continue;
+          }
+
+          const msgTs = typeof (latestMsg.createdAt || latestMsg.timestamp) === "number"
+            ? (latestMsg.createdAt || latestMsg.timestamp)
+            : 0;
+          if (msgTs < maxLookback || msgTs > cutoffTs) {
+            continue;
+          }
+
+          const text = String(latestMsg.text || "").trim();
+          if (text.length <= 3) continue;
+
+          const sName = String(latestMsg.senderName || latestMsg.username || `Telegram User ${chatId}`);
+          const elapsed = Math.round((now - msgTs) / (1000 * 60 * 60));
+          const draft = await this.generateQuickSuggestedDraft(sName, text);
+
+          alerts.push({
+            senderName: sName,
+            chatId,
+            channel: "telegram",
+            messageText: text,
+            elapsedHours: elapsed,
+            timeStr: latestMsg.timeStr || `${elapsed}h ago`,
+            suggestedDraftReply: draft,
+          });
         }
       }
     } catch (e) {
@@ -118,12 +279,26 @@ class ProactiveExecutiveService {
       };
     }
 
-    let summary = `📬 *Unanswered Messages Sentinel (${alerts.length} pending):*\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    const divider = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+    let summary = `📬 *Unanswered Messages Sentinel*\n${divider}\n*${alerts.length} Pending Repl${alerts.length === 1 ? "y" : "ies"} — Action Required!*\n${divider}\n\n`;
+
     alerts.slice(0, 5).forEach((a, i) => {
-      const channelEmoji = a.channel === "whatsapp" ? "💬 [WhatsApp]" : "✈️ [Telegram]";
-      summary += `${i + 1}. *${a.senderName}* (${channelEmoji} - _${a.elapsedHours}h pehle_)\n   • *Message:* _"${a.messageText.slice(0, 100)}"_\n   💡 *Suggested Reply:* _"${a.suggestedDraftReply}"_\n\n`;
+      const channelBadge = a.channel === "whatsapp" ? "💬 WhatsApp" : "✈️ Telegram";
+      const timeLabel = a.elapsedHours >= 24
+        ? `${Math.round(a.elapsedHours / 24)} din pehle`
+        : `${a.elapsedHours}h pehle`;
+
+      summary += `*${i + 1}.* 👤 *${a.senderName}*\n`;
+      summary += `   📡 ${channelBadge}   🕐 ${timeLabel}\n`;
+      summary += `   💬 _"${a.messageText.slice(0, 120).replace(/\n/g, " ")}"_\n`;
+      summary += `   ──────────────────────────\n`;
+      summary += `   💡 *Suggested Reply:*\n`;
+      summary += `   _"${a.suggestedDraftReply}"_\n`;
+      summary += `\n`;
     });
-    summary += `_Aap bol sakte hain: \`[Naam] ko wo suggested reply bhej do\`!_`;
+
+    summary += `${divider}\n`;
+    summary += `_💡 Tip: Bol sakte hain — *"[Naam] ko suggested reply bhej do"*_`;
 
     return {
       count: alerts.length,

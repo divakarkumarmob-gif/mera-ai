@@ -456,7 +456,45 @@ class TelegramBotService {
 
     const recent = cachedTurns.slice(-limit);
     if (recent.length === 0) return "";
-    return recent.map((m) => `• [${m.timeStr}] ${m.senderName}: "${m.text}"`).join("\n");
+
+    // Day-grouped organized transcript format
+    const divider = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+    let out = `📋 *Recent Conversation*\n${divider}\n`;
+    let lastDayKey = "";
+
+    for (const m of recent) {
+      const ts = m.timestamp || Date.now();
+      const msgDate = new Date(ts > 1e11 ? ts : ts * 1000);
+      const istStr = msgDate.toLocaleString("en-US", { timeZone: "Asia/Kolkata" });
+      const istDate = new Date(istStr);
+
+      const dayKey = istDate.toDateString();
+      if (dayKey !== lastDayKey) {
+        lastDayKey = dayKey;
+        const dayLabel = istDate.toLocaleDateString("en-IN", {
+          timeZone: "Asia/Kolkata",
+          weekday: "long",
+          day: "numeric",
+          month: "short",
+        });
+        out += `\n          *${dayLabel}*\n`;
+      }
+
+      const timeLabel = istDate.toLocaleTimeString("en-IN", {
+        timeZone: "Asia/Kolkata",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      });
+
+      const isBot = m.senderName.toLowerCase().includes("friday") || m.senderName === "Friday (You)";
+      const isMe = m.senderName.toLowerCase().includes("boss") || m.senderName.toLowerCase().includes("dk");
+      const senderLabel = isBot ? "Friday" : isMe ? "Aap" : m.senderName;
+
+      out += `\n${senderLabel} — _"${m.text.replace(/\n/g, " ")}"_ (${timeLabel})\n`;
+    }
+
+    return out.trim();
   }
 
   private async callApi(method: string, body?: any, timeoutMs = 35000): Promise<any> {
@@ -2217,7 +2255,91 @@ ${
    - Never reveal DK's personal schedule, whereabouts, or credentials.`
 }
 
-IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with Telegram Markdown (*bold*, _italic_).`;
+IMPORTANT: Reply in crisp, natural, conversational Hinglish. Format cleanly with Telegram Markdown (*bold*, _italic_).
+
+🗒️ REPLY FORMATTING RULES (MANDATORY — FOLLOW FOR EVERY RESPONSE):
+Always format replies for maximum readability on mobile. Use this structure based on content type:
+
+1️⃣ QUICK ANSWERS (fact, short status, yes/no):
+   One punchy sentence. No headers needed.
+   Example: “Ji Boss! Rohit ka reply 2h pehle aaya tha.”
+
+2️⃣ LIST / MULTIPLE ITEMS (contacts, messages, tasks, history):
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   📦 *Topic Heading*
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   1. *Item Name* — detail
+   2. *Item Name* — detail
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+3️⃣ MESSAGES / CHAT HISTORY (last N messages):
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   💬 *Last 5 msgs — Rohit*
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   *Thursday*
+
+   Rohit: “Bhai meeting kab?” _(4:12 PM)_
+   You: “Aaj 5 bje” _(4:15 PM)_
+
+   *Friday*
+
+   Rohit: “Aagaya hoon” _(4:58 PM)_
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+4️⃣ ANALYSIS / SUMMARY (long content, research, document):
+   *📌 Summary: [Topic]*
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   • Key point one
+   • Key point two
+   • Key point three
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   💡 _Bottom Line: one sentence conclusion_
+
+5️⃣ REMINDER / ACTION CONFIRMATION:
+   ✅ *Done Boss!*
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   🔔 *Reminder:* School
+   📅 *Date:* Monday
+   ⏰ *Time:* 9:00 AM
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+6️⃣ UNANSWERED MESSAGES:
+   📬 *Unanswered Messages (N pending):*
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   1. *Rohit* (💬 WhatsApp — 4h pehle)
+      🗨️ “Bhai kal meeting ka timing kya hai?”
+      💡 Suggested: _“Haan Rohit, kal 2 bje finalize karte hain.”_
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+GLOBAL RULES:
+- ALWAYS use ━ divider lines between sections
+- ALWAYS bold (*text*) labels like names, times, headings
+- NEVER write a wall of plain text — break into sections
+- NEVER use hashes (#, ##) as headers
+- NEVER use code blocks for normal text
+- Use emojis sparingly at start of sections, not mid-sentence
+- Max 2-3 lines per paragraph block before adding a line break
+- Format responses cleanly using Telegram markdown (*bold*, _italic_, bullet points)
+
+🗓️ SCHEDULE / TIMETABLE FORMAT MANDATE (CRITICAL):
+Whenever Boss tells you a schedule, routine, or timetable — via TEXT or VOICE — you MUST format the reply EXACTLY like this:
+
+🗓️ *Schedule / Routine:*
+Monday [9:00 AM] → School
+Monday [1:00 PM] → Lunch Break
+Tuesday [7:00 AM] → Gym
+Wednesday [8:00 PM] → Study
+(One entry per line. Use the EXACT activity names Boss mentioned. 12-hour time format. If day not specified, use [Time] → Activity)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔔 *Boss, kya main yeh schedule set kar doon?*
+Reply karo: _"Haan set kar do"_ ya _"Set routine"_ — Friday timely reminders set kar degi!
+
+This format MUST be used:
+- When Boss dictates a schedule verbally (e.g. "somwar ko 9 bje school, mangalwar 7 bje gym")
+- When Boss sends a voice message describing a schedule
+- When Boss types out a timetable in text
+- On BOTH WhatsApp and Telegram`;
 
     const currentMode = isOwner ? await fridayModeService.getMode() : "mode_a";
     const isModeB = currentMode === "mode_b";
@@ -3724,12 +3846,15 @@ INSTRUCTIONS:
     // 5. Handle Documents / PDFs (Vision OCR & Vault Indexing)
     if (msg.document) {
       try {
-        await this.sendMessage(chatId, "📄 *Document / PDF analyze ho raha hai...*");
+        await this.sendMessage(chatId, "📄 *Document / PDF analyze ho raha hai...* ⚡");
         const mimeType = msg.document.mime_type || "application/pdf";
         const fileName = msg.document.file_name || "document.pdf";
+        const chatIdStr = String(chatId);
         const { buffer } = await this.downloadFile(msg.document.file_id);
-        const analysisRes = await visionMemoryService.processIncomingMedia(buffer, mimeType, senderName, text, fileName);
-        await this.sendMessage(chatId, `📑 *Document OCR & Summary (${fileName}):*\n\n${analysisRes.analysis}`);
+
+        // Use generateMediaSummary (has new Day [Time] → Activity format + detectedScheduleSlots per chatId)
+        const summaryText = await visionMemoryService.generateMediaSummary(buffer, mimeType, text || undefined, fileName, chatIdStr);
+        await this.sendMessage(chatId, summaryText);
 
         // Index in Media Vault
         await this.indexMediaItem({
@@ -3746,8 +3871,7 @@ INSTRUCTIONS:
           fileSizeBytes: buffer.length,
           mimeType,
           caption: text,
-          analysisSummary: analysisRes.analysis,
-          ocrText: analysisRes.ocrText,
+          analysisSummary: summaryText.slice(0, 500),
           keyTopics: ["pdf", "document", fileName, senderName],
           timestamp: Date.now(),
           dateStr: new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
@@ -3758,6 +3882,7 @@ INSTRUCTIONS:
       }
       return;
     }
+
 
     // 5.1 Handle Videos & Video Notes (Gemini Multimodal Video Analysis & Vault Indexing)
     if (msg.video || msg.video_note) {
@@ -4339,7 +4464,48 @@ INSTRUCTIONS:
               dateFilter: parameters.dateFilter,
               limit: parameters.limit
             });
-            const replyText = msgs.length === 0 ? "📭 WhatsApp par koi message nahi mila." : msgs.slice(0, 10).map(m => `[${m.dateStr}] ${m.senderName}: ${m.text}`).join("\n");
+
+            let replyText: string;
+            if (msgs.length === 0) {
+              replyText = "📭 WhatsApp par koi message nahi mila.";
+            } else {
+              const divider = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+              const heading = parameters.senderName
+                ? `${parameters.senderName} ke Last ${msgs.length} Messages`
+                : `WhatsApp Messages (${msgs.length})`;
+              replyText = `📋 *${heading}*\n${divider}\n`;
+
+              let lastDayKey = "";
+              for (const m of msgs.slice(0, parameters.limit || 10)) {
+                const ts = m.timestamp || Date.now();
+                const msgDate = new Date(ts > 1e11 ? ts : ts * 1000);
+                const istStr = msgDate.toLocaleString("en-US", { timeZone: "Asia/Kolkata" });
+                const istDate = new Date(istStr);
+
+                const dayKey = istDate.toDateString();
+                if (dayKey !== lastDayKey) {
+                  lastDayKey = dayKey;
+                  const dayLabel = istDate.toLocaleDateString("en-IN", {
+                    timeZone: "Asia/Kolkata",
+                    weekday: "long",
+                    day: "numeric",
+                    month: "short",
+                  });
+                  replyText += `\n          *${dayLabel}*\n`;
+                }
+
+                const timeLabel = istDate.toLocaleTimeString("en-IN", {
+                  timeZone: "Asia/Kolkata",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  hour12: true,
+                });
+
+                const isMe = m.senderPhone === "me" || m.senderName.includes("DK") || m.senderName.includes("Boss");
+                const senderLabel = isMe ? "Aap" : m.senderName;
+                replyText += `\n${senderLabel} — _"${m.text.replace(/\n/g, " ")}"_ (${timeLabel})\n`;
+              }
+            }
             await this.sendMessage(chatId, replyText);
             return { handled: true, replyText };
           } catch (err: any) {
@@ -4348,6 +4514,7 @@ INSTRUCTIONS:
             return { handled: true, replyText: errorMsg };
           }
         }
+
 
         case "get_conversation_history": {
           try {
@@ -4365,28 +4532,47 @@ INSTRUCTIONS:
 
         case "set_routine": {
           const { bossRoutineService } = await import("./bossRoutineService");
+          const chatIdStr = String(chatId);
           if (parameters.slots?.length) {
-            await bossRoutineService.setFullRoutine(parameters.slots);
-            await this.sendMessage(chatId, "📅 Poora routine set kar diya!");
-            return { handled: true, replyText: "Routine set" };
+            const result = await bossRoutineService.setFullRoutine(parameters.slots);
+            const divider = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+            const slotLines = result.slots.map((s) => `• [${s.timeRangeStr}] → ${s.title}`).join("\n");
+            const replyMsg = `✅ <b>Schedule Set Ho Gaya, Boss!</b>\n${divider}\n${slotLines}\n${divider}\n🔔 Ab Friday timely reminders deti rahegi! 🚀`;
+            await this.sendMessage(chatId, replyMsg);
+            visionMemoryService.clearPendingTextSchedule(chatIdStr);
+            return { handled: true, replyText: replyMsg };
           }
           if (parameters.slotQuery) {
             await bossRoutineService.updateRoutineSlot(parameters.slotQuery, { startTimeStr: parameters.startTimeStr, endTimeStr: parameters.endTimeStr, activity: parameters.activity });
-            await this.sendMessage(chatId, `📅 ${parameters.slotQuery} routine update kar diya!`);
+            await this.sendMessage(chatId, `📅 <b>${parameters.slotQuery}</b> routine update kar diya, Boss!`);
             return { handled: true, replyText: "Routine updated" };
           }
-          const recentMedia = visionMemoryService.getChatMediaContext(String(chatId));
+          // Fallback 1: Photo/Doc detected slots
+          const recentMedia = visionMemoryService.getChatMediaContext(chatIdStr);
           if (recentMedia?.detectedScheduleSlots?.length) {
-            await bossRoutineService.setFullRoutine(recentMedia.detectedScheduleSlots);
-            const slotSummary = recentMedia.detectedScheduleSlots
-              .map((s) => `• <b>${s.startTimeStr} - ${s.endTimeStr}</b>: ${s.title} (${s.activity})`)
-              .join("\n");
-            const replyMsg = `✅ <b>Done Boss! Photo/Doc se daily routine successfully set ho gaya hai:</b>\n\n${slotSummary}\n\nAb Friday aapko har slot par timely reminders deti rahegi! 🚀`;
+            const result = await bossRoutineService.setFullRoutine(recentMedia.detectedScheduleSlots);
+            const divider = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+            const slotLines = result.slots.map((s) => `• [${s.timeRangeStr}] → ${s.title}`).join("\n");
+            const replyMsg = `✅ <b>Photo/Doc wala Schedule Set Ho Gaya, Boss!</b>\n${divider}\n${slotLines}\n${divider}\n🔔 Ab Friday timely reminders deti rahegi! 🚀`;
             await this.sendMessage(chatId, replyMsg);
             return { handled: true, replyText: replyMsg };
           }
-          return { handled: false };
+          // Fallback 2: Text/Voice pending schedule
+          const pendingSlots = visionMemoryService.getPendingTextSchedule(chatIdStr);
+          if (pendingSlots?.length) {
+            const result = await bossRoutineService.setFullRoutine(pendingSlots);
+            const divider = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+            const slotLines = result.slots.map((s) => `• [${s.timeRangeStr}] → ${s.title}`).join("\n");
+            const replyMsg = `✅ <b>Aapka Schedule Set Ho Gaya, Boss!</b>\n${divider}\n${slotLines}\n${divider}\n🔔 Ab Friday timely reminders deti rahegi! 🚀`;
+            await this.sendMessage(chatId, replyMsg);
+            visionMemoryService.clearPendingTextSchedule(chatIdStr);
+            return { handled: true, replyText: replyMsg };
+          }
+          // Nothing to set
+          await this.sendMessage(chatId, "⚠️ Boss, koi schedule detect nahi hua. Pehle apna schedule text ya photo mein bhejo, phir 'Haan set kar do' bolein.");
+          return { handled: true, replyText: "No schedule pending" };
         }
+
 
         case "get_routine": {
           const { bossRoutineService: brs } = await import("./bossRoutineService");

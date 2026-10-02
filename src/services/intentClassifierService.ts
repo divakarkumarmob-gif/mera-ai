@@ -588,7 +588,18 @@ CRITICAL RULES:
 8. **ROUTINE / SCHEDULE CONFIRMATION**:
    - If user confirms routine/timetable suggestions or says "haan set kar do", "routine set karo", "photo wala routine save karo", "schedule set kar do", "haan routine bana do", "set routine", "reminders set kar do" → call set_routine!
 
-9. **NO FUNCTION MATCH**: If no function fits, use general_chat with a natural response.
+9. **TEXT / VOICE SCHEDULE DETECTION**:
+   - If Boss verbally describes a schedule or timetable (e.g. "somwar ko 9 bje school hai", "monday 9am school, tuesday 7am gym", "mera routine: subah 7 uthna, 9 bje office, raat 10 sona", "mere schedule me likha hai...") → use general_chat BUT format the reply EXACTLY like:
+
+   🗓️ *Schedule / Routine:*
+   Monday [9:00 AM] → School
+   Tuesday [7:00 AM] → Gym
+   Wednesday [10:00 PM] → Sleep
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   🔔 *Boss, kya main yeh schedule set kar doon?*
+   Reply karo: _"Haan set kar do"_ ya _"Set routine"_
+
+10. **NO FUNCTION MATCH**: If no function fits, use general_chat with a natural response.
 
 Be decisive. One function call per classification.`;
   }

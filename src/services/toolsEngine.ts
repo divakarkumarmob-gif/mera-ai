@@ -62,9 +62,100 @@ class ToolsEngine {
   private inMemoryReminders = new Map<string, ReminderItem>();
   private inMemoryNotes = new Map<string, NoteItem>();
 
+  /**
+   * Parses a natural-language time string into a future IST timestamp.
+   * Handles: "kal subah 7 bje", "5 PM", "in 20 minutes", "tomorrow 9am", "raat 10 bje", etc.
+   */
+  private parseTimeStringToTimestamp(timeString: string, durationMinutes: number, now: number): number {
+    // If explicit duration given by AI, use it directly
+    if (durationMinutes > 0) {
+      return now + durationMinutes * 60 * 1000;
+    }
+
+    const ts = (timeString || "").toLowerCase().trim();
+    if (!ts || ts === "soon" || ts === "abhi") {
+      return now + 60 * 60 * 1000; // Default 1hr
+    }
+
+    const istNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+    let targetDate = new Date(istNow);
+
+    // ── Day offset ──────────────────────────────────────────────────────
+    const isTomorrow   = /\b(kal|tomorrow|agle din|next day|kal subah|kal raat|kal dopahar|kal shaam)\b/.test(ts);
+    const isDayAfter   = /\b(parso|parso\s+subah|day after)\b/.test(ts);
+    const isWeekday    = /\b(somwar|monday|mangalwar|tuesday|budhwar|wednesday|guruwar|thursday|shukrawar|friday|shaniwar|saturday|itwaar|sunday)\b/.test(ts);
+
+    if (isTomorrow)  targetDate.setDate(targetDate.getDate() + 1);
+    if (isDayAfter)  targetDate.setDate(targetDate.getDate() + 2);
+
+    // ── Time of day keywords → default hour ─────────────────────────────
+    const isMorning = /\b(subah|morning|sawere|saver)\b/.test(ts);
+    const isAfternoon = /\b(dopahar|afternoon|duphar)\b/.test(ts);
+    const isEvening = /\b(shaam|evening)\b/.test(ts);
+    const isNight   = /\b(raat|night|ratra)\b/.test(ts);
+
+    // ── Extract numeric hour ─────────────────────────────────────────────
+    // Matches "7 bje", "7:30 bje", "7 am", "7:30 pm", "7", "19:00"
+    const timeMatch =
+      ts.match(/\b(\d{1,2}):(\d{2})\s*(am|pm|bje|baj|baj[e]?)?\b/) ||
+      ts.match(/\b(\d{1,2})\s*(am|pm|bje|baj[e]?)\b/) ||
+      ts.match(/\bin\s+(\d+)\s+(minute|min|mins|minat|ghanta|hour|hr|hrs)\b/) || null;
+
+    if (timeMatch) {
+      // "in X minutes/hours" format
+      if (/^in\s+/.test(timeMatch[0])) {
+        const qty = parseInt(timeMatch[1], 10);
+        const unit = timeMatch[2];
+        if (/hour|hr|ghanta/.test(unit)) return now + qty * 60 * 60 * 1000;
+        return now + qty * 60 * 1000;
+      }
+
+      let hour   = parseInt(timeMatch[1], 10);
+      const min  = timeMatch[2] && /^\d+$/.test(timeMatch[2]) ? parseInt(timeMatch[2], 10) : 0;
+      const ampm = (timeMatch[3] || timeMatch[2] || "").toLowerCase();
+
+      // AM/PM conversion
+      if (/pm/.test(ampm) && hour < 12) hour += 12;
+      if (/am/.test(ampm) && hour === 12) hour = 0;
+
+      // Hindi time keywords for 12-hr → 24-hr conversion
+      if (!ampm || /bje|baj/.test(ampm)) {
+        if (isNight   && hour < 12 && hour >= 6) hour += 12;          // raat 10 bje → 22
+        else if (isEvening && hour < 12 && hour >= 5) hour += 12;     // shaam 6 bje → 18
+        else if (isAfternoon && hour < 12 && hour >= 12) hour = hour;  // dopahar 1 bje → 13
+        else if (isAfternoon && hour < 12) hour += 12;
+        else if (isMorning && hour === 12) hour = 0;
+        // 1-5 PM range — if no morning keyword and hour is 1-5, assume PM
+        else if (!isMorning && hour >= 1 && hour <= 5) hour += 12;
+      }
+
+      targetDate.setHours(hour, min, 0, 0);
+
+      // If the computed time is already in the past today AND no "kal" keyword → push to tomorrow
+      if (!isTomorrow && !isDayAfter && targetDate.getTime() <= now) {
+        targetDate.setDate(targetDate.getDate() + 1);
+      }
+
+      return targetDate.getTime();
+    }
+
+    // ── Relative minute/hour patterns not matched above ──────────────────
+    const relMatch = ts.match(/(\d+)\s*(minute|min|mins|ghante|hour|hr|hrs|ghanta)/);
+    if (relMatch) {
+      const qty  = parseInt(relMatch[1], 10);
+      const unit = relMatch[2];
+      if (/hour|hr|ghante|ghanta/.test(unit)) return now + qty * 3600000;
+      return now + qty * 60000;
+    }
+
+    // Fallback: 1hr from now
+    return now + 60 * 60 * 1000;
+  }
+
   public async addReminder(title: string, timeString = "soon", durationMinutes = 0): Promise<ReminderItem> {
     const now = Date.now();
-    const due = durationMinutes > 0 ? now + durationMinutes * 60 * 1000 : now + 60 * 60 * 1000;
+    const due = this.parseTimeStringToTimestamp(timeString, durationMinutes, now);
+
     const id = "rem_" + Math.random().toString(36).substring(2, 9);
     const item: ReminderItem = {
       id,
@@ -82,6 +173,7 @@ class ToolsEngine {
 
     return item;
   }
+
 
   public async addNote(title: string, content: string): Promise<NoteItem> {
     const now = Date.now();

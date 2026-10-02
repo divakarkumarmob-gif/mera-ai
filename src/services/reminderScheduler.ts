@@ -69,10 +69,12 @@ class ReminderScheduler {
 
     // 2. Send via WhatsApp to the owner's number, if configured.
     const ownerPhone = process.env.OWNER_WHATSAPP_NUMBER;
+    let waDelivered = false;
     if (ownerPhone) {
-      const message = `⏰ Reminder: ${reminder.title}${reminder.timeString ? ` (${reminder.timeString})` : ""}`;
+      const message = `⏰ *Reminder:* ${reminder.title}${reminder.timeString ? ` _(${reminder.timeString})_` : ""}`;
       const sendRes = await sendWhatsAppUnified(ownerPhone, message);
       if (sendRes.success) {
+        waDelivered = true;
         console.log(`[ReminderScheduler] Reminder delivered via ${sendRes.via || "WhatsApp"}`);
       } else {
         console.warn(`[ReminderScheduler] WhatsApp delivery skipped/failed: ${sendRes.message}`);
@@ -83,6 +85,23 @@ class ReminderScheduler {
           "Set it in your .env to receive reminders on WhatsApp even when the app isn't open."
       );
     }
+
+    // 3. Also deliver via Telegram if configured (dual-channel delivery)
+    const tgToken   = process.env.TELEGRAM_BOT_TOKEN;
+    const tgChatId  = process.env.TELEGRAM_BOSS_CHAT_ID || process.env.TELEGRAM_OWNER_CHAT_ID;
+    if (tgToken && tgChatId) {
+      try {
+        const tgMsg = encodeURIComponent(
+          `⏰ *Reminder:* ${reminder.title}${reminder.timeString ? ` _(${reminder.timeString})_` : ""}`
+        );
+        const url = `https://api.telegram.org/bot${tgToken}/sendMessage?chat_id=${tgChatId}&text=${tgMsg}&parse_mode=Markdown`;
+        await fetch(url);
+        console.log("[ReminderScheduler] Reminder also delivered via Telegram.");
+      } catch (tgErr) {
+        console.warn("[ReminderScheduler] Telegram delivery failed:", tgErr);
+      }
+    }
+
 
     // Mark completed either way, so it never fires twice. If both delivery
     // paths failed (app closed + WhatsApp not connected), the reminder is
