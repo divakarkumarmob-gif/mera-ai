@@ -480,42 +480,180 @@ class BackgroundLocationService {
     // ── Step 2: Flush any queued offline pings first ─────────────────────────
     await this.flushOfflineQueue();
 
-    // ── Step 3: Send current ping ────────────────────────────────────────────
-    try {
-      const res = await fetch(getApiUrl('/api/location/ping'), {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
-      });
-      if (res.ok) {
-        const interval = this.getCurrentInterval();
-        const offMethod = (this as any)._offlineMethod;
-        console.log(`[BGLocation] ✅ Ping saved! lat:${lat} lon:${lon}${usingCached ? ` (${offMethod || 'cached'})` : ''} | next in ${interval/1000}s`);
-        this.consecutiveErrors = 0;
-        this.updateMovementState(lat, lon);
+    // ── Step 3: Send ping with adaptive retry ────────────────────────────────
+    const sent = await this.sendPingWithAdaptiveRetry(payload);
+    if (sent === 'ok') {
+      const interval = this.getCurrentInterval();
+      const offMethod = (this as any)._offlineMethod;
+      console.log(`[BGLocation] ✅ Ping saved! lat:${lat} lon:${lon}${usingCached ? ` (${offMethod || 'cached'})` : ''} | next in ${interval/1000}s`);
+      this.consecutiveErrors = 0;
+      this.updateMovementState(lat, lon);
 
-        // ── Passively build offline fingerprint DB when GPS is fresh ──────
-        if (!usingCached) {
-          const acc = this.cachedLast?.accuracy ?? this.lastPosition?.coords?.accuracy ?? 0;
-          offlineFallbackLocationService.buildFingerprint(lat, lon, acc).catch(() => {});
-          offlineFallbackLocationService.buildCellCache(lat, lon, acc);
-          offlineFallbackLocationService.resetDeadReckoning(lat, lon);
-        }
-
-        // Clear offline method tracking
-        delete (this as any)._offlineAccuracy;
-        delete (this as any)._offlineMethod;
-        delete (this as any)._offlineConf;
-      } else {
-        console.error('[BGLocation] ❌ Ping HTTP error:', res.status);
-        this.queueOfflinePing(payload); // server error → queue
-        this.consecutiveErrors++;       // GPS/server error counts
+      // ── Build offline DB when GPS is fresh ──────────────────────────────
+      if (!usingCached) {
+        const acc = this.cachedLast?.accuracy ?? this.lastPosition?.coords?.accuracy ?? 0;
+        offlineFallbackLocationService.buildFingerprint(lat, lon, acc).catch(() => {});
+        offlineFallbackLocationService.buildCellCache(lat, lon, acc);
+        offlineFallbackLocationService.resetDeadReckoning(lat, lon);
       }
-    } catch (netErr: any) {
-      // ── Data/Internet off ─────────────────────────────────────────────────
-      console.warn('[BGLocation] 📵 No internet — ping queued for retry:', netErr?.message);
-      this.queueOfflinePing(payload);
-      // DO NOT increment consecutiveErrors for network failures
-      // DO NOT stopTracking — we'll retry when data returns
+      delete (this as any)._offlineAccuracy;
+      delete (this as any)._offlineMethod;
+      delete (this as any)._offlineConf;
+    } else if (sent === 'queued') {
+      console.log('[BGLocation] 📦 Ping queued (data off or timeout)');
+    } else {
+      console.error('[BGLocation] ❌ Ping failed permanently:', sent);
+      this.consecutiveErrors++; // only count actual server errors
     }
+  }
+
+  // ── Adaptive Network Fetch ────────────────────────────────────────────────
+
+  /**
+   * Detects current network quality.
+   * Returns: 'offline' | '2g' | 'slow' | 'good'
+   */
+  private getNetworkQuality(): 'offline' | '2g' | 'slow' | 'good' {
+    try {
+      // navigator.onLine is basic but fast
+      if (typeof navigator !== 'undefined' && !navigator.onLine) return 'offline';
+
+      const conn = (navigator as any).connection || (navigator as any).mozConnection;
+      if (!conn) return 'good'; // assume good if API unavailable
+
+      const eff = conn.effectiveType as string | undefined; // '2g' | '3g' | '4g' | 'slow-2g'
+      const downlink = conn.downlink as number | undefined;  // Mbps
+
+      if (eff === 'slow-2g') return '2g';
+      if (eff === '2g')      return '2g';
+      if (eff === '3g' || (downlink !== undefined && downlink < 1)) return 'slow';
+      return 'good';
+    } catch {
+      return 'good';
+    }
+  }
+
+  /**
+   * Build a minimal payload for slow/2G networks.
+   * Drops optional fields (altitude, heading, battery) to reduce bytes.
+   */
+  private buildMinimalPayload(full: GpsPingPayload): Partial<GpsPingPayload> {
+    return {
+      deviceId: full.deviceId,
+      username: full.username,
+      label:    full.label,
+      lat:      full.lat,
+      lon:      full.lon,
+      accuracy: full.accuracy,
+      // Drop: altitude, speed, heading, batteryLevel, isCharging, networkType
+      isCachedLastKnown: full.isCachedLastKnown,
+    };
+  }
+
+  /**
+   * Send ping with adaptive strategy based on network quality:
+   *
+   * GPS ON + Data OFF   → queue immediately (no retry)
+   * GPS ON + Data SLOW  → short timeout, minimal payload, 2 retries
+   * GPS ON + Data GOOD  → normal fetch, 3 retries with backoff
+   *
+   * Returns: 'ok' | 'queued' | 'error:<status>'
+   */
+  private async sendPingWithAdaptiveRetry(payload: GpsPingPayload): Promise<string> {
+    const quality = this.getNetworkQuality();
+    const url     = getApiUrl('/api/location/ping');
+
+    // Case 1: GPS ON + Data OFF → queue immediately, no point trying
+    if (quality === 'offline') {
+      this.queueOfflinePing(payload);
+      return 'queued';
+    }
+
+    // Case 2: GPS ON + Data SLOW (2G / weak 3G)
+    if (quality === '2g' || quality === 'slow') {
+      console.log(`[BGLocation] 📶 Slow network (${quality}) — using minimal payload + short timeout`);
+      const miniPayload = this.buildMinimalPayload(payload);
+      const MAX_RETRIES_SLOW = 2;
+      const TIMEOUT_SLOW_MS  = 8000; // 8s timeout on slow network
+
+      for (let attempt = 1; attempt <= MAX_RETRIES_SLOW; attempt++) {
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), TIMEOUT_SLOW_MS);
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(miniPayload),
+            signal: controller.signal,
+          });
+          clearTimeout(timer);
+          if (res.ok) return 'ok';
+          if (attempt < MAX_RETRIES_SLOW) {
+            await this.sleep(1500 * attempt); // 1.5s, 3s
+          }
+        } catch (err: any) {
+          if (err?.name === 'AbortError') {
+            console.warn(`[BGLocation] ⏱️ Slow network timeout (attempt ${attempt}/${MAX_RETRIES_SLOW})`);
+          } else {
+            // Total network failure → queue and stop retrying
+            this.queueOfflinePing(payload);
+            return 'queued';
+          }
+          if (attempt === MAX_RETRIES_SLOW) {
+            // All retries exhausted on slow network → queue
+            this.queueOfflinePing(payload);
+            return 'queued';
+          }
+          await this.sleep(2000 * attempt);
+        }
+      }
+      this.queueOfflinePing(payload);
+      return 'queued';
+    }
+
+    // Case 3: GPS ON + Data GOOD → normal fetch with exponential backoff
+    const MAX_RETRIES_GOOD = 3;
+    const TIMEOUT_GOOD_MS  = 15000; // 15s timeout on good network
+
+    for (let attempt = 1; attempt <= MAX_RETRIES_GOOD; attempt++) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), TIMEOUT_GOOD_MS);
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+        clearTimeout(timer);
+        if (res.ok) return 'ok';
+        // Server error (4xx/5xx)
+        if (res.status >= 400 && res.status < 500) {
+          return `error:${res.status}`; // client error, don't retry
+        }
+        // 5xx → retry
+        if (attempt < MAX_RETRIES_GOOD) await this.sleep(1000 * 2 ** (attempt - 1)); // 1s, 2s
+      } catch (err: any) {
+        if (err?.name === 'AbortError') {
+          console.warn(`[BGLocation] ⏱️ Request timeout (attempt ${attempt}/${MAX_RETRIES_GOOD})`);
+        } else {
+          // Network failure → queue
+          this.queueOfflinePing(payload);
+          return 'queued';
+        }
+        if (attempt === MAX_RETRIES_GOOD) {
+          this.queueOfflinePing(payload);
+          return 'queued';
+        }
+        await this.sleep(1000 * 2 ** (attempt - 1)); // exponential: 1s, 2s, 4s
+      }
+    }
+    this.queueOfflinePing(payload);
+    return 'queued';
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   /** Queue a failed ping to localStorage for retry when internet returns */
