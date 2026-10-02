@@ -215,16 +215,25 @@ class BackgroundLocationService {
     try {
       // Register device with the server
       const registerUrl = getApiUrl('/api/location/register');
+      console.log('[BackgroundLocation] 📡 Registering device at:', registerUrl, '| Payload:', JSON.stringify(payload));
       const response = await fetch(registerUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
 
-      const data = await response.json();
+      const responseText = await response.text();
+      console.log('[BackgroundLocation] 📥 Register response status:', response.status, '| Body:', responseText);
+
+      let data: any;
+      try { data = JSON.parse(responseText); } catch { data = { success: false, message: responseText }; }
+
       if (!data.success) {
+        console.error('[BackgroundLocation] ❌ Register failed:', data.message);
         return { success: false, message: data.message || 'Registration failed' };
       }
+
+      console.log('[BackgroundLocation] ✅ Device registered successfully in Firestore!');
 
       // Mark tracking as enabled
       try {
@@ -242,7 +251,7 @@ class BackgroundLocationService {
         message: `Device "${label}" registered! Live location tracking active. 📍`,
       };
     } catch (err: any) {
-      console.error('[BackgroundLocation] Registration error:', err);
+      console.error('[BackgroundLocation] ❌ Registration network error:', err?.message || err);
       return {
         success: false,
         message: `Registration failed: ${err?.message || 'Network error'}`,
@@ -462,20 +471,23 @@ class BackgroundLocationService {
 
     try {
       const pingUrl = getApiUrl('/api/location/ping');
+      console.log('[BackgroundLocation] 📡 Sending ping to:', pingUrl, '| lat:', payload.lat, 'lon:', payload.lon);
       const response = await fetch(pingUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
 
+      const responseText = await response.text();
       if (response.ok) {
+        console.log('[BackgroundLocation] ✅ Ping saved to Firestore! Response:', responseText);
         this.consecutiveErrors = 0;
       } else {
-        console.warn('[BackgroundLocation] Ping failed with status:', response.status);
+        console.error('[BackgroundLocation] ❌ Ping FAILED! Status:', response.status, '| Body:', responseText);
         this.consecutiveErrors++;
       }
     } catch (err: any) {
-      console.warn('[BackgroundLocation] Ping network error:', err?.message);
+      console.error('[BackgroundLocation] ❌ Ping network error (no internet or server down?):', err?.message);
       this.consecutiveErrors++;
     }
   }
@@ -520,7 +532,13 @@ class BackgroundLocationService {
 
     if (this.isTrackingEnabled()) {
       console.log(`[BackgroundLocation] Auto-resuming tracking for "${label}"...`);
-      this.startTracking();
+      // Always re-register on resume so Firestore has the device entry even after server restarts
+      try {
+        await this.requestPermissionAndStart(label);
+      } catch {
+        // Fallback: just start tracking if permission was already granted
+        this.startTracking();
+      }
     } else {
       // If not yet started, trigger permission prompt so user can allow location
       try {
@@ -530,6 +548,7 @@ class BackgroundLocationService {
       }
     }
   }
+
 
   // ── Battery & Network Helpers ────────────────────────────────────────────
 
