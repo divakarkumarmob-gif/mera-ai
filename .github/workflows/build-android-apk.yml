@@ -75,41 +75,86 @@ jobs:
           echo "sdk.dir=$ANDROID_HOME" > android/local.properties
           echo "✅ local.properties written: sdk.dir=$ANDROID_HOME"
 
-      - name: 🛠️ Fix Kotlin Duplicate Classes & Configure Gradle
+      - name: 🛠️ Fix Gradle — Revert AGP & Force Compatible androidx.core Version
         run: |
-          # 1. Enable Jetifier & AndroidX in gradle.properties
-          PROP="android/gradle.properties"
-          if [ -f "$PROP" ]; then
-            echo "android.enableJetifier=true" >> "$PROP"
-            echo "android.useAndroidX=true" >> "$PROP"
-          fi
-
-          # 2. Bump compileSdk + targetSdk to 36 (required by core-ktx 1.17.0)
           APP_GRADLE="android/app/build.gradle"
-          if [ -f "$APP_GRADLE" ]; then
-            # Bump compileSdk (handles both 'compileSdk X' and 'compileSdkVersion X')
-            sed -i 's/compileSdk\b\s*=\s*35/compileSdk = 36/g' "$APP_GRADLE"
-            sed -i 's/compileSdk 35/compileSdk 36/g' "$APP_GRADLE"
-            sed -i 's/compileSdkVersion 35/compileSdkVersion 36/g' "$APP_GRADLE"
-            # Bump targetSdk to 36 as well
-            sed -i 's/targetSdk\b\s*=\s*35/targetSdk = 36/g' "$APP_GRADLE"
-            sed -i 's/targetSdk 35/targetSdk 36/g' "$APP_GRADLE"
-            sed -i 's/targetSdkVersion 35/targetSdkVersion 36/g' "$APP_GRADLE"
-            echo "✅ compileSdk/targetSdk bumped to 36"
-          fi
-
-          # 3. Bump Android Gradle Plugin to 8.8.0 (supports compileSdk 36)
           ROOT_GRADLE="android/build.gradle"
+          VARS_GRADLE="android/variables.gradle"
+          PROP="android/gradle.properties"
+
+          # ── 1. Jetifier & AndroidX ────────────────────────────────────────────
+          if [ -f "$PROP" ]; then
+            grep -q "android.enableJetifier" "$PROP" || echo "android.enableJetifier=true" >> "$PROP"
+            grep -q "android.useAndroidX"    "$PROP" || echo "android.useAndroidX=true"    >> "$PROP"
+          fi
+
+          # ── 2. Revert AGP to 8.7.2 (stable, compileSdk 35 compatible) ────────
+          # Root cause: core-ktx:1.17.0 needs AGP 8.9.1+ but that chain of
+          # upgrades is fragile. Instead we pin core-ktx to 1.13.1 (step 4).
           if [ -f "$ROOT_GRADLE" ]; then
-            sed -i "s/com.android.tools.build:gradle:[0-9.]\+/com.android.tools.build:gradle:8.8.0/g" "$ROOT_GRADLE"
-            echo "✅ AGP bumped to 8.8.0"
+            sed -i "s/com.android.tools.build:gradle:[0-9.]\+/com.android.tools.build:gradle:8.7.2/g" "$ROOT_GRADLE"
+            echo "✅ AGP pinned → 8.7.2"
           fi
 
-          # 4. Add Kotlin stdlib + core-ktx resolution strategy to app/build.gradle
+          # ── 3. Keep compileSdk at 35 (AGP 8.7.2 supports up to 35) ──────────
+          # Capacitor 6+ stores compileSdkVersion in variables.gradle NOT app/build.gradle
+          if [ -f "$VARS_GRADLE" ]; then
+            sed -i 's/compileSdkVersion\s*=\s*[0-9]\+/compileSdkVersion = 35/g' "$VARS_GRADLE"
+            sed -i 's/targetSdkVersion\s*=\s*[0-9]\+/targetSdkVersion = 35/g'   "$VARS_GRADLE"
+            echo "✅ variables.gradle → compileSdkVersion=35, targetSdkVersion=35"
+            cat "$VARS_GRADLE"
+          fi
+          # Also patch app/build.gradle in case literals exist there
           if [ -f "$APP_GRADLE" ]; then
-            printf "\nconfigurations.all {\n    resolutionStrategy {\n        force 'org.jetbrains.kotlin:kotlin-stdlib:1.8.22'\n        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22'\n        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22'\n    }\n}\n\ndependencies {\n    constraints {\n        implementation('org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22') {\n            because('kotlin-stdlib-jdk7 is now part of kotlin-stdlib')\n        }\n        implementation('org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22') {\n            because('kotlin-stdlib-jdk8 is now part of kotlin-stdlib')\n        }\n    }\n}\n" >> "$APP_GRADLE"
+            sed -i 's/compileSdk\s\+[0-9]\+/compileSdk 35/g'         "$APP_GRADLE"
+            sed -i 's/compileSdkVersion\s\+[0-9]\+/compileSdkVersion 35/g' "$APP_GRADLE"
+            sed -i 's/targetSdk\s\+[0-9]\+/targetSdk 35/g'           "$APP_GRADLE"
+            sed -i 's/targetSdkVersion\s\+[0-9]\+/targetSdkVersion 35/g'   "$APP_GRADLE"
           fi
 
+          # ── 4. Force core-ktx:1.13.1 — KEY FIX ──────────────────────────────
+          # core-ktx:1.17.0 (pulled by capacitor plugins) needs AGP 8.9.1+
+          # and compileSdk 36 — way too new. Pin to 1.13.1 which is:
+          #   ✅ compileSdk 35 compatible
+          #   ✅ AGP 8.7.x compatible
+          #   ✅ Production stable (used by millions of apps)
+          if [ -f "$APP_GRADLE" ]; then
+            cat >> "$APP_GRADLE" << 'GRADLE_EOF'
+
+// ── FRIDAY CI: Dependency Version Resolution Fixes ─────────────────────────
+configurations.all {
+    resolutionStrategy {
+        // Pin androidx.core to 1.13.1 (stable, API-35, AGP-8.7 compatible)
+        // Prevents: core-ktx:1.17.0 → AGP 8.9.1+ requirement chain
+        force 'androidx.core:core-ktx:1.13.1'
+        force 'androidx.core:core:1.13.1'
+
+        // Kotlin stdlib deduplication (prevents duplicate class errors)
+        force 'org.jetbrains.kotlin:kotlin-stdlib:1.8.22'
+        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22'
+        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22'
+    }
+}
+
+dependencies {
+    constraints {
+        implementation('org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22') {
+            because('kotlin-stdlib-jdk7 is now part of kotlin-stdlib')
+        }
+        implementation('org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22') {
+            because('kotlin-stdlib-jdk8 is now part of kotlin-stdlib')
+        }
+    }
+}
+GRADLE_EOF
+            echo "✅ Resolution strategy written → core-ktx:1.13.1 + kotlin-stdlib:1.8.22"
+          fi
+
+          # ── 5. Verify final state ─────────────────────────────────────────────
+          echo "── android/build.gradle (AGP version) ──"
+          grep "com.android.tools.build" "$ROOT_GRADLE" || true
+          echo "── android/variables.gradle ──"
+          cat "$VARS_GRADLE" 2>/dev/null || echo "(not found)"
 
       - name: 🔑 Configure Permissions & Android 14/15 Foreground Service in AndroidManifest
         run: |
