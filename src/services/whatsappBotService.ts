@@ -2058,28 +2058,32 @@ class WhatsAppBotService {
       return `${trimmedLabel}: ${trimmedUrl}`;
     });
 
-    // 2. Remove markdown header hashes at line starts (### Header -> *Header*)
-    clean = clean.replace(/^(#{1,6})\s*(.+)$/gm, (_match, _h, heading) => {
-      const t = heading.trim();
-      return t ? `*${t}*` : "";
-    });
-
-    // 3. Convert double asterisks **bold** to WhatsApp single asterisk *bold*
+    // 2. Convert double asterisks **bold** to WhatsApp single asterisk *bold*
     clean = clean.replace(/\*\*([^*]+)\*\*/g, "*$1*");
 
-    // 4. Standardize dividers: ───, ---, === to WhatsApp divider ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    clean = clean.replace(/^[─\-_=]{3,}$/gm, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    // 3. Convert markdown header hashes at line starts (# Header -> *Header*)
+    clean = clean.replace(/(?:^|\n)\s*#{1,6}\s*([^\n]+)/g, (_m, heading) => `\n\n*${heading.trim()}*\n`);
 
-    // 5. Ensure empty line before *Method N:* or *Step N:* if squashed after paragraph
+    // 4. Handle inline hashes (e.g. "...disabled. ### Method 1: ...")
+    clean = clean.replace(/\s+#{1,6}\s*(Method\s+\d+[^.\n]+?)(?=\s+\d+\.|\s+If\s+|\s+When\s+|$)/gi, "\n\n*$1*\n");
+    clean = clean.replace(/\s+#{1,6}\s+([A-Z][a-zA-Z0-9\s]{2,40}:)/g, "\n\n*$1*\n");
+
+    // 5. Standardize dividers: ───, ---, === to WhatsApp divider ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    clean = clean.replace(/[─\-_=]{5,}/g, "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+
+    // 6. Ensure line break and empty line before *Method N:* or *Step N:*
     clean = clean.replace(/([^\n])\s+(\*(?:Method|Step|Option|Phase)\s+\d+[:\-][^*]*\*)/gi, "$1\n\n$2\n");
 
-    // 6. Ensure line breaks before numbered steps if squashed into a single line (e.g. "...files: 1. Open Google...")
-    clean = clean.replace(/([^\n])\s+(\d+\.\s+[A-Z])/g, "$1\n\n$2");
+    // 7. Ensure line breaks before numbered steps if squashed (e.g. "...files: 1. Open Google... 2. Go to...")
+    clean = clean.replace(/([^\n])\s+(\d+\.\s+[A-Z])/g, "$1\n$2");
 
-    // 7. Ensure empty line before bullet points if squashed
-    clean = clean.replace(/([^\n])\s+([•\-\*]\s+[A-Z])/g, "$1\n\n$2");
+    // 8. Ensure line breaks before bullet points if squashed
+    clean = clean.replace(/([^\n])\s+([•\-\*]\s+[A-Z])/g, "$1\n$2");
 
-    // 8. Collapse excessive empty newlines (more than 2) to maximum 2
+    // 9. Separate introductory title if squashed with body: e.g. "📌 *Title* Intro text..."
+    clean = clean.replace(/(📌\s*\*[^*]+\*)\s+([A-Z])/g, "$1\n\n$2");
+
+    // 10. Collapse excessive empty newlines (more than 2) to maximum 2
     clean = clean.replace(/\n{3,}/g, "\n\n");
 
     return clean.trim();
