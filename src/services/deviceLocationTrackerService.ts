@@ -418,13 +418,20 @@ class DeviceLocationTrackerService {
         else if (ageMinutes < 1440) lastUpdatedAgo = `${Math.floor(ageMinutes / 60)} ghante pehle`;
         else lastUpdatedAgo = `${Math.floor(ageMinutes / 1440)} din pehle`;
 
-        const message = `📍 **${bestMatch.label || bestMatch.ownerName}** ki **Cached** Location (GPS fix pending):\n\n` +
-          `🏠 **Address:** ${cachedAddress}\n` +
-          `🌐 **Coordinates:** ${bestMatch.lat.toFixed(6)}, ${bestMatch.lon.toFixed(6)}\n` +
-          `⏱️ **Last Updated:** ${lastUpdatedAgo} (Cached)\n` +
-          `${batteryStr}${networkStr}\n` +
-          `📌 **Google Maps:** ${googleMapsUrl}\n` +
-          `ℹ️ *Note: Yeh cached location hai. Live GPS fix milte hi update ho jayega.*`;
+        const message =
+          `📍 *${bestMatch.label || bestMatch.ownerName}* ki Location\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `🏠 *Address:*\n${cachedAddress}\n` +
+          `\n` +
+          `🌐 *Coordinates:*\n${bestMatch.lat.toFixed(6)}, ${bestMatch.lon.toFixed(6)}\n` +
+          `\n` +
+          `⏱️ *Last Updated:* ${lastUpdatedAgo}\n` +
+          (batteryStr ? `${batteryStr}\n` : "") +
+          (bestMatch.networkType ? `📡 *Network:* ${bestMatch.networkType.toUpperCase()}\n` : "") +
+          `\n` +
+          `📌 *Google Maps:*\n${googleMapsUrl}\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `ℹ️ _Cached location — Live GPS fix pending_`;
 
         return {
           success: true,
@@ -474,14 +481,20 @@ class DeviceLocationTrackerService {
 
       const networkStr = bestMatch.networkType ? ` | 📡 ${bestMatch.networkType.toUpperCase()}` : "";
 
-      const message = `📍 **${bestMatch.label || bestMatch.ownerName}** ki Live Location:\n\n` +
-        `🏠 **Address:** ${bestMatch.address || "Address not available"}\n` +
-        `🌐 **Coordinates:** ${bestMatch.lat.toFixed(6)}, ${bestMatch.lon.toFixed(6)}\n` +
-        `🎯 **Accuracy:** ${Math.round(bestMatch.accuracy || 0)} meters\n` +
-        `⏱️ **Last Updated:** ${lastUpdatedAgo}\n` +
-        `${batteryStr}${networkStr}\n` +
-        `📌 **Google Maps:** ${googleMapsUrl}` +
-        staleWarning;
+      const message =
+        `📍 *${bestMatch.label || bestMatch.ownerName}* ki Live Location\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `🏠 *Address:*\n${bestMatch.address || "Address not available"}\n` +
+        `\n` +
+        `🌐 *Coordinates:*\n${bestMatch.lat.toFixed(6)}, ${bestMatch.lon.toFixed(6)}\n` +
+        `\n` +
+        `🎯 *Accuracy:* ${Math.round(bestMatch.accuracy || 0)} meters\n` +
+        `⏱️ *Last Updated:* ${lastUpdatedAgo}\n` +
+        (batteryStr ? `${batteryStr}\n` : "") +
+        (bestMatch.networkType ? `📡 *Network:* ${bestMatch.networkType.toUpperCase()}\n` : "") +
+        `\n` +
+        `📌 *Google Maps:*\n${googleMapsUrl}` +
+        (isStale ? `\n\n⚠️ _Warning: ${lastUpdatedAgo} ki location hai — device offline ho sakta hai_` : "");
 
       return {
         success: true,

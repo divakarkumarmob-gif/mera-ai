@@ -782,6 +782,31 @@ export function createAgentToolsRouter(): Router {
     }
   });
 
+  // Quick debug: GET /api/location/status?label=bhai  → see what Firestore has for any device
+  router.get("/api/location/status", async (req, res) => {
+    try {
+      const { deviceLocationTrackerService } = await import("../services/deviceLocationTrackerService");
+      const label = String(req.query.label || "boss").trim();
+      const result = await deviceLocationTrackerService.getDeviceLocation(label);
+      const allDevices = await deviceLocationTrackerService.listAllDevices();
+      res.json({
+        query: label,
+        result,
+        allRegisteredDevices: allDevices.map((d: any) => ({
+          label: d.label,
+          username: d.username,
+          address: d.address,
+          lastUpdatedAt: d.lastUpdatedAt ? new Date(d.lastUpdatedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : "never",
+          lat: d.lat,
+          lon: d.lon,
+          batteryLevel: d.batteryLevel,
+        })),
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err?.message || "Status check failed" });
+    }
+  });
+
   // ══════════════════════════════════════════════════════════════════════════
   // PHONE INTELLIGENCE & OSINT
   // ══════════════════════════════════════════════════════════════════════════
