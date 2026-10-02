@@ -896,7 +896,7 @@ class WhatsAppBotService {
               );
               if (powerRes.handled && powerRes.replyText) {
                 if (powerRes.mentions && powerRes.mentions.length > 0) {
-                  await this.sock.sendMessage(replyJid, { text: powerRes.replyText, mentions: powerRes.mentions });
+                  await this.sock.sendMessage(replyJid, { text: this.formatWhatsAppMarkdown(powerRes.replyText), mentions: powerRes.mentions });
                 } else {
                   await this.sendHumanLikeMessage(replyJid, powerRes.replyText, text, msg.key);
                 }
@@ -924,7 +924,7 @@ class WhatsAppBotService {
               );
               if (naturalRes.handled && naturalRes.replyText) {
                 if (naturalRes.mentions && naturalRes.mentions.length > 0) {
-                  await this.sock.sendMessage(replyJid, { text: naturalRes.replyText, mentions: naturalRes.mentions });
+                  await this.sock.sendMessage(replyJid, { text: this.formatWhatsAppMarkdown(naturalRes.replyText), mentions: naturalRes.mentions });
                 } else {
                   await this.sendHumanLikeMessage(replyJid, naturalRes.replyText, text, msg.key);
                 }
@@ -2039,6 +2039,52 @@ class WhatsAppBotService {
     await this.initSocket();
   }
 
+  /**
+   * Transforms markdown to clean WhatsApp markdown (*bold*, _italic_),
+   * fixes squashed lines, removes markdown header hashes, converts links,
+   * and ensures spacious readability on WhatsApp mobile.
+   */
+  public formatWhatsAppMarkdown(text: string): string {
+    if (!text) return "";
+    let clean = text;
+
+    // 1. Convert markdown links [Label](URL) -> "Label: URL" (or just URL if label is identical or empty)
+    clean = clean.replace(/\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/g, (_match, label, url) => {
+      const trimmedLabel = label.trim();
+      const trimmedUrl = url.trim();
+      if (!trimmedLabel || trimmedLabel.toLowerCase() === trimmedUrl.toLowerCase()) {
+        return trimmedUrl;
+      }
+      return `${trimmedLabel}: ${trimmedUrl}`;
+    });
+
+    // 2. Remove markdown header hashes at line starts (### Header -> *Header*)
+    clean = clean.replace(/^(#{1,6})\s*(.+)$/gm, (_match, _h, heading) => {
+      const t = heading.trim();
+      return t ? `*${t}*` : "";
+    });
+
+    // 3. Convert double asterisks **bold** to WhatsApp single asterisk *bold*
+    clean = clean.replace(/\*\*([^*]+)\*\*/g, "*$1*");
+
+    // 4. Standardize dividers: ───, ---, === to WhatsApp divider ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    clean = clean.replace(/^[─\-_=]{3,}$/gm, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+    // 5. Ensure empty line before *Method N:* or *Step N:* if squashed after paragraph
+    clean = clean.replace(/([^\n])\s+(\*(?:Method|Step|Option|Phase)\s+\d+[:\-][^*]*\*)/gi, "$1\n\n$2\n");
+
+    // 6. Ensure line breaks before numbered steps if squashed into a single line (e.g. "...files: 1. Open Google...")
+    clean = clean.replace(/([^\n])\s+(\d+\.\s+[A-Z])/g, "$1\n\n$2");
+
+    // 7. Ensure empty line before bullet points if squashed
+    clean = clean.replace(/([^\n])\s+([•\-\*]\s+[A-Z])/g, "$1\n\n$2");
+
+    // 8. Collapse excessive empty newlines (more than 2) to maximum 2
+    clean = clean.replace(/\n{3,}/g, "\n\n");
+
+    return clean.trim();
+  }
+
   // ── Outgoing Dispatches with Firewall ─────────────────────────────────────
 
   public async sendHumanLikeMessage(jid: string, text: string, incomingText?: string, messageKey?: any): Promise<any> {
@@ -2057,7 +2103,8 @@ class WhatsAppBotService {
       return null;
     }
 
-    const trimmed = text.trim();
+    const formatted = this.formatWhatsAppMarkdown(text);
+    const trimmed = formatted.trim();
     const recipientKey = jid.replace(/@.*$/, "");
 
     await humanBotFirewallService.simulateWhatsAppHumanTyping(
@@ -2313,10 +2360,11 @@ class WhatsAppBotService {
 
       const gifPayload = typeof gifSource === "string" ? { url: gifSource } : gifSource;
       let sendRes: any = null;
+      const cleanCaption = caption ? this.formatWhatsAppMarkdown(caption) : "";
       try {
-        sendRes = await this.sock.sendMessage(jid, { video: gifPayload, gifPlayback: true, caption: caption || "" });
+        sendRes = await this.sock.sendMessage(jid, { video: gifPayload, gifPlayback: true, caption: cleanCaption });
       } catch {
-        sendRes = await this.sock.sendMessage(jid, { image: gifPayload, caption: caption || "" });
+        sendRes = await this.sock.sendMessage(jid, { image: gifPayload, caption: cleanCaption });
       }
 
       if (sendRes?.key?.id) {
@@ -2367,14 +2415,15 @@ class WhatsAppBotService {
 
       const videoPayload = typeof videoSource === "string" ? { url: videoSource } : videoSource;
       let sendRes: any = null;
+      const cleanCaption = caption ? this.formatWhatsAppMarkdown(caption) : "";
       try {
         sendRes = await this.sock.sendMessage(
           jid,
-          { video: videoPayload, caption: caption || "", gifPlayback },
+          { video: videoPayload, caption: cleanCaption, gifPlayback },
           sendOptions
         );
       } catch {
-        sendRes = await this.sock.sendMessage(jid, { video: videoPayload, caption: caption || "", gifPlayback });
+        sendRes = await this.sock.sendMessage(jid, { video: videoPayload, caption: cleanCaption, gifPlayback });
       }
 
       if (sendRes?.key?.id) {

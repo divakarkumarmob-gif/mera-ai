@@ -514,7 +514,8 @@ class HumanBrowserService {
       .replace(/&gt;/g, ">")
       .replace(/&nbsp;/g, " ")
       .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(dec))
-      .replace(/\s+/g, " ")
+      .replace(/[^\S\r\n]+/g, " ")
+      .replace(/\n{3,}/g, "\n\n")
       .trim();
   }
 
@@ -594,7 +595,7 @@ Rules:
         parts.push(`🔗 *Store Link:* ${buyLink}`);
         const photoLink = p.imgUrl || `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(p.title)}`;
         parts.push(`🖼️ *View Photos:* ${photoLink}`);
-        parts.push(`──────────────────────`);
+        parts.push(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
         return parts.join("\n");
       });
 
@@ -613,34 +614,50 @@ Rules:
         const { GoogleGenAI } = await import("@google/genai");
         const ai = new GoogleGenAI({ apiKey: key });
 
-        const prompt = `You are a Google Chrome Search & AI Overview formatter.
-Your task is to present the search results for "${cleanQuery}" EXACTLY as they appear on Google Chrome (verbatim, factual, and clean).
+        const prompt = `You are an elite Knowledge & Search Results formatter for WhatsApp.
+Your task is to present search results for "${cleanQuery}" formatted for maximum readability on WhatsApp mobile.
 
 Search Query: "${cleanQuery}"
 Raw Web Search / DOM Snippets:
 ${combinedSnippets || "Factual knowledge about: " + cleanQuery}
 
-Formatting Instructions:
-- If this is a shopping/product search (e.g. shirts, shoes, phones):
-  List the top genuine items found with realistic Indian pricing in ₹ INR, ratings, and genuine store links (Amazon.in / Flipkart / Myntra).
-  Put a clean dividing line (──────────────────────) after EVERY item:
-  *1. [Brand & Model Name]* — *₹[Price]* (⭐ [Rating] • [Store Name])
-  🔗 *Buy Link:* https://www.amazon.in/s?k=[URL_ENCODED_NAME]
-  🖼️ *View Photos:* https://www.google.com/search?tbm=isch&q=[URL_ENCODED_NAME]
-  • *Details:* [Genuine fabric/specs/features]
-  ──────────────────────
+Formatting Instructions (STRICT WHATSAPP MARKDOWN):
+- NEVER use markdown heading hashes (###, ##, #). Use *Bold Text* instead.
+- NEVER use double asterisks (**). WhatsApp ONLY supports single asterisks (*bold*).
+- ALWAYS use generous vertical spacing: Put an empty blank line between every paragraph, method, and numbered step so text NEVER appears cramped into a single line!
+- Use the clean divider line: ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-- If this is a factual / legal / informational query (e.g. Indian Constitution 42nd amendment, Prime Minister, facts):
-  Provide the EXACT verbatim factual summary directly:
-  📌 *[Key Summary / Answer]*
-  [Clear, comprehensive factual explanation without robotic filler]
-  ──────────────────────
-  🔗 *Source:* https://en.wikipedia.org/wiki/[Relevant_Topic]
+Format structure for guides / methods:
+📌 *[Topic Heading]*
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[1-2 introductory sentences explaining the core answer]
+
+*Method 1: [Method Title]*
+1. [Clear action step 1]
+
+2. [Clear action step 2]
+
+3. [Clear action step 3]
+
+*Method 2: [Method Title]*
+1. [Clear action step 1]
+
+2. [Clear action step 2]
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔗 *Source:* [Verified Source URL or Authority name]
+
+For shopping/products:
+*1. [Brand & Model Name]* — *₹[Price]* (⭐ [Rating] • [Store Name])
+🔗 *Buy Link:* https://www.amazon.in/s?k=[URL_ENCODED_NAME]
+🖼️ *View Photos:* https://www.google.com/search?tbm=isch&q=[URL_ENCODED_NAME]
+• *Details:* [Genuine fabric/specs/features]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 STRICT RULES:
 - Do NOT make up synthetic chatbot closing questions or personality fluff.
-- Always include the dividing line (──────────────────────) after each card.
-- Output clean readable text without raw HTML entities.`;
+- Output clean readable text with blank lines between every numbered step and section.
+- NEVER squash text into a single paragraph or line.`;
 
         for (const model of ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]) {
           try {
