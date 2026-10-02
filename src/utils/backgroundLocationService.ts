@@ -6,20 +6,32 @@
  *  2. @capacitor/geolocation        → Fused Location Provider (foreground)
  *  3. navigator.geolocation         → Web/browser fallback
  *
- * Why no permanent notification?
- *  - WorkManager + Fused Location Provider = Android OS manages wakeup
- *  - No foreground service = no permanent status bar notification
- *  - OS wakes app periodically to fetch GPS and send ping
- *
- * Ping interval: 60 seconds (configurable via PING_INTERVAL_MS)
+ * 🔋 ADAPTIVE BATTERY OPTIMIZATION:
+ *  - Moving (>50m change)   → ping every 60s  (real-time tracking)
+ *  - Slow / stopped         → ping every 3min (light tracking)
+ *  - Stationary long time   → ping every 5min (idle mode)
+ *  - Deep idle (no move 30m)→ ping every 10min (sleep mode)
+ *  - Fused Location uses WiFi+Cell instead of GPS when stationary = less drain
  */
 
 import { getApiUrl } from './api';
 import { getStoredUser } from './appSecurityClient';
 
-// ── Configuration ─────────────────────────────────────────────────────────────
+// ── Adaptive Ping Configuration ───────────────────────────────────────────────
 
-const PING_INTERVAL_MS         = 60 * 1000;
+// Intervals based on movement state
+const INTERVAL_ACTIVE_MS      = 60  * 1000;   // Moving       → 60s
+const INTERVAL_SLOW_MS        = 3   * 60000;  // Slow/stopped → 3min
+const INTERVAL_IDLE_MS        = 5   * 60000;  // Idle         → 5min
+const INTERVAL_SLEEP_MS       = 10  * 60000;  // Deep idle    → 10min
+
+// Movement thresholds
+const MOVE_THRESHOLD_M        = 50;    // meters — considered "moved"
+const IDLE_THRESHOLD_PINGS    = 3;     // 3 consecutive no-move pings → idle
+const SLEEP_THRESHOLD_PINGS   = 6;     // 6 consecutive no-move pings → sleep
+
+// Keep for compat
+const PING_INTERVAL_MS        = INTERVAL_ACTIVE_MS;
 const STORAGE_KEY_DEVICE_ID    = 'friday_location_device_id';
 const STORAGE_KEY_DEVICE_LABEL = 'friday_location_device_label';
 const STORAGE_KEY_TRACKING_ON  = 'friday_location_tracking_enabled';
@@ -54,6 +66,71 @@ class BackgroundLocationService {
   private isNative            = false;
   private consecutiveErrors   = 0;
   private readonly MAX_ERRORS = 10;
+
+  // ── Adaptive battery optimization ─────────────────────────────────────────
+  private noMovePingCount    = 0;   // consecutive pings with no significant movement
+  private lastPingCoords: { lat: number; lon: number } | null = null;
+
+  /** Haversine distance in meters between two GPS points */
+  private distanceMeters(a: { lat: number; lon: number }, b: { lat: number; lon: number }): number {
+    const R = 6371000;
+    const dLat = (b.lat - a.lat) * Math.PI / 180;
+    const dLon = (b.lon - a.lon) * Math.PI / 180;
+    const sin2 = Math.sin(dLat / 2) ** 2 +
+      Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+    return R * 2 * Math.asin(Math.sqrt(sin2));
+  }
+
+  /** Get current adaptive interval based on movement state */
+  private getCurrentInterval(): number {
+    if (this.noMovePingCount >= SLEEP_THRESHOLD_PINGS) return INTERVAL_SLEEP_MS;   // 10min
+    if (this.noMovePingCount >= IDLE_THRESHOLD_PINGS)  return INTERVAL_IDLE_MS;    // 5min
+    if (this.noMovePingCount >= 1)                     return INTERVAL_SLOW_MS;    // 3min
+    return INTERVAL_ACTIVE_MS;                                                      // 60s
+  }
+
+  /** Update movement counter and restart timer if interval changed */
+  private updateMovementState(lat: number, lon: number): void {
+    const prev = this.lastPingCoords;
+    const curr = { lat, lon };
+    this.lastPingCoords = curr;
+
+    if (!prev) return; // first ping, no comparison
+
+    const dist = this.distanceMeters(prev, curr);
+    const moved = dist >= MOVE_THRESHOLD_M;
+
+    if (moved) {
+      if (this.noMovePingCount > 0) {
+        console.log(`[BGLocation] 🏃 Movement detected (${dist.toFixed(0)}m) → back to 60s interval`);
+        this.noMovePingCount = 0;
+        this.restartPingTimer(); // immediately switch to active interval
+      }
+    } else {
+      const prevCount = this.noMovePingCount;
+      this.noMovePingCount++;
+      const newInterval = this.getCurrentInterval();
+      const labels = ['3min 🐢', '5min 💤', '10min 😴'];
+      const thresholds = [IDLE_THRESHOLD_PINGS, SLEEP_THRESHOLD_PINGS, SLEEP_THRESHOLD_PINGS + 1];
+
+      if (this.noMovePingCount !== prevCount && thresholds.includes(this.noMovePingCount)) {
+        const idx = thresholds.indexOf(this.noMovePingCount);
+        console.log(`[BGLocation] 🔋 Stationary detected → interval → ${labels[idx] || '10min 😴'}`);
+        this.restartPingTimer();
+      } else if (this.noMovePingCount === 1) {
+        console.log(`[BGLocation] 🔋 No movement (${dist.toFixed(0)}m) → switching to 3min interval`);
+        this.restartPingTimer();
+      }
+    }
+  }
+
+  /** Restart the ping timer with the current adaptive interval */
+  private restartPingTimer(): void {
+    if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = null; }
+    if (!this.isRunning) return;
+    const interval = this.getCurrentInterval();
+    this.pingTimer = setInterval(() => { this.sendPing(); }, interval);
+  }
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -374,11 +451,19 @@ class BackgroundLocationService {
       const res = await fetch(getApiUrl('/api/location/ping'), {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
       });
-      if (res.ok) { console.log('[BGLocation] ✅ Ping saved! lat:', lat, 'lon:', lon); this.consecutiveErrors = 0; }
-      else { console.error('[BGLocation] ❌ Ping failed:', res.status); this.consecutiveErrors++; }
+      if (res.ok) {
+        const interval = this.getCurrentInterval();
+        console.log(`[BGLocation] ✅ Ping saved! lat:${lat} lon:${lon} | next in ${interval/1000}s`);
+        this.consecutiveErrors = 0;
+        // Update movement state AFTER successful ping → may change next interval
+        this.updateMovementState(lat, lon);
+      } else {
+        console.error('[BGLocation] ❌ Ping failed:', res.status); this.consecutiveErrors++;
+      }
     } catch (err: any) {
       console.error('[BGLocation] ❌ Ping network error:', err?.message); this.consecutiveErrors++;
     }
+
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────────
