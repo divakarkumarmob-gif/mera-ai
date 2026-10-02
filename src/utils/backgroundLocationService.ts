@@ -36,6 +36,8 @@ const STORAGE_KEY_DEVICE_ID    = 'friday_location_device_id';
 const STORAGE_KEY_DEVICE_LABEL = 'friday_location_device_label';
 const STORAGE_KEY_TRACKING_ON  = 'friday_location_tracking_enabled';
 const STORAGE_KEY_LAST_KNOWN   = 'friday_last_known_location';
+const STORAGE_KEY_OFFLINE_Q    = 'friday_offline_ping_queue';  // queued pings when data is off
+const MAX_OFFLINE_QUEUE        = 10;  // max queued pings (oldest dropped when full)
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -410,11 +412,13 @@ class BackgroundLocationService {
   // ── Ping to Server ────────────────────────────────────────────────────────────
 
   private async sendPing(): Promise<void> {
+    // ── Step 1: Get coordinates ──────────────────────────────────────────────
     const cached = this.loadLastKnown();
     let lat = this.cachedLast?.lat ?? this.lastPosition?.coords?.latitude ?? cached?.lat;
     let lon = this.cachedLast?.lon ?? this.lastPosition?.coords?.longitude ?? cached?.lon;
+    let usingCached = false;
 
-    // One-shot fetch if no coords
+    // Try fresh GPS if no coords
     if (!lat || !lon) {
       try {
         if (this.isNative) {
@@ -430,7 +434,18 @@ class BackgroundLocationService {
           this.lastPosition = pos;
           this.saveLastKnown({ lat, lon, accuracy: pos.coords.accuracy ?? 0, altitude: null, speed: null, heading: null, timestamp: Date.now() });
         }
-      } catch { return; }
+      } catch (gpsErr: any) {
+        console.warn('[BGLocation] ⚠️ GPS unavailable:', gpsErr?.message);
+        // GPS off → use last known cache instead of bailing out
+        if (cached?.lat && cached?.lon) {
+          lat = cached.lat; lon = cached.lon;
+          usingCached = true;
+          console.log('[BGLocation] 📦 Using cached last-known coords (GPS off)');
+        } else {
+          console.warn('[BGLocation] No coords at all — skipping this ping');
+          return;
+        }
+      }
     }
     if (!lat || !lon) return;
 
@@ -444,26 +459,83 @@ class BackgroundLocationService {
       speed:     this.cachedLast?.speed     ?? this.lastPosition?.coords?.speed     ?? cached?.speed     ?? null,
       heading:   this.cachedLast?.heading   ?? this.lastPosition?.coords?.heading   ?? cached?.heading   ?? null,
       batteryLevel: this.getBatteryLevel(), isCharging: this.getChargingStatus(), networkType: this.getNetworkType(),
-      isCachedLastKnown: !this.cachedLast && !this.lastPosition && !!cached,
+      isCachedLastKnown: usingCached || (!this.cachedLast && !this.lastPosition && !!cached),
     };
 
+    // ── Step 2: Flush any queued offline pings first ─────────────────────────
+    await this.flushOfflineQueue();
+
+    // ── Step 3: Send current ping ────────────────────────────────────────────
     try {
       const res = await fetch(getApiUrl('/api/location/ping'), {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
       });
       if (res.ok) {
         const interval = this.getCurrentInterval();
-        console.log(`[BGLocation] ✅ Ping saved! lat:${lat} lon:${lon} | next in ${interval/1000}s`);
+        console.log(`[BGLocation] ✅ Ping saved! lat:${lat} lon:${lon}${usingCached ? ' (cached)' : ''} | next in ${interval/1000}s`);
         this.consecutiveErrors = 0;
-        // Update movement state AFTER successful ping → may change next interval
         this.updateMovementState(lat, lon);
       } else {
-        console.error('[BGLocation] ❌ Ping failed:', res.status); this.consecutiveErrors++;
+        console.error('[BGLocation] ❌ Ping HTTP error:', res.status);
+        this.queueOfflinePing(payload); // server error → queue
+        this.consecutiveErrors++;       // GPS/server error counts
       }
-    } catch (err: any) {
-      console.error('[BGLocation] ❌ Ping network error:', err?.message); this.consecutiveErrors++;
+    } catch (netErr: any) {
+      // ── Data/Internet off ─────────────────────────────────────────────────
+      console.warn('[BGLocation] 📵 No internet — ping queued for retry:', netErr?.message);
+      this.queueOfflinePing(payload);
+      // DO NOT increment consecutiveErrors for network failures
+      // DO NOT stopTracking — we'll retry when data returns
     }
+  }
 
+  /** Queue a failed ping to localStorage for retry when internet returns */
+  private queueOfflinePing(payload: GpsPingPayload): void {
+    try {
+      const raw = this.readStorage(STORAGE_KEY_OFFLINE_Q);
+      const queue: GpsPingPayload[] = raw ? JSON.parse(raw) : [];
+      queue.push(payload);
+      // Keep only last MAX_OFFLINE_QUEUE entries (drop oldest)
+      if (queue.length > MAX_OFFLINE_QUEUE) queue.splice(0, queue.length - MAX_OFFLINE_QUEUE);
+      this.writeStorage(STORAGE_KEY_OFFLINE_Q, JSON.stringify(queue));
+      console.log(`[BGLocation] 📦 Offline queue: ${queue.length}/${MAX_OFFLINE_QUEUE} pings stored`);
+    } catch { /* ignore storage errors */ }
+  }
+
+  /** Flush queued pings to server when internet is back */
+  private async flushOfflineQueue(): Promise<void> {
+    try {
+      const raw = this.readStorage(STORAGE_KEY_OFFLINE_Q);
+      if (!raw) return;
+      const queue: GpsPingPayload[] = JSON.parse(raw);
+      if (!queue.length) return;
+
+      console.log(`[BGLocation] 🔄 Flushing ${queue.length} queued pings...`);
+      const pingUrl = getApiUrl('/api/location/ping');
+      const remaining: GpsPingPayload[] = [];
+
+      for (const p of queue) {
+        try {
+          const res = await fetch(pingUrl, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p),
+          });
+          if (!res.ok) remaining.push(p); // keep failed ones
+        } catch {
+          remaining.push(p); // still offline
+          break;             // stop trying if still no internet
+        }
+      }
+
+      if (remaining.length < queue.length) {
+        console.log(`[BGLocation] ✅ Flushed ${queue.length - remaining.length} queued pings!`);
+      }
+      // Update queue with only unsent pings
+      if (remaining.length === 0) {
+        this.writeStorage(STORAGE_KEY_OFFLINE_Q, '');
+      } else {
+        this.writeStorage(STORAGE_KEY_OFFLINE_Q, JSON.stringify(remaining));
+      }
+    } catch { /* ignore */ }
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────────
