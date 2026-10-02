@@ -49,6 +49,32 @@ jobs:
           npx cap add android || true
           npx cap sync android
 
+      - name: 🔧 Fix Background-Runner AAR (android-js-engine-release.aar)
+        run: |
+          # capacitor-background-runner needs android-js-engine-release.aar in two locations.
+          # cap sync doesn't always place it correctly in CI — fix manually.
+          AAR_SRC=$(find node_modules/@capacitor/background-runner -name "android-js-engine-release.aar" 2>/dev/null | head -1)
+          echo "AAR source: $AAR_SRC"
+
+          if [ -n "$AAR_SRC" ]; then
+            # Location 1: cordova-android-plugins libs
+            mkdir -p android/capacitor-cordova-android-plugins/src/android/libs
+            cp "$AAR_SRC" android/capacitor-cordova-android-plugins/src/android/libs/android-js-engine-release.aar
+            echo "✅ Copied AAR → cordova-android-plugins/libs"
+
+            # Location 2: app/libs (fallback lookup)
+            mkdir -p android/app/libs
+            cp "$AAR_SRC" android/app/libs/android-js-engine-release.aar
+            echo "✅ Copied AAR → app/libs"
+          else
+            echo "⚠️ android-js-engine-release.aar not found in node_modules — background-runner may be missing"
+            find node_modules/@capacitor/background-runner -type f 2>/dev/null | head -20 || true
+          fi
+
+          # Also ensure local.properties has sdk.dir set (needed in some CI environments)
+          echo "sdk.dir=$ANDROID_HOME" > android/local.properties
+          echo "✅ local.properties written: sdk.dir=$ANDROID_HOME"
+
       - name: 🛠️ Fix Kotlin Duplicate Classes & Configure Gradle
         run: |
           # 1. Enable Jetifier & AndroidX in gradle.properties
