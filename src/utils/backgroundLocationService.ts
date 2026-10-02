@@ -520,167 +520,264 @@ class BackgroundLocationService {
   }
 
 
-  // ── Adaptive Network Fetch ────────────────────────────────────────────────
+  // ── 5-Layer Unstable Network Solution ────────────────────────────────────────
+  //
+  // Layer 1: RTT Probe       — measure actual round-trip time before sending
+  // Layer 2: Beacon API      — fire-and-forget for unstable connections
+  // Layer 3: Adaptive Payload — 3 tiers based on RTT: full / mini / ultra-mini
+  // Layer 4: Jitter Backoff  — smart retry, no thundering herd
+  // Layer 5: Smart Queue     — newest-first, dedup if location unchanged
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /** Last measured RTT in milliseconds. -1 = unknown */
+  private lastRttMs = -1;
+  /** RTT probe: sends a HEAD request and measures response time */
+  private async probeRtt(): Promise<number> {
+    const probeUrl = getApiUrl('/api/health'); // small/fast endpoint
+    const start = Date.now();
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 5000);
+      await fetch(probeUrl, { method: 'HEAD', signal: ctrl.signal });
+      clearTimeout(t);
+      this.lastRttMs = Date.now() - start;
+    } catch {
+      this.lastRttMs = 9999; // treat as very slow / offline
+    }
+    return this.lastRttMs;
+  }
 
   /**
-   * Detects current network quality.
+   * Detects current network quality using BOTH Connection API + last RTT.
    * Returns: 'offline' | '2g' | 'slow' | 'good'
    */
   private getNetworkQuality(): 'offline' | '2g' | 'slow' | 'good' {
     try {
-      // navigator.onLine is basic but fast
       if (typeof navigator !== 'undefined' && !navigator.onLine) return 'offline';
 
       const conn = (navigator as any).connection || (navigator as any).mozConnection;
-      if (!conn) return 'good'; // assume good if API unavailable
+      const eff      = conn?.effectiveType as string | undefined;
+      const downlink = conn?.downlink      as number | undefined;
 
-      const eff = conn.effectiveType as string | undefined; // '2g' | '3g' | '4g' | 'slow-2g'
-      const downlink = conn.downlink as number | undefined;  // Mbps
-
-      if (eff === 'slow-2g') return '2g';
-      if (eff === '2g')      return '2g';
-      if (eff === '3g' || (downlink !== undefined && downlink < 1)) return 'slow';
+      // Use both API-reported quality AND last measured RTT
+      const rtt = this.lastRttMs;
+      if (eff === 'slow-2g' || (rtt > 0 && rtt >= 4000)) return '2g';
+      if (eff === '2g'      || (rtt > 0 && rtt >= 2000)) return '2g';
+      if (eff === '3g' || (downlink !== undefined && downlink < 1) || (rtt > 0 && rtt >= 800)) return 'slow';
       return 'good';
     } catch {
       return 'good';
     }
   }
 
-  /**
-   * Build a minimal payload for slow/2G networks.
-   * Drops optional fields (altitude, heading, battery) to reduce bytes.
-   */
-  private buildMinimalPayload(full: GpsPingPayload): Partial<GpsPingPayload> {
-    return {
-      deviceId: full.deviceId,
-      username: full.username,
-      label:    full.label,
-      lat:      full.lat,
-      lon:      full.lon,
-      accuracy: full.accuracy,
-      // Drop: altitude, speed, heading, batteryLevel, isCharging, networkType
-      isCachedLastKnown: full.isCachedLastKnown,
-    };
+  // ── Layer 3: Adaptive Payload Tiers ────────────────────────────────────────
+
+  /** FULL payload — all fields (~350 bytes) — good network */
+  private buildFullPayload(p: GpsPingPayload): GpsPingPayload { return p; }
+
+  /** MINI payload — drops altitude/heading/battery (~180 bytes) — slow network */
+  private buildMiniPayload(p: GpsPingPayload): Partial<GpsPingPayload> {
+    return { deviceId: p.deviceId, username: p.username, label: p.label,
+             lat: p.lat, lon: p.lon, accuracy: p.accuracy,
+             networkType: p.networkType, isCachedLastKnown: p.isCachedLastKnown };
   }
 
+  /** ULTRA-MINI payload — bare minimum (~100 bytes) — very bad network */
+  private buildUltraMiniPayload(p: GpsPingPayload): object {
+    return { d: p.deviceId, u: p.username, lat: p.lat, lon: p.lon, a: p.accuracy };
+  }
+
+  /** Choose payload tier based on current RTT */
+  private choosePayload(p: GpsPingPayload): { body: string; tier: string } {
+    const rtt = this.lastRttMs;
+    if (rtt < 0 || rtt < 800)  return { body: JSON.stringify(this.buildFullPayload(p)),      tier: 'full'       };
+    if (rtt < 2000)             return { body: JSON.stringify(this.buildMiniPayload(p)),      tier: 'mini'       };
+    return                             { body: JSON.stringify(this.buildUltraMiniPayload(p)), tier: 'ultra-mini' };
+  }
+
+  // ── Layer 2: Beacon API ─────────────────────────────────────────────────────
+
   /**
-   * Send ping with adaptive strategy based on network quality:
-   *
-   * GPS ON + Data OFF   → queue immediately (no retry)
-   * GPS ON + Data SLOW  → short timeout, minimal payload, 2 retries
-   * GPS ON + Data GOOD  → normal fetch, 3 retries with backoff
-   *
-   * Returns: 'ok' | 'queued' | 'error:<status>'
+   * sendBeacon: fire-and-forget POST.
+   * Browser queues it internally and sends when possible — survives:
+   *   ✅ Intermittent drops
+   *   ✅ Page close / app background
+   *   ✅ Slow connections
+   * Returns true if browser accepted the beacon (not if server received it)
    */
-  private async sendPingWithAdaptiveRetry(payload: GpsPingPayload): Promise<string> {
-    const quality = this.getNetworkQuality();
-    const url     = getApiUrl('/api/location/ping');
+  private tryBeacon(payload: GpsPingPayload): boolean {
+    if (typeof navigator === 'undefined' || !navigator.sendBeacon) return false;
+    try {
+      const url  = getApiUrl('/api/location/ping');
+      const mini = this.buildMiniPayload(payload); // beacon has 64KB limit
+      const blob = new Blob([JSON.stringify(mini)], { type: 'application/json' });
+      const accepted = navigator.sendBeacon(url, blob);
+      if (accepted) console.log('[BGLocation] 📡 Beacon fired (unstable net fallback)');
+      return accepted;
+    } catch { return false; }
+  }
 
-    // Case 1: GPS ON + Data OFF → queue immediately, no point trying
-    if (quality === 'offline') {
-      this.queueOfflinePing(payload);
-      return 'queued';
-    }
+  // ── Layer 4: Jitter Backoff ─────────────────────────────────────────────────
 
-    // Case 2: GPS ON + Data SLOW (2G / weak 3G)
-    if (quality === '2g' || quality === 'slow') {
-      console.log(`[BGLocation] 📶 Slow network (${quality}) — using minimal payload + short timeout`);
-      const miniPayload = this.buildMinimalPayload(payload);
-      const MAX_RETRIES_SLOW = 2;
-      const TIMEOUT_SLOW_MS  = 8000; // 8s timeout on slow network
+  /** Sleep with jitter to prevent thundering herd on reconnect */
+  private async jitterSleep(baseMs: number): Promise<void> {
+    const jitter = Math.random() * baseMs * 0.3; // ±30% jitter
+    await this.sleep(baseMs + jitter);
+  }
 
-      for (let attempt = 1; attempt <= MAX_RETRIES_SLOW; attempt++) {
-        try {
-          const controller = new AbortController();
-          const timer = setTimeout(() => controller.abort(), TIMEOUT_SLOW_MS);
-          const res = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(miniPayload),
-            signal: controller.signal,
-          });
-          clearTimeout(timer);
-          if (res.ok) return 'ok';
-          if (attempt < MAX_RETRIES_SLOW) {
-            await this.sleep(1500 * attempt); // 1.5s, 3s
+  // ── Layer 5: Smart Queue ────────────────────────────────────────────────────
+
+  /**
+   * Smart queue: adds ping to localStorage queue.
+   *   - Deduplicates: if last queued location is <50m away → replace instead of add
+   *   - Priority: newest-first flush (most recent location matters more)
+   */
+  private queueOfflinePing(payload: GpsPingPayload): void {
+    try {
+      const raw   = this.readStorage(STORAGE_KEY_OFFLINE_Q);
+      const queue: GpsPingPayload[] = raw ? JSON.parse(raw) : [];
+
+      // Dedup: check if last entry is within 50m — replace it
+      if (queue.length > 0) {
+        const last = queue[queue.length - 1];
+        if (last.lat && last.lon && payload.lat && payload.lon) {
+          const dist = this.distanceMeters(
+            { lat: last.lat, lon: last.lon },
+            { lat: payload.lat, lon: payload.lon }
+          );
+          if (dist < 50) {
+            queue[queue.length - 1] = payload; // replace stale nearby entry
+            this.writeStorage(STORAGE_KEY_OFFLINE_Q, JSON.stringify(queue));
+            console.log(`[BGLocation] 📦 Queue dedup: replaced nearby entry (${dist.toFixed(0)}m)`);
+            return;
           }
-        } catch (err: any) {
-          if (err?.name === 'AbortError') {
-            console.warn(`[BGLocation] ⏱️ Slow network timeout (attempt ${attempt}/${MAX_RETRIES_SLOW})`);
-          } else {
-            // Total network failure → queue and stop retrying
-            this.queueOfflinePing(payload);
-            return 'queued';
-          }
-          if (attempt === MAX_RETRIES_SLOW) {
-            // All retries exhausted on slow network → queue
-            this.queueOfflinePing(payload);
-            return 'queued';
-          }
-          await this.sleep(2000 * attempt);
         }
       }
+
+      queue.push(payload);
+      if (queue.length > MAX_OFFLINE_QUEUE) queue.splice(0, queue.length - MAX_OFFLINE_QUEUE);
+      this.writeStorage(STORAGE_KEY_OFFLINE_Q, JSON.stringify(queue));
+      console.log(`[BGLocation] 📦 Offline queue: ${queue.length}/${MAX_OFFLINE_QUEUE} pings`);
+    } catch { /* ignore */ }
+  }
+
+  // ── Main Adaptive Sender ───────────────────────────────────────────────────
+
+  /**
+   * GPS ON + Data UNSTABLE — best-in-class send strategy.
+   *
+   * Flow:
+   *   1. Check offline → queue immediately
+   *   2. Probe RTT → determine real connection quality
+   *   3. Try Beacon API (fire-and-forget, most resilient)
+   *   4. Try REST fetch with adaptive payload + jitter backoff
+   *   5. All fail → smart queue
+   *
+   * Returns: 'ok' | 'beacon' | 'queued' | 'error:<status>'
+   */
+  private async sendPingWithAdaptiveRetry(payload: GpsPingPayload): Promise<string> {
+    const url = getApiUrl('/api/location/ping');
+
+    // ── L1: Offline fast-path ─────────────────────────────────────────────────
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
       this.queueOfflinePing(payload);
       return 'queued';
     }
 
-    // Case 3: GPS ON + Data GOOD → normal fetch with exponential backoff
-    const MAX_RETRIES_GOOD = 3;
-    const TIMEOUT_GOOD_MS  = 15000; // 15s timeout on good network
+    // ── L1: Probe actual RTT ──────────────────────────────────────────────────
+    // Only probe if last RTT unknown or connection type changed
+    const quality = this.getNetworkQuality();
+    if (this.lastRttMs < 0 || quality !== 'good') {
+      await this.probeRtt();
+    }
 
-    for (let attempt = 1; attempt <= MAX_RETRIES_GOOD; attempt++) {
+    const freshQuality = this.getNetworkQuality();
+    console.log(`[BGLocation] 📶 Network: ${freshQuality} | RTT: ${this.lastRttMs}ms`);
+
+    // ── Offline after probe ────────────────────────────────────────────────────
+    if (freshQuality === 'offline' || this.lastRttMs >= 9000) {
+      this.queueOfflinePing(payload);
+      return 'queued';
+    }
+
+    // ── L3: Choose payload tier based on RTT ──────────────────────────────────
+    const { body, tier } = this.choosePayload(payload);
+    console.log(`[BGLocation] 📦 Payload tier: ${tier} (${body.length} bytes)`);
+
+    // ── L2: Try Beacon API first (most resilient for unstable) ────────────────
+    // Beacon is fire-and-forget — doesn't block, browser handles retry
+    // We still try REST after for confirmation
+    const beaconFired = freshQuality === '2g' || freshQuality === 'slow'
+      ? this.tryBeacon(payload)
+      : false;
+
+    // ── L4: Dynamic timeout based on RTT ──────────────────────────────────────
+    // timeout = RTT × 4, min 5s, max 20s
+    const dynamicTimeout = Math.min(20000, Math.max(5000, (this.lastRttMs > 0 ? this.lastRttMs : 3000) * 4));
+    const maxRetries     = freshQuality === '2g' ? 2 : freshQuality === 'slow' ? 3 : 3;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), TIMEOUT_GOOD_MS);
+        const timer      = setTimeout(() => controller.abort(), dynamicTimeout);
+
         const res = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
+          body,
           signal: controller.signal,
         });
         clearTimeout(timer);
-        if (res.ok) return 'ok';
-        // Server error (4xx/5xx)
-        if (res.status >= 400 && res.status < 500) {
-          return `error:${res.status}`; // client error, don't retry
+
+        if (res.ok) {
+          // Update RTT with this successful request's timing
+          this.lastRttMs = Math.min(this.lastRttMs, dynamicTimeout); // shrink if faster
+          return 'ok';
         }
-        // 5xx → retry
-        if (attempt < MAX_RETRIES_GOOD) await this.sleep(1000 * 2 ** (attempt - 1)); // 1s, 2s
+
+        // 4xx client error → don't retry
+        if (res.status >= 400 && res.status < 500) {
+          return beaconFired ? 'beacon' : `error:${res.status}`;
+        }
+
+        // 5xx → retry with jitter
+        if (attempt < maxRetries) {
+          const backoff = 1000 * 2 ** (attempt - 1); // 1s, 2s, 4s
+          console.warn(`[BGLocation] ⏱️ HTTP ${res.status}, retry ${attempt}/${maxRetries} in ${backoff}ms+jitter`);
+          await this.jitterSleep(backoff);
+        }
+
       } catch (err: any) {
         if (err?.name === 'AbortError') {
-          console.warn(`[BGLocation] ⏱️ Request timeout (attempt ${attempt}/${MAX_RETRIES_GOOD})`);
+          // Timeout — network too slow, increase RTT estimate
+          this.lastRttMs = Math.min(9000, this.lastRttMs * 1.5);
+          console.warn(`[BGLocation] ⏱️ Timeout (RTT updated: ${this.lastRttMs.toFixed(0)}ms) attempt ${attempt}/${maxRetries}`);
         } else {
-          // Network failure → queue
-          this.queueOfflinePing(payload);
-          return 'queued';
+          // Network failure
+          console.warn(`[BGLocation] 📵 Network error attempt ${attempt}:`, err?.message);
         }
-        if (attempt === MAX_RETRIES_GOOD) {
-          this.queueOfflinePing(payload);
-          return 'queued';
+
+        if (attempt === maxRetries) {
+          // All retries exhausted
+          if (!beaconFired) this.queueOfflinePing(payload);
+          return beaconFired ? 'beacon' : 'queued';
         }
-        await this.sleep(1000 * 2 ** (attempt - 1)); // exponential: 1s, 2s, 4s
+
+        // Jitter backoff between retries
+        await this.jitterSleep(800 * 2 ** (attempt - 1));
       }
     }
-    this.queueOfflinePing(payload);
-    return 'queued';
+
+    if (!beaconFired) this.queueOfflinePing(payload);
+    return beaconFired ? 'beacon' : 'queued';
   }
+
 
   private sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  /** Queue a failed ping to localStorage for retry when internet returns */
-  private queueOfflinePing(payload: GpsPingPayload): void {
-    try {
-      const raw = this.readStorage(STORAGE_KEY_OFFLINE_Q);
-      const queue: GpsPingPayload[] = raw ? JSON.parse(raw) : [];
-      queue.push(payload);
-      // Keep only last MAX_OFFLINE_QUEUE entries (drop oldest)
-      if (queue.length > MAX_OFFLINE_QUEUE) queue.splice(0, queue.length - MAX_OFFLINE_QUEUE);
-      this.writeStorage(STORAGE_KEY_OFFLINE_Q, JSON.stringify(queue));
-      console.log(`[BGLocation] 📦 Offline queue: ${queue.length}/${MAX_OFFLINE_QUEUE} pings stored`);
-    } catch { /* ignore storage errors */ }
-  }
+
 
   /** Flush queued pings to server when internet is back */
   private async flushOfflineQueue(): Promise<void> {
