@@ -84,11 +84,32 @@ jobs:
             echo "android.useAndroidX=true" >> "$PROP"
           fi
 
-          # 2. Add Kotlin stdlib resolution constraints to android/app/build.gradle
+          # 2. Bump compileSdk + targetSdk to 36 (required by core-ktx 1.17.0)
           APP_GRADLE="android/app/build.gradle"
+          if [ -f "$APP_GRADLE" ]; then
+            # Bump compileSdk (handles both 'compileSdk X' and 'compileSdkVersion X')
+            sed -i 's/compileSdk\b\s*=\s*35/compileSdk = 36/g' "$APP_GRADLE"
+            sed -i 's/compileSdk 35/compileSdk 36/g' "$APP_GRADLE"
+            sed -i 's/compileSdkVersion 35/compileSdkVersion 36/g' "$APP_GRADLE"
+            # Bump targetSdk to 36 as well
+            sed -i 's/targetSdk\b\s*=\s*35/targetSdk = 36/g' "$APP_GRADLE"
+            sed -i 's/targetSdk 35/targetSdk 36/g' "$APP_GRADLE"
+            sed -i 's/targetSdkVersion 35/targetSdkVersion 36/g' "$APP_GRADLE"
+            echo "✅ compileSdk/targetSdk bumped to 36"
+          fi
+
+          # 3. Bump Android Gradle Plugin to 8.8.0 (supports compileSdk 36)
+          ROOT_GRADLE="android/build.gradle"
+          if [ -f "$ROOT_GRADLE" ]; then
+            sed -i "s/com.android.tools.build:gradle:[0-9.]\+/com.android.tools.build:gradle:8.8.0/g" "$ROOT_GRADLE"
+            echo "✅ AGP bumped to 8.8.0"
+          fi
+
+          # 4. Add Kotlin stdlib + core-ktx resolution strategy to app/build.gradle
           if [ -f "$APP_GRADLE" ]; then
             printf "\nconfigurations.all {\n    resolutionStrategy {\n        force 'org.jetbrains.kotlin:kotlin-stdlib:1.8.22'\n        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22'\n        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22'\n    }\n}\n\ndependencies {\n    constraints {\n        implementation('org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22') {\n            because('kotlin-stdlib-jdk7 is now part of kotlin-stdlib')\n        }\n        implementation('org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22') {\n            because('kotlin-stdlib-jdk8 is now part of kotlin-stdlib')\n        }\n    }\n}\n" >> "$APP_GRADLE"
           fi
+
 
       - name: 🔑 Configure Permissions & Android 14/15 Foreground Service in AndroidManifest
         run: |
