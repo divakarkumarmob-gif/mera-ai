@@ -282,8 +282,43 @@ function getRamCacheEntry(rawQuery: string): DeviceLocationEntry | null {
 class DeviceLocationTrackerService {
 
   constructor() {
-    // On server boot → hydrate RAM cache from TG pinned vault (survives Render restarts)
-    hydrateCacheFromTelegramVault().catch(() => {});
+    // On server boot → hydrate RAM cache from ALL persistence layers
+    this.hydrateRamCacheOnBoot().catch(() => {});
+  }
+
+  /** Boot hydration: Firestore (primary) → TG pinned vault (fallback) */
+  private async hydrateRamCacheOnBoot(): Promise<void> {
+    let hydratedFromFirestore = false;
+
+    // 1️⃣ Try Firestore first
+    try {
+      const snap = await locationsCollection().orderBy("lastUpdatedAt", "desc").get();
+      if (!snap.empty) {
+        let count = 0;
+        for (const doc of snap.docs) {
+          const d = doc.data() as DeviceLocationEntry;
+          const hasCoords = d.lat && d.lon && !(d.lat === 0 && d.lon === 0);
+          if (hasCoords) {
+            updateRamCache(d);
+            count++;
+          }
+        }
+        if (count > 0) {
+          console.log(`[LocationTracker] 🔥 Boot hydration: ${count} device(s) loaded from Firestore into RAM cache`);
+          hydratedFromFirestore = true;
+        }
+      }
+    } catch (err: any) {
+      console.warn("[LocationTracker] Firestore boot hydration failed:", err?.message || err);
+    }
+
+    // 2️⃣ TG vault as fallback (or supplement) if Firestore had no valid data
+    if (!hydratedFromFirestore) {
+      await hydrateCacheFromTelegramVault();
+    } else {
+      // Still hydrate TG vault silently to keep vaultMessageId updated for future writes
+      hydrateCacheFromTelegramVault().catch(() => {});
+    }
   }
 
   /**
