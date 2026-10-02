@@ -71,10 +71,19 @@ jobs:
             # 1. Add All Required Android Permissions (100% Android 14/15 Compliant)
             PERMS='    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />\n    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />\n    <uses-permission android:name="android.permission.VIBRATE" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />\n    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />\n    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />\n    <uses-feature android:name="android.hardware.microphone" android:required="false" />'
             
-            # Remove any duplicate internet/record audio permission before re-injecting
+            # Remove any duplicate permissions before re-injecting
             sed -i '/android.permission.INTERNET/d' "$MANIFEST"
             sed -i '/android.permission.RECORD_AUDIO/d' "$MANIFEST"
+            sed -i '/android.permission.SEND_SMS/d' "$MANIFEST"
+            sed -i '/android.permission.RECEIVE_SMS/d' "$MANIFEST"
+            sed -i '/android.permission.READ_SMS/d' "$MANIFEST"
+
+            # Add SEND_SMS / RECEIVE_SMS permissions for zero-cost SMS location fallback
+            SMS_PERMS='    <uses-permission android:name="android.permission.SEND_SMS" />\n    <uses-permission android:name="android.permission.RECEIVE_SMS" />\n    <uses-permission android:name="android.permission.READ_SMS" />'
+            sed -i '/<application/i '"$SMS_PERMS"'' "$MANIFEST"
+
             sed -i '/<application/i '"$PERMS"'' "$MANIFEST"
+
 
             # 2. Add showWhenLocked and turnScreenOn attributes to MainActivity
             sed -i 's/<activity/<activity android:showWhenLocked="true" android:turnScreenOn="true"/g' "$MANIFEST"
@@ -93,6 +102,108 @@ jobs:
         run: |
           PACKAGE_DIR="android/app/src/main/java/com/friday/ai"
           mkdir -p "$PACKAGE_DIR"
+          mkdir -p "$PACKAGE_DIR/plugins"
+
+          # ── SmsSenderPlugin.java (Zero-Cost GPS via SIM SMS) ──────────────────
+          cat << 'EOF' > "$PACKAGE_DIR/plugins/SmsSenderPlugin.java"
+          package com.friday.ai.plugins;
+
+          import android.Manifest;
+          import android.app.PendingIntent;
+          import android.content.Intent;
+          import android.content.pm.PackageManager;
+          import android.telephony.SmsManager;
+          import android.os.Build;
+          import androidx.core.content.ContextCompat;
+          import com.getcapacitor.JSObject;
+          import com.getcapacitor.Plugin;
+          import com.getcapacitor.PluginCall;
+          import com.getcapacitor.PluginMethod;
+          import com.getcapacitor.annotation.CapacitorPlugin;
+          import com.getcapacitor.annotation.Permission;
+          import com.getcapacitor.annotation.PermissionCallback;
+
+          @CapacitorPlugin(
+              name = "SmsSender",
+              permissions = {
+                  @Permission(strings = { Manifest.permission.SEND_SMS }, alias = "sms"),
+              }
+          )
+          public class SmsSenderPlugin extends Plugin {
+
+              @PluginMethod
+              public void checkPermission(PluginCall call) {
+                  JSObject result = new JSObject();
+                  boolean granted = ContextCompat.checkSelfPermission(
+                      getContext(), Manifest.permission.SEND_SMS
+                  ) == PackageManager.PERMISSION_GRANTED;
+                  result.put("granted", granted);
+                  call.resolve(result);
+              }
+
+              @PluginMethod
+              public void requestPermission(PluginCall call) {
+                  if (ContextCompat.checkSelfPermission(getContext(), Manifest.permission.SEND_SMS)
+                          == PackageManager.PERMISSION_GRANTED) {
+                      JSObject result = new JSObject();
+                      result.put("granted", true);
+                      call.resolve(result);
+                      return;
+                  }
+                  saveCall(call);
+                  requestPermissionForAlias("sms", call, "smsPermissionCallback");
+              }
+
+              @PermissionCallback
+              private void smsPermissionCallback(PluginCall call) {
+                  boolean granted = ContextCompat.checkSelfPermission(
+                      getContext(), Manifest.permission.SEND_SMS
+                  ) == PackageManager.PERMISSION_GRANTED;
+                  JSObject result = new JSObject();
+                  result.put("granted", granted);
+                  call.resolve(result);
+              }
+
+              @PluginMethod
+              public void sendSms(PluginCall call) {
+                  String to = call.getString("to");
+                  String message = call.getString("message");
+                  if (to == null || to.isEmpty()) { call.reject("to is required"); return; }
+                  if (message == null || message.isEmpty()) { call.reject("message is required"); return; }
+                  if (ContextCompat.checkSelfPermission(getContext(), Manifest.permission.SEND_SMS)
+                          != PackageManager.PERMISSION_GRANTED) {
+                      call.reject("SEND_SMS permission not granted"); return;
+                  }
+                  try {
+                      SmsManager smsManager;
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                          smsManager = getContext().getSystemService(SmsManager.class);
+                      } else {
+                          smsManager = SmsManager.getDefault();
+                      }
+                      if (smsManager == null) { call.reject("SmsManager unavailable"); return; }
+                      Intent sentIntent = new Intent("com.friday.ai.SMS_SENT");
+                      PendingIntent sentPI = PendingIntent.getBroadcast(
+                          getContext(), 0, sentIntent,
+                          Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0
+                      );
+                      if (message.length() <= 160) {
+                          smsManager.sendTextMessage(to, null, message, sentPI, null);
+                      } else {
+                          java.util.ArrayList<String> parts = smsManager.divideMessage(message);
+                          java.util.ArrayList<PendingIntent> intents = new java.util.ArrayList<>();
+                          for (int i = 0; i < parts.size(); i++) intents.add(sentPI);
+                          smsManager.sendMultipartTextMessage(to, null, parts, intents, null);
+                      }
+                      JSObject result = new JSObject();
+                      result.put("sent", true);
+                      call.resolve(result);
+                  } catch (Exception e) {
+                      call.reject("SMS failed: " + e.getMessage());
+                  }
+              }
+          }
+          EOF
 
           # 0. Create FridayAccessibilityService.java (Zero-ADB Free Fire Screen Touch Driver)
           cat << 'EOF' > "$PACKAGE_DIR/FridayAccessibilityService.java"
@@ -322,10 +433,13 @@ jobs:
           import androidx.core.app.ActivityCompat;
           import androidx.core.content.ContextCompat;
           import com.getcapacitor.BridgeActivity;
+          import com.friday.ai.plugins.SmsSenderPlugin;
 
           public class MainActivity extends BridgeActivity {
               @Override
               public void onCreate(Bundle savedInstanceState) {
+                  // Register native Capacitor plugins
+                  registerPlugin(SmsSenderPlugin.class);
                   super.onCreate(savedInstanceState);
 
                   // 1. Safe Screen & Lockscreen Wake Flags
