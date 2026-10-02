@@ -11,6 +11,120 @@
 
 import { db, FieldValue } from "./firebaseAdmin";
 
+// ── Telegram Memory Bot Fallback Helpers ────────────────────────────────────
+// Used when Firestore credentials are broken / data is stale (0,0 coords).
+// Location pings are mirrored to a dedicated Telegram chat as tagged messages.
+// Format: #LOC_PING|label=Boss|lat=24.96|lon=86.03|addr=Patna|ts=1234567890
+
+const TG_LOC_TAG = "#LOC_PING";
+
+async function tgApiCall(token: string, method: string, body?: any): Promise<any> {
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(8000),
+    });
+    const json = await res.json();
+    return json.ok ? json.result : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Save location ping as a tagged message in TG Memory Bot chat (fire-and-forget) */
+async function savePingToTelegram(label: string, lat: number, lon: number, address: string, ts: number): Promise<void> {
+  const token = (
+    process.env.TELEGRAM_MEMORY_BOT_TOKEN ||
+    process.env.TELEGRAM_BRAIN_BOT_TOKEN ||
+    ""
+  ).trim();
+  const chatId = (
+    process.env.TELEGRAM_OWNER_CHAT_ID ||
+    process.env.TELEGRAM_BOSS_CHAT_ID ||
+    process.env.BOSS_TELEGRAM_CHAT_ID ||
+    process.env.TELEGRAM_OWNER_ID ||
+    process.env.TELEGRAM_CHAT_ID ||
+    ""
+  ).trim();
+  if (!token || !chatId) return;
+
+  const text = `${TG_LOC_TAG}|label=${label}|lat=${lat}|lon=${lon}|addr=${address}|ts=${ts}`;
+  await tgApiCall(token, "sendMessage", { chat_id: chatId, text, disable_notification: true });
+}
+
+/** Fetch the latest location ping for a label from TG bot chat history */
+async function fetchLocationFromTelegram(label: string): Promise<DeviceLocationEntry | null> {
+  const token = (
+    process.env.TELEGRAM_MEMORY_BOT_TOKEN ||
+    process.env.TELEGRAM_BRAIN_BOT_TOKEN ||
+    ""
+  ).trim();
+  const chatId = (
+    process.env.TELEGRAM_OWNER_CHAT_ID ||
+    process.env.TELEGRAM_BOSS_CHAT_ID ||
+    process.env.BOSS_TELEGRAM_CHAT_ID ||
+    process.env.TELEGRAM_OWNER_ID ||
+    process.env.TELEGRAM_CHAT_ID ||
+    ""
+  ).trim();
+  if (!token || !chatId) return null;
+
+  try {
+    // Fetch latest 100 messages and find most recent location ping for this label
+    const updates = await tgApiCall(token, "getUpdates", {
+      limit: 100,
+      allowed_updates: ["message"],
+    });
+    if (!Array.isArray(updates)) return null;
+
+    const lowerLabel = label.toLowerCase();
+    let bestEntry: DeviceLocationEntry | null = null;
+    let bestTs = 0;
+
+    for (const update of updates) {
+      const text: string = update?.message?.text || "";
+      if (!text.startsWith(TG_LOC_TAG)) continue;
+
+      // Parse: #LOC_PING|label=Boss|lat=24.96|lon=86.03|addr=...|ts=123
+      const parts: Record<string, string> = {};
+      text.split("|").slice(1).forEach((part) => {
+        const eq = part.indexOf("=");
+        if (eq !== -1) parts[part.slice(0, eq)] = part.slice(eq + 1);
+      });
+
+      const msgLabel = (parts["label"] || "").toLowerCase();
+      const isBossQuery = ["boss", "dk", "divakar", "boss phone"].some(t => lowerLabel.includes(t) || msgLabel.includes(t));
+      const matches = msgLabel === lowerLabel || (isBossQuery && ["boss", "dk", "divakar"].some(t => msgLabel.includes(t)));
+      if (!matches) continue;
+
+      const lat = parseFloat(parts["lat"] || "0");
+      const lon = parseFloat(parts["lon"] || "0");
+      const ts  = parseInt(parts["ts"]  || "0", 10);
+      if (!lat || !lon || ts <= bestTs) continue;
+
+      bestTs = ts;
+      bestEntry = {
+        deviceId: `tg_fallback_${msgLabel}`,
+        label: parts["label"] || label,
+        ownerName: parts["label"] || label,
+        lat, lon,
+        accuracy: 0, altitude: null, speed: null, heading: null,
+        address: parts["addr"] || `${lat.toFixed(5)}, ${lon.toFixed(5)}`,
+        lastUpdatedAt: ts,
+        registeredAt: ts,
+        batteryLevel: null, isCharging: null, networkType: null,
+        isCachedLastKnown: false,
+      };
+    }
+
+    return bestEntry;
+  } catch {
+    return null;
+  }
+}
+
 // ── Interfaces ───────────────────────────────────────────────────────────────
 
 export interface DeviceLocationEntry {
@@ -252,8 +366,13 @@ class DeviceLocationTrackerService {
     this.reverseGeocode(lat, lon).then(async (address) => {
       try {
         await locationsCollection().doc(deviceId).update({ address });
+        // Also update TG backup with proper address
+        savePingToTelegram((data.label || "Boss").trim(), lat, lon, address, now).catch(() => {});
       } catch { /* non-critical */ }
-    }).catch(() => { /* geocoding failed, fallback coords already saved */ });
+    }).catch(() => {
+      // geocoding failed — still save to TG with coordinate-based address
+      savePingToTelegram((data.label || "Boss").trim(), lat, lon, fallbackAddress, now).catch(() => {});
+    });
 
     return { success: true, message: "Location ping received." };
   }
@@ -391,15 +510,28 @@ class DeviceLocationTrackerService {
         bestMatch.address !== "Location not yet received" &&
         bestMatch.address !== "0.0000, 0.0000";
 
-      // If no valid coords AND no valid address → device registered but GPS never fired
+      // If no valid coords AND no valid address → try Telegram fallback
       if (!hasValidCoords && !hasValidAddress) {
-        return {
-          success: false,
-          deviceId: bestMatch.deviceId,
-          label: bestMatch.label,
-          ownerName: bestMatch.ownerName,
-          message: `Boss, "${bestMatch.label || bestMatch.ownerName}" phone system me registered hai, lekin abhi tak live GPS coordinates sync nahi hue hain.\n\n📱 FRIDAY app/web open karein aur location permission dein — location turant update ho jayegi!`,
-        };
+        try {
+          const tgEntry = await fetchLocationFromTelegram(bestMatch.label || rawQuery || "boss");
+          if (tgEntry) {
+            // Got data from TG — use it as bestMatch
+            bestMatch = tgEntry;
+          } else {
+            return {
+              success: false,
+              deviceId: bestMatch.deviceId,
+              label: bestMatch.label,
+              ownerName: bestMatch.ownerName,
+              message: `Boss, "${bestMatch.label || bestMatch.ownerName}" phone system me registered hai, lekin abhi tak live GPS coordinates sync nahi hue hain.\n\n📱 FRIDAY app/web open karein aur location permission dein — location turant update ho jayegi!`,
+            };
+          }
+        } catch {
+          return {
+            success: false,
+            message: `Boss, "${bestMatch.label || bestMatch.ownerName}" phone system me registered hai, lekin abhi tak live GPS coordinates sync nahi hue hain.\n\n📱 FRIDAY app/web open karein aur location permission dein — location turant update ho jayegi!`,
+          };
+        }
       }
 
       // If we have valid coords but address is still fallback, use coords as address
@@ -530,11 +662,46 @@ class DeviceLocationTrackerService {
         networkType: bestMatch.networkType,
         message,
       };
-    } catch (err: any) {
-      console.error("[LocationTracker] Query error:", err?.message || err);
+    } catch (firestoreErr: any) {
+      console.error("[LocationTracker] ❌ Firestore getDeviceLocation failed:", firestoreErr?.message || firestoreErr);
+      // ── Firestore completely failed → try Telegram fallback ──────────────
+      try {
+        const tgEntry = await fetchLocationFromTelegram(rawQuery || "boss");
+        if (tgEntry) {
+          const ageMs = Date.now() - (tgEntry.lastUpdatedAt || 0);
+          const ageMinutes = Math.floor(ageMs / 60000);
+          let lastUpdatedAgo: string;
+          if (ageMinutes < 1) lastUpdatedAgo = "Abhi abhi";
+          else if (ageMinutes < 60) lastUpdatedAgo = `${ageMinutes} min pehle`;
+          else lastUpdatedAgo = `${Math.floor(ageMinutes / 60)} ghante pehle`;
+
+          const googleMapsUrl = `https://www.google.com/maps?q=${tgEntry.lat},${tgEntry.lon}`;
+          return {
+            success: true,
+            deviceId: tgEntry.deviceId,
+            label: tgEntry.label,
+            ownerName: tgEntry.ownerName,
+            lat: tgEntry.lat,
+            lon: tgEntry.lon,
+            address: tgEntry.address,
+            googleMapsUrl,
+            lastUpdatedAt: tgEntry.lastUpdatedAt,
+            lastUpdatedAgo,
+            isCached: true,
+            message:
+              `📍 *${tgEntry.label}* ki Location _(Telegram Backup)_\n` +
+              `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+              `📮 *Address:* ${tgEntry.address}\n` +
+              `⏱️ *Last seen:* ${lastUpdatedAgo}\n` +
+              `\n🗺️ [Google Maps pe dekhein](${googleMapsUrl})\n` +
+              `\n⚠️ _Firestore unavailable — Telegram backup se mila._`,
+          };
+        }
+      } catch { /* TG also failed */ }
+
       return {
         success: false,
-        message: `Location query failed: ${err?.message || "Unknown error"}`,
+        message: `Location service temporarily unavailable. Firestore error: ${firestoreErr?.message || "Unknown"}`
       };
     }
   }
