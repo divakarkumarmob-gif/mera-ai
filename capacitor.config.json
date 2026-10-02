@@ -17,6 +17,11 @@
       "launchShowDuration": 2000,
       "backgroundColor": "#020617",
       "showSpinner": false
+    },
+    "BackgroundGeolocation": {
+      "backgroundMessage": "FRIDAY AI is tracking your location. Screen off safe.",
+      "backgroundTitle": "FRIDAY Location Active"
     }
   }
 }
+
