@@ -119,36 +119,10 @@ jobs:
           #   ✅ AGP 8.7.x compatible
           #   ✅ Production stable (used by millions of apps)
           if [ -f "$APP_GRADLE" ]; then
-            cat >> "$APP_GRADLE" << 'GRADLE_EOF'
-
-// ── FRIDAY CI: Dependency Version Resolution Fixes ─────────────────────────
-configurations.all {
-    resolutionStrategy {
-        // Pin androidx.core to 1.13.1 (stable, API-35, AGP-8.7 compatible)
-        // Prevents: core-ktx:1.17.0 → AGP 8.9.1+ requirement chain
-        force 'androidx.core:core-ktx:1.13.1'
-        force 'androidx.core:core:1.13.1'
-
-        // Kotlin stdlib deduplication (prevents duplicate class errors)
-        force 'org.jetbrains.kotlin:kotlin-stdlib:1.8.22'
-        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22'
-        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22'
-    }
-}
-
-dependencies {
-    constraints {
-        implementation('org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22') {
-            because('kotlin-stdlib-jdk7 is now part of kotlin-stdlib')
-        }
-        implementation('org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22') {
-            because('kotlin-stdlib-jdk8 is now part of kotlin-stdlib')
-        }
-    }
-}
-GRADLE_EOF
+            printf '\n// FRIDAY CI: Dependency Version Resolution Fixes\nconfigurations.all {\n    resolutionStrategy {\n        force '\''androidx.core:core-ktx:1.13.1'\''\n        force '\''androidx.core:core:1.13.1'\''\n        force '\''org.jetbrains.kotlin:kotlin-stdlib:1.8.22'\''\n        force '\''org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22'\''\n        force '\''org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22'\''\n    }\n}\ndependencies {\n    constraints {\n        implementation('\''org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22'\'') {\n            because('\''kotlin-stdlib-jdk7 is now part of kotlin-stdlib'\'')\n        }\n        implementation('\''org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22'\'') {\n            because('\''kotlin-stdlib-jdk8 is now part of kotlin-stdlib'\'')\n        }\n    }\n}\n' >> "$APP_GRADLE"
             echo "✅ Resolution strategy written → core-ktx:1.13.1 + kotlin-stdlib:1.8.22"
           fi
+
 
           # ── 5. Verify final state ─────────────────────────────────────────────
           echo "── android/build.gradle (AGP version) ──"
