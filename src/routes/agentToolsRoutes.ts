@@ -792,11 +792,11 @@ export function createAgentToolsRouter(): Router {
       res.json({
         query: label,
         result,
-        allRegisteredDevices: allDevices.map((d: any) => ({
+        allRegisteredDevices: (allDevices.devices || []).map((d: any) => ({
           label: d.label,
-          username: d.username,
+          username: (d as any).username || d.label,
           address: d.address,
-          lastUpdatedAt: d.lastUpdatedAt ? new Date(d.lastUpdatedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : "never",
+          lastUpdatedAt: (d as any).lastUpdatedAt ? new Date((d as any).lastUpdatedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : (d.lastUpdatedAgo || "never"),
           lat: d.lat,
           lon: d.lon,
           batteryLevel: d.batteryLevel,

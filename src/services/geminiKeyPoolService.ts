@@ -149,6 +149,34 @@ export class GeminiKeyPoolService {
   }
 
   /**
+   * Returns all configured GoogleGenAI clients with their index and key.
+   */
+  public getAllClients(): { client: GoogleGenAI; apiKey: string; keyIndex: number }[] {
+    return this.keys.map((k) => ({ client: k.client, apiKey: k.apiKey, keyIndex: k.index }));
+  }
+
+  /**
+   * Returns a single clean primary GoogleGenAI client (never malformed with commas).
+   */
+  public getPrimaryClient(): GoogleGenAI {
+    if (this.keys.length > 0) {
+      return this.keys[0].client;
+    }
+    const cleanKey = (process.env.GEMINI_API_KEY || "").split(/[,;\n]/)[0].trim().replace(/^["']|["']$/g, "");
+    return new GoogleGenAI({ apiKey: cleanKey || "placeholder-gemini-key" });
+  }
+
+  /**
+   * Returns a clean single primary API key string.
+   */
+  public getPrimaryApiKey(): string {
+    if (this.keys.length > 0) {
+      return this.keys[0].apiKey;
+    }
+    return (process.env.GEMINI_API_KEY || "").split(/[,;\n]/)[0].trim().replace(/^["']|["']$/g, "") || "placeholder-gemini-key";
+  }
+
+  /**
    * Shorthand alias for getOptimalClient.
    */
   public getClient(options: { priority?: WorkloadPriority; preferredIndex?: number } = {}): ClientAllocation {

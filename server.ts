@@ -44,17 +44,16 @@ import { dispatchLiveToolCall } from "./src/live/liveToolDispatcher";
 import { buildLiveSystemInstruction } from "./src/live/liveSystemPrompt";
 import { createApiRouter } from "./src/routes/apiRoutes";
 
+import { geminiKeyPoolService } from "./src/services/geminiKeyPoolService";
+
 const PORT = Number(process.env.PORT) || 3000;
 const isProduction = process.env.NODE_ENV === "production";
-
-if (!process.env.GEMINI_API_KEY) {
-  console.warn("WARNING: GEMINI_API_KEY is not set. The AI agent will not work until you set it.");
-}
 
 // ── Global Baileys (unofficial WA) toggle (Default ON for maximum responsiveness) ──
 let baileysEnabled: boolean = true;
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "placeholder-gemini-key" });
+// Clean GoogleGenAI client from Predictive Key Pool (handles comma-separated multi-keys properly)
+const ai = geminiKeyPoolService.getPrimaryClient();
 
 // ---------------------------------------------------------------------------
 // Express Master Server Application
@@ -326,10 +325,16 @@ async function startServer() {
       let newSession: any = null;
       let lastLiveError: any = null;
 
-      for (const modelCandidate of liveModelsToTry) {
-        try {
-          console.log(`[Server] Connecting to Gemini Live with model: ${modelCandidate} (session=${sessionId})`);
-          newSession = await ai.live.connect({
+      const poolClients = geminiKeyPoolService.getAllClients();
+      const clientCandidates = poolClients.length > 0
+        ? poolClients
+        : [{ client: ai, apiKey: geminiKeyPoolService.getPrimaryApiKey(), keyIndex: 0 }];
+
+      for (const clientItem of clientCandidates) {
+        for (const modelCandidate of liveModelsToTry) {
+          try {
+            console.log(`[Server] Connecting to Gemini Live with model: ${modelCandidate} on Key #${clientItem.keyIndex + 1} (session=${sessionId})`);
+            newSession = await clientItem.client.live.connect({
             model: modelCandidate,
             callbacks: {
               onopen: () => {
@@ -444,13 +449,21 @@ async function startServer() {
             },
           });
 
-          // Successfully established live connection with this candidate
+          // Successfully established live connection with this candidate & key
+          geminiKeyPoolService.recordSuccess(clientItem.keyIndex);
           break;
         } catch (err: any) {
-          console.warn(`[Server] Live model ${modelCandidate} connection error: ${err?.message || err}`);
+          console.warn(`[Server] Live model ${modelCandidate} (Key #${clientItem.keyIndex + 1}) error: ${err?.message || err}`);
+          if (String(err?.message || err).includes("429") || String(err?.message || err).includes("RESOURCE_EXHAUSTED")) {
+            geminiKeyPoolService.recordRateLimitError(clientItem.keyIndex);
+          } else {
+            geminiKeyPoolService.recordGenericError(clientItem.keyIndex);
+          }
           lastLiveError = err;
         }
       }
+      if (newSession) break;
+    }
 
       if (!newSession) {
         throw lastLiveError || new Error("Failed to connect to any Gemini Live Audio models");
