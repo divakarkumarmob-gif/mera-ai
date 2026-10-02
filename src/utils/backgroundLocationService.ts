@@ -16,6 +16,7 @@
 
 import { getApiUrl } from './api';
 import { getStoredUser } from './appSecurityClient';
+import { offlineFallbackLocationService } from './offlineFallbackLocationService';
 
 // ── Adaptive Ping Configuration ───────────────────────────────────────────────
 
@@ -436,11 +437,25 @@ class BackgroundLocationService {
         }
       } catch (gpsErr: any) {
         console.warn('[BGLocation] ⚠️ GPS unavailable:', gpsErr?.message);
-        // GPS off → use last known cache instead of bailing out
-        if (cached?.lat && cached?.lon) {
+
+        // ── GPS off: try offline multi-method estimation ──────────────────
+        const offlineEst = await offlineFallbackLocationService.estimateOfflineLocation(
+          cached ? { lat: cached.lat, lon: cached.lon, accuracy: cached.accuracy, timestamp: cached.timestamp } : undefined
+        );
+
+        if (offlineEst) {
+          lat = offlineEst.lat;
+          lon = offlineEst.lon;
+          usingCached = true;
+          // Override accuracy from offline estimate
+          (this as any)._offlineAccuracy = offlineEst.accuracy;
+          (this as any)._offlineMethod   = offlineEst.method;
+          (this as any)._offlineConf     = offlineEst.confidence;
+          console.log(`[BGLocation] 🔍 Offline estimate (${offlineEst.method}, ${offlineEst.confidence}% conf): lat=${lat?.toFixed(5)} lon=${lon?.toFixed(5)} acc=${offlineEst.accuracy}m`);
+        } else if (cached?.lat && cached?.lon) {
           lat = cached.lat; lon = cached.lon;
           usingCached = true;
-          console.log('[BGLocation] 📦 Using cached last-known coords (GPS off)');
+          console.log('[BGLocation] 📦 Using cached last-known coords (all methods failed)');
         } else {
           console.warn('[BGLocation] No coords at all — skipping this ping');
           return;
@@ -472,9 +487,23 @@ class BackgroundLocationService {
       });
       if (res.ok) {
         const interval = this.getCurrentInterval();
-        console.log(`[BGLocation] ✅ Ping saved! lat:${lat} lon:${lon}${usingCached ? ' (cached)' : ''} | next in ${interval/1000}s`);
+        const offMethod = (this as any)._offlineMethod;
+        console.log(`[BGLocation] ✅ Ping saved! lat:${lat} lon:${lon}${usingCached ? ` (${offMethod || 'cached'})` : ''} | next in ${interval/1000}s`);
         this.consecutiveErrors = 0;
         this.updateMovementState(lat, lon);
+
+        // ── Passively build offline fingerprint DB when GPS is fresh ──────
+        if (!usingCached) {
+          const acc = this.cachedLast?.accuracy ?? this.lastPosition?.coords?.accuracy ?? 0;
+          offlineFallbackLocationService.buildFingerprint(lat, lon, acc).catch(() => {});
+          offlineFallbackLocationService.buildCellCache(lat, lon, acc);
+          offlineFallbackLocationService.resetDeadReckoning(lat, lon);
+        }
+
+        // Clear offline method tracking
+        delete (this as any)._offlineAccuracy;
+        delete (this as any)._offlineMethod;
+        delete (this as any)._offlineConf;
       } else {
         console.error('[BGLocation] ❌ Ping HTTP error:', res.status);
         this.queueOfflinePing(payload); // server error → queue

@@ -11,11 +11,14 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
-    exclude: ['motion'],
+    exclude: ['motion', 'capacitor-wifi'],
   },
   build: {
     sourcemap: false,
     minify: 'esbuild',
     cssMinify: true,
+    rollupOptions: {
+      external: ['capacitor-wifi'],
+    },
   },
 });
