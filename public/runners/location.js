@@ -17,7 +17,7 @@ addEventListener('locationPing', async (resolve, reject, args) => {
     const deviceId = args?.deviceId || 'unknown_device';
     const label    = args?.label    || 'Boss Phone';
     const username = args?.username || 'boss';
-    const pingUrl  = args?.pingUrl  || 'https://mera-ai.onrender.com/api/location/ping';
+    const pingUrl  = args?.pingUrl  || 'https://mera-ai-3496.onrender.com/api/location/ping';
 
     // Get current GPS position using Capacitor's background-compatible API
     const position = await new Promise((res, rej) => {

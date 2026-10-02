@@ -24,7 +24,7 @@
       "event": "locationPing",
       "repeat": true,
       "interval": 1,
-      "autoStart": true
+      "autoStart": false
     }
   }
 }

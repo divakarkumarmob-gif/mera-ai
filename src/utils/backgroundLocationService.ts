@@ -139,10 +139,15 @@ class BackgroundLocationService {
     this.pingTimer = setInterval(() => { this.sendPing(); }, interval);
   }
 
+  public checkNative(): boolean {
+    if (typeof window === 'undefined') return false;
+    return typeof (window as any).Capacitor !== 'undefined' &&
+      Boolean((window as any).Capacitor?.isNativePlatform?.());
+  }
+
   constructor() {
     if (typeof window !== 'undefined') {
-      this.isNative = typeof (window as any).Capacitor !== 'undefined' &&
-        (window as any).Capacitor?.isNativePlatform?.();
+      this.isNative = this.checkNative();
       this.loadLastKnown();
 
       // ── Instant flush when internet returns ─────────────────────────────
@@ -238,6 +243,75 @@ class BackgroundLocationService {
 
 
 
+  /**
+   * Tries to get fresh GPS or fused network coordinates.
+   * Cascade order:
+   *   1. Capacitor Geolocation (High accuracy GPS, 8s timeout)
+   *   2. Capacitor Geolocation (Low accuracy Fused - works instantly indoors in <1s!)
+   *   3. Browser navigator.geolocation (High accuracy, 8s timeout)
+   *   4. Browser navigator.geolocation (Low accuracy, 5s timeout)
+   */
+  public async getFreshPosition(): Promise<CachedPosition | null> {
+    if (typeof window === 'undefined') return null;
+
+    const toCached = (lat: number, lon: number, accuracy: number, pos?: any): CachedPosition => ({
+      lat,
+      lon,
+      accuracy: accuracy || 0,
+      altitude: pos?.coords?.altitude ?? null,
+      speed: pos?.coords?.speed ?? null,
+      heading: pos?.coords?.heading ?? null,
+      timestamp: Date.now(),
+    });
+
+    const isNative = this.checkNative();
+
+    // 1. Native Capacitor Geolocation (Fused Location Provider on Android)
+    if (isNative) {
+      try {
+        const { Geolocation } = await import('@capacitor/geolocation');
+        // Try high accuracy GPS first
+        try {
+          const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 8000, maximumAge: 10000 });
+          if (pos?.coords?.latitude && pos?.coords?.longitude) {
+            return toCached(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy ?? 0, pos);
+          }
+        } catch {
+          // Fallback to low accuracy (WiFi & Cell Fused - works immediately indoors!)
+          const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: false, timeout: 5000, maximumAge: 60000 });
+          if (pos?.coords?.latitude && pos?.coords?.longitude) {
+            return toCached(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy ?? 0, pos);
+          }
+        }
+      } catch (err: any) {
+        console.warn('[BGLocation] Capacitor getFreshPosition error:', err?.message);
+      }
+    }
+
+    // 2. Web Geolocation API fallback
+    if ('geolocation' in navigator) {
+      try {
+        const pos = await new Promise<GeolocationPosition>((res, rej) =>
+          navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: true, timeout: 8000, maximumAge: 10000 })
+        );
+        if (pos?.coords?.latitude && pos?.coords?.longitude) {
+          return toCached(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy ?? 0, pos);
+        }
+      } catch {
+        try {
+          const pos = await new Promise<GeolocationPosition>((res, rej) =>
+            navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: false, timeout: 5000, maximumAge: 60000 })
+          );
+          if (pos?.coords?.latitude && pos?.coords?.longitude) {
+            return toCached(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy ?? 0, pos);
+          }
+        } catch {}
+      }
+    }
+
+    return null;
+  }
+
   /** Request GPS permission and start tracking */
   public async requestPermissionAndStart(customLabel?: string): Promise<{ success: boolean; message: string }> {
     if (typeof window === 'undefined') return { success: false, message: 'Not a browser environment.' };
@@ -246,58 +320,41 @@ class BackgroundLocationService {
     const label = customLabel || this.getDeviceLabel() || user?.displayName || user?.username || 'Boss Phone';
     this.setDeviceLabel(label);
 
-    // Try Capacitor Geolocation (Fused) first on native
-    if (this.isNative) {
+    const isNative = this.checkNative();
+
+    // 1. Native permission request if on Android
+    if (isNative) {
       try {
         const { Geolocation } = await import('@capacitor/geolocation');
-        const perm = await Geolocation.requestPermissions();
-        if (perm.location === 'granted' || perm.location === 'limited') {
-          const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 15000 });
-          const cached: CachedPosition = {
-            lat: pos.coords.latitude, lon: pos.coords.longitude,
-            accuracy: pos.coords.accuracy ?? 0,
-            altitude: pos.coords.altitude ?? null,
-            speed: pos.coords.speed ?? null,
-            heading: pos.coords.heading ?? null,
-            timestamp: Date.now(),
-          };
-          this.cachedLast = cached;
-          this.saveLastKnown(cached);
-          this.writeStorage(STORAGE_KEY_TRACKING_ON, 'true');
-          const res = await this.registerAndStart(label, label, { lat: cached.lat, lon: cached.lon, accuracy: cached.accuracy });
-          return res;
+        const check = await Geolocation.checkPermissions();
+        if (check.location !== 'granted') {
+          await Geolocation.requestPermissions();
         }
       } catch (err: any) {
-        console.warn('[BGLocation] Capacitor Geolocation error, falling back to web:', err?.message);
+        console.warn('[BGLocation] Native permission request notice:', err?.message);
       }
     }
 
-    // Web geolocation fallback
-    if (!('geolocation' in navigator)) return { success: false, message: 'Geolocation not supported.' };
+    // 2. Always enable tracking state & start foreground + background tracking loops
+    this.writeStorage(STORAGE_KEY_TRACKING_ON, 'true');
+    this.startTracking();
 
-    return new Promise((resolve) => {
-      navigator.geolocation.getCurrentPosition(
-        async (pos) => {
-          this.lastPosition = pos;
-          this.saveLastKnown({
-            lat: pos.coords.latitude, lon: pos.coords.longitude,
-            accuracy: pos.coords.accuracy ?? 0,
-            altitude: pos.coords.altitude ?? null, speed: pos.coords.speed ?? null,
-            heading: pos.coords.heading ?? null, timestamp: Date.now(),
-          });
-          this.writeStorage(STORAGE_KEY_TRACKING_ON, 'true');
-          resolve(await this.registerAndStart(label, label, {
-            lat: pos.coords.latitude, lon: pos.coords.longitude, accuracy: pos.coords.accuracy,
-          }));
-        },
-        async (err) => {
-          const cached = this.loadLastKnown();
-          if (cached) resolve(await this.registerAndStart(label, label, { lat: cached.lat, lon: cached.lon, accuracy: cached.accuracy }));
-          else resolve({ success: false, message: `Location denied: ${err.message}` });
-        },
-        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-      );
-    });
+    // 3. Try to get fresh location immediately (with indoor fallback)
+    const fresh = await this.getFreshPosition();
+    if (fresh) {
+      this.cachedLast = fresh;
+      this.saveLastKnown(fresh);
+      return await this.registerAndStart(label, label, { lat: fresh.lat, lon: fresh.lon, accuracy: fresh.accuracy });
+    }
+
+    // 4. If fresh GPS fix is taking time, use cached coordinates to register device
+    const cached = this.loadLastKnown();
+    if (cached) {
+      return await this.registerAndStart(label, label, { lat: cached.lat, lon: cached.lon, accuracy: cached.accuracy });
+    }
+
+    // 5. Initial registration even without coordinates yet — tracking loop will ping coordinates as soon as available
+    return await this.registerAndStart(label, label);
   }
 
   /** Register device on server and start tracking */
@@ -335,15 +392,22 @@ class BackgroundLocationService {
       const text = await res.text();
       let data: any;
       try { data = JSON.parse(text); } catch { data = { success: false, message: text }; }
-      if (!data.success) return { success: false, message: data.message || 'Registration failed' };
+      if (!data.success) {
+        console.warn('[BGLocation] Server registration notice:', data.message);
+      } else {
+        console.log('[BGLocation] ✅ Device registered!');
+      }
 
-      console.log('[BGLocation] ✅ Device registered!');
       this.writeStorage(STORAGE_KEY_TRACKING_ON, 'true');
       this.startTracking();
-      await this.sendPing();
+      this.sendPing().catch(() => {});
       return { success: true, message: `"${label}" registered! GPS tracking active 📍` };
     } catch (err: any) {
-      return { success: false, message: `Registration error: ${err?.message}` };
+      console.warn('[BGLocation] ⚠️ Register network error (tracking active locally):', err?.message);
+      this.writeStorage(STORAGE_KEY_TRACKING_ON, 'true');
+      this.startTracking();
+      this.sendPing().catch(() => {});
+      return { success: true, message: `"${label}" tracking active locally 📍` };
     }
   }
 
@@ -484,30 +548,28 @@ class BackgroundLocationService {
   private async sendPing(): Promise<void> {
     // ── Step 1: Get coordinates ──────────────────────────────────────────────
     const cached = this.loadLastKnown();
-    let lat = this.cachedLast?.lat ?? this.lastPosition?.coords?.latitude ?? cached?.lat;
-    let lon = this.cachedLast?.lon ?? this.lastPosition?.coords?.longitude ?? cached?.lon;
+    let lat: number | undefined;
+    let lon: number | undefined;
+    let accuracy = 0;
     let usingCached = false;
 
-    // Try fresh GPS if no coords
-    if (!lat || !lon) {
-      try {
-        if (this.isNative) {
-          const { Geolocation } = await import('@capacitor/geolocation');
-          const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 12000 });
-          lat = pos.coords.latitude; lon = pos.coords.longitude;
-          this.saveLastKnown({ lat, lon, accuracy: pos.coords.accuracy ?? 0, altitude: null, speed: null, heading: null, timestamp: Date.now() });
-        } else if ('geolocation' in navigator) {
-          const pos = await new Promise<GeolocationPosition>((res, rej) =>
-            navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: true, timeout: 12000 })
-          );
-          lat = pos.coords.latitude; lon = pos.coords.longitude;
-          this.lastPosition = pos;
-          this.saveLastKnown({ lat, lon, accuracy: pos.coords.accuracy ?? 0, altitude: null, speed: null, heading: null, timestamp: Date.now() });
-        }
-      } catch (gpsErr: any) {
-        console.warn('[BGLocation] ⚠️ GPS unavailable:', gpsErr?.message);
+    // 1. Always attempt to get a fresh position first!
+    const fresh = await this.getFreshPosition();
+    if (fresh) {
+      lat = fresh.lat;
+      lon = fresh.lon;
+      accuracy = fresh.accuracy;
+      this.cachedLast = fresh;
+      this.saveLastKnown(fresh);
+    } else {
+      // 2. Fallback to watchPosition's last cached or stored last known
+      lat = this.cachedLast?.lat ?? this.lastPosition?.coords?.latitude ?? cached?.lat;
+      lon = this.cachedLast?.lon ?? this.lastPosition?.coords?.longitude ?? cached?.lon;
+      accuracy = this.cachedLast?.accuracy ?? this.lastPosition?.coords?.accuracy ?? cached?.accuracy ?? 0;
+      usingCached = true;
 
-        // ── GPS off: try offline multi-method estimation ──────────────────
+      // 3. If still no coords, try offline fallback estimation (WiFi fingerprints, cell towers, dead reckoning)
+      if (!lat || !lon) {
         const offlineEst = await offlineFallbackLocationService.estimateOfflineLocation(
           cached ? { lat: cached.lat, lon: cached.lon, accuracy: cached.accuracy, timestamp: cached.timestamp } : undefined
         );
@@ -515,14 +577,15 @@ class BackgroundLocationService {
         if (offlineEst) {
           lat = offlineEst.lat;
           lon = offlineEst.lon;
+          accuracy = offlineEst.accuracy;
           usingCached = true;
-          // Override accuracy from offline estimate
           (this as any)._offlineAccuracy = offlineEst.accuracy;
           (this as any)._offlineMethod   = offlineEst.method;
           (this as any)._offlineConf     = offlineEst.confidence;
           console.log(`[BGLocation] 🔍 Offline estimate (${offlineEst.method}, ${offlineEst.confidence}% conf): lat=${lat?.toFixed(5)} lon=${lon?.toFixed(5)} acc=${offlineEst.accuracy}m`);
         } else if (cached?.lat && cached?.lon) {
           lat = cached.lat; lon = cached.lon;
+          accuracy = cached.accuracy;
           usingCached = true;
           console.log('[BGLocation] 📦 Using cached last-known coords (all methods failed)');
         } else {
@@ -531,6 +594,7 @@ class BackgroundLocationService {
         }
       }
     }
+
     if (!lat || !lon) return;
 
     const user  = getStoredUser();
