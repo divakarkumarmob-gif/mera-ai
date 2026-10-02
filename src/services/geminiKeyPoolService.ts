@@ -60,31 +60,30 @@ export class GeminiKeyPoolService {
    */
   public reloadKeysFromEnv(): void {
     const rawKeys: string[] = [];
-
-    // 1. Multiple comma or semicolon separated keys
-    const multiEnv = process.env.GEMINI_API_KEYS || process.env.GOOGLE_API_KEYS;
-    if (multiEnv) {
-      const parts = multiEnv.split(/[,;\n]/).map((k) => k.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
-      rawKeys.push(...parts);
-    }
-
-    // 2. Legacy / Fallback single keys
-    const singleKeys = [
+    // Collect all potential env variable sources (plural or singular)
+    const envSources = [
+      process.env.GEMINI_API_KEYS,
       process.env.GEMINI_API_KEY,
-      process.env.VITE_GEMINI_API_KEY,
+      process.env.GOOGLE_API_KEYS,
       process.env.GOOGLE_API_KEY,
+      process.env.VITE_GEMINI_API_KEY,
     ];
-    for (const sk of singleKeys) {
-      if (sk && sk.trim()) {
-        const clean = sk.trim().replace(/^["']|["']$/g, "");
-        if (clean && !rawKeys.includes(clean)) {
-          rawKeys.push(clean);
+
+    for (const source of envSources) {
+      if (!source || !source.trim()) continue;
+      // Split by comma, semicolon, or newline
+      const parts = source
+        .split(/[,;\n]/)
+        .map((k) => k.trim().replace(/^["']|["']$/g, ""))
+        .filter((k) => k.length > 10);
+      for (const p of parts) {
+        if (!rawKeys.includes(p)) {
+          rawKeys.push(p);
         }
       }
     }
 
-    // Remove duplicates while preserving insertion order
-    const uniqueKeys = Array.from(new Set(rawKeys.filter((k) => k.length > 10)));
+    const uniqueKeys = rawKeys;
 
     if (uniqueKeys.length === 0) {
       console.warn("[GeminiKeyPool] ⚠️ No Gemini API keys found in environment variables!");
