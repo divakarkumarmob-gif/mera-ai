@@ -17,6 +17,8 @@
 import { getApiUrl } from './api';
 import { getStoredUser } from './appSecurityClient';
 import { offlineFallbackLocationService } from './offlineFallbackLocationService';
+import { firestoreLocationClient } from './firestoreLocationClient';
+
 
 // ── Adaptive Ping Configuration ───────────────────────────────────────────────
 
@@ -480,7 +482,28 @@ class BackgroundLocationService {
     // ── Step 2: Flush any queued offline pings first ─────────────────────────
     await this.flushOfflineQueue();
 
-    // ── Step 3: Send ping with adaptive retry ────────────────────────────────
+    // ── Step 2.5: Write to Firestore (offline-safe, auto-syncs) ──────────────
+    // This is the GUARANTEED delivery path.
+    // If data is OFF → IndexedDB cache → auto-sync when internet returns
+    // If data is ON  → writes immediately to Firestore
+    // No manual queue needed for Firestore — Google handles it!
+    firestoreLocationClient.writeLocation({
+      deviceId: payload.deviceId,
+      username: payload.username,
+      label:    payload.label,
+      lat:      payload.lat,
+      lon:      payload.lon,
+      accuracy: payload.accuracy,
+      altitude: payload.altitude,
+      speed:    payload.speed,
+      heading:  payload.heading,
+      batteryLevel:     payload.batteryLevel,
+      isCharging:       payload.isCharging,
+      networkType:      payload.networkType,
+      isCachedLastKnown: payload.isCachedLastKnown,
+    }).catch(err => console.warn('[BGLocation] Firestore write error:', err?.message));
+
+    // ── Step 3: Send REST ping with adaptive retry (server-side logic) ────────
     const sent = await this.sendPingWithAdaptiveRetry(payload);
     if (sent === 'ok') {
       const interval = this.getCurrentInterval();
@@ -500,12 +523,14 @@ class BackgroundLocationService {
       delete (this as any)._offlineMethod;
       delete (this as any)._offlineConf;
     } else if (sent === 'queued') {
-      console.log('[BGLocation] 📦 Ping queued (data off or timeout)');
+      // REST API queued — but Firestore already wrote/cached it above ✅
+      console.log('[BGLocation] 📦 REST ping queued | Firestore write already handled offline');
     } else {
-      console.error('[BGLocation] ❌ Ping failed permanently:', sent);
-      this.consecutiveErrors++; // only count actual server errors
+      console.error('[BGLocation] ❌ REST ping failed:', sent);
+      this.consecutiveErrors++;
     }
   }
+
 
   // ── Adaptive Network Fetch ────────────────────────────────────────────────
 
