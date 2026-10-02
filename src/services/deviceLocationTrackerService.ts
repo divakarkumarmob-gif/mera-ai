@@ -210,42 +210,52 @@ class DeviceLocationTrackerService {
 
     const now = Date.now();
 
-    try {
-      // Reverse geocode the coordinates to a human-readable address
-      const address = await this.reverseGeocode(lat, lon);
+    // ── Always save coordinates first, geocoding is best-effort ───────────
+    const isCached = data.isCachedLastKnown === true;
+    const fallbackAddress = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
 
-      const isCached = data.isCachedLastKnown === true;
-      const updateData: any = {
-        lat,
-        lon,
-        accuracy: data.accuracy || 0,
-        altitude: data.altitude ?? null,
-        speed: data.speed ?? null,
-        heading: data.heading ?? null,
-        address,
-        lastUpdatedAt: now,
-        isCachedLastKnown: isCached,
-      };
+    // Build update payload with valid coords (guaranteed at this point)
+    const updateData: any = {
+      lat,
+      lon,
+      accuracy: data.accuracy || 0,
+      altitude: data.altitude ?? null,
+      speed: data.speed ?? null,
+      heading: data.heading ?? null,
+      address: fallbackAddress, // will be overwritten if geocoding succeeds
+      lastUpdatedAt: now,
+      isCachedLastKnown: isCached,
+    };
 
-      if (data.username) {
-        updateData.username = data.username.toLowerCase().trim();
-      }
-      if (data.label) {
-        updateData.label = data.label.trim();
-      }
-
-      // Only update battery/network if provided
-      if (data.batteryLevel !== undefined) updateData.batteryLevel = data.batteryLevel;
-      if (data.isCharging !== undefined) updateData.isCharging = data.isCharging;
-      if (data.networkType !== undefined) updateData.networkType = data.networkType;
-
-      await locationsCollection().doc(deviceId).set(updateData, { merge: true });
-
-      return { success: true, message: "Location ping received." };
-    } catch (err: any) {
-      console.error("[LocationTracker] Ping error:", err?.message || err);
-      return { success: false, message: `Ping failed: ${err?.message || "Unknown error"}` };
+    if (data.username) {
+      updateData.username = data.username.toLowerCase().trim();
     }
+    if (data.label) {
+      updateData.label = data.label.trim();
+    }
+
+    // Only update battery/network if provided
+    if (data.batteryLevel !== undefined) updateData.batteryLevel = data.batteryLevel;
+    if (data.isCharging !== undefined) updateData.isCharging = data.isCharging;
+    if (data.networkType !== undefined) updateData.networkType = data.networkType;
+
+    try {
+      // Save coordinates immediately so they're never lost
+      await locationsCollection().doc(deviceId).set(updateData, { merge: true });
+      console.log(`[LocationTracker] ✅ Ping saved: deviceId=${deviceId}, lat=${lat}, lon=${lon}`);
+    } catch (err: any) {
+      console.error("[LocationTracker] ❌ Firestore write FAILED for ping:", err?.message || err);
+      return { success: false, message: `Firestore write failed: ${err?.message || "Unknown error"}` };
+    }
+
+    // Async geocoding — update address in background (non-blocking)
+    this.reverseGeocode(lat, lon).then(async (address) => {
+      try {
+        await locationsCollection().doc(deviceId).update({ address });
+      } catch { /* non-critical */ }
+    }).catch(() => { /* geocoding failed, fallback coords already saved */ });
+
+    return { success: true, message: "Location ping received." };
   }
 
   /**
@@ -373,21 +383,28 @@ class DeviceLocationTrackerService {
       }
 
       // Check if device has never sent valid coordinates yet
-      // Be more lenient: if there's a cached position within 48 hours, use it
       const ageMs = Date.now() - (bestMatch.lastUpdatedAt || 0);
       const isCached = bestMatch.isCachedLastKnown === true;
-      const hasValidCoords = !(bestMatch.lat === 0 && bestMatch.lon === 0);
-      const hasValidAddress = bestMatch.address && bestMatch.address !== "Location not yet received";
+      const hasValidCoords = bestMatch.lat !== undefined && bestMatch.lon !== undefined &&
+        !(bestMatch.lat === 0 && bestMatch.lon === 0);
+      const hasValidAddress = bestMatch.address &&
+        bestMatch.address !== "Location not yet received" &&
+        bestMatch.address !== "0.0000, 0.0000";
 
+      // If no valid coords AND no valid address → device registered but GPS never fired
       if (!hasValidCoords && !hasValidAddress) {
-        // No valid coordinates ever received AND no cached position
         return {
           success: false,
           deviceId: bestMatch.deviceId,
           label: bestMatch.label,
           ownerName: bestMatch.ownerName,
-          message: `Boss, "${bestMatch.label || bestMatch.ownerName}" phone system me registered hai, lekin abhi tak live GPS coordinates sync nahi hue hain. Kripya phone me Location (GPS) ON karke FRIDAY app/web open karein, live address turant update ho jayega.`,
+          message: `Boss, "${bestMatch.label || bestMatch.ownerName}" phone system me registered hai, lekin abhi tak live GPS coordinates sync nahi hue hain.\n\n📱 FRIDAY app/web open karein aur location permission dein — location turant update ho jayegi!`,
         };
+      }
+
+      // If we have valid coords but address is still fallback, use coords as address
+      if (hasValidCoords && !hasValidAddress) {
+        bestMatch.address = `${bestMatch.lat!.toFixed(5)}, ${bestMatch.lon!.toFixed(5)} (GPS coordinates)`;
       }
 
       // If we have cached position but no live GPS fix, check age
