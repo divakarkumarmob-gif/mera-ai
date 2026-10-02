@@ -11,12 +11,39 @@
 
 import { db, FieldValue } from "./firebaseAdmin";
 
-// ── Telegram Memory Bot Fallback Helpers ────────────────────────────────────
-// Used when Firestore credentials are broken / data is stale (0,0 coords).
-// Location pings are mirrored to a dedicated Telegram chat as tagged messages.
-// Format: #LOC_PING|label=Boss|lat=24.96|lon=86.03|addr=Patna|ts=1234567890
+// ── Location Persistence Helpers (RAM + TG Pinned Vault) ─────────────────────
+// Strategy:
+//   1. Every ping → update locationRamCache (in-process, instant)
+//   2. Every ping → update TG PINNED message (persistent across Render restarts)
+//   3. Server boot → read TG pinned message → hydrate locationRamCache
+//
+// TG Pinned Message format (base64 JSON):
+//   #LOC_VAULT\n`<base64(JSON.stringify(locationVault))>`
+//
+// locationVault = { [labelLower]: { label, lat, lon, addr, ts } }
 
-const TG_LOC_TAG = "#LOC_PING";
+const TG_LOC_VAULT_TAG = "#LOC_VAULT";
+
+// In-process vault mirror (persists between pings, reset on restart → then hydrated from TG)
+const locationVaultStore: Record<string, { label: string; lat: number; lon: number; addr: string; ts: number }> = {};
+let tgVaultMessageId: number | null = null;
+
+function getTgCreds(): { token: string; chatId: string } | null {
+  const token = (
+    process.env.TELEGRAM_MEMORY_BOT_TOKEN ||
+    process.env.TELEGRAM_BRAIN_BOT_TOKEN ||
+    ""
+  ).trim();
+  const chatId = (
+    process.env.TELEGRAM_OWNER_CHAT_ID ||
+    process.env.TELEGRAM_BOSS_CHAT_ID ||
+    process.env.BOSS_TELEGRAM_CHAT_ID ||
+    process.env.TELEGRAM_OWNER_ID ||
+    process.env.TELEGRAM_CHAT_ID ||
+    ""
+  ).trim();
+  return token && chatId ? { token, chatId } : null;
+}
 
 async function tgApiCall(token: string, method: string, body?: any): Promise<any> {
   try {
@@ -33,96 +60,126 @@ async function tgApiCall(token: string, method: string, body?: any): Promise<any
   }
 }
 
-/** Save location ping as a tagged message in TG Memory Bot chat (fire-and-forget) */
-async function savePingToTelegram(label: string, lat: number, lon: number, address: string, ts: number): Promise<void> {
-  const token = (
-    process.env.TELEGRAM_MEMORY_BOT_TOKEN ||
-    process.env.TELEGRAM_BRAIN_BOT_TOKEN ||
-    ""
-  ).trim();
-  const chatId = (
-    process.env.TELEGRAM_OWNER_CHAT_ID ||
-    process.env.TELEGRAM_BOSS_CHAT_ID ||
-    process.env.BOSS_TELEGRAM_CHAT_ID ||
-    process.env.TELEGRAM_OWNER_ID ||
-    process.env.TELEGRAM_CHAT_ID ||
-    ""
-  ).trim();
-  if (!token || !chatId) return;
+/** Persist full vault as a pinned message in TG chat (survives server restarts) */
+async function persistVaultToTelegram(): Promise<void> {
+  const creds = getTgCreds();
+  if (!creds) return;
+  const { token, chatId } = creds;
 
-  const text = `${TG_LOC_TAG}|label=${label}|lat=${lat}|lon=${lon}|addr=${address}|ts=${ts}`;
-  await tgApiCall(token, "sendMessage", { chat_id: chatId, text, disable_notification: true });
-}
-
-/** Fetch the latest location ping for a label from TG bot chat history */
-async function fetchLocationFromTelegram(label: string): Promise<DeviceLocationEntry | null> {
-  const token = (
-    process.env.TELEGRAM_MEMORY_BOT_TOKEN ||
-    process.env.TELEGRAM_BRAIN_BOT_TOKEN ||
-    ""
-  ).trim();
-  const chatId = (
-    process.env.TELEGRAM_OWNER_CHAT_ID ||
-    process.env.TELEGRAM_BOSS_CHAT_ID ||
-    process.env.BOSS_TELEGRAM_CHAT_ID ||
-    process.env.TELEGRAM_OWNER_ID ||
-    process.env.TELEGRAM_CHAT_ID ||
-    ""
-  ).trim();
-  if (!token || !chatId) return null;
+  const encoded = Buffer.from(JSON.stringify(locationVaultStore)).toString("base64");
+  const text = `${TG_LOC_VAULT_TAG}\n\`${encoded}\`\n_Last updated: ${new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}_`;
 
   try {
-    // Fetch latest 100 messages and find most recent location ping for this label
-    const updates = await tgApiCall(token, "getUpdates", {
-      limit: 100,
-      allowed_updates: ["message"],
-    });
-    if (!Array.isArray(updates)) return null;
-
-    const lowerLabel = label.toLowerCase();
-    let bestEntry: DeviceLocationEntry | null = null;
-    let bestTs = 0;
-
-    for (const update of updates) {
-      const text: string = update?.message?.text || "";
-      if (!text.startsWith(TG_LOC_TAG)) continue;
-
-      // Parse: #LOC_PING|label=Boss|lat=24.96|lon=86.03|addr=...|ts=123
-      const parts: Record<string, string> = {};
-      text.split("|").slice(1).forEach((part) => {
-        const eq = part.indexOf("=");
-        if (eq !== -1) parts[part.slice(0, eq)] = part.slice(eq + 1);
+    if (tgVaultMessageId) {
+      // Edit existing pinned message
+      const edited = await tgApiCall(token, "editMessageText", {
+        chat_id: chatId, message_id: tgVaultMessageId, text,
       });
-
-      const msgLabel = (parts["label"] || "").toLowerCase();
-      const isBossQuery = ["boss", "dk", "divakar", "boss phone"].some(t => lowerLabel.includes(t) || msgLabel.includes(t));
-      const matches = msgLabel === lowerLabel || (isBossQuery && ["boss", "dk", "divakar"].some(t => msgLabel.includes(t)));
-      if (!matches) continue;
-
-      const lat = parseFloat(parts["lat"] || "0");
-      const lon = parseFloat(parts["lon"] || "0");
-      const ts  = parseInt(parts["ts"]  || "0", 10);
-      if (!lat || !lon || ts <= bestTs) continue;
-
-      bestTs = ts;
-      bestEntry = {
-        deviceId: `tg_fallback_${msgLabel}`,
-        label: parts["label"] || label,
-        ownerName: parts["label"] || label,
-        lat, lon,
-        accuracy: 0, altitude: null, speed: null, heading: null,
-        address: parts["addr"] || `${lat.toFixed(5)}, ${lon.toFixed(5)}`,
-        lastUpdatedAt: ts,
-        registeredAt: ts,
-        batteryLevel: null, isCharging: null, networkType: null,
-        isCachedLastKnown: false,
-      };
+      if (edited) { console.log("[LocationTracker] 📌 TG location vault updated (edit)"); return; }
     }
+    // Send new message and pin it
+    const sent = await tgApiCall(token, "sendMessage", { chat_id: chatId, text, disable_notification: true });
+    if (sent?.message_id) {
+      tgVaultMessageId = sent.message_id;
+      await tgApiCall(token, "pinChatMessage", { chat_id: chatId, message_id: sent.message_id, disable_notification: true });
+      console.log("[LocationTracker] 📌 TG location vault created and pinned");
+    }
+  } catch { /* non-critical */ }
+}
 
-    return bestEntry;
-  } catch {
-    return null;
+/** On server boot: read TG pinned message → hydrate locationVaultStore + locationRamCache */
+async function hydrateCacheFromTelegramVault(): Promise<void> {
+  const creds = getTgCreds();
+  if (!creds) return;
+  const { token, chatId } = creds;
+
+  try {
+    const chat = await tgApiCall(token, "getChat", { chat_id: chatId });
+    const pinnedText: string = chat?.pinned_message?.text || "";
+    if (!pinnedText.includes(TG_LOC_VAULT_TAG)) return;
+
+    const match = pinnedText.match(/`([A-Za-z0-9+/=]+)`/);
+    if (!match?.[1]) return;
+
+    const vault = JSON.parse(Buffer.from(match[1], "base64").toString("utf-8")) as typeof locationVaultStore;
+    let count = 0;
+    for (const [key, entry] of Object.entries(vault)) {
+      locationVaultStore[key] = entry;
+      // Hydrate RAM cache
+      const ramEntry: DeviceLocationEntry = {
+        deviceId: `tg_vault_${key}`,
+        label: entry.label, ownerName: entry.label, username: key,
+        lat: entry.lat, lon: entry.lon,
+        accuracy: 0, altitude: null, speed: null, heading: null,
+        address: entry.addr,
+        lastUpdatedAt: entry.ts, registeredAt: entry.ts,
+        batteryLevel: null, isCharging: null, networkType: null,
+        isCachedLastKnown: true,
+      };
+      updateRamCache(ramEntry);
+      count++;
+    }
+    if (count > 0) {
+      console.log(`[LocationTracker] 🔁 Hydrated ${count} device(s) from TG pinned vault into RAM cache on boot`);
+    }
+  } catch (err: any) {
+    console.warn("[LocationTracker] TG vault hydration warning:", err?.message || err);
   }
+}
+
+/** Save location ping (updates vault store + persists to TG) */
+async function savePingToTelegram(label: string, lat: number, lon: number, address: string, ts: number): Promise<void> {
+  const key = label.toLowerCase();
+  locationVaultStore[key] = { label, lat, lon, addr: address, ts };
+  await persistVaultToTelegram();
+}
+
+/** Fetch latest location for a label from TG vault (fallback when RAM cache is empty) */
+async function fetchLocationFromTelegram(label: string): Promise<DeviceLocationEntry | null> {
+  // First check in-process vault store
+  const key = label.toLowerCase();
+  const bossAliases = ["boss", "dk", "divakar"];
+  let entry = locationVaultStore[key];
+  if (!entry) {
+    // Boss alias match
+    const isBoss = bossAliases.some(a => key.includes(a));
+    if (isBoss) {
+      for (const [k, v] of Object.entries(locationVaultStore)) {
+        if (bossAliases.some(a => k.includes(a))) { entry = v; break; }
+      }
+    }
+    if (!entry && Object.keys(locationVaultStore).length === 1) {
+      entry = Object.values(locationVaultStore)[0];
+    }
+  }
+  if (entry) {
+    return {
+      deviceId: `tg_vault_${key}`,
+      label: entry.label, ownerName: entry.label, username: key,
+      lat: entry.lat, lon: entry.lon,
+      accuracy: 0, altitude: null, speed: null, heading: null,
+      address: entry.addr,
+      lastUpdatedAt: entry.ts, registeredAt: entry.ts,
+      batteryLevel: null, isCharging: null, networkType: null,
+      isCachedLastKnown: true,
+    };
+  }
+
+  // Not in vault store yet → try to hydrate from TG pinned message
+  await hydrateCacheFromTelegramVault();
+  // Retry after hydration
+  return locationVaultStore[key] ? {
+    deviceId: `tg_vault_${key}`,
+    label: locationVaultStore[key].label,
+    ownerName: locationVaultStore[key].label,
+    username: key,
+    lat: locationVaultStore[key].lat, lon: locationVaultStore[key].lon,
+    accuracy: 0, altitude: null, speed: null, heading: null,
+    address: locationVaultStore[key].addr,
+    lastUpdatedAt: locationVaultStore[key].ts, registeredAt: locationVaultStore[key].ts,
+    batteryLevel: null, isCharging: null, networkType: null,
+    isCachedLastKnown: true,
+  } : null;
 }
 
 // ── Interfaces ───────────────────────────────────────────────────────────────
@@ -223,6 +280,11 @@ function getRamCacheEntry(rawQuery: string): DeviceLocationEntry | null {
 // ── Service Class ────────────────────────────────────────────────────────────
 
 class DeviceLocationTrackerService {
+
+  constructor() {
+    // On server boot → hydrate RAM cache from TG pinned vault (survives Render restarts)
+    hydrateCacheFromTelegramVault().catch(() => {});
+  }
 
   /**
    * Register a new device for live location tracking.
