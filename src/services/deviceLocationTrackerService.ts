@@ -256,7 +256,9 @@ class DeviceLocationTrackerService {
     const rawQuery = (personNameOrLabel || "").trim().toLowerCase();
     const isSelfOrBoss =
       !rawQuery ||
-      ["boss", "dk", "divakar", "mera", "meri", "me", "my", "khud", "self", "apna", "apni", "current", "admin", "owner", "location", "boss location", "live location"].some(
+      // NOTE: "location", "boss location", "live location" removed — they were too greedy
+      // and caused "bhai ki location" to always resolve as Boss device.
+      ["boss", "dk", "divakar", "mera", "meri", "me", "my", "khud", "self", "apna", "apni", "current", "admin", "owner"].some(
         (term) => rawQuery === term || rawQuery.includes(term)
       );
 
@@ -322,7 +324,7 @@ class DeviceLocationTrackerService {
 
           // Common Hindi terms mapping
           const hindiAliases: Record<string, string[]> = {
-            boss: ["boss", "dk", "divakar", "mera", "meri", "me", "my", "khud", "self", "apna", "apni", "current", "admin", "owner", "location"],
+            boss: ["boss", "dk", "divakar", "mera", "meri", "me", "my", "khud", "self", "apna", "apni", "current", "admin", "owner"],
             bhai: ["bhai", "brother", "bro", "bhaiya", "bhaiyya"],
             papa: ["papa", "father", "dad", "daddy", "pitaji", "abba", "abbu"],
             mummy: ["mummy", "mother", "mom", "maa", "amma", "ammi"],

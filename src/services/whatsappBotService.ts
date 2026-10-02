@@ -519,7 +519,14 @@ class WhatsAppBotService {
       (m.videoMessage ? "[Video]" : "") ||
       (m.documentMessage ? "[Document]" : "") ||
       (m.contactMessage ? `[Contact: ${m.contactMessage.displayName}]` : "") ||
-      (m.locationMessage ? "[Location]" : "") ||
+      // -- Live Location (real-time streaming, shared with timer) --
+      (m.liveLocationMessage
+        ? `[LiveLocation: Lat ${m.liveLocationMessage.degreesLatitude?.toFixed(6)}, Long ${m.liveLocationMessage.degreesLongitude?.toFixed(6)}, Accuracy: ${Math.round(m.liveLocationMessage.accuracyInMeters || 0)}m, Duration: ${Math.round((m.liveLocationMessage.durationInSeconds || 0) / 60)}min${m.liveLocationMessage.caption ? `, Caption: ${m.liveLocationMessage.caption}` : ""}]`
+        : "") ||
+      // -- Static Location pin (one-time share) --
+      (m.locationMessage
+        ? `[Location: Lat ${m.locationMessage.degreesLatitude?.toFixed(6)}, Long ${m.locationMessage.degreesLongitude?.toFixed(6)}${m.locationMessage.name ? `, Place: ${m.locationMessage.name}` : ""}${m.locationMessage.address ? `, Address: ${m.locationMessage.address}` : ""}]`
+        : "") ||
       (m.reactionMessage ? `[Reaction: ${m.reactionMessage.text}]` : "") ||
       ""
     );
@@ -679,6 +686,31 @@ class WhatsAppBotService {
               whatsappIntelligenceService.recordStatusStory(msg);
             } catch {}
             continue;
+          }
+
+          // -- WhatsApp Location / LiveLocation -> Firestore Bridge -------------
+          // Whenever someone shares a live location or pin on WhatsApp,
+          // store it in device_locations so Friday can answer "X kahan hai?"
+          const _rawLocMsg = msg.message;
+          const _locPayload = _rawLocMsg?.liveLocationMessage || _rawLocMsg?.locationMessage;
+          if (_locPayload && _locPayload.degreesLatitude && _locPayload.degreesLongitude) {
+            try {
+              const _senderJidRaw = msg.key?.fromMe ? (this.dedicatedPhone ? `${this.dedicatedPhone}@s.whatsapp.net` : remoteJid) : (remoteJid.endsWith("@g.us") ? (msg.key?.participant || remoteJid) : remoteJid);
+              const _senderPhone = _senderJidRaw.split("@")[0].split(":")[0].replace(/\D/g, "");
+              const _senderLabel = msg.pushName || (msg.key?.fromMe ? "Boss (DK)" : `+${_senderPhone}`);
+              const _isLive = !!_rawLocMsg?.liveLocationMessage;
+              const { deviceLocationTrackerService } = await import("./deviceLocationTrackerService");
+              await deviceLocationTrackerService.receivePing({  
+                deviceId: `wa_${_senderPhone}`,
+                label: _senderLabel,
+                lat: _locPayload.degreesLatitude,
+                lon: _locPayload.degreesLongitude,
+                accuracy: _locPayload.accuracyInMeters || 0,
+              });
+              console.log(`[WhatsAppBot] 📍 ${_isLive ? "Live" : "Static"} location from ${_senderLabel} stored -> Firestore (${_locPayload.degreesLatitude.toFixed(4)}, ${_locPayload.degreesLongitude.toFixed(4)})`);
+            } catch (_locErr: any) {
+              console.warn("[WhatsAppBot] Location bridge error:", _locErr?.message);
+            }
           }
 
           const text = this.extractMessageText(msg);

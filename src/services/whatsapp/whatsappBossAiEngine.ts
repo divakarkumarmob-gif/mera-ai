@@ -1501,7 +1501,7 @@ ${recentChatMedia.ocrText ? `- Extracted OCR Text: ${recentChatMedia.ocrText}` :
       },
       {
         name: "get_device_location",
-        description: "Get real-time live GPS device location of Boss DK ('boss location', 'meri location', 'current location', 'main kahan hoon') or any registered family member ('bhai kahan hai', 'papa kahan hain'). Returns exact address, Google Maps link, coordinates, battery level, and last updated time.",
+        description: "Get real-time live GPS device location of Boss DK ('boss location', 'meri location', 'current location', 'main kahan hoon') or any registered family member or person ('bhai kahan hai', 'papa kahan hain', 'mummy ki location', 'X kahan hai'). Devices are auto-registered when the person opens FRIDAY APK/web and logs in with their username — so their username becomes their location label. Returns exact address, Google Maps link, coordinates, battery level, and last updated time. Pass the person's name/username/relation as personNameOrLabel.",
         parameters: {
           type: "OBJECT",
           properties: {
