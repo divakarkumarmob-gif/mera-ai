@@ -17,7 +17,6 @@
 import { getApiUrl } from './api';
 import { getStoredUser } from './appSecurityClient';
 import { offlineFallbackLocationService } from './offlineFallbackLocationService';
-import { firestoreLocationClient } from './firestoreLocationClient';
 
 
 // ── Adaptive Ping Configuration ───────────────────────────────────────────────
@@ -142,6 +141,16 @@ class BackgroundLocationService {
       this.isNative = typeof (window as any).Capacitor !== 'undefined' &&
         (window as any).Capacitor?.isNativePlatform?.();
       this.loadLastKnown();
+
+      // ── Instant flush when internet returns ─────────────────────────────
+      // GPS ON + Data OFF case:
+      //   → Pings were queued in localStorage
+      //   → Jab bhi internet aata hai (online event) → turant flush
+      //   → No waiting for next ping cycle (which could be 10 min if idle)
+      window.addEventListener('online', () => {
+        console.log('[BGLocation] 🌐 Internet restored! Flushing offline queue...');
+        this.flushOfflineQueue().catch(() => {});
+      });
     }
   }
 
@@ -482,28 +491,7 @@ class BackgroundLocationService {
     // ── Step 2: Flush any queued offline pings first ─────────────────────────
     await this.flushOfflineQueue();
 
-    // ── Step 2.5: Write to Firestore (offline-safe, auto-syncs) ──────────────
-    // This is the GUARANTEED delivery path.
-    // If data is OFF → IndexedDB cache → auto-sync when internet returns
-    // If data is ON  → writes immediately to Firestore
-    // No manual queue needed for Firestore — Google handles it!
-    firestoreLocationClient.writeLocation({
-      deviceId: payload.deviceId,
-      username: payload.username,
-      label:    payload.label,
-      lat:      payload.lat,
-      lon:      payload.lon,
-      accuracy: payload.accuracy,
-      altitude: payload.altitude,
-      speed:    payload.speed,
-      heading:  payload.heading,
-      batteryLevel:     payload.batteryLevel,
-      isCharging:       payload.isCharging,
-      networkType:      payload.networkType,
-      isCachedLastKnown: payload.isCachedLastKnown,
-    }).catch(err => console.warn('[BGLocation] Firestore write error:', err?.message));
-
-    // ── Step 3: Send REST ping with adaptive retry (server-side logic) ────────
+    // ── Step 3: Send REST ping with adaptive retry ────────────────────────────
     const sent = await this.sendPingWithAdaptiveRetry(payload);
     if (sent === 'ok') {
       const interval = this.getCurrentInterval();
