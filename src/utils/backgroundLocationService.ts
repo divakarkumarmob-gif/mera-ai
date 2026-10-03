@@ -92,6 +92,7 @@ interface GpsPingPayload {
 class BackgroundLocationService {
   private isRunning           = false;
   private webWatchId: number | null = null;
+  private bgGeoWatcherId: string | null = null;  // @capacitor-community/background-geolocation watcher ID
   private pingTimer: any      = null;
   private lastPosition: GeolocationPosition | null = null;
   private cachedLast: CachedPosition | null = null;
@@ -303,11 +304,11 @@ class BackgroundLocationService {
       try {
         const { Geolocation } = await import('@capacitor/geolocation');
 
-        // Check & request permission with strict timeout
+        // Check & request permission — increased timeouts to avoid false 'denied' on slow Android starts
         try {
-          const check = await safePromise(Geolocation.checkPermissions(), 2000, null);
+          const check = await safePromise(Geolocation.checkPermissions(), 4000, null);
           if (check?.location !== 'granted') {
-            await safePromise(Geolocation.requestPermissions(), 5000, null);
+            await safePromise(Geolocation.requestPermissions(), 8000, null);
           }
         } catch {}
 
@@ -505,9 +506,10 @@ class BackgroundLocationService {
    * Start GPS tracking.
    *
    * APK Strategy:
-   *   1. @capacitor/background-runner (WorkManager) — screen OFF, no notification
-   *   2. @capacitor/geolocation watchPosition      — foreground high-accuracy
-   *   3. Fallback ping timer (60s)
+   *   1. @capacitor-community/background-geolocation  ← REAL background (app closed ✅)
+   *      → Runs a persistent Android foreground service with notification
+   *      → Calls onLocation callback even when screen is OFF and app is killed
+   *   2. Fallback ping timer (60s) for network transmission
    *
    * Web Strategy:
    *   - navigator.geolocation.watchPosition
@@ -522,15 +524,20 @@ class BackgroundLocationService {
     console.log('[BGLocation] 🛰️ Starting GPS (native:', this.isNative, ')...');
 
     if (this.isNative) {
-      // Start WorkManager background runner (Fused, no notification)
-      this.startWorkManagerTracking().catch(() => {});
-      // Also start Capacitor Geolocation watch for foreground accuracy
-      this.startCapacitorGeoWatch().catch(() => {});
+      // ⭐ PRIMARY: @capacitor-community/background-geolocation
+      // This is the ONLY plugin that works when app is closed/killed.
+      // It starts a persistent Android Foreground Service (shows a notification)
+      // and delivers location updates via callback even with screen OFF.
+      this.startBackgroundGeoService().catch((err) => {
+        console.warn('[BGLocation] BG-geo failed, falling back to watchPosition:', err?.message);
+        // Fallback: Capacitor standard geolocation (foreground only)
+        this.startCapacitorGeoWatch().catch(() => {});
+      });
     } else {
       this.startWebWatch();
     }
 
-    // 60s ping timer — backup that also works in foreground
+    // 60s ping timer — backup / foreground pings
     this.pingTimer = setInterval(() => { this.sendPing(); }, PING_INTERVAL_MS);
     this.sendPing(); // immediate first ping
   }
@@ -542,46 +549,103 @@ class BackgroundLocationService {
     if (this.webWatchId !== null) {
       navigator.geolocation.clearWatch(this.webWatchId); this.webWatchId = null;
     }
-    this.stopWorkManagerTracking().catch(() => {});
+    // Stop the real background geo service (removes persistent notification)
+    this.stopBackgroundGeoService().catch(() => {});
     this.writeStorage(STORAGE_KEY_TRACKING_ON, 'false');
   }
 
-  // ── WorkManager (Google Fused, Screen OFF, No Notification) ─────────────────
+  // ── @capacitor-community/background-geolocation (TRUE Background — App Closed ✅) ──
+  //
+  // WHY THIS PLUGIN:
+  //   • @capacitor/background-runner  → one-shot dispatch only, NOT a persistent watcher
+  //   • @capacitor/geolocation watch  → FOREGROUND ONLY — stops when app is swiped away
+  //   • @capacitor-community/background-geolocation → runs an Android ForegroundService
+  //     with a persistent notification. OS cannot kill it. Works with screen OFF & app closed.
+  //
+  // ANDROID REQUIREMENT:
+  //   AndroidManifest.xml must have:
+  //     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+  //     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  //     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+  //   And inside <application>:
+  //     <service android:name="com.equimaps.capacitorbackgroundgeolocation.BackgroundGeolocationService"
+  //              android:foregroundServiceType="location"
+  //              android:exported="false" />
 
-  /**
-   * Uses @capacitor/background-runner with WorkManager.
-   * Android dispatches this every ~60s even when screen is OFF.
-   * No persistent notification required.
-   */
-  private async startWorkManagerTracking(): Promise<void> {
+  private async startBackgroundGeoService(): Promise<void> {
     try {
-      const { BackgroundRunner } = await import('@capacitor/background-runner');
+      const { BackgroundGeolocation } = await import('@capacitor-community/background-geolocation');
 
-      // Dispatch a repeating background task
-      await BackgroundRunner.dispatchEvent({
-        label: 'com.friday.ai.location',   // matches runner config in capacitor.config.json
-        event: 'locationPing',
-        details: {
-          deviceId: this.getOrCreateDeviceId(),
-          label: this.getDeviceLabel(),
-          username: getStoredUser()?.username || 'boss',
-          pingUrl: getApiUrl('/api/location/ping'),
+      // Remove any previous watcher to avoid duplicates
+      if (this.bgGeoWatcherId) {
+        await BackgroundGeolocation.removeWatcher({ id: this.bgGeoWatcherId }).catch(() => {});
+        this.bgGeoWatcherId = null;
+      }
+
+      const watcher = await BackgroundGeolocation.addWatcher(
+        {
+          // ⭐ backgroundMessage makes it run even when app is CLOSED
+          // Android will show a persistent notification with this text
+          backgroundMessage: 'FRIDAY is tracking your location in background.',
+          backgroundTitle: 'FRIDAY Location Active 📍',
+          requestPermissions: true,
+          stale: false,         // only fresh locations (not cached)
+          distanceFilter: 10,   // trigger only when moved >10m (battery saving)
         },
-      });
+        (location, error) => {
+          if (error) {
+            if (error.code === 'NOT_AUTHORIZED') {
+              console.warn('[BGLocation] BG-geo: Location permission denied. User needs to grant Always Allow.');
+            } else {
+              console.warn('[BGLocation] BG-geo error:', error.message);
+            }
+            return;
+          }
 
-      console.log('[BGLocation] ✅ WorkManager background runner dispatched (Fused GPS, no notification)');
+          if (!location) return;
+
+          const c: CachedPosition = {
+            lat: location.latitude,
+            lon: location.longitude,
+            accuracy: location.accuracy ?? 0,
+            altitude: location.altitude ?? null,
+            speed: location.speed ?? null,
+            heading: location.bearing ?? null,
+            timestamp: Date.now(),
+          };
+
+          this.cachedLast = c;
+          this.saveLastKnown(c);
+          this.consecutiveErrors = 0;
+
+          console.log(`[BGLocation] 📍 BG-geo update: lat=${c.lat.toFixed(5)} lon=${c.lon.toFixed(5)} acc=${c.accuracy}m`);
+
+          // Immediately transmit to server (works foreground + background)
+          this.sendPing().catch(() => {});
+        }
+      );
+
+      this.bgGeoWatcherId = watcher.id;
+      console.log('[BGLocation] ✅ Background geolocation service started (id:', watcher.id, ') — works with app CLOSED ✅');
     } catch (err: any) {
-      console.warn('[BGLocation] WorkManager not available:', err?.message, '— relying on Capacitor Geolocation watch');
+      console.warn('[BGLocation] @capacitor-community/background-geolocation error:', err?.message);
+      throw err; // let caller fallback to watchPosition
     }
   }
 
-  private async stopWorkManagerTracking(): Promise<void> {
-    // WorkManager tasks are managed by Android OS; they stop automatically when tracking is disabled
-    // Re-dispatch with empty event or wait for next cycle to not re-register
-    console.log('[BGLocation] WorkManager tracking deregistered (will stop on next cycle).');
+  private async stopBackgroundGeoService(): Promise<void> {
+    try {
+      if (!this.bgGeoWatcherId) return;
+      const { BackgroundGeolocation } = await import('@capacitor-community/background-geolocation');
+      await BackgroundGeolocation.removeWatcher({ id: this.bgGeoWatcherId });
+      this.bgGeoWatcherId = null;
+      console.log('[BGLocation] ⏹️ Background geolocation service stopped (notification removed)');
+    } catch (err: any) {
+      console.warn('[BGLocation] stopBackgroundGeoService error:', err?.message);
+    }
   }
 
-  // ── Capacitor Geolocation Watch (Fused, Foreground) ─────────────────────────
+  // ── Capacitor Geolocation Watch (Foreground-only fallback) ──────────────────
 
   private async startCapacitorGeoWatch(): Promise<void> {
     try {
@@ -601,11 +665,10 @@ class BackgroundLocationService {
           this.cachedLast = c;
           this.saveLastKnown(c);
           this.consecutiveErrors = 0;
-          // 🚀 SEND LIVE PING IMMEDIATELY on every watchPosition GPS fix!
           this.sendPing().catch(() => {});
         }
       );
-      console.log('[BGLocation] ✅ Capacitor Geolocation watch active (foreground)');
+      console.log('[BGLocation] ✅ Capacitor Geolocation watch active (foreground fallback)');
     } catch (err: any) {
       console.warn('[BGLocation] Capacitor Geolocation watch error:', err?.message);
     }
@@ -1181,16 +1244,31 @@ class BackgroundLocationService {
     if (isNative) {
       try {
         const { Geolocation } = await import('@capacitor/geolocation');
-        const check = await safePromise(Geolocation.checkPermissions(), 2500, null);
+        // ⭐ Increased timeout: 2500ms was too short on slow Android starts — caused null return
+        const check = await safePromise(Geolocation.checkPermissions(), 5000, null);
         const perm = check?.location;
         if (perm === 'granted') {
           permInfo = 'Permission: Granted ✅';
+        } else if (perm === 'denied') {
+          // Explicitly denied by user — no point requesting again
+          permInfo = 'Permission: denied ❌ (User blocked in Settings)';
         } else {
-          permInfo = `Permission: "${perm || 'prompt'}". Requesting user consent...`;
+          // perm is 'prompt', 'prompt-with-rationale', or null (timeout) — request consent
+          permInfo = `Permission: "${perm || 'checking...'}". Requesting user consent...`;
           report.step2_coordinates.message = permInfo;
           notify();
-          const req = await safePromise(Geolocation.requestPermissions(), 7000, null);
-          permInfo = req?.location === 'granted' ? 'Permission: Granted ✅' : `Permission: ${req?.location || 'denied'} ❌`;
+          const req = await safePromise(Geolocation.requestPermissions(), 9000, null);
+          if (req === null) {
+            // Timeout — don't assume denied! Re-check actual state instead
+            const recheck = await safePromise(Geolocation.checkPermissions(), 3000, null);
+            permInfo = recheck?.location === 'granted'
+              ? 'Permission: Granted ✅'
+              : `Permission: ${recheck?.location || 'unknown'} (timeout during request)`;
+          } else {
+            permInfo = req.location === 'granted'
+              ? 'Permission: Granted ✅'
+              : `Permission: ${req.location} ❌`;
+          }
         }
       } catch (e: any) {
         permInfo = `Permission check error: ${e?.message}`;
