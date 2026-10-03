@@ -23,7 +23,10 @@ object FridayWebSocketClient {
     var onConnectionStateChanged: ((Boolean) -> Unit)? = null
     var onStateChanged: ((String) -> Unit)? = null
 
+    private var appContext: Context? = null
+
     fun connect(context: Context) {
+        appContext = context.applicationContext
         if (isConnected && webSocket != null) return
 
         val backendUrl = FridayApiClient.getBackendUrl(context)
@@ -88,9 +91,24 @@ object FridayWebSocketClient {
                         handler.post { onMessageReceived?.invoke(speechText) }
                     }
 
-                    // 3. State indicators (Speaking / Thinking)
+                    // 3. State indicators & Live Call Alerts
                     if (type.isNotEmpty()) {
                         when (type) {
+                            "trigger_incoming_call" -> {
+                                val callerName = json.optString("callerName", "WhatsApp Caller")
+                                Log.i(TAG, "📞 Live WhatsApp call alert: $callerName")
+                                appContext?.let { ctx ->
+                                    com.friday.ai.bluetooth.BluetoothAudioRouter.startBluetoothSco(ctx)
+                                    com.friday.ai.tools.SpeechManager.speak(ctx, "WhatsApp call from $callerName.")
+                                }
+                            }
+                            "whatsapp_contact_sent" -> {
+                                val success = json.optBoolean("success", false)
+                                Log.i(TAG, "📤 WhatsApp message dispatch result: success=$success")
+                                if (success) {
+                                    com.friday.ai.tools.SoundEffectsManager.playAffirmationChime()
+                                }
+                            }
                             "speaking" -> handler.post { onStateChanged?.invoke("SPEAKING") }
                             "thinking" -> handler.post { onStateChanged?.invoke("THINKING") }
                             "auth_ack" -> Log.i(TAG, "✅ Server authenticated session token")

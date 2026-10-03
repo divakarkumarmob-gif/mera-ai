@@ -308,6 +308,31 @@ const rawFunctionDeclarations: any[] = [
     }
   },
   {
+    "name": "send_whatsapp_message",
+    "description": "Send a WhatsApp message directly to any contact or phone number in background. Use when user says 'Send WhatsApp to...', 'Ramesh ko bolo ki...', 'WhatsApp par message bhejo...'.",
+    "parameters": {
+      "type": "OBJECT",
+      "properties": {
+        "contactNameOrPhone": {
+          "type": "STRING",
+          "description": "The name of the contact in the phonebook (e.g. 'Rahul', 'Ramesh') or phone number"
+        },
+        "messageText": {
+          "type": "STRING",
+          "description": "The exact message body to send"
+        },
+        "channel": {
+          "type": "STRING",
+          "description": "Optional: 'whatsapp1' (Official Meta API), 'whatsapp2' (Baileys Bot), or 'auto' (default: auto)"
+        }
+      },
+      "required": [
+        "contactNameOrPhone",
+        "messageText"
+      ]
+    }
+  },
+  {
     "name": "set_primary_whatsapp_channel",
     "description": "Set and remember DK's preferred primary/default WhatsApp channel ('whatsapp1' or 'whatsapp2' or 'auto'). Use when DK says 'Primary WhatsApp 2 yaad rakhna', 'Aage se WhatsApp 2 se hi message bhejna', 'WhatsApp 1 ko default bana do', or sets channel preference. Saves preference permanently in database so all future messages automatically use this channel.",
     "parameters": {

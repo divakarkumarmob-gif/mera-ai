@@ -491,6 +491,7 @@ async function startServer() {
     };
 
     let pendingImages: any[] = [];
+    let pendingTexts: string[] = [];
     const processImageInput = async (parsedData: any) => {
       if (!currentSession) return;
       try {
@@ -651,6 +652,16 @@ async function startServer() {
             pendingImages = [];
             for (const imgMsg of queued) await processImageInput(imgMsg);
           }
+          if (pendingTexts.length > 0) {
+            const queuedTexts = [...pendingTexts];
+            pendingTexts = [];
+            for (const qText of queuedTexts) {
+              currentSession.sendClientContent({
+                turns: [{ role: "user", parts: [{ text: qText }] }],
+                turnComplete: true,
+              });
+            }
+          }
         } catch (err: any) {
           console.error("Failed to create Gemini Live session:", err);
           currentSession = undefined;
@@ -663,6 +674,13 @@ async function startServer() {
       if (!currentSession) {
         if (parsedData.image) {
           pendingImages.push(parsedData);
+          return;
+        }
+        if (parsedData.type === "chat_message" || (parsedData.text && !parsedData.type)) {
+          if (parsedData.text) pendingTexts.push(parsedData.text);
+          if (!isInitializingSession && hasEverConnected && !isReconnecting) {
+            autoReconnect().catch((e) => console.error("[Server] Auto-reconnect catch in message router:", e));
+          }
           return;
         }
         if (isInitializingSession) return;
@@ -682,6 +700,18 @@ async function startServer() {
           } catch (e) {
             console.error("[Server] Failed to send audioStreamEnd:", e);
           }
+        } else if (parsedData.type === "chat_message" || (parsedData.text && !parsedData.type)) {
+          const userQuery = parsedData.text;
+          console.log(`[Server] Forwarding voice text query to Gemini Live (session=${sessionId}): "${userQuery}"`);
+          currentSession.sendClientContent({
+            turns: [
+              {
+                role: "user",
+                parts: [{ text: userQuery }],
+              },
+            ],
+            turnComplete: true,
+          });
         } else if (parsedData.image) {
           await processImageInput(parsedData);
         }

@@ -448,10 +448,13 @@ export async function dispatchLiveToolCall(call: any, context: ToolDispatchConte
                     ? { success: true, message: `Contact "${delRes.name}" (+${delRes.phone}) has been deleted from DK's contacts book.` }
                     : { success: false, message: `No matching contact found for "${contactNameOrPhone}" — nothing was deleted.` };
                   clientWs.send(JSON.stringify({ type: "contact_deleted", ...result }));
-                } else if (call.name === "send_whatsapp_to_contact") {
-                  const { contactNameOrPhone, messageText, channel } = call.args || {};
-                  const contact = await contactsService.findContact(contactNameOrPhone);
-                  const targetPhone = contact ? contact.phone : String(contactNameOrPhone || "").replace(/[\s\-\(\)\+]/g, "");
+                } else if (call.name === "send_whatsapp_to_contact" || call.name === "send_whatsapp_message") {
+                  const { contactNameOrPhone, target, phone, to, messageText, message, text, channel } = call.args || {};
+                  const contactTarget = contactNameOrPhone || target || phone || to;
+                  const finalMessageText = messageText || message || text;
+
+                  const contact = await contactsService.findContact(contactTarget);
+                  const targetPhone = contact ? contact.phone : String(contactTarget || "").replace(/[\s\-\(\)\+]/g, "");
 
                   const selectedChannel: "auto" | "whatsapp1" | "whatsapp2" =
                     channel === "whatsapp1" || channel === "1" ? "whatsapp1"
@@ -460,7 +463,7 @@ export async function dispatchLiveToolCall(call: any, context: ToolDispatchConte
 
                   const isBaileysActive = getBaileysEnabled?.() ?? whatsappBotService.isBaileysEnabled();
 
-                  const sendRes = await sendWhatsAppUnified(targetPhone, messageText, {
+                  const sendRes = await sendWhatsAppUnified(targetPhone, finalMessageText, {
                     channel: selectedChannel,
                     baileysEnabled: isBaileysActive,
                   });
@@ -472,7 +475,7 @@ export async function dispatchLiveToolCall(call: any, context: ToolDispatchConte
                     suggestBaileysFallback: sendRes.suggestBaileysFallback,
                     canFallbackToWhatsApp2: sendRes.canFallbackToWhatsApp2,
                     targetPhone,
-                    messageText,
+                    messageText: finalMessageText,
                     message: sendRes.message,
                   };
                   clientWs.send(JSON.stringify({ type: "whatsapp_contact_sent", ...result }));

@@ -17,6 +17,9 @@ object SpeechManager : TextToSpeech.OnInitListener {
     private var tts: TextToSpeech? = null
     private var isTtsReady = false
 
+    val isSpeaking: Boolean
+        get() = tts?.isSpeaking == true
+
     private var speechRecognizer: SpeechRecognizer? = null
     private var isListening = false
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -46,11 +49,47 @@ object SpeechManager : TextToSpeech.OnInitListener {
         }
     }
 
+    fun isNightHours(): Boolean {
+        val cal = java.util.Calendar.getInstance()
+        val hour = cal.get(java.util.Calendar.HOUR_OF_DAY)
+        val minute = cal.get(java.util.Calendar.MINUTE)
+        // 10:30 PM (22:30) to 06:00 AM (06:00)
+        return (hour > 22 || (hour == 22 && minute >= 30) || hour < 6)
+    }
+
+    fun isWhisperModeActive(context: Context? = null): Boolean {
+        if (context != null) {
+            val prefs = context.getSharedPreferences("FridayPrefs", Context.MODE_PRIVATE)
+            val override = prefs.getString("whisper_mode", "auto")
+            if (override == "always") return true
+            if (override == "disabled") return false
+        }
+        return isNightHours()
+    }
+
     fun speak(context: Context, text: String, queueMode: Int = TextToSpeech.QUEUE_FLUSH) {
         mainHandler.post {
             init(context)
             if (isTtsReady && tts != null) {
-                tts?.speak(text, queueMode, null, "friday_speech_${System.currentTimeMillis()}")
+                val whisperActive = isWhisperModeActive(context)
+                if (whisperActive) {
+                    // Night Whisper Mode: Softer pitch, slightly slower, gentler cadence
+                    tts?.setPitch(0.92f)
+                    tts?.setSpeechRate(0.90f)
+                } else {
+                    // Daytime Mode: Crisp, energetic, standard pitch
+                    tts?.setPitch(1.05f)
+                    tts?.setSpeechRate(1.0f)
+                }
+
+                val params = Bundle().apply {
+                    putFloat(
+                        TextToSpeech.Engine.KEY_PARAM_VOLUME,
+                        if (whisperActive) 0.45f else 1.0f
+                    )
+                }
+
+                tts?.speak(text, queueMode, params, "friday_speech_${System.currentTimeMillis()}")
             } else {
                 Log.w(TAG, "TTS not ready yet, queuing...")
             }
@@ -104,6 +143,7 @@ object SpeechManager : TextToSpeech.OnInitListener {
                         isListening = true
                         onListeningStateChanged?.invoke(true)
                         Log.i(TAG, "🎙️ Friday is listening...")
+                        SoundEffectsManager.playWakeChime()
                     }
 
                     override fun onBeginningOfSpeech() {}
@@ -113,6 +153,7 @@ object SpeechManager : TextToSpeech.OnInitListener {
                     override fun onEndOfSpeech() {
                         isListening = false
                         onListeningStateChanged?.invoke(false)
+                        SoundEffectsManager.playDoneChime()
                     }
 
                     override fun onError(error: Int) {

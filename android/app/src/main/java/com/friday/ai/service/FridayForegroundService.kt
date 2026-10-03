@@ -1,6 +1,7 @@
 package com.friday.ai.service
 
 import android.app.Notification
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
@@ -22,10 +23,15 @@ import com.friday.ai.R
 import com.friday.ai.bluetooth.BluetoothControlManager
 import com.friday.ai.network.FridayApiClient
 import com.friday.ai.network.FridayWebSocketClient
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import com.friday.ai.tools.LocationTracker
 import com.friday.ai.tools.SmsController
 import com.friday.ai.tools.SpeechManager
+import com.friday.ai.tools.SoundEffectsManager
+import com.friday.ai.tools.TorchController
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
@@ -46,10 +52,14 @@ class FridayForegroundService : Service() {
         var isRunning: Boolean = false
             private set
 
+        var isSmartSleep: Boolean = false
+            private set
+
         var currentLocation: Location? = null
             get() = instance?.locationTracker?.lastKnownLocation
 
-        private var instance: FridayForegroundService? = null
+        var instance: FridayForegroundService? = null
+            private set
     }
 
     private var wakeLock: PowerManager.WakeLock? = null
@@ -68,10 +78,16 @@ class FridayForegroundService : Service() {
         // Connect WebSocket for live AI agent communication
         FridayWebSocketClient.connect(this)
 
-        // Wire speech recognition back to AI agent
+        // Wire speech recognition: offline resolver first, then cloud AI fallback
         SpeechManager.onSpeechRecognized = { text ->
             Log.i(TAG, "User voice query: $text")
-            FridayWebSocketClient.sendMessage(text)
+            if (!handleOfflineVoiceCommand(text)) {
+                if (FridayWebSocketClient.isConnected) {
+                    FridayWebSocketClient.sendMessage(text)
+                } else {
+                    SpeechManager.speak(this, "Internet is offline, Boss. I can execute offline commands like torch, time, battery, and SOS.")
+                }
+            }
         }
 
         // Wire AI agent responses to TTS voice
@@ -157,22 +173,62 @@ class FridayForegroundService : Service() {
             BluetoothControlManager.Action.STOP_SPEAKING -> {
                 Log.i(TAG, "🛑 Executing STOP_SPEAKING via Bluetooth Long Press")
                 SpeechManager.stopSpeaking()
+                SoundEffectsManager.playDoneChime()
                 vibrateDevice(30L)
             }
         }
     }
 
     private fun executeQuickBriefing() {
+        // 1. Futuristic audio chime + double haptic pulse
+        SoundEffectsManager.playAffirmationChime()
+        vibratePattern(longArrayOf(0, 70, 50, 90))
+
+        // 2. Dynamic time-based greeting
+        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        val greeting = when {
+            hour in 5..11 -> "Good morning Boss."
+            hour in 12..16 -> "Good afternoon Boss."
+            hour in 17..21 -> "Good evening Boss."
+            else -> "Good night Boss."
+        }
+
         val timeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
         val currentTime = timeFormat.format(Date())
 
+        // 3. Battery status & charging detection
         val bm = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
         val batteryPct = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        val isCharging = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val status = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_STATUS)
+            status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL
+        } else {
+            false
+        }
 
+        val batteryReport = when {
+            isCharging -> "Battery is at $batteryPct percent and charging."
+            batteryPct <= 20 -> "Warning, battery is low at $batteryPct percent."
+            else -> "Battery is at $batteryPct percent."
+        }
+
+        // 4. Network connectivity
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        val activeNetwork = cm?.activeNetwork
+        val caps = cm?.getNetworkCapabilities(activeNetwork)
+        val netStatus = when {
+            caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true -> "Wi-Fi online."
+            caps?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true -> "Mobile network active."
+            else -> "Offline mode."
+        }
+
+        // 5. GPS status
         val loc = locationTracker?.lastKnownLocation
-        val locText = if (loc != null) "GPS signal locked." else "Locating satellite signal."
+        val locStatus = if (loc != null) "GPS locked." else "Locating satellite."
 
-        val briefingText = "Good day, Sir. The time is $currentTime. Your battery is at $batteryPct percent. $locText Friday is standing by."
+        // 6. Complete concise briefing (< 6 seconds)
+        val whisperTag = if (SpeechManager.isWhisperModeActive(this)) "Night whisper active." else ""
+        val briefingText = "$greeting The time is $currentTime. $batteryReport $netStatus $locStatus $whisperTag Friday is standing by."
         SpeechManager.speak(this, briefingText)
     }
 
@@ -196,6 +252,63 @@ class FridayForegroundService : Service() {
 
         // 3. Audio confirmation in earbud
         SpeechManager.speak(this, "Emergency SOS broadcasted. Location dispatched.")
+    }
+
+    private fun handleOfflineVoiceCommand(rawText: String): Boolean {
+        val query = rawText.lowercase(Locale.getDefault()).trim()
+
+        // 1. Torch / Flashlight ON
+        if (query.contains("torch on") || query.contains("turn on torch") || query.contains("flashlight on") ||
+            query.contains("torch chalu") || query.contains("light on") || query.contains("light chalu") ||
+            query.contains("torch jalao") || query.contains("flash on")) {
+            val ok = TorchController.setTorch(this, true)
+            SoundEffectsManager.playAffirmationChime()
+            SpeechManager.speak(this, if (ok) "Flashlight turned on." else "Flashlight is unavailable.")
+            return true
+        }
+
+        // 2. Torch / Flashlight OFF
+        if (query.contains("torch off") || query.contains("turn off torch") || query.contains("flashlight off") ||
+            query.contains("torch band") || query.contains("light off") || query.contains("light band") ||
+            query.contains("torch bujhao") || query.contains("flash off")) {
+            TorchController.setTorch(this, false)
+            SoundEffectsManager.playAffirmationChime()
+            SpeechManager.speak(this, "Flashlight turned off.")
+            return true
+        }
+
+        // 3. Time Inquiry
+        if (query.contains("time kya") || query.contains("kitna time") || query.contains("what time") ||
+            query.contains("current time") || query.contains("samay kya") || query == "time") {
+            val timeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
+            val currentTime = timeFormat.format(Date())
+            SoundEffectsManager.playAffirmationChime()
+            SpeechManager.speak(this, "The time is $currentTime, Boss.")
+            return true
+        }
+
+        // 4. Battery Inquiry
+        if (query.contains("battery") || query.contains("charge") || query.contains("charging") || query.contains("kitni charging")) {
+            val bm = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+            val batteryPct = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            SoundEffectsManager.playAffirmationChime()
+            SpeechManager.speak(this, "Battery is currently at $batteryPct percent, Boss.")
+            return true
+        }
+
+        // 5. Quick Briefing
+        if (query.contains("briefing") || query.contains("system status") || query.contains("status update") || query.contains("update do")) {
+            executeQuickBriefing()
+            return true
+        }
+
+        // 6. Emergency SOS
+        if (query == "sos" || query.contains("emergency") || query.contains("bachao") || query.contains("help me")) {
+            executeSilentSos()
+            return true
+        }
+
+        return false
     }
 
     private fun startForegroundWithNotification() {
@@ -244,7 +357,30 @@ class FridayForegroundService : Service() {
         }
     }
 
-    private fun buildNotification(): Notification {
+    fun enterSmartSleep() {
+        if (isSmartSleep) return
+        isSmartSleep = true
+        Log.i(TAG, "🌙 Entering Smart Sleep Mode (WakeLock released to save battery, Doze mode enabled)")
+        releaseLocks()
+        locationTracker?.stopTracking()
+        updateNotification("FRIDAY AI (Smart Sleep)", "💤 Earbuds Disconnected • Battery Saver Active")
+    }
+
+    fun exitSmartSleep() {
+        if (!isSmartSleep) return
+        isSmartSleep = false
+        Log.i(TAG, "☀️ Exiting Smart Sleep Mode (Earbuds Reconnected, WakeLock re-armed)")
+        acquireLocks()
+        locationTracker?.startTracking()
+        updateNotification("FRIDAY AI Active", "🎧 Bluetooth Button Ready • 📍 GPS Syncing")
+    }
+
+    fun updateNotification(title: String, content: String) {
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        nm?.notify(NOTIFICATION_ID, buildNotification(title, content))
+    }
+
+    private fun buildNotification(title: String? = null, content: String? = null): Notification {
         val openAppIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
@@ -276,8 +412,8 @@ class FridayForegroundService : Service() {
 
         return NotificationCompat.Builder(this, FridayApplication.FOREGROUND_CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("FRIDAY AI Active")
-            .setContentText("🎧 Bluetooth Button Ready • 📍 GPS Syncing")
+            .setContentTitle(title ?: "FRIDAY AI Active")
+            .setContentText(content ?: "🎧 Bluetooth Button Ready • 📍 GPS Syncing")
             .setContentIntent(openAppPending)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)

@@ -131,13 +131,18 @@ object BluetoothControlManager {
                 lastDownTime = System.currentTimeMillis()
                 isLongPressTriggered = false
 
-                // Schedule long-press check
+                // Schedule long-press / tap-and-hold check
                 handler.postDelayed({
                     if (!isLongPressTriggered && (System.currentTimeMillis() - lastDownTime >= LONG_PRESS_TIMEOUT_MS)) {
                         isLongPressTriggered = true
                         clickCount = 0
-                        Log.i(TAG, "🔘 Bluetooth Long Press -> STOP_SPEAKING")
-                        dispatchAction(context, Action.STOP_SPEAKING)
+                        if (com.friday.ai.tools.SpeechManager.isSpeaking) {
+                            Log.i(TAG, "🔘 Bluetooth Long Press -> STOP_SPEAKING")
+                            dispatchAction(context, Action.STOP_SPEAKING)
+                        } else {
+                            Log.i(TAG, "🔘 Bluetooth Tap & Hold -> TOGGLE_MIC (Wake Friday)")
+                            dispatchAction(context, Action.TOGGLE_MIC)
+                        }
                     }
                 }, LONG_PRESS_TIMEOUT_MS)
             }
