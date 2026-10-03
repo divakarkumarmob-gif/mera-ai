@@ -15,6 +15,7 @@ import android.webkit.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import android.location.LocationManager
 import androidx.webkit.WebViewAssetLoader
 import com.friday.ai.bluetooth.BluetoothAudioRouter
 import com.friday.ai.bluetooth.BluetoothControlManager
@@ -22,8 +23,10 @@ import com.friday.ai.databinding.ActivityMainBinding
 import com.friday.ai.network.FridayApiClient
 import com.friday.ai.service.FridayAccessibilityService
 import com.friday.ai.service.FridayForegroundService
+import com.friday.ai.tools.LocationTracker
 import com.friday.ai.tools.SmsController
 import com.friday.ai.tools.WifiScannerHelper
+import org.json.JSONObject
 
 class MainActivity : AppCompatActivity() {
 
@@ -38,8 +41,35 @@ class MainActivity : AppCompatActivity() {
 
     private val permissionsLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) {
+    ) { grants ->
+        val fineGranted = grants[Manifest.permission.ACCESS_FINE_LOCATION] == true
+        val coarseGranted = grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (fineGranted || coarseGranted) {
+            checkAndRequestBackgroundLocation()
+        }
         startFridayForegroundService()
+    }
+
+    private val bgLocationLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        Log.i(TAG, "Background location permission result: $granted")
+        startFridayForegroundService()
+    }
+
+    private fun checkAndRequestBackgroundLocation() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val bgGranted = ContextCompat.checkSelfPermission(
+                this, Manifest.permission.ACCESS_BACKGROUND_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!bgGranted) {
+                try {
+                    bgLocationLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Could not launch background location request: ${e.message}")
+                }
+            }
+        }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -244,7 +274,103 @@ class MainActivity : AppCompatActivity() {
             fun getBackendUrl(): String {
                 return FridayApiClient.getBackendUrl(this@MainActivity)
             }
+
+            @JavascriptInterface
+            fun hasLocationPermission(): Boolean {
+                val hasFine = ContextCompat.checkSelfPermission(
+                    this@MainActivity, Manifest.permission.ACCESS_FINE_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED
+                val hasCoarse = ContextCompat.checkSelfPermission(
+                    this@MainActivity, Manifest.permission.ACCESS_COARSE_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED
+                return hasFine || hasCoarse
+            }
+
+            @JavascriptInterface
+            fun hasBackgroundLocationPermission(): Boolean {
+                return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    ContextCompat.checkSelfPermission(
+                        this@MainActivity, Manifest.permission.ACCESS_BACKGROUND_LOCATION
+                    ) == PackageManager.PERMISSION_GRANTED
+                } else {
+                    hasLocationPermission()
+                }
+            }
+
+            @JavascriptInterface
+            fun requestLocationPermission(): Boolean {
+                runOnUiThread {
+                    requestAppPermissions()
+                }
+                return true
+            }
+
+            @JavascriptInterface
+            fun isGpsEnabled(): Boolean {
+                val lm = getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return false
+                return try {
+                    lm.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+                            lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+                } catch (e: Exception) {
+                    false
+                }
+            }
+
+            @JavascriptInterface
+            fun getLocation(): String {
+                val loc = LocationTracker.getImmediateLocation(this@MainActivity)
+                if (loc == null) {
+                    return "{}"
+                }
+                val json = JSONObject().apply {
+                    put("lat", loc.latitude)
+                    put("lon", loc.longitude)
+                    put("accuracy", loc.accuracy)
+                    put("altitude", if (loc.hasAltitude()) loc.altitude else JSONObject.NULL)
+                    put("speed", if (loc.hasSpeed()) loc.speed else JSONObject.NULL)
+                    put("heading", if (loc.hasBearing()) loc.bearing else JSONObject.NULL)
+                    put("timestamp", loc.time)
+                    put("source", "native-android")
+                }
+                return json.toString()
+            }
+
+            @JavascriptInterface
+            fun sendLocationPingNow(): Boolean {
+                val loc = LocationTracker.getImmediateLocation(this@MainActivity)
+                if (loc != null) {
+                    FridayApiClient.sendLocationPing(this@MainActivity, loc)
+                    return true
+                }
+                return false
+            }
+
+            @JavascriptInterface
+            fun syncDeviceInfo(deviceId: String, username: String, label: String) {
+                FridayApiClient.syncDeviceInfo(this@MainActivity, deviceId, username, label)
+            }
         }, "FridayNativeBridge")
+
+        // Push real-time native location updates directly into WebView
+        LocationTracker.instance?.onLocationUpdated = { loc ->
+            runOnUiThread {
+                val script = """
+                    (function() {
+                        var d = {
+                            lat: ${loc.latitude},
+                            lon: ${loc.longitude},
+                            accuracy: ${loc.accuracy},
+                            altitude: ${if (loc.hasAltitude()) loc.altitude else "null"},
+                            speed: ${if (loc.hasSpeed()) loc.speed else "null"},
+                            heading: ${if (loc.hasBearing()) loc.bearing else "null"},
+                            timestamp: ${loc.time}
+                        };
+                        window.dispatchEvent(new CustomEvent('friday:native_location', { detail: d }));
+                    })();
+                """.trimIndent()
+                binding.webView.evaluateJavascript(script, null)
+            }
+        }
 
         // Safety fallback: Hide loading indicator after 2.5s even if load takes time
         binding.root.postDelayed({

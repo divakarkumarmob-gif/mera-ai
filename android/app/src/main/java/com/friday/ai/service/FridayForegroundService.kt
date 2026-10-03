@@ -189,17 +189,40 @@ class FridayForegroundService : Service() {
     private fun startForegroundWithNotification() {
         val notif = buildNotification()
 
+        val hasFine = androidx.core.content.ContextCompat.checkSelfPermission(
+            this, android.Manifest.permission.ACCESS_FINE_LOCATION
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val hasCoarse = androidx.core.content.ContextCompat.checkSelfPermission(
+            this, android.Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val hasMic = androidx.core.content.ContextCompat.checkSelfPermission(
+            this, android.Manifest.permission.RECORD_AUDIO
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                val types = ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION or
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or
+                var types = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or
                         ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                if (hasFine || hasCoarse) {
+                    types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+                }
+                if (hasMic) {
+                    types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                }
                 startForeground(NOTIFICATION_ID, notif, types)
             } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val types = ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION or
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-                startForeground(NOTIFICATION_ID, notif, types)
+                var types = 0
+                if (hasFine || hasCoarse) {
+                    types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+                }
+                if (hasMic) {
+                    types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                }
+                if (types != 0) {
+                    startForeground(NOTIFICATION_ID, notif, types)
+                } else {
+                    startForeground(NOTIFICATION_ID, notif)
+                }
             } else {
                 startForeground(NOTIFICATION_ID, notif)
             }

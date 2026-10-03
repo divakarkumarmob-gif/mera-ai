@@ -39,6 +39,31 @@ object FridayApiClient {
         prefs.edit().putString("backend_url", url.trim().trimEnd('/')).apply()
     }
 
+    fun syncDeviceInfo(context: Context, deviceId: String, username: String, label: String) {
+        val prefs = context.getSharedPreferences("FridayPrefs", Context.MODE_PRIVATE)
+        prefs.edit()
+            .putString("device_id", deviceId.trim())
+            .putString("username", username.trim())
+            .putString("device_label", label.trim())
+            .apply()
+        Log.i(TAG, "Synced device info: deviceId=$deviceId, username=$username, label=$label")
+    }
+
+    fun getDeviceId(context: Context): String {
+        val prefs = context.getSharedPreferences("FridayPrefs", Context.MODE_PRIVATE)
+        return prefs.getString("device_id", "dev_apk_boss") ?: "dev_apk_boss"
+    }
+
+    fun getDeviceLabel(context: Context): String {
+        val prefs = context.getSharedPreferences("FridayPrefs", Context.MODE_PRIVATE)
+        return prefs.getString("device_label", "Boss Phone (${Build.MODEL})") ?: "Boss Phone (${Build.MODEL})"
+    }
+
+    fun getUsername(context: Context): String {
+        val prefs = context.getSharedPreferences("FridayPrefs", Context.MODE_PRIVATE)
+        return prefs.getString("username", "boss") ?: "boss"
+    }
+
     /**
      * Pings the server with current device GPS coordinates + Battery telemetry
      * Target: POST /api/location/ping
@@ -62,9 +87,9 @@ object FridayApiClient {
                     status == BatteryManager.BATTERY_STATUS_FULL
         } catch (ignored: Exception) {}
 
-        val deviceId = "dev_apk_boss"
-        val label = "Boss Phone (${Build.MODEL})"
-        val username = "boss"
+        val deviceId = getDeviceId(context)
+        val label = getDeviceLabel(context)
+        val username = getUsername(context)
 
         val json = JSONObject().apply {
             put("deviceId", deviceId)
