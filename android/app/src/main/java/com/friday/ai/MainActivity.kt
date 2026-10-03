@@ -29,8 +29,8 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "FridayMainActivity"
-        private const val ASSET_DOMAIN = "appassets.androidplatform.net"
-        private const val START_URL = "https://appassets.androidplatform.net/assets/index.html"
+        private const val ASSET_DOMAIN = "localhost"
+        private const val START_URL = "https://localhost/index.html"
     }
 
     private lateinit var binding: ActivityMainBinding
@@ -47,6 +47,9 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        // Enable Chrome remote inspection: chrome://inspect
+        WebView.setWebContentsDebuggingEnabled(true)
 
         setupLockscreenFlags()
         requestAppPermissions()
@@ -138,10 +141,10 @@ class MainActivity : AppCompatActivity() {
         settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
         settings.cacheMode = WebSettings.LOAD_DEFAULT
 
-        // Asset Loader to securely serve local bundled React assets
+        // Asset Loader to securely serve local bundled React assets from root "/"
         assetLoader = WebViewAssetLoader.Builder()
             .setDomain(ASSET_DOMAIN)
-            .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this))
+            .addPathHandler("/", WebViewAssetLoader.AssetsPathHandler(this))
             .build()
 
         // Auto-grant Camera, Mic and Geolocation to WebView for Gemini Live Voice & Vision
@@ -163,6 +166,11 @@ class MainActivity : AppCompatActivity() {
             ) {
                 callback?.invoke(origin, true, false)
             }
+
+            override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
+                Log.d("FRIDAY_WEB", "${consoleMessage?.message()} [${consoleMessage?.sourceId()}:${consoleMessage?.lineNumber()}]")
+                return true
+            }
         }
 
         webView.webViewClient = object : WebViewClient() {
@@ -171,13 +179,21 @@ class MainActivity : AppCompatActivity() {
                 request: WebResourceRequest?
             ): WebResourceResponse? {
                 val url = request?.url ?: return null
-                return assetLoader.shouldInterceptRequest(url)
+                if (url.host.equals(ASSET_DOMAIN, ignoreCase = true)) {
+                    return assetLoader.shouldInterceptRequest(url)
+                }
+                return null
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
                 binding.loadingLayout.visibility = View.GONE
                 injectNativeBridges()
+            }
+
+            override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
+                super.onReceivedError(view, request, error)
+                Log.w(TAG, "WebView error: ${error?.description} for ${request?.url}")
             }
 
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
@@ -229,6 +245,11 @@ class MainActivity : AppCompatActivity() {
                 return FridayApiClient.getBackendUrl(this@MainActivity)
             }
         }, "FridayNativeBridge")
+
+        // Safety fallback: Hide loading indicator after 2.5s even if load takes time
+        binding.root.postDelayed({
+            binding.loadingLayout.visibility = View.GONE
+        }, 2500)
 
         // Load the local Friday Web App (Renders Login Prompt, Capsules, Starry Background, Gemini Live)
         Log.i(TAG, "Loading local Friday App from: $START_URL")

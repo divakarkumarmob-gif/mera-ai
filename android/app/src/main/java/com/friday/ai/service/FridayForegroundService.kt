@@ -239,7 +239,7 @@ class FridayForegroundService : Service() {
         )
 
         return NotificationCompat.Builder(this, FridayApplication.FOREGROUND_CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle("FRIDAY AI Active")
             .setContentText("🎧 Bluetooth Button Ready • 📍 GPS Syncing")
             .setContentIntent(openAppPending)
