@@ -2246,7 +2246,16 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
         };
     };
 
+    const lastToggleTimeRef = useRef(0);
+
     const handleToggleRecording = async () => {
+        const now = Date.now();
+        if (now - lastToggleTimeRef.current < 600) {
+            console.log("[LiveAIInterface] Debouncing rapid recording toggle call");
+            return;
+        }
+        lastToggleTimeRef.current = now;
+
         if (isRecording) stopRecording();
         else await ensureConnection(true);
     };

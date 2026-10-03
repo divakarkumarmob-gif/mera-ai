@@ -14,8 +14,8 @@ import com.friday.ai.service.FridayForegroundService
 object BluetoothControlManager {
     private const val TAG = "FridayBluetooth"
 
-    // Click Debounce Threshold for 3-tap detection
-    private const val MULTI_CLICK_TIMEOUT_MS = 450L
+    // Click Debounce Threshold for 3-tap detection (520ms gives ample window for 3 clicks)
+    private const val MULTI_CLICK_TIMEOUT_MS = 520L
 
     private var mediaSession: MediaSessionCompat? = null
     private val handler = Handler(Looper.getMainLooper())

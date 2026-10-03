@@ -184,7 +184,9 @@ object SpeechManager : TextToSpeech.OnInitListener {
             Log.i(TAG, "🎙️ Friday Continuous 3-minute Session Started")
             SoundEffectsManager.playWakeChime()
             resetInactivityTimer()
-            internalStartListening()
+            mainHandler.removeCallbacks(restartListeningRunnable)
+            // Allow 280ms for the wake chime AudioTrack to finish completely before opening microphone!
+            mainHandler.postDelayed(restartListeningRunnable, 280L)
         }
     }
 

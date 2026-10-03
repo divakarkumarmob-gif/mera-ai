@@ -145,6 +145,7 @@ class FridayForegroundService : Service() {
                 Log.i(TAG, "🎙️ Executing TOGGLE_MIC via Bluetooth")
                 vibrateDevice(50L)
                 wakeScreen()
+                com.friday.ai.bluetooth.BluetoothAudioRouter.startBluetoothSco(this)
                 SpeechManager.toggleListening(this)
 
                 // Launch / bring Friday assistant to screen over lockscreen

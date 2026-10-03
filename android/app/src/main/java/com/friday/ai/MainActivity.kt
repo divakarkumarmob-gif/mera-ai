@@ -131,16 +131,29 @@ class MainActivity : AppCompatActivity() {
 
             // 2. Also trigger UI Webview mic button directly to start Gemini Live audio session immediately
             binding.root.postDelayed({
-                binding.webView.evaluateJavascript(
-                    """
-                    (function() {
-                        window.dispatchEvent(new CustomEvent('friday_bluetooth_toggle_mic'));
-                        var btn = document.querySelector('[data-mic-trigger="true"], [data-mic="true"], button[aria-label*="Mic"], button[title*="Session"]');
-                        if (btn) btn.click();
-                    })();
-                    """.trimIndent(), null
-                )
-            }, 300)
+                triggerWebviewMicToggle()
+            }, 300L)
+        }
+    }
+
+    private var lastMicTriggerTime = 0L
+
+    fun triggerWebviewMicToggle() {
+        val now = System.currentTimeMillis()
+        if (now - lastMicTriggerTime < 600L) {
+            Log.d(TAG, "Debouncing rapid Webview mic trigger (${now - lastMicTriggerTime}ms)")
+            return
+        }
+        lastMicTriggerTime = now
+
+        binding.root.post {
+            binding.webView.evaluateJavascript(
+                """
+                (function() {
+                    window.dispatchEvent(new CustomEvent('friday_bluetooth_toggle_mic'));
+                })();
+                """.trimIndent(), null
+            )
         }
     }
 
@@ -485,14 +498,7 @@ class MainActivity : AppCompatActivity() {
                 when (action) {
                     BluetoothControlManager.Action.TOGGLE_MIC -> {
                         Log.i(TAG, "🎧 Bluetooth -> Toggle Mic in Friday UI")
-                        val script = """
-                            (function() {
-                                window.dispatchEvent(new CustomEvent('friday_bluetooth_toggle_mic'));
-                                var btn = document.querySelector('[data-mic-trigger="true"], [data-mic="true"], button[aria-label*="Mic"], button[title*="Session"]');
-                                if (btn) btn.click();
-                            })();
-                        """.trimIndent()
-                        binding.webView.evaluateJavascript(script, null)
+                        triggerWebviewMicToggle()
                     }
 
                     BluetoothControlManager.Action.VOICE_BRIEFING -> {
