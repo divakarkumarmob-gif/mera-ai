@@ -224,7 +224,11 @@ class BackgroundLocationService {
   private async fetchAndApplySmsRecipient(): Promise<void> {
     try {
       const url = getApiUrl('/config/app');
-      const res = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(8000) });
+      // ⭐ AbortController instead of AbortSignal.timeout() — Android WebView compatible!
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 8000);
+      const res = await fetch(url, { method: 'GET', signal: ctrl.signal });
+      clearTimeout(t);
       if (!res.ok) return;
 
       const data: { smsRecipient?: string; smsFallbackEnabled?: boolean } = await res.json();
@@ -374,11 +378,13 @@ class BackgroundLocationService {
     const user   = getStoredUser();
     const cached = this.loadLastKnown();
 
+    const isNativePlatform = this.checkNative();
     const payload: any = {
       deviceId,
       label: this.deviceLabel || 'Boss Phone',
       ownerName: ownerName || this.deviceLabel || 'DK (Boss)',
       username: user?.username || 'boss',
+      platform: isNativePlatform ? 'apk' : 'web',  // ⭐ Reliable APK vs web flag
       batteryLevel: this.getBatteryLevel(),
       isCharging: this.getChargingStatus(),
       networkType: this.getNetworkType(),
@@ -392,16 +398,21 @@ class BackgroundLocationService {
     }
 
     try {
+      // ⭐ AbortController instead of no-timeout hang — Android WebView safe!
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 10000);
       const res  = await fetch(getApiUrl('/api/location/register'), {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload), signal: ctrl.signal,
       });
+      clearTimeout(t);
       const text = await res.text();
       let data: any;
       try { data = JSON.parse(text); } catch { data = { success: false, message: text }; }
       if (!data.success) {
         console.warn('[BGLocation] Server registration notice:', data.message);
       } else {
-        console.log('[BGLocation] ✅ Device registered!');
+        console.log('[BGLocation] ✅ Device registered! platform=' + payload.platform + ' deviceId=' + deviceId);
       }
 
       this.writeStorage(STORAGE_KEY_TRACKING_ON, 'true');

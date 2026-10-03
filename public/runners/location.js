@@ -45,6 +45,7 @@ addEventListener('locationPing', async (resolve, reject, args) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         deviceId, label, username,
+        platform: 'apk',  // ⭐ Always APK — this runner only runs on Android WorkManager
         lat, lon, accuracy: accuracy ?? 0,
         altitude: altitude ?? null,
         speed: speed ?? null,
