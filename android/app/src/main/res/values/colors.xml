@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="friday_black">#020617</color>
+    <color name="friday_card">#0F172A</color>
+    <color name="friday_card_stroke">#1E293B</color>
+    <color name="friday_cyan">#06B6D4</color>
+    <color name="friday_cyan_glow">#22D3EE</color>
+    <color name="friday_blue">#3B82F6</color>
+    <color name="friday_purple">#8B5CF6</color>
+    <color name="friday_red">#EF4444</color>
+    <color name="friday_emerald">#10B981</color>
+    <color name="friday_text_main">#F8FAFC</color>
+    <color name="friday_text_muted">#94A3B8</color>
+</resources>

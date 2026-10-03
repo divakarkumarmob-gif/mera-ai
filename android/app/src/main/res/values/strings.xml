@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">FRIDAY</string>
+    <string name="channel_name">FRIDAY Core Service</string>
+    <string name="channel_desc">Keeps FRIDAY AI, Location Sync &amp; Bluetooth controls active 24/7</string>
+</resources>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.FridayAI" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:statusBarColor">@color/friday_black</item>
+        <item name="android:navigationBarColor">@color/friday_black</item>
+        <item name="android:windowBackground">@color/friday_black</item>
+        <item name="colorPrimary">@color/friday_cyan</item>
+        <item name="colorPrimaryVariant">@color/friday_blue</item>
+        <item name="colorOnPrimary">@color/friday_black</item>
+    </style>
+</resources>
