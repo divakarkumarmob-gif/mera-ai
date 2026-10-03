@@ -23,8 +23,9 @@ export interface ApiRoutesContext extends BotRoutesContext {
 export function createApiRouter(context: ApiRoutesContext): Router {
   const masterRouter = Router();
 
-  // Root health check endpoint
-  masterRouter.get("/health", (_req, res) => res.json({ ok: true, status: "healthy", timestamp: Date.now() }));
+  // Root health check endpoints
+  masterRouter.all("/health", (_req, res) => res.json({ ok: true, status: "healthy", timestamp: Date.now() }));
+  masterRouter.all("/api/health", (_req, res) => res.json({ ok: true, status: "healthy", timestamp: Date.now() }));
 
   /**
    * GET /config/app

@@ -203,7 +203,7 @@ class BackgroundLocationService {
     this.fetchAndApplySmsRecipient().catch(() => {});
 
     const user  = getStoredUser();
-    const label = this.getDeviceLabel() || user?.displayName || user?.username || 'Boss Device';
+    const label = this.getDeviceLabel() || user?.displayName || user?.username || 'Boss Phone';
     if (this.isTrackingEnabled()) {
       console.log(`[BGLocation] 🔄 Auto-resuming for "${label}"...`);
       await this.requestPermissionAndStart(label).catch(() => this.startTracking());
@@ -598,9 +598,11 @@ class BackgroundLocationService {
     if (!lat || !lon) return;
 
     const user  = getStoredUser();
-    const label = this.getDeviceLabel() || user?.displayName || user?.username || 'FRIDAY Device';
+    const label = this.getDeviceLabel() || user?.displayName || user?.username || 'Boss Phone';
     const payload: GpsPingPayload = {
-      deviceId: this.getOrCreateDeviceId(), username: user?.username, label,
+      deviceId: this.getOrCreateDeviceId(),
+      username: user?.username || 'boss',
+      label: label || 'Boss Phone',
       lat, lon,
       accuracy:  this.cachedLast?.accuracy  ?? this.lastPosition?.coords?.accuracy  ?? cached?.accuracy  ?? 0,
       altitude:  this.cachedLast?.altitude  ?? this.lastPosition?.coords?.altitude  ?? cached?.altitude  ?? null,
@@ -799,118 +801,52 @@ class BackgroundLocationService {
    */
   private async sendPingWithAdaptiveRetry(payload: GpsPingPayload): Promise<string> {
     const url = getApiUrl('/api/location/ping');
+    const body = JSON.stringify(payload);
 
-    // ── L1: Offline fast-path + SMS fallback ──────────────────────────────────
-    // GPS ON + Data OFF → queue ping + fire SMS (zero cost via SIM)
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
-      this.queueOfflinePing(payload);
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+        signal: AbortSignal.timeout(10000),
+      });
 
-      // 📱 SMS FALLBACK: send coordinates via native SMS (no internet needed)
-      const smsRecipient = this.getSmsRecipient();
-      if (smsRecipient && payload.lat && payload.lon) {
-        sendLocationSms({
-          lat:             payload.lat,
-          lon:             payload.lon,
-          accuracy:        payload.accuracy ?? 999,
-          deviceId:        payload.deviceId,
-          recipientNumber: smsRecipient,
-        }).then(result => {
-          console.log(`[BGLocation] 📱 SMS fallback: ${result}`);
-        }).catch(() => {});
-      } else if (!smsRecipient) {
-        console.log('[BGLocation] ℹ️ SMS fallback not configured (no recipient set)');
+      if (res.ok) {
+        console.log(`[BGLocation] 🚀 Live ping delivered to server: lat=${payload.lat}, lon=${payload.lon}`);
+        return 'ok';
       }
 
-      return 'queued';
-    }
-
-    // ── L1: Probe actual RTT ──────────────────────────────────────────────────
-    // Only probe if last RTT unknown or connection type changed
-    const quality = this.getNetworkQuality();
-    if (this.lastRttMs < 0 || quality !== 'good') {
-      await this.probeRtt();
-    }
-
-    const freshQuality = this.getNetworkQuality();
-    console.log(`[BGLocation] 📶 Network: ${freshQuality} | RTT: ${this.lastRttMs}ms`);
-
-    // ── Offline after probe (data died during probe) ───────────────────────────
-
-    if (freshQuality === 'offline' || this.lastRttMs >= 9000) {
-      this.queueOfflinePing(payload);
-      return 'queued';
-    }
-
-    // ── L3: Choose payload tier based on RTT ──────────────────────────────────
-    const { body, tier } = this.choosePayload(payload);
-    console.log(`[BGLocation] 📦 Payload tier: ${tier} (${body.length} bytes)`);
-
-    // ── L2: Try Beacon API first (most resilient for unstable) ────────────────
-    // Beacon is fire-and-forget — doesn't block, browser handles retry
-    // We still try REST after for confirmation
-    const beaconFired = freshQuality === '2g' || freshQuality === 'slow'
-      ? this.tryBeacon(payload)
-      : false;
-
-    // ── L4: Dynamic timeout based on RTT ──────────────────────────────────────
-    // timeout = RTT × 4, min 5s, max 20s
-    const dynamicTimeout = Math.min(20000, Math.max(5000, (this.lastRttMs > 0 ? this.lastRttMs : 3000) * 4));
-    const maxRetries     = freshQuality === '2g' ? 2 : freshQuality === 'slow' ? 3 : 3;
-
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        const controller = new AbortController();
-        const timer      = setTimeout(() => controller.abort(), dynamicTimeout);
-
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body,
-          signal: controller.signal,
-        });
-        clearTimeout(timer);
-
-        if (res.ok) {
-          // Update RTT with this successful request's timing
-          this.lastRttMs = Math.min(this.lastRttMs, dynamicTimeout); // shrink if faster
-          return 'ok';
-        }
-
-        // 4xx client error → don't retry
-        if (res.status >= 400 && res.status < 500) {
-          return beaconFired ? 'beacon' : `error:${res.status}`;
-        }
-
-        // 5xx → retry with jitter
-        if (attempt < maxRetries) {
-          const backoff = 1000 * 2 ** (attempt - 1); // 1s, 2s, 4s
-          console.warn(`[BGLocation] ⏱️ HTTP ${res.status}, retry ${attempt}/${maxRetries} in ${backoff}ms+jitter`);
-          await this.jitterSleep(backoff);
-        }
-
-      } catch (err: any) {
-        if (err?.name === 'AbortError') {
-          // Timeout — network too slow, increase RTT estimate
-          this.lastRttMs = Math.min(9000, this.lastRttMs * 1.5);
-          console.warn(`[BGLocation] ⏱️ Timeout (RTT updated: ${this.lastRttMs.toFixed(0)}ms) attempt ${attempt}/${maxRetries}`);
-        } else {
-          // Network failure
-          console.warn(`[BGLocation] 📵 Network error attempt ${attempt}:`, err?.message);
-        }
-
-        if (attempt === maxRetries) {
-          // All retries exhausted
-          if (!beaconFired) this.queueOfflinePing(payload);
-          return beaconFired ? 'beacon' : 'queued';
-        }
-
-        // Jitter backoff between retries
-        await this.jitterSleep(800 * 2 ** (attempt - 1));
+      console.warn(`[BGLocation] ⚠️ Server ping returned HTTP ${res.status}`);
+      if (res.status >= 400 && res.status < 500) {
+        return `error:${res.status}`;
       }
+    } catch (err: any) {
+      console.warn('[BGLocation] 📵 Live fetch error, falling back to offline queue & SMS:', err?.message);
     }
 
-    if (!beaconFired) this.queueOfflinePing(payload);
-    return beaconFired ? 'beacon' : 'queued';
+    // ── Fallback 1: Beacon API ───────────────────────────────────────────────
+    if (this.tryBeacon(payload)) {
+      return 'beacon';
+    }
+
+    // ── Fallback 2: Offline Queue ────────────────────────────────────────────
+    this.queueOfflinePing(payload);
+
+    // ── Fallback 3: SMS Fallback ─────────────────────────────────────────────
+    const smsRecipient = this.getSmsRecipient();
+    if (smsRecipient && payload.lat && payload.lon) {
+      sendLocationSms({
+        lat:             payload.lat,
+        lon:             payload.lon,
+        accuracy:        payload.accuracy ?? 999,
+        deviceId:        payload.deviceId,
+        recipientNumber: smsRecipient,
+      }).then(result => {
+        console.log(`[BGLocation] 📱 SMS fallback sent: ${result}`);
+      }).catch(() => {});
+    }
+
+    return 'queued';
   }
 
 

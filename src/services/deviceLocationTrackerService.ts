@@ -41,9 +41,17 @@ async function fetchLocationFromTelegram(label: string): Promise<DeviceLocationE
       const du = (d.username || "").toLowerCase();
       const matched = dl.includes(lq) || du.includes(lq) ||
         (isBoss && (["boss","dk","divakar"].some(a => dl.includes(a) || du.includes(a))));
-      if (matched || (isBoss && !best)) best = d;
+      if (matched || (isBoss && !best)) {
+        if (!best || (d.lastUpdatedAt || 0) > (best.lastUpdatedAt || 0)) {
+          best = d;
+        }
+      }
     }
-    if (!best && isBoss && snap.size === 1) best = snap.docs[0].data() as DeviceLocationEntry;
+    if (!best && isBoss && snap.size >= 1) {
+      const all = snap.docs.map(d => d.data() as DeviceLocationEntry);
+      all.sort((a, b) => (b.lastUpdatedAt || 0) - (a.lastUpdatedAt || 0));
+      best = all[0];
+    }
     return best;
   } catch {
     return null;
@@ -131,17 +139,32 @@ function getRamCacheEntry(rawQuery: string): DeviceLocationEntry | null {
   const bossAliases = ["boss", "dk", "divakar", "mera", "me", "self", "apna", "owner", "admin"];
   const isBossQuery = !q || bossAliases.some(a => q === a || q.includes(a));
   if (isBossQuery) {
+    let bestBossEntry: DeviceLocationEntry | null = null;
     for (const [key, entry] of locationRamCache) {
-      if (["boss", "dk", "divakar"].some(a => key.includes(a))) return entry;
+      if (["boss", "dk", "divakar"].some(a => key.includes(a))) {
+        if (!bestBossEntry || (entry.lastUpdatedAt || 0) > (bestBossEntry.lastUpdatedAt || 0)) {
+          bestBossEntry = entry;
+        }
+      }
     }
-    // If only one device is cached, return it
-    if (locationRamCache.size === 1) return [...locationRamCache.values()][0];
+    if (bestBossEntry) return bestBossEntry;
+    // If only one or multiple devices cached, return the most recent one
+    if (locationRamCache.size > 0) {
+      const all = [...locationRamCache.values()];
+      all.sort((a, b) => (b.lastUpdatedAt || 0) - (a.lastUpdatedAt || 0));
+      return all[0];
+    }
   }
   // Partial match
+  let bestPartial: DeviceLocationEntry | null = null;
   for (const [key, entry] of locationRamCache) {
-    if (key.includes(q) || q.includes(key)) return entry;
+    if (key.includes(q) || q.includes(key)) {
+      if (!bestPartial || (entry.lastUpdatedAt || 0) > (bestPartial.lastUpdatedAt || 0)) {
+        bestPartial = entry;
+      }
+    }
   }
-  return null;
+  return bestPartial;
 }
 
 
@@ -428,91 +451,121 @@ class DeviceLocationTrackerService {
       let bestMatch: DeviceLocationEntry | null = null;
       let bestScore = 0;
 
-      // Single device auto-resolve
-      if (allDocs.size === 1 && isSelfOrBoss) {
-        bestMatch = allDocs.docs[0].data() as DeviceLocationEntry;
-        bestScore = 100;
+      // Candidate tracking to prioritize the most recent active device
+      interface Candidate {
+        entry: DeviceLocationEntry;
+        score: number;
+        hasCoords: boolean;
+        lastUpdatedAt: number;
       }
 
-      if (!bestMatch) {
-        for (const doc of allDocs.docs) {
-          const data = doc.data() as DeviceLocationEntry;
-          const username = (data.username || "").toLowerCase();
-          const label = (data.label || "").toLowerCase();
-          const owner = (data.ownerName || "").toLowerCase();
-          const deviceId = (data.deviceId || "").toLowerCase();
+      const candidates: Candidate[] = [];
 
-          // If query is for Boss / Self
-          if (isSelfOrBoss) {
-            if (
-              username.includes("boss") ||
-              username.includes("dk") ||
-              username.includes("divakar") ||
-              label.includes("boss") ||
-              label.includes("dk") ||
-              label.includes("divakar") ||
-              owner.includes("boss") ||
-              owner.includes("dk") ||
-              owner.includes("divakar")
-            ) {
-              bestMatch = data;
-              bestScore = 100;
-              break;
-            }
+      for (const doc of allDocs.docs) {
+        const data = doc.data() as DeviceLocationEntry;
+        const username = (data.username || "").toLowerCase();
+        const label = (data.label || "").toLowerCase();
+        const owner = (data.ownerName || "").toLowerCase();
+        const deviceId = (data.deviceId || "").toLowerCase();
+
+        let score = 0;
+
+        // If query is for Boss / Self
+        if (isSelfOrBoss) {
+          if (
+            username.includes("boss") ||
+            username.includes("dk") ||
+            username.includes("divakar") ||
+            label.includes("boss") ||
+            label.includes("dk") ||
+            label.includes("divakar") ||
+            owner.includes("boss") ||
+            owner.includes("dk") ||
+            owner.includes("divakar")
+          ) {
+            score = 100;
+          } else {
+            // Registered device without explicit boss label
+            score = 70;
           }
+        }
 
-          // Exact match
-          if (username === rawQuery || label === rawQuery || owner === rawQuery || deviceId === rawQuery) {
-            bestMatch = data;
-            bestScore = 100;
-            break;
+        // Exact match
+        if (username === rawQuery || label === rawQuery || owner === rawQuery || deviceId === rawQuery) {
+          score = Math.max(score, 100);
+        }
+
+        // Partial/fuzzy match
+        if (username.includes(rawQuery) || rawQuery.includes(username)) score = Math.max(score, 95);
+        else if (label.includes(rawQuery) || rawQuery.includes(label)) score = Math.max(score, 80);
+        else if (owner.includes(rawQuery) || rawQuery.includes(owner)) score = Math.max(score, 70);
+
+        // Common Hindi terms mapping
+        const hindiAliases: Record<string, string[]> = {
+          boss: ["boss", "dk", "divakar", "mera", "meri", "me", "my", "khud", "self", "apna", "apni", "current", "admin", "owner", "phone", "mobile"],
+          bhai: ["bhai", "brother", "bro", "bhaiya", "bhaiyya"],
+          papa: ["papa", "father", "dad", "daddy", "pitaji", "abba", "abbu"],
+          mummy: ["mummy", "mother", "mom", "maa", "amma", "ammi"],
+          behen: ["behen", "sister", "sis", "didi", "behan"],
+          wife: ["wife", "biwi", "patni", "mrs"],
+          husband: ["husband", "pati", "hubby"],
+        };
+
+        for (const [, aliases] of Object.entries(hindiAliases)) {
+          const queryMatchesAlias = aliases.some((a) => rawQuery.includes(a) || a.includes(rawQuery));
+          const userMatchesAlias = username && aliases.some((a) => username.includes(a) || a.includes(username));
+          const labelMatchesAlias = aliases.some((a) => label.includes(a) || a.includes(label));
+          const ownerMatchesAlias = aliases.some((a) => owner.includes(a) || a.includes(owner));
+          if (queryMatchesAlias && (userMatchesAlias || labelMatchesAlias || ownerMatchesAlias)) {
+            score = Math.max(score, 85);
           }
+        }
 
-          // Partial/fuzzy match
-          let score = 0;
-          if (username.includes(rawQuery) || rawQuery.includes(username)) score = 95;
-          else if (label.includes(rawQuery) || rawQuery.includes(label)) score = 80;
-          else if (owner.includes(rawQuery) || rawQuery.includes(owner)) score = 70;
-
-          // Common Hindi terms mapping
-          const hindiAliases: Record<string, string[]> = {
-            boss: ["boss", "dk", "divakar", "mera", "meri", "me", "my", "khud", "self", "apna", "apni", "current", "admin", "owner"],
-            bhai: ["bhai", "brother", "bro", "bhaiya", "bhaiyya"],
-            papa: ["papa", "father", "dad", "daddy", "pitaji", "abba", "abbu"],
-            mummy: ["mummy", "mother", "mom", "maa", "amma", "ammi"],
-            behen: ["behen", "sister", "sis", "didi", "behan"],
-            wife: ["wife", "biwi", "patni", "mrs"],
-            husband: ["husband", "pati", "hubby"],
-          };
-
-          for (const [, aliases] of Object.entries(hindiAliases)) {
-            const queryMatchesAlias = aliases.some((a) => rawQuery.includes(a) || a.includes(rawQuery));
-            const userMatchesAlias = username && aliases.some((a) => username.includes(a) || a.includes(username));
-            const labelMatchesAlias = aliases.some((a) => label.includes(a) || a.includes(label));
-            const ownerMatchesAlias = aliases.some((a) => owner.includes(a) || a.includes(owner));
-            if (queryMatchesAlias && (userMatchesAlias || labelMatchesAlias || ownerMatchesAlias)) {
-              score = Math.max(score, 85);
-            }
-          }
-
-          if (score > bestScore) {
-            bestScore = score;
-            bestMatch = data;
-          }
+        if (score >= 50) {
+          const hasCoords = Boolean(
+            data.lat !== undefined &&
+            data.lon !== undefined &&
+            !(data.lat === 0 && data.lon === 0)
+          );
+          candidates.push({
+            entry: data,
+            score,
+            hasCoords,
+            lastUpdatedAt: data.lastUpdatedAt || 0,
+          });
         }
       }
 
-      // If query was Boss/Self and still no explicit match, pick the most recently active device
-      if ((!bestMatch || bestScore < 50) && isSelfOrBoss && allDocs.size > 0) {
-        let mostRecent = allDocs.docs[0].data() as DeviceLocationEntry;
-        for (const doc of allDocs.docs) {
-          const d = doc.data() as DeviceLocationEntry;
-          if ((d.lastUpdatedAt || 0) > (mostRecent.lastUpdatedAt || 0)) {
-            mostRecent = d;
-          }
+      // Sort candidates:
+      // 1. Decisive score difference (>20) prioritizes matching person (e.g. "bhai" vs "boss")
+      // 2. For matching devices (e.g. multiple Boss devices): The most recent ping ALWAYS wins!
+      // 3. Prefer devices with valid coordinates
+      candidates.sort((a, b) => {
+        if (Math.abs(a.score - b.score) > 20) {
+          return b.score - a.score;
         }
-        bestMatch = mostRecent;
-        bestScore = 90;
+        // Both are matching candidates. Prioritize recency!
+        const timeDiff = (b.lastUpdatedAt || 0) - (a.lastUpdatedAt || 0);
+        if (Math.abs(timeDiff) > 60000) { // >1 min difference: newer ping wins
+          return timeDiff;
+        }
+        if (a.hasCoords !== b.hasCoords) {
+          return a.hasCoords ? -1 : 1;
+        }
+        return b.score - a.score;
+      });
+
+      if (candidates.length > 0) {
+        bestMatch = candidates[0].entry;
+        bestScore = candidates[0].score;
+      }
+
+      // Check RAM cache: if RAM cache has a ping that is NEWER than bestMatch, use RAM cache!
+      const ramEntry = getRamCacheEntry(rawQuery || (bestMatch?.label ?? "boss"));
+      if (ramEntry && (ramEntry.lastUpdatedAt || 0) > (bestMatch?.lastUpdatedAt || 0)) {
+        console.log(`[LocationTracker] ⚡ Newer ping found in RAM cache (${new Date(ramEntry.lastUpdatedAt).toISOString()}) vs Firestore (${bestMatch ? new Date(bestMatch.lastUpdatedAt).toISOString() : 'none'})`);
+        bestMatch = ramEntry;
+        bestScore = Math.max(bestScore, 95);
       }
 
       if (!bestMatch || bestScore < 50) {
