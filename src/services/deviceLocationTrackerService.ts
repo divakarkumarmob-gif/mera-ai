@@ -125,49 +125,112 @@ const STALE_LOCATION_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 24 hours - location 
 const MAX_CACHED_LOCATION_AGE_MS = 48 * 60 * 60 * 1000; // 48 hours - cached position valid up to this age
 
 // ── ⭐ Server-side RAM cache (zero-latency fallback when Firestore fails) ─────
-// Key = label.toLowerCase() (e.g. "boss phone", "bhai")
-// Updated on every successful ping — no external dependency needed
-const locationRamCache = new Map<string, DeviceLocationEntry>();
+// Key = deviceId.toLowerCase() → always unique per device
+// Secondary index: label/username/ownerName → for quick lookup
+// APK entries ALWAYS win over web entries for same user!
+const locationRamCache = new Map<string, DeviceLocationEntry>();  // key = deviceId
+const ramCacheIndex    = new Map<string, string>();               // key = alias → deviceId
+
+function isApkDevice(entry: DeviceLocationEntry): boolean {
+  const id  = (entry.deviceId || '').toLowerCase();
+  const lbl = (entry.label    || '').toLowerCase();
+  return id.includes('apk') || lbl.includes('apk') || lbl.includes('phone') || lbl.includes('mobile');
+}
 
 function updateRamCache(entry: DeviceLocationEntry): void {
-  const keys = new Set<string>();
-  if (entry.label)     keys.add(entry.label.toLowerCase());
-  if (entry.ownerName) keys.add(entry.ownerName.toLowerCase());
-  if (entry.username)  keys.add(entry.username.toLowerCase());
-  if (entry.deviceId)  keys.add(entry.deviceId.toLowerCase());
-  for (const k of keys) locationRamCache.set(k, entry);
-  console.log(`[LocationTracker] 🗂️ RAM cache updated for keys: ${[...keys].join(", ")}`);
+  if (!entry.deviceId) return;
+
+  const existingForDevice = locationRamCache.get(entry.deviceId.toLowerCase());
+  // Only overwrite if this entry is NEWER than what we already have for this deviceId
+  if (existingForDevice && (existingForDevice.lastUpdatedAt || 0) >= (entry.lastUpdatedAt || 0)) {
+    return; // already have same or newer — skip
+  }
+
+  // Store by deviceId (primary key)
+  locationRamCache.set(entry.deviceId.toLowerCase(), entry);
+
+  // Update secondary alias index (alias → deviceId)
+  const aliases = new Set<string>();
+  if (entry.label)     aliases.add(entry.label.toLowerCase());
+  if (entry.ownerName) aliases.add(entry.ownerName.toLowerCase());
+  if (entry.username)  aliases.add(entry.username.toLowerCase());
+
+  for (const alias of aliases) {
+    const existingDeviceId = ramCacheIndex.get(alias);
+    if (!existingDeviceId) {
+      // No entry for this alias yet — just map it
+      ramCacheIndex.set(alias, entry.deviceId.toLowerCase());
+    } else {
+      const existingEntry = locationRamCache.get(existingDeviceId);
+      if (!existingEntry) {
+        ramCacheIndex.set(alias, entry.deviceId.toLowerCase());
+      } else {
+        const incomingIsApk  = isApkDevice(entry);
+        const existingIsApk  = isApkDevice(existingEntry);
+        const incomingAge    = Date.now() - (entry.lastUpdatedAt        || 0);
+        const existingAge    = Date.now() - (existingEntry.lastUpdatedAt || 0);
+
+        // APK entry beats web entry if APK was active within 24h
+        if (incomingIsApk && !existingIsApk && incomingAge < 24 * 3600 * 1000) {
+          ramCacheIndex.set(alias, entry.deviceId.toLowerCase());
+        } else if (!incomingIsApk && existingIsApk && existingAge < 24 * 3600 * 1000) {
+          // Keep the existing APK entry — web should NOT overwrite APK alias
+        } else if ((entry.lastUpdatedAt || 0) > (existingEntry.lastUpdatedAt || 0)) {
+          // Both same platform — newer wins
+          ramCacheIndex.set(alias, entry.deviceId.toLowerCase());
+        }
+      }
+    }
+  }
+
+  console.log(`[LocationTracker] 🗂️ RAM cache updated: deviceId=${entry.deviceId} (${isApkDevice(entry) ? '📱APK' : '🌐Web'}) ts=${new Date(entry.lastUpdatedAt || 0).toISOString()}`);
 }
 
 function getRamCacheEntry(rawQuery: string): DeviceLocationEntry | null {
   const q = rawQuery.toLowerCase();
-  // Direct match
+
+  // 1. Direct deviceId match
   if (locationRamCache.has(q)) return locationRamCache.get(q)!;
-  // Boss/self aliases
+
+  // 2. Alias index lookup
+  const mappedDeviceId = ramCacheIndex.get(q);
+  if (mappedDeviceId && locationRamCache.has(mappedDeviceId)) {
+    return locationRamCache.get(mappedDeviceId)!;
+  }
+
   const bossAliases = ["boss", "dk", "divakar", "mera", "me", "self", "apna", "owner", "admin"];
   const isBossQuery = !q || bossAliases.some(a => q === a || q.includes(a));
+
+  // 3. Boss/self query: pick the best device for this user
   if (isBossQuery) {
-    let bestBossEntry: DeviceLocationEntry | null = null;
-    for (const [key, entry] of locationRamCache) {
-      if (["boss", "dk", "divakar"].some(a => key.includes(a))) {
-        if (!bestBossEntry || (entry.lastUpdatedAt || 0) > (bestBossEntry.lastUpdatedAt || 0)) {
-          bestBossEntry = entry;
-        }
-      }
-    }
-    if (bestBossEntry) return bestBossEntry;
-    // If only one or multiple devices cached, return the most recent one
-    if (locationRamCache.size > 0) {
-      const all = [...locationRamCache.values()];
-      all.sort((a, b) => (b.lastUpdatedAt || 0) - (a.lastUpdatedAt || 0));
-      return all[0];
-    }
+    // Collect ALL entries, prefer APK + most recent
+    const all = [...locationRamCache.values()].filter(
+      e => e.lat && e.lon && !(e.lat === 0 && e.lon === 0)
+    );
+    if (all.length === 0) return null;
+
+    all.sort((a, b) => {
+      const aIsApk = isApkDevice(a);
+      const bIsApk = isApkDevice(b);
+      const now    = Date.now();
+      const aAge   = now - (a.lastUpdatedAt || 0);
+      const bAge   = now - (b.lastUpdatedAt || 0);
+
+      // APK within 24h always beats web
+      if (bIsApk && !aIsApk && bAge < 24 * 3600 * 1000) return  1;
+      if (aIsApk && !bIsApk && aAge < 24 * 3600 * 1000) return -1;
+      // Both same platform — newer wins
+      return (b.lastUpdatedAt || 0) - (a.lastUpdatedAt || 0);
+    });
+    return all[0];
   }
-  // Partial match
+
+  // 4. Partial alias match (for non-boss queries like "bhai")
   let bestPartial: DeviceLocationEntry | null = null;
-  for (const [key, entry] of locationRamCache) {
-    if (key.includes(q) || q.includes(key)) {
-      if (!bestPartial || (entry.lastUpdatedAt || 0) > (bestPartial.lastUpdatedAt || 0)) {
+  for (const [alias, deviceId] of ramCacheIndex) {
+    if (alias.includes(q) || q.includes(alias)) {
+      const entry = locationRamCache.get(deviceId);
+      if (entry && (!bestPartial || (entry.lastUpdatedAt || 0) > (bestPartial.lastUpdatedAt || 0))) {
         bestPartial = entry;
       }
     }
@@ -193,9 +256,24 @@ class DeviceLocationTrackerService {
     try {
       const snap = await locationsCollection().orderBy("lastUpdatedAt", "desc").get();
       if (!snap.empty) {
+        // ⭐ CRITICAL: Sort web entries FIRST, APK entries LAST.
+        // This ensures APK entry is the final writer in updateRamCache,
+        // so APK correctly "wins" alias ownership even if web was more recently updated in Firestore.
+        const docs = snap.docs.map(d => d.data() as DeviceLocationEntry);
+        const webDocs = docs.filter(d => {
+          const id  = (d.deviceId || '').toLowerCase();
+          const lbl = (d.label    || '').toLowerCase();
+          return !id.includes('apk') && !lbl.includes('apk') && !lbl.includes('phone') && !lbl.includes('mobile');
+        });
+        const apkDocs = docs.filter(d => {
+          const id  = (d.deviceId || '').toLowerCase();
+          const lbl = (d.label    || '').toLowerCase();
+          return id.includes('apk') || lbl.includes('apk') || lbl.includes('phone') || lbl.includes('mobile');
+        });
+
         let count = 0;
-        for (const doc of snap.docs) {
-          const d = doc.data() as DeviceLocationEntry;
+        // Load web first (will be overwritten by APK below)
+        for (const d of [...webDocs, ...apkDocs]) {
           const hasCoords = d.lat && d.lon && !(d.lat === 0 && d.lon === 0);
           if (hasCoords) {
             updateRamCache(d);
@@ -203,7 +281,7 @@ class DeviceLocationTrackerService {
           }
         }
         if (count > 0) {
-          console.log(`[LocationTracker] 🔥 Boot hydration: ${count} device(s) loaded from Firestore into RAM cache`);
+          console.log(`[LocationTracker] 🔥 Boot hydration: ${count} device(s) loaded (${webDocs.length} web, ${apkDocs.length} APK). APK aliases win.`);
           hydratedFromFirestore = true;
         }
       }
