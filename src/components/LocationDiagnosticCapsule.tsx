@@ -260,12 +260,30 @@ export default function LocationDiagnosticCapsule() {
                 <p className="text-[11px] text-slate-400 leading-snug">
                   {report?.step2_coordinates?.message || 'Ready to fetch device coordinates'}
                 </p>
-                {report?.step2_coordinates?.details && (
+                {report?.step2_coordinates?.details?.lat && (
                   <div className="text-[10px] text-cyan-300/80 font-mono bg-black/40 px-2 py-1 rounded">
                     Lat: {report.step2_coordinates.details.lat?.toFixed(5)}, Lon:{' '}
                     {report.step2_coordinates.details.lon?.toFixed(5)} (±
                     {Math.round(report.step2_coordinates.details.accuracy || 0)}m)
                   </div>
+                )}
+                {step2 === 'failed' && isNative && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const { Geolocation } = await import('@capacitor/geolocation');
+                        await Geolocation.requestPermissions();
+                        handleRunDiagnostic();
+                      } catch (e: any) {
+                        alert('Permission request: ' + e?.message);
+                      }
+                    }}
+                    className="mt-1 self-start flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-[10px] font-semibold transition-colors"
+                  >
+                    <MapPin className="w-3 h-3" />
+                    <span>📍 Tap here to Grant Location Permission</span>
+                  </button>
                 )}
               </div>
 

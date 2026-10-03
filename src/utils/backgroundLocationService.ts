@@ -43,6 +43,32 @@ const STORAGE_KEY_OFFLINE_Q    = 'friday_offline_ping_queue';  // queued pings w
 const STORAGE_KEY_SMS_RECIPIENT = 'friday_sms_recipient';      // boss's phone number for SMS fallback
 const MAX_OFFLINE_QUEUE        = 10;  // max queued pings (oldest dropped when full)
 
+/** Ensures a Promise settles within timeoutMs; returns fallback if timeout fires or promise rejects */
+function safePromise<T>(p: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
+  return new Promise<T>((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        resolve(fallback);
+      }
+    }, timeoutMs);
+    p.then((res) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        resolve(res);
+      }
+    }).catch(() => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        resolve(fallback);
+      }
+    });
+  });
+}
+
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -251,10 +277,11 @@ class BackgroundLocationService {
   /**
    * Tries to get fresh GPS or fused network coordinates.
    * Cascade order:
-   *   1. Capacitor Geolocation (High accuracy GPS, 8s timeout)
-   *   2. Capacitor Geolocation (Low accuracy Fused - works instantly indoors in <1s!)
-   *   3. Browser navigator.geolocation (High accuracy, 8s timeout)
-   *   4. Browser navigator.geolocation (Low accuracy, 5s timeout)
+   *   1. Capacitor Geolocation (Last-known cache, 2.5s)
+   *   2. Capacitor Geolocation (Low accuracy Fused - works indoors in <1s)
+   *   3. Capacitor Geolocation (High accuracy GPS, 4.5s)
+   *   4. Web navigator.geolocation fallback
+   *   5. LocalStorage cached position fallback
    */
   public async getFreshPosition(): Promise<CachedPosition | null> {
     if (typeof window === 'undefined') return null;
@@ -275,20 +302,51 @@ class BackgroundLocationService {
     if (isNative) {
       try {
         const { Geolocation } = await import('@capacitor/geolocation');
-        // ⭐ FAST PATH: Try low accuracy / fused network first (WiFi / Cell)
-        // On Android, Fused Location Provider returns this in < 500ms!
+
+        // Check & request permission with strict timeout
         try {
-          const fastPos = await Geolocation.getCurrentPosition({ enableHighAccuracy: false, timeout: 3000, maximumAge: 60000 });
+          const check = await safePromise(Geolocation.checkPermissions(), 2000, null);
+          if (check?.location !== 'granted') {
+            await safePromise(Geolocation.requestPermissions(), 5000, null);
+          }
+        } catch {}
+
+        // ⭐ FAST PATH A: Instant Last Known Position (maximumAge: 10 mins)
+        // On Android, Fused Location Provider has this in memory!
+        try {
+          const cachedPos = await safePromise(
+            Geolocation.getCurrentPosition({ enableHighAccuracy: false, timeout: 2500, maximumAge: 600000 }),
+            3000,
+            null
+          );
+          if (cachedPos?.coords?.latitude && cachedPos?.coords?.longitude) {
+            console.log('[BGLocation] ⚡ Fast cached fix acquired:', cachedPos.coords.latitude, cachedPos.coords.longitude);
+            return toCached(cachedPos.coords.latitude, cachedPos.coords.longitude, cachedPos.coords.accuracy ?? 0, cachedPos);
+          }
+        } catch {}
+
+        // ⭐ FAST PATH B: Low accuracy Fused network fix
+        try {
+          const fastPos = await safePromise(
+            Geolocation.getCurrentPosition({ enableHighAccuracy: false, timeout: 3500, maximumAge: 60000 }),
+            4000,
+            null
+          );
           if (fastPos?.coords?.latitude && fastPos?.coords?.longitude) {
-            console.log('[BGLocation] ⚡ Fast fused fix acquired in <1s:', fastPos.coords.latitude, fastPos.coords.longitude);
+            console.log('[BGLocation] ⚡ Fused fix acquired in <2s:', fastPos.coords.latitude, fastPos.coords.longitude);
             return toCached(fastPos.coords.latitude, fastPos.coords.longitude, fastPos.coords.accuracy ?? 0, fastPos);
           }
         } catch {}
 
-        // Fallback: Try high accuracy GPS (satellite)
+        // Fallback: Satellite GPS
         try {
-          const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 6000, maximumAge: 10000 });
+          const pos = await safePromise(
+            Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 4500, maximumAge: 15000 }),
+            5000,
+            null
+          );
           if (pos?.coords?.latitude && pos?.coords?.longitude) {
+            console.log('[BGLocation] 🛰️ Satellite GPS fix acquired:', pos.coords.latitude, pos.coords.longitude);
             return toCached(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy ?? 0, pos);
           }
         } catch {}
@@ -297,26 +355,41 @@ class BackgroundLocationService {
       }
     }
 
-    // 2. Web Geolocation API fallback
+    // 2. Web Geolocation API fallback (also protected by safePromise)
     if ('geolocation' in navigator) {
       try {
-        // Fast low-accuracy first
-        const pos = await new Promise<GeolocationPosition>((res, rej) =>
-          navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: false, timeout: 3000, maximumAge: 60000 })
-        );
-        if (pos?.coords?.latitude && pos?.coords?.longitude) {
-          return toCached(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy ?? 0, pos);
+        const getWebPos = (highAcc: boolean, timeoutMs: number, maxAge: number) => {
+          return new Promise<GeolocationPosition | null>((resolve) => {
+            const timer = setTimeout(() => resolve(null), timeoutMs + 500);
+            try {
+              navigator.geolocation.getCurrentPosition(
+                (pos) => { clearTimeout(timer); resolve(pos); },
+                () => { clearTimeout(timer); resolve(null); },
+                { enableHighAccuracy: highAcc, timeout: timeoutMs, maximumAge: maxAge }
+              );
+            } catch {
+              clearTimeout(timer);
+              resolve(null);
+            }
+          });
+        };
+
+        const pos1 = await getWebPos(false, 2500, 300000);
+        if (pos1?.coords?.latitude && pos1?.coords?.longitude) {
+          return toCached(pos1.coords.latitude, pos1.coords.longitude, pos1.coords.accuracy ?? 0, pos1);
         }
-      } catch {
-        try {
-          const pos = await new Promise<GeolocationPosition>((res, rej) =>
-            navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: true, timeout: 6000, maximumAge: 10000 })
-          );
-          if (pos?.coords?.latitude && pos?.coords?.longitude) {
-            return toCached(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy ?? 0, pos);
-          }
-        } catch {}
-      }
+
+        const pos2 = await getWebPos(true, 3500, 10000);
+        if (pos2?.coords?.latitude && pos2?.coords?.longitude) {
+          return toCached(pos2.coords.latitude, pos2.coords.longitude, pos2.coords.accuracy ?? 0, pos2);
+        }
+      } catch {}
+    }
+
+    // 3. Fallback to localStorage cached position
+    const lastKnown = this.loadLastKnown();
+    if (lastKnown && lastKnown.lat && lastKnown.lon) {
+      return lastKnown;
     }
 
     return null;
@@ -1103,6 +1176,30 @@ class BackgroundLocationService {
     // ── STEP 2: GPS Coordinates ─────────────────────────────────────────────
     const t2 = Date.now();
     let coords: CachedPosition | null = null;
+    let permInfo = '';
+
+    if (isNative) {
+      try {
+        const { Geolocation } = await import('@capacitor/geolocation');
+        const check = await safePromise(Geolocation.checkPermissions(), 2500, null);
+        const perm = check?.location;
+        if (perm === 'granted') {
+          permInfo = 'Permission: Granted ✅';
+        } else {
+          permInfo = `Permission: "${perm || 'prompt'}". Requesting user consent...`;
+          report.step2_coordinates.message = permInfo;
+          notify();
+          const req = await safePromise(Geolocation.requestPermissions(), 7000, null);
+          permInfo = req?.location === 'granted' ? 'Permission: Granted ✅' : `Permission: ${req?.location || 'denied'} ❌`;
+        }
+      } catch (e: any) {
+        permInfo = `Permission check error: ${e?.message}`;
+      }
+    }
+
+    report.step2_coordinates.message = `${permInfo ? permInfo + ' • ' : ''}Acquiring GPS / Fused coordinates...`;
+    notify();
+
     try {
       coords = await this.getFreshPosition();
       if (!coords) {
@@ -1114,15 +1211,17 @@ class BackgroundLocationService {
           status: 'success',
           title: '2. GPS Coordinates',
           message: `Coordinates acquired: ${coords.lat.toFixed(5)}, ${coords.lon.toFixed(5)} (±${Math.round(coords.accuracy)}m)`,
-          details: { lat: coords.lat, lon: coords.lon, accuracy: coords.accuracy, altitude: coords.altitude, speed: coords.speed },
+          details: { lat: coords.lat, lon: coords.lon, accuracy: coords.accuracy, altitude: coords.altitude, speed: coords.speed, permInfo },
           durationMs: Date.now() - t2,
         };
       } else {
         report.step2_coordinates = {
           status: 'failed',
           title: '2. GPS Coordinates',
-          message: 'Could not acquire GPS fix (permission issue or location disabled on device).',
-          details: null,
+          message: isNative 
+            ? `${permInfo ? permInfo + ' • ' : ''}Coordinates nahi mile — Phone notification bar se GPS / Location toggle ON karein aur app permission check karein.`
+            : 'Could not acquire GPS fix (permission issue or location disabled on device).',
+          details: { permInfo },
           durationMs: Date.now() - t2,
         };
       }
@@ -1131,7 +1230,7 @@ class BackgroundLocationService {
         status: 'failed',
         title: '2. GPS Coordinates',
         message: `GPS error: ${err?.message || 'Location fetch failed'}`,
-        details: { error: err?.message },
+        details: { error: err?.message, permInfo },
         durationMs: Date.now() - t2,
       };
     }
