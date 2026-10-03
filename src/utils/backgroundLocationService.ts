@@ -54,6 +54,7 @@ interface CachedPosition {
 
 interface GpsPingPayload {
   deviceId: string; username?: string; label?: string;
+  platform?: string;  // 'apk' | 'web' — reliable APK vs browser flag
   lat: number; lon: number; accuracy: number;
   altitude: number | null; speed: number | null; heading: number | null;
   batteryLevel: number | null; isCharging: boolean | null; networkType: string | null;
@@ -616,10 +617,12 @@ class BackgroundLocationService {
 
     const user  = getStoredUser();
     const label = this.getDeviceLabel() || user?.displayName || user?.username || 'Boss Phone';
+    const isNativePlatform = this.checkNative();
     const payload: GpsPingPayload = {
       deviceId: this.getOrCreateDeviceId(),
       username: user?.username || 'boss',
       label: label || 'Boss Phone',
+      platform: isNativePlatform ? 'apk' : 'web',  // ⭐ Reliable APK vs web flag
       lat, lon,
       accuracy:  this.cachedLast?.accuracy  ?? this.lastPosition?.coords?.accuracy  ?? cached?.accuracy  ?? 0,
       altitude:  this.cachedLast?.altitude  ?? this.lastPosition?.coords?.altitude  ?? cached?.altitude  ?? null,

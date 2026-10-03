@@ -132,9 +132,11 @@ const locationRamCache = new Map<string, DeviceLocationEntry>();  // key = devic
 const ramCacheIndex    = new Map<string, string>();               // key = alias → deviceId
 
 function isApkDevice(entry: DeviceLocationEntry): boolean {
-  const id  = (entry.deviceId || '').toLowerCase();
-  const lbl = (entry.label    || '').toLowerCase();
-  return id.includes('apk') || lbl.includes('apk') || lbl.includes('phone') || lbl.includes('mobile');
+  const id = (entry.deviceId || '').toLowerCase();
+  // ONLY check deviceId — labels like 'Boss Phone' are NOT reliable
+  // because both browser and APK can have same label.
+  // deviceId is always 'dev_apk_<user>' for APK and 'dev_web_<user>' for browser.
+  return id.includes('apk') || (entry as any).platform === 'apk';
 }
 
 function updateRamCache(entry: DeviceLocationEntry): void {
@@ -412,6 +414,7 @@ class DeviceLocationTrackerService {
     deviceId: string;
     username?: string;
     label?: string;
+    platform?: string;   // 'apk' | 'web' — sent from client
     lat: number;
     lon: number;
     accuracy?: number;
@@ -439,6 +442,10 @@ class DeviceLocationTrackerService {
     const isCached = data.isCachedLastKnown === true;
     const fallbackAddress = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
 
+    // Infer platform from deviceId if not explicitly provided
+    const platform = data.platform ||
+      (deviceId.toLowerCase().includes('apk') ? 'apk' : 'web');
+
     // Build update payload with valid coords (guaranteed at this point)
     const updateData: any = {
       lat,
@@ -450,7 +457,9 @@ class DeviceLocationTrackerService {
       address: fallbackAddress, // will be overwritten if geocoding succeeds
       lastUpdatedAt: now,
       isCachedLastKnown: isCached,
+      platform,  // ⭐ Reliable APK vs web flag saved in Firestore
     };
+
 
     if (data.username) {
       updateData.username = data.username.toLowerCase().trim();
@@ -623,50 +632,40 @@ class DeviceLocationTrackerService {
       }
 
       // Sort candidates:
-      // 1. Decisive score difference (>20) prioritizes matching person (e.g. "bhai" vs "boss")
-      // 2. Devices WITH VALID COORDINATES (lat !== 0, lon !== 0) ALWAYS beat devices with 0,0!
-      // 3. Mobile APK priority: A mobile phone APK has real GPS and beats a static web browser!
+      // 1. Decisive score difference (>20) → person match wins (e.g. "bhai" vs "boss")
+      // 2. Devices WITH VALID COORDINATES always beat 0,0 devices
+      // 3. ⭐ APK ALWAYS beats Web browser (APK = real phone GPS)
+      //    Detection: ONLY via deviceId containing 'apk' or platform field — NOT label
       // 4. Recency: More recent ping wins
       candidates.sort((a, b) => {
         if (Math.abs(a.score - b.score) > 20) {
           return b.score - a.score;
         }
 
-        // 1. CRITICAL: A device with REAL coordinates ALWAYS beats a device with 0,0!
+        // Rule 1: Real coords beat 0,0
         if (a.hasCoords !== b.hasCoords) {
           return a.hasCoords ? -1 : 1;
         }
 
-        // 2. Check if candidates are Mobile APK vs Web Browser
-        const aId = (a.entry.deviceId || "").toLowerCase();
-        const bId = (b.entry.deviceId || "").toLowerCase();
-        const aLabel = (a.entry.label || "").toLowerCase();
-        const bLabel = (b.entry.label || "").toLowerCase();
-        const aIsApk = aId.includes("apk") || aLabel.includes("apk") || aLabel.includes("phone");
-        const bIsApk = bId.includes("apk") || bLabel.includes("apk") || bLabel.includes("phone");
+        // Rule 2: APK beats Web (ONLY check deviceId, never label!)
+        const aId    = (a.entry.deviceId || '').toLowerCase();
+        const bId    = (b.entry.deviceId || '').toLowerCase();
+        const aIsApk = aId.includes('apk') || (a.entry as any).platform === 'apk';
+        const bIsApk = bId.includes('apk') || (b.entry as any).platform === 'apk';
 
-        const now = Date.now();
+        const now    = Date.now();
         const aAgeMs = now - (a.lastUpdatedAt || 0);
         const bAgeMs = now - (b.lastUpdatedAt || 0);
 
-        // If one is mobile APK and was active within the last 24h, while the other is web browser:
-        // The mobile phone APK represents the user's real physical GPS movement!
-        if (bIsApk && !aIsApk && bAgeMs < 24 * 3600 * 1000) {
-          return 1; // b (APK) wins!
-        }
-        if (aIsApk && !bIsApk && aAgeMs < 24 * 3600 * 1000) {
-          return -1; // a (APK) wins!
-        }
+        if (bIsApk && !aIsApk && bAgeMs < 24 * 3600 * 1000) return  1; // b=APK wins
+        if (aIsApk && !bIsApk && aAgeMs < 24 * 3600 * 1000) return -1; // a=APK wins
 
-        // Both are same platform or both older: prioritize the most recent ping!
+        // Rule 3: Newer ping wins (if difference > 1 min)
         const timeDiff = (b.lastUpdatedAt || 0) - (a.lastUpdatedAt || 0);
-        if (Math.abs(timeDiff) > 60000) { // >1 min difference
-          return timeDiff;
-        }
+        if (Math.abs(timeDiff) > 60000) return timeDiff;
 
-        if (aIsApk !== bIsApk) {
-          return bIsApk ? 1 : -1;
-        }
+        // Rule 4: APK still gets preference even for small time diffs
+        if (aIsApk !== bIsApk) return bIsApk ? 1 : -1;
 
         return b.score - a.score;
       });
