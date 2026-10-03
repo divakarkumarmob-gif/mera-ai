@@ -552,8 +552,8 @@ class BackgroundLocationService {
 
   /**
    * Write deviceId / username / label / backendUrl to Android SharedPreferences
-   * (via Capacitor's Preferences plugin). FridayForegroundService reads these
-   * on the native Java side so it can POST GPS pings independently of the WebView.
+   * (via FridayNativeBridge or Capacitor Preferences fallback). FridayForegroundService reads these
+   * on the native Kotlin side so it can POST GPS pings independently of the WebView.
    */
   private async syncNativeServicePrefs(
     deviceId: string,
@@ -561,11 +561,16 @@ class BackgroundLocationService {
     label: string
   ): Promise<void> {
     try {
+      const nativeBridge = typeof window !== 'undefined' ? (window as any).FridayNativeBridge : null;
+      if (nativeBridge && typeof nativeBridge.syncDeviceInfo === 'function') {
+        nativeBridge.syncDeviceInfo(deviceId, username, label);
+        console.log('[BGLocation] 💾 Native Kotlin prefs synced directly via FridayNativeBridge: deviceId=' + deviceId);
+        return;
+      }
+
       const { Preferences } = await import(/* @vite-ignore */ '@capacitor/preferences');
       const backendUrl = (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_BACKEND_URL)
         || 'https://mera-ai-3496.onrender.com';
-      // Capacitor Preferences uses a single shared file; we use group "FridayPrefs"
-      // to match the SharedPreferences file name that FridayForegroundService reads.
       await Preferences.set({ key: 'friday_deviceId',   value: deviceId });
       await Preferences.set({ key: 'friday_username',   value: username });
       await Preferences.set({ key: 'friday_label',      value: label });
@@ -576,15 +581,12 @@ class BackgroundLocationService {
     }
   }
 
-
   /**
    * Start GPS tracking.
    *
-   * APK Strategy:
-   *   1. @capacitor-community/background-geolocation  ← REAL background (app closed ✅)
-   *      → Runs a persistent Android foreground service with notification
-   *      → Calls onLocation callback even when screen is OFF and app is killed
-   *   2. Fallback ping timer (60s) for network transmission
+   * Pure Native APK Strategy:
+   *   1. FridayForegroundService is running in background 24/7 on Android OS
+   *   2. Real-time updates delivered via FridayNativeBridge & LocationTracker
    *
    * Web Strategy:
    *   - navigator.geolocation.watchPosition
@@ -599,15 +601,16 @@ class BackgroundLocationService {
     console.log('[BGLocation] 🛰️ Starting GPS (native:', this.isNative, ')...');
 
     if (this.isNative) {
-      // ⭐ PRIMARY: @capacitor-community/background-geolocation
-      // This is the ONLY plugin that works when app is closed/killed.
-      // It starts a persistent Android Foreground Service (shows a notification)
-      // and delivers location updates via callback even with screen OFF.
-      this.startBackgroundGeoService().catch((err) => {
-        console.warn('[BGLocation] BG-geo failed, falling back to watchPosition:', err?.message);
-        // Fallback: Capacitor standard geolocation (foreground only)
-        this.startCapacitorGeoWatch().catch(() => {});
-      });
+      const nativeBridge = typeof window !== 'undefined' ? (window as any).FridayNativeBridge : null;
+      if (nativeBridge) {
+        console.log('[BGLocation] 🟢 Friday Native Kotlin service is running 24/7 background tracking');
+        try { nativeBridge.sendLocationPingNow?.(); } catch (e) {}
+      } else {
+        this.startBackgroundGeoService().catch((err) => {
+          console.warn('[BGLocation] BG-geo failed, falling back to watchPosition:', err?.message);
+          this.startCapacitorGeoWatch().catch(() => {});
+        });
+      }
     } else {
       this.startWebWatch();
     }
@@ -1336,7 +1339,23 @@ class BackgroundLocationService {
     let coords: CachedPosition | null = null;
     let permInfo = '';
 
-    if (isNative) {
+    const nativeBridge = typeof window !== 'undefined' ? (window as any).FridayNativeBridge : null;
+    if (nativeBridge) {
+      try {
+        const hasPerm = typeof nativeBridge.hasLocationPermission === 'function' ? nativeBridge.hasLocationPermission() : true;
+        const isGpsOn = typeof nativeBridge.isGpsEnabled === 'function' ? nativeBridge.isGpsEnabled() : true;
+        if (hasPerm) {
+          permInfo = `Native Permission: Granted ✅ ${isGpsOn ? '(GPS Hardware Active)' : '(⚠️ GPS off in Quick Settings)'}`;
+        } else {
+          permInfo = 'Native Permission: Requesting from Android...';
+          report.step2_coordinates.message = permInfo;
+          notify();
+          nativeBridge.requestLocationPermission?.();
+        }
+      } catch (e: any) {
+        permInfo = `Native permission check: ${e?.message}`;
+      }
+    } else if (isNative) {
       try {
         const { Geolocation } = await import(/* @vite-ignore */ '@capacitor/geolocation');
 

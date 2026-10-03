@@ -272,6 +272,12 @@ export default function LocationDiagnosticCapsule() {
                     type="button"
                     onClick={async () => {
                       try {
+                        const nativeBridge = typeof window !== 'undefined' ? (window as any).FridayNativeBridge : null;
+                        if (nativeBridge && typeof nativeBridge.requestLocationPermission === 'function') {
+                          nativeBridge.requestLocationPermission();
+                          setTimeout(() => handleRunDiagnostic(), 1500);
+                          return;
+                        }
                         const { Geolocation } = await import('@capacitor/geolocation');
                         await Geolocation.requestPermissions();
                         handleRunDiagnostic();
