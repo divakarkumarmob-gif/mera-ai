@@ -28,6 +28,26 @@ jobs:
         run: |
           yes | sdkmanager --licenses || true
 
+      - name: 🟢 Setup Node.js (v20)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: 📦 Install Dependencies & Build Friday Web Assets
+        run: |
+          npm install
+          npm run build
+        env:
+          VITE_BACKEND_URL: https://mera-ai-3496.onrender.com
+
+      - name: 📁 Bundle Web Assets into Android APK Assets
+        run: |
+          mkdir -p android/app/src/main/assets
+          cp -r dist/* android/app/src/main/assets/
+          echo "✅ Bundled assets verified:"
+          ls -lh android/app/src/main/assets/
+
       - name: 🐘 Setup Gradle Cache
         uses: actions/cache@v4
         with:

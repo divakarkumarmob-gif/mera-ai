@@ -5,7 +5,6 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -16,6 +15,7 @@ import android.webkit.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.webkit.WebViewAssetLoader
 import com.friday.ai.bluetooth.BluetoothAudioRouter
 import com.friday.ai.bluetooth.BluetoothControlManager
 import com.friday.ai.databinding.ActivityMainBinding
@@ -29,9 +29,12 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "FridayMainActivity"
+        private const val ASSET_DOMAIN = "appassets.androidplatform.net"
+        private const val START_URL = "https://appassets.androidplatform.net/assets/index.html"
     }
 
     private lateinit var binding: ActivityMainBinding
+    private lateinit var assetLoader: WebViewAssetLoader
 
     private val permissionsLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -122,7 +125,7 @@ class MainActivity : AppCompatActivity() {
         val webView = binding.webView
         val settings = webView.settings
 
-        // Enable all high-performance Web features for Capsules, 3D Avatar & Gemini Live
+        // Enable all high-performance Web features for Capsules, 3D Avatar, Login Modal & Gemini Live
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
         settings.databaseEnabled = true
@@ -134,6 +137,12 @@ class MainActivity : AppCompatActivity() {
         settings.loadWithOverviewMode = true
         settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
         settings.cacheMode = WebSettings.LOAD_DEFAULT
+
+        // Asset Loader to securely serve local bundled React assets
+        assetLoader = WebViewAssetLoader.Builder()
+            .setDomain(ASSET_DOMAIN)
+            .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this))
+            .build()
 
         // Auto-grant Camera, Mic and Geolocation to WebView for Gemini Live Voice & Vision
         webView.webChromeClient = object : WebChromeClient() {
@@ -157,9 +166,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         webView.webViewClient = object : WebViewClient() {
-            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                super.onPageStarted(view, url, favicon)
-                binding.loadingLayout.visibility = View.VISIBLE
+            override fun shouldInterceptRequest(
+                view: WebView?,
+                request: WebResourceRequest?
+            ): WebResourceResponse? {
+                val url = request?.url ?: return null
+                return assetLoader.shouldInterceptRequest(url)
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
@@ -168,20 +180,9 @@ class MainActivity : AppCompatActivity() {
                 injectNativeBridges()
             }
 
-            override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
-                super.onReceivedError(view, request, error)
-                if (request?.isForMainFrame == true) {
-                    Log.w(TAG, "WebView connection error: ${error?.description}. Retrying in 3s...")
-                    view?.postDelayed({
-                        val url = FridayApiClient.getBackendUrl(this@MainActivity)
-                        view.loadUrl(url)
-                    }, 3000)
-                }
-            }
-
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                 val url = request?.url?.toString() ?: return false
-                if (url.startsWith("http://") || url.startsWith("https://")) {
+                if (url.contains(ASSET_DOMAIN) || url.startsWith("https://mera-ai-3496.onrender.com")) {
                     return false // Let WebView load it
                 }
                 return try {
@@ -229,10 +230,9 @@ class MainActivity : AppCompatActivity() {
             }
         }, "FridayNativeBridge")
 
-        // Load the full Friday Web App
-        val backendUrl = FridayApiClient.getBackendUrl(this)
-        Log.i(TAG, "Loading Friday App from: $backendUrl")
-        webView.loadUrl(backendUrl)
+        // Load the local Friday Web App (Renders Login Prompt, Capsules, Starry Background, Gemini Live)
+        Log.i(TAG, "Loading local Friday App from: $START_URL")
+        webView.loadUrl(START_URL)
     }
 
     private fun injectNativeBridges() {
@@ -244,7 +244,6 @@ class MainActivity : AppCompatActivity() {
                 // Listen to Bluetooth Hardware Events dispatched from Kotlin
                 window.addEventListener('friday_bluetooth_toggle_mic', function() {
                     console.log("[FRIDAY Native] Bluetooth Mic Trigger received in Web App!");
-                    // Find and click the Live AI Mic button in UI
                     var micBtn = document.querySelector('[data-mic-trigger="true"]') ||
                                  document.querySelector('button[aria-label*="Mic"]') ||
                                  document.querySelector('button[title*="Mic"]') ||

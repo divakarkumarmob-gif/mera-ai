@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en" style="background-color: #0a0f24;">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0a0f24" />
+    <title>AI Live Agent</title>
+    <!-- Preload critical 3D avatar assets for instant model display -->
+    <link rel="preload" href="/friday.fbx" as="fetch" crossorigin="anonymous" />
+    <link rel="preload" href="/Breathing Idle (1).fbx" as="fetch" crossorigin="anonymous" />
+    <link rel="preload" href="/Talking.fbx" as="fetch" crossorigin="anonymous" />
+    <script type="module" crossorigin src="/assets/index-D9zdiSxk.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-CqhLWO9n.css">
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      // Register Friday 3D Assets Service Worker for instant future loads
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js', { scope: '/' })
+            .then(reg => console.log('[SW] Friday 3D cache registered:', reg.scope))
+            .catch(err => console.warn('[SW] Registration notice:', err));
+        });
+      }
+    </script>
+  </body>
+</html>

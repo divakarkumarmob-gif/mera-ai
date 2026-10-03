@@ -20,9 +20,11 @@ export function getBackendBaseUrl(): string {
     return envUrl.trim().replace(/\/+$/, '');
   }
 
-  // 3. Detect if running inside a native mobile environment (Capacitor Android / file:// / capacitor://localhost)
+  // 3. Detect if running inside a native mobile environment (Friday Native Android / Capacitor / file://)
   const isNativeOrCapacitor =
+    Boolean((window as any).isFridayNativeApp) ||
     Boolean((window as any).Capacitor?.isNativePlatform?.()) ||
+    window.location.origin.includes('androidplatform.net') ||
     window.location.protocol === 'file:' ||
     window.location.origin.includes('capacitor://') ||
     window.location.origin.includes('localhost') ||
