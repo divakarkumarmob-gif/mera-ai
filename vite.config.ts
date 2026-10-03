@@ -11,6 +11,7 @@ import { defineConfig } from 'vite';
 const BROKEN_NATIVE_ONLY_PACKAGES = [
   'capacitor-wifi',
   '@capacitor-community/background-geolocation',
+  '@capacitor/preferences',
 ];
 
 export default defineConfig({

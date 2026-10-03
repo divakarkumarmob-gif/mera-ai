@@ -1,4 +1,4 @@
-name: Build & Package FRIDAY Android APK
+﻿name: Build & Package FRIDAY Android APK
 
 on:
   push:
@@ -15,46 +15,46 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 📥 Checkout Repository
+      - name: ðŸ“¥ Checkout Repository
         uses: actions/checkout@v4
 
-      - name: ☕ Setup Java 21 (Required for Capacitor 7 / Android Gradle)
+      - name: â˜• Setup Java 21 (Required for Capacitor 7 / Android Gradle)
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: 🤖 Accept Android SDK Licenses
+      - name: ðŸ¤– Accept Android SDK Licenses
         run: |
           yes | sdkmanager --licenses || true
 
-      - name: 🟢 Setup Node.js (v20)
+      - name: ðŸŸ¢ Setup Node.js (v20)
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: 'npm'
 
-      - name: 📦 Install Dependencies & Capacitor CLI
+      - name: ðŸ“¦ Install Dependencies & Capacitor CLI
         run: |
           npm install
           npm install @capacitor/core @capacitor/cli @capacitor/android
 
-      - name: ⚡ Build Web Assets (Vite Production Build)
+      - name: âš¡ Build Web Assets (Vite Production Build)
         run: npm run build
         env:
           VITE_BACKEND_URL: https://mera-ai-3496.onrender.com
 
-      - name: 📱 Initialize & Sync Capacitor Android Project
+      - name: ðŸ“± Initialize & Sync Capacitor Android Project
         run: |
           npm uninstall capacitor-wifi --no-save || true
           rm -rf node_modules/capacitor-wifi || true
           npx cap add android || true
           npx cap sync android
 
-      - name: 🔧 Fix Background-Runner AAR (android-js-engine-release.aar)
+      - name: ðŸ”§ Fix Background-Runner AAR (android-js-engine-release.aar)
         run: |
           # capacitor-background-runner needs android-js-engine-release.aar in two locations.
-          # cap sync doesn't always place it correctly in CI — fix manually.
+          # cap sync doesn't always place it correctly in CI â€” fix manually.
           AAR_SRC=$(find node_modules/@capacitor/background-runner -name "android-js-engine-release.aar" 2>/dev/null | head -1)
           echo "AAR source: $AAR_SRC"
 
@@ -62,49 +62,49 @@ jobs:
             # Location 1: cordova-android-plugins libs
             mkdir -p android/capacitor-cordova-android-plugins/src/android/libs
             cp "$AAR_SRC" android/capacitor-cordova-android-plugins/src/android/libs/android-js-engine-release.aar
-            echo "✅ Copied AAR → cordova-android-plugins/libs"
+            echo "âœ… Copied AAR â†’ cordova-android-plugins/libs"
 
             # Location 2: app/libs (fallback lookup)
             mkdir -p android/app/libs
             cp "$AAR_SRC" android/app/libs/android-js-engine-release.aar
-            echo "✅ Copied AAR → app/libs"
+            echo "âœ… Copied AAR â†’ app/libs"
           else
-            echo "⚠️ android-js-engine-release.aar not found in node_modules — background-runner may be missing"
+            echo "âš ï¸ android-js-engine-release.aar not found in node_modules â€” background-runner may be missing"
             find node_modules/@capacitor/background-runner -type f 2>/dev/null | head -20 || true
           fi
 
           # Also ensure local.properties has sdk.dir set (needed in some CI environments)
           echo "sdk.dir=$ANDROID_HOME" > android/local.properties
-          echo "✅ local.properties written: sdk.dir=$ANDROID_HOME"
+          echo "âœ… local.properties written: sdk.dir=$ANDROID_HOME"
 
-      - name: 🛠️ Fix Gradle — Revert AGP & Force Compatible androidx.core Version
+      - name: ðŸ› ï¸ Fix Gradle â€” Revert AGP & Force Compatible androidx.core Version
         run: |
           APP_GRADLE="android/app/build.gradle"
           ROOT_GRADLE="android/build.gradle"
           VARS_GRADLE="android/variables.gradle"
           PROP="android/gradle.properties"
 
-          # ── 1. Jetifier & AndroidX ────────────────────────────────────────────
+          # â”€â”€ 1. Jetifier & AndroidX â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
           if [ -f "$PROP" ]; then
             grep -q "android.enableJetifier" "$PROP" || echo "android.enableJetifier=true" >> "$PROP"
             grep -q "android.useAndroidX"    "$PROP" || echo "android.useAndroidX=true"    >> "$PROP"
           fi
 
-          # ── 2. Revert AGP to 8.7.2 (stable, compileSdk 35 compatible) ────────
+          # â”€â”€ 2. Revert AGP to 8.7.2 (stable, compileSdk 35 compatible) â”€â”€â”€â”€â”€â”€â”€â”€
           # Root cause: core-ktx:1.17.0 needs AGP 8.9.1+ but that chain of
           # upgrades is fragile. Instead we pin core-ktx to 1.13.1 (step 4).
           if [ -f "$ROOT_GRADLE" ]; then
             sed -i "s/com.android.tools.build:gradle:[0-9.]\+/com.android.tools.build:gradle:8.7.2/g" "$ROOT_GRADLE"
-            echo "✅ AGP pinned → 8.7.2"
+            echo "âœ… AGP pinned â†’ 8.7.2"
           fi
 
-          # ── 3. Keep compileSdk at 35, bump minSdk to 24 ────────────────────
+          # â”€â”€ 3. Keep compileSdk at 35, bump minSdk to 24 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
           # android-js-engine-release (used by capacitor-background-runner) requires minSdk 24
           if [ -f "$VARS_GRADLE" ]; then
             sed -i 's/compileSdkVersion\s*=\s*[0-9]\+/compileSdkVersion = 35/g' "$VARS_GRADLE"
             sed -i 's/targetSdkVersion\s*=\s*[0-9]\+/targetSdkVersion = 35/g'   "$VARS_GRADLE"
             sed -i 's/minSdkVersion\s*=\s*[0-9]\+/minSdkVersion = 24/g'         "$VARS_GRADLE"
-            echo "✅ variables.gradle → compileSdkVersion=35, targetSdkVersion=35, minSdkVersion=24"
+            echo "âœ… variables.gradle â†’ compileSdkVersion=35, targetSdkVersion=35, minSdkVersion=24"
             cat "$VARS_GRADLE"
           fi
           # Also patch app/build.gradle in case literals exist there
@@ -117,25 +117,25 @@ jobs:
             sed -i 's/minSdkVersion\s\+[0-9]\+/minSdkVersion 24/g'                 "$APP_GRADLE"
           fi
 
-          # ── 4. Force core-ktx:1.13.1 — KEY FIX ──────────────────────────────
+          # â”€â”€ 4. Force core-ktx:1.13.1 â€” KEY FIX â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
           # core-ktx:1.17.0 (pulled by capacitor plugins) needs AGP 8.9.1+
-          # and compileSdk 36 — way too new. Pin to 1.13.1 which is:
-          #   ✅ compileSdk 35 compatible
-          #   ✅ AGP 8.7.x compatible
-          #   ✅ Production stable (used by millions of apps)
+          # and compileSdk 36 â€” way too new. Pin to 1.13.1 which is:
+          #   âœ… compileSdk 35 compatible
+          #   âœ… AGP 8.7.x compatible
+          #   âœ… Production stable (used by millions of apps)
           if [ -f "$APP_GRADLE" ]; then
             printf '\n// FRIDAY CI: Dependency Version Resolution Fixes\nconfigurations.all {\n    resolutionStrategy {\n        force '\''androidx.core:core-ktx:1.13.1'\''\n        force '\''androidx.core:core:1.13.1'\''\n        force '\''org.jetbrains.kotlin:kotlin-stdlib:1.8.22'\''\n        force '\''org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22'\''\n        force '\''org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22'\''\n    }\n}\ndependencies {\n    constraints {\n        implementation('\''org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22'\'') {\n            because('\''kotlin-stdlib-jdk7 is now part of kotlin-stdlib'\'')\n        }\n        implementation('\''org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22'\'') {\n            because('\''kotlin-stdlib-jdk8 is now part of kotlin-stdlib'\'')\n        }\n    }\n}\n' >> "$APP_GRADLE"
-            echo "✅ Resolution strategy written → core-ktx:1.13.1 + kotlin-stdlib:1.8.22"
+            echo "âœ… Resolution strategy written â†’ core-ktx:1.13.1 + kotlin-stdlib:1.8.22"
           fi
 
 
-          # ── 5. Verify final state ─────────────────────────────────────────────
-          echo "── android/build.gradle (AGP version) ──"
+          # â”€â”€ 5. Verify final state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+          echo "â”€â”€ android/build.gradle (AGP version) â”€â”€"
           grep "com.android.tools.build" "$ROOT_GRADLE" || true
-          echo "── android/variables.gradle ──"
+          echo "â”€â”€ android/variables.gradle â”€â”€"
           cat "$VARS_GRADLE" 2>/dev/null || echo "(not found)"
 
-      - name: 🔑 Configure Permissions & Android 14/15 Foreground Service in AndroidManifest
+      - name: ðŸ”‘ Configure Permissions & Android 14/15 Foreground Service in AndroidManifest
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           if [ -f "$MANIFEST" ]; then
@@ -176,13 +176,13 @@ jobs:
             fi
           fi
 
-      - name: 🛡️ Inject Crash-Proof FridayForegroundService, AccessibilityService & MainActivity
+      - name: ðŸ›¡ï¸ Inject Crash-Proof FridayForegroundService, AccessibilityService & MainActivity
         run: |
           PACKAGE_DIR="android/app/src/main/java/com/friday/ai"
           mkdir -p "$PACKAGE_DIR"
           mkdir -p "$PACKAGE_DIR/plugins"
 
-          # ── SmsSenderPlugin.java (Zero-Cost GPS via SIM SMS) ──────────────────
+          # â”€â”€ SmsSenderPlugin.java (Zero-Cost GPS via SIM SMS) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
           cat << 'EOF' > "$PACKAGE_DIR/plugins/SmsSenderPlugin.java"
           package com.friday.ai.plugins;
 
@@ -283,7 +283,7 @@ jobs:
           }
           EOF
 
-          # ── WifiScannerPlugin.java (Crash-Proof Native Offline WiFi Scanner) ──
+          # â”€â”€ WifiScannerPlugin.java (Crash-Proof Native Offline WiFi Scanner) â”€â”€
           cat << 'EOF' > "$PACKAGE_DIR/plugins/WifiScannerPlugin.java"
           package com.friday.ai.plugins;
 
@@ -400,8 +400,8 @@ jobs:
           }
           EOF
 
-          # 1. Create FridayForegroundService.java (100% Crash-Proof & Android 14/15 Compliant)
-          cat << 'EOF' > "$PACKAGE_DIR/FridayForegroundService.java"
+          # 1. Create FridayForegroundService.java - Native GPS tracking (works when app is CLOSED)
+          cat << 'JAVA_EOF' > "$PACKAGE_DIR/FridayForegroundService.java"
           package com.friday.ai;
 
           import android.Manifest;
@@ -412,189 +412,221 @@ jobs:
           import android.app.Service;
           import android.content.Context;
           import android.content.Intent;
+          import android.content.SharedPreferences;
           import android.content.pm.PackageManager;
           import android.content.pm.ServiceInfo;
+          import android.location.Location;
           import android.net.wifi.WifiManager;
           import android.os.Build;
           import android.os.IBinder;
+          import android.os.Looper;
           import android.os.PowerManager;
+          import android.util.Log;
           import androidx.core.app.NotificationCompat;
           import androidx.core.content.ContextCompat;
+          import com.google.android.gms.location.FusedLocationProviderClient;
+          import com.google.android.gms.location.LocationCallback;
+          import com.google.android.gms.location.LocationRequest;
+          import com.google.android.gms.location.LocationResult;
+          import com.google.android.gms.location.LocationServices;
+          import com.google.android.gms.location.Priority;
+          import java.io.OutputStream;
+          import java.net.HttpURLConnection;
+          import java.net.URL;
+          import java.nio.charset.StandardCharsets;
+          import java.util.concurrent.ExecutorService;
+          import java.util.concurrent.Executors;
 
           public class FridayForegroundService extends Service {
-              public static final String CHANNEL_ID = "friday_background_channel";
-              public static final int NOTIFICATION_ID = 1001;
-              public static final String ACTION_START = "ACTION_START";
-              public static final String ACTION_STOP = "ACTION_STOP";
+              private static final String TAG = "FridayBGLocation";
+              public static final String CHANNEL_ID    = "friday_background_channel";
+              public static final int    NOTIFICATION_ID = 1001;
+              public static final String ACTION_START  = "ACTION_START";
+              public static final String ACTION_STOP   = "ACTION_STOP";
 
-              private PowerManager.WakeLock wakeLock;
-              private WifiManager.WifiLock wifiLock;
+              private static final String PREFS_NAME      = "CAPPreferences";
+              private static final String PREF_BACKEND_URL = "friday_backendUrl";
+              private static final String PREF_DEVICE_ID  = "friday_deviceId";
+              private static final String PREF_USERNAME   = "friday_username";
+              private static final String PREF_LABEL      = "friday_label";
+              private static final String DEFAULT_BACKEND = "https://mera-ai-3496.onrender.com";
+              private static final long   GPS_INTERVAL_MS = 30_000L;
+              private static final long   GPS_MIN_MS      = 15_000L;
+
+              private PowerManager.WakeLock       wakeLock;
+              private WifiManager.WifiLock        wifiLock;
+              private FusedLocationProviderClient fusedClient;
+              private LocationCallback            locationCallback;
+              private ExecutorService             httpExecutor;
 
               @Override
               public void onCreate() {
                   super.onCreate();
                   createNotificationChannel();
                   acquireLocks();
+                  httpExecutor = Executors.newSingleThreadExecutor();
+                  fusedClient  = LocationServices.getFusedLocationProviderClient(this);
               }
 
               @Override
               public int onStartCommand(Intent intent, int flags, int startId) {
                   if (intent != null && ACTION_STOP.equals(intent.getAction())) {
+                      stopLocationUpdates();
                       stopForeground(true);
                       stopSelf();
                       return START_NOT_STICKY;
                   }
-
-                  Notification notification = buildForegroundNotification();
+                  Notification notif = buildNotification();
                   try {
-                      int serviceType = 0;
-                      // DATA_SYNC is safe on Android 14+ without runtime permission prompt
-                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                          serviceType |= ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC;
-                      }
-                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                          serviceType |= ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK;
-                          if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                              serviceType |= ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;
-                          }
-                      }
                       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                          if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
-                              ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-                              serviceType |= ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION;
-                          }
-                      }
-
-                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                          if (serviceType == 0 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                              serviceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC;
-                          }
-                          startForeground(NOTIFICATION_ID, notification, serviceType);
+                          int type = ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION;
+                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+                              type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC;
+                          startForeground(NOTIFICATION_ID, notif, type);
                       } else {
-                          startForeground(NOTIFICATION_ID, notification);
+                          startForeground(NOTIFICATION_ID, notif);
                       }
                   } catch (Throwable t) {
-                      t.printStackTrace();
-                      try {
-                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                              startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
-                          } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                              startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
-                          } else {
-                              startForeground(NOTIFICATION_ID, notification);
-                          }
-                      } catch (Throwable ignored) {
-                          ignored.printStackTrace();
-                      }
+                      try { startForeground(NOTIFICATION_ID, notif); } catch (Throwable ignored) {}
                   }
-
+                  startLocationUpdates();
                   return START_STICKY;
+              }
+
+              @Override public void onDestroy() {
+                  stopLocationUpdates();
+                  releaseLocks();
+                  if (httpExecutor != null) httpExecutor.shutdown();
+                  super.onDestroy();
+              }
+
+              @Override public IBinder onBind(Intent intent) { return null; }
+
+              private void startLocationUpdates() {
+                  boolean hasFine   = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)   == PackageManager.PERMISSION_GRANTED;
+                  boolean hasCoarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+                  if (!hasFine && !hasCoarse) { Log.w(TAG, "No location permission"); return; }
+
+                  locationCallback = new LocationCallback() {
+                      @Override
+                      public void onLocationResult(LocationResult result) {
+                          if (result == null) return;
+                          Location loc = result.getLastLocation();
+                          if (loc == null) return;
+                          Log.d(TAG, "GPS: " + loc.getLatitude() + "," + loc.getLongitude() + " acc=" + loc.getAccuracy() + "m");
+                          sendPing(loc);
+                      }
+                  };
+
+                  LocationRequest req = new LocationRequest.Builder(
+                      hasFine ? Priority.PRIORITY_HIGH_ACCURACY : Priority.PRIORITY_BALANCED_POWER_ACCURACY,
+                      GPS_INTERVAL_MS
+                  ).setMinUpdateIntervalMillis(GPS_MIN_MS).build();
+
+                  try {
+                      fusedClient.requestLocationUpdates(req, locationCallback, Looper.getMainLooper());
+                      Log.d(TAG, "GPS tracking started every " + GPS_INTERVAL_MS + "ms");
+                  } catch (Throwable e) { Log.e(TAG, "GPS start failed: " + e.getMessage()); }
+              }
+
+              private void stopLocationUpdates() {
+                  try {
+                      if (fusedClient != null && locationCallback != null) {
+                          fusedClient.removeLocationUpdates(locationCallback);
+                          locationCallback = null;
+                      }
+                  } catch (Throwable ignored) {}
+              }
+
+              private void sendPing(Location loc) {
+                  SharedPreferences p = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+                  String backend  = p.getString(PREF_BACKEND_URL, DEFAULT_BACKEND).replaceAll("/+$", "");
+                  String deviceId = p.getString(PREF_DEVICE_ID,  "apk-" + Build.MODEL.replace(" ", "_"));
+                  String username = p.getString(PREF_USERNAME,    "");
+                  String label    = p.getString(PREF_LABEL,       Build.MODEL);
+                  String url      = backend + "/api/location/ping";
+                  String alt = loc.hasAltitude() ? String.valueOf(loc.getAltitude()) : "null";
+                  String spd = loc.hasSpeed()    ? String.valueOf(loc.getSpeed())    : "null";
+                  final String body = "{\"deviceId\":\"" + esc(deviceId) + "\",\"username\":\"" + esc(username)
+                      + "\",\"label\":\"" + esc(label) + "\",\"lat\":" + loc.getLatitude()
+                      + ",\"lon\":" + loc.getLongitude() + ",\"accuracy\":" + loc.getAccuracy()
+                      + ",\"altitude\":" + alt + ",\"speed\":" + spd
+                      + ",\"source\":\"native-foreground-service\"}";
+                  httpExecutor.execute(() -> {
+                      HttpURLConnection c = null;
+                      try {
+                          c = (HttpURLConnection) new URL(url).openConnection();
+                          c.setRequestMethod("POST");
+                          c.setRequestProperty("Content-Type", "application/json");
+                          c.setConnectTimeout(10000); c.setReadTimeout(10000); c.setDoOutput(true);
+                          try (OutputStream os = c.getOutputStream()) { os.write(body.getBytes(StandardCharsets.UTF_8)); }
+                          Log.d(TAG, "Ping OK HTTP " + c.getResponseCode());
+                      } catch (Throwable e) { Log.w(TAG, "Ping failed: " + e.getMessage()); }
+                      finally { if (c != null) try { c.disconnect(); } catch (Throwable ignored) {} }
+                  });
+              }
+
+              private static String esc(String s) {
+                  if (s == null) return "";
+                  return s.replace("\\", "\\\\").replace("\"", "\\\"");
               }
 
               private void acquireLocks() {
                   try {
-                      PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
-                      if (powerManager != null && (wakeLock == null || !wakeLock.isHeld())) {
-                          wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "FridayAI:BackgroundWakeLock");
+                      PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+                      if (pm != null && (wakeLock == null || !wakeLock.isHeld())) {
+                          wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "FridayAI:BGLocationWakeLock");
                           wakeLock.acquire(12 * 60 * 60 * 1000L);
                       }
-                  } catch (Throwable e) {
-                      e.printStackTrace();
-                  }
+                  } catch (Throwable e) { Log.e(TAG, "WakeLock: " + e.getMessage()); }
                   try {
-                      WifiManager wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-                      if (wifiManager != null && (wifiLock == null || !wifiLock.isHeld())) {
-                          wifiLock = wifiManager.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "FridayAI:WifiLock");
+                      WifiManager wm = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+                      if (wm != null && (wifiLock == null || !wifiLock.isHeld())) {
+                          wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "FridayAI:WifiLock");
                           wifiLock.acquire();
                       }
-                  } catch (Throwable e) {
-                      e.printStackTrace();
-                  }
+                  } catch (Throwable e) { Log.e(TAG, "WifiLock: " + e.getMessage()); }
               }
 
               private void releaseLocks() {
-                  try {
-                      if (wakeLock != null && wakeLock.isHeld()) {
-                          wakeLock.release();
-                          wakeLock = null;
-                      }
-                  } catch (Throwable e) {
-                      e.printStackTrace();
-                  }
-                  try {
-                      if (wifiLock != null && wifiLock.isHeld()) {
-                          wifiLock.release();
-                          wifiLock = null;
-                      }
-                  } catch (Throwable e) {
-                      e.printStackTrace();
-                  }
+                  try { if (wakeLock != null && wakeLock.isHeld()) { wakeLock.release(); wakeLock = null; } } catch (Throwable ignored) {}
+                  try { if (wifiLock != null && wifiLock.isHeld()) { wifiLock.release(); wifiLock = null; } } catch (Throwable ignored) {}
               }
 
               private void createNotificationChannel() {
-                  try {
-                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                          NotificationChannel channel = new NotificationChannel(
-                              CHANNEL_ID,
-                              "FRIDAY AI Background & Call Service",
-                              NotificationManager.IMPORTANCE_LOW
-                          );
-                          channel.setDescription("Keeps Friday AI active for live intelligence and location sync.");
-                          NotificationManager manager = getSystemService(NotificationManager.class);
-                          if (manager != null) {
-                              manager.createNotificationChannel(channel);
-                          }
-                      }
-                  } catch (Throwable e) {
-                      e.printStackTrace();
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      try {
+                          NotificationChannel ch = new NotificationChannel(
+                              CHANNEL_ID, "FRIDAY AI Background Service", NotificationManager.IMPORTANCE_LOW);
+                          ch.setDescription("Keeps FRIDAY location sync active even when app is closed.");
+                          ch.setShowBadge(false);
+                          NotificationManager nm = getSystemService(NotificationManager.class);
+                          if (nm != null) nm.createNotificationChannel(ch);
+                      } catch (Throwable ignored) {}
                   }
               }
 
-              private Notification buildForegroundNotification() {
-                  PendingIntent pendingIntent = null;
+              private Notification buildNotification() {
+                  PendingIntent pi = null;
                   try {
-                      Intent launchIntent = getPackageManager().getLaunchIntentForPackage(getPackageName());
-                      if (launchIntent == null) {
-                          launchIntent = new Intent(this, MainActivity.class);
-                      }
-                      launchIntent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-                      pendingIntent = PendingIntent.getActivity(
-                          this,
-                          0,
-                          launchIntent,
-                          PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0)
-                      );
+                      Intent launch = getPackageManager().getLaunchIntentForPackage(getPackageName());
+                      if (launch == null) launch = new Intent(this, MainActivity.class);
+                      launch.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                      int f = PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0);
+                      pi = PendingIntent.getActivity(this, 0, launch, f);
                   } catch (Throwable ignored) {}
-
-                  int icon = getApplicationInfo().icon != 0 ? getApplicationInfo().icon : android.R.drawable.ic_dialog_info;
-
-                  NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
+                  int icon = getApplicationInfo().icon != 0 ? getApplicationInfo().icon : android.R.drawable.ic_menu_mylocation;
+                  NotificationCompat.Builder b = new NotificationCompat.Builder(this, CHANNEL_ID)
                       .setContentTitle("FRIDAY AI Active")
-                      .setContentText("🎙️ Live Voice Calling & AI Intelligence Ready • 'Hello Friday'")
-                      .setSmallIcon(icon)
-                      .setOngoing(true)
+                      .setContentText("📍 Location syncing • 🎙️ Say 'Hello Friday' to wake")
+                      .setSmallIcon(icon).setOngoing(true)
                       .setPriority(NotificationCompat.PRIORITY_LOW)
                       .setCategory(NotificationCompat.CATEGORY_SERVICE);
-
-                  if (pendingIntent != null) {
-                      builder.setContentIntent(pendingIntent);
-                  }
-
-                  return builder.build();
-              }
-
-              @Override
-              public void onDestroy() {
-                  releaseLocks();
-                  super.onDestroy();
-              }
-
-              @Override
-              public IBinder onBind(Intent intent) {
-                  return null;
+                  if (pi != null) b.setContentIntent(pi);
+                  return b.build();
               }
           }
-          EOF
+          JAVA_EOF
 
           # 2. Update MainActivity.java (Crash-Proof, Safe Permission Requests & WebView Init)
           cat << 'EOF' > "$PACKAGE_DIR/MainActivity.java"
@@ -753,13 +785,13 @@ jobs:
           }
           EOF
 
-      - name: 🔨 Build FRIDAY Main AI APK via Gradle
+      - name: ðŸ”¨ Build FRIDAY Main AI APK via Gradle
         run: |
           cd android
           chmod +x ./gradlew
           ./gradlew assembleDebug --no-daemon
 
-      - name: 🎮 Build Friday Touch Helper Standalone APK via Gradle
+      - name: ðŸŽ® Build Friday Touch Helper Standalone APK via Gradle
         run: |
           cd android-helper
           echo "sdk.dir=$ANDROID_HOME" > local.properties
@@ -771,7 +803,7 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
 
-      - name: 📦 Prepare & Rename Both APKs
+      - name: ðŸ“¦ Prepare & Rename Both APKs
         run: |
           mkdir -p apk-output
           cp android/app/build/outputs/apk/debug/app-debug.apk apk-output/FRIDAY.apk
@@ -779,21 +811,21 @@ jobs:
           echo "Generated APK Files:"
           ls -lh apk-output/
 
-      - name: 📤 Upload FRIDAY.apk (Main AI Live Agent App)
+      - name: ðŸ“¤ Upload FRIDAY.apk (Main AI Live Agent App)
         uses: actions/upload-artifact@v4
         with:
           name: FRIDAY-Main-App
           path: apk-output/FRIDAY.apk
           retention-days: 30
 
-      - name: 📤 Upload FridayTouchHelper.apk (Touch Helper App)
+      - name: ðŸ“¤ Upload FridayTouchHelper.apk (Touch Helper App)
         uses: actions/upload-artifact@v4
         with:
           name: Friday-Touch-Helper
           path: apk-output/FridayTouchHelper.apk
           retention-days: 30
 
-      - name: 🚀 Attach Both APKs to GitHub Release
+      - name: ðŸš€ Attach Both APKs to GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:

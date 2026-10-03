@@ -457,7 +457,7 @@ class BackgroundLocationService {
       label: this.deviceLabel || 'Boss Phone',
       ownerName: ownerName || this.deviceLabel || 'DK (Boss)',
       username: user?.username || 'boss',
-      platform: isNativePlatform ? 'apk' : 'web',  // ⭐ Reliable APK vs web flag
+      platform: isNativePlatform ? 'apk' : 'web',
       batteryLevel: this.getBatteryLevel(),
       isCharging: this.getChargingStatus(),
       networkType: this.getNetworkType(),
@@ -470,8 +470,13 @@ class BackgroundLocationService {
       payload.accuracy = coords?.accuracy ?? cached?.accuracy ?? 0;
     }
 
+    // ── Sync config to native SharedPreferences so FridayForegroundService
+    //    can track GPS even when WebView (JS) is completely stopped.
+    if (isNativePlatform) {
+      this.syncNativeServicePrefs(deviceId, user?.username || 'boss', label).catch(() => {});
+    }
+
     try {
-      // ⭐ AbortController instead of no-timeout hang — Android WebView safe!
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 10000);
       const res  = await fetch(getApiUrl('/api/location/register'), {
@@ -500,6 +505,33 @@ class BackgroundLocationService {
       return { success: true, message: `"${label}" tracking active locally 📍` };
     }
   }
+
+  /**
+   * Write deviceId / username / label / backendUrl to Android SharedPreferences
+   * (via Capacitor's Preferences plugin). FridayForegroundService reads these
+   * on the native Java side so it can POST GPS pings independently of the WebView.
+   */
+  private async syncNativeServicePrefs(
+    deviceId: string,
+    username: string,
+    label: string
+  ): Promise<void> {
+    try {
+      const { Preferences } = await import(/* @vite-ignore */ '@capacitor/preferences');
+      const backendUrl = (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_BACKEND_URL)
+        || 'https://mera-ai-3496.onrender.com';
+      // Capacitor Preferences uses a single shared file; we use group "FridayPrefs"
+      // to match the SharedPreferences file name that FridayForegroundService reads.
+      await Preferences.set({ key: 'friday_deviceId',   value: deviceId });
+      await Preferences.set({ key: 'friday_username',   value: username });
+      await Preferences.set({ key: 'friday_label',      value: label });
+      await Preferences.set({ key: 'friday_backendUrl', value: backendUrl });
+      console.log('[BGLocation] 💾 Native prefs synced → FridayForegroundService will use deviceId=' + deviceId);
+    } catch (err: any) {
+      console.warn('[BGLocation] syncNativeServicePrefs error:', err?.message);
+    }
+  }
+
 
   /**
    * Start GPS tracking.
