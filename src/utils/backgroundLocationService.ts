@@ -302,9 +302,8 @@ class BackgroundLocationService {
     // 1. Native Capacitor Geolocation (Fused Location Provider on Android)
     if (isNative) {
       try {
-        const { Geolocation } = await import('@capacitor/geolocation');
+        const { Geolocation } = await import(/* @vite-ignore */ '@capacitor/geolocation');
 
-        // Check & request permission — increased timeouts to avoid false 'denied' on slow Android starts
         try {
           const check = await safePromise(Geolocation.checkPermissions(), 4000, null);
           if (check?.location !== 'granted') {
@@ -409,7 +408,7 @@ class BackgroundLocationService {
     // 1. Native permission request if on Android
     if (isNative) {
       try {
-        const { Geolocation } = await import('@capacitor/geolocation');
+        const { Geolocation } = await import(/* @vite-ignore */ '@capacitor/geolocation');
         const check = await Geolocation.checkPermissions();
         if (check.location !== 'granted') {
           await Geolocation.requestPermissions();
@@ -574,7 +573,8 @@ class BackgroundLocationService {
 
   private async startBackgroundGeoService(): Promise<void> {
     try {
-      const { BackgroundGeolocation } = await import('@capacitor-community/background-geolocation');
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      const { BackgroundGeolocation } = await import(/* @vite-ignore */ '@capacitor-community/background-geolocation');
 
       // Remove any previous watcher to avoid duplicates
       if (this.bgGeoWatcherId) {
@@ -636,7 +636,8 @@ class BackgroundLocationService {
   private async stopBackgroundGeoService(): Promise<void> {
     try {
       if (!this.bgGeoWatcherId) return;
-      const { BackgroundGeolocation } = await import('@capacitor-community/background-geolocation');
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      const { BackgroundGeolocation } = await import(/* @vite-ignore */ '@capacitor-community/background-geolocation');
       await BackgroundGeolocation.removeWatcher({ id: this.bgGeoWatcherId });
       this.bgGeoWatcherId = null;
       console.log('[BGLocation] ⏹️ Background geolocation service stopped (notification removed)');
@@ -649,7 +650,7 @@ class BackgroundLocationService {
 
   private async startCapacitorGeoWatch(): Promise<void> {
     try {
-      const { Geolocation } = await import('@capacitor/geolocation');
+      const { Geolocation } = await import(/* @vite-ignore */ '@capacitor/geolocation');
       await Geolocation.watchPosition(
         { enableHighAccuracy: true, timeout: 30000 },
         (pos, err) => {
@@ -1243,8 +1244,8 @@ class BackgroundLocationService {
 
     if (isNative) {
       try {
-        const { Geolocation } = await import('@capacitor/geolocation');
-        // ⭐ Increased timeout: 2500ms was too short on slow Android starts — caused null return
+        const { Geolocation } = await import(/* @vite-ignore */ '@capacitor/geolocation');
+
         const check = await safePromise(Geolocation.checkPermissions(), 5000, null);
         const perm = check?.location;
         if (perm === 'granted') {
