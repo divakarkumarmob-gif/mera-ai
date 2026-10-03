@@ -42,7 +42,15 @@ async function fetchLocationFromTelegram(label: string): Promise<DeviceLocationE
       const matched = dl.includes(lq) || du.includes(lq) ||
         (isBoss && (["boss","dk","divakar"].some(a => dl.includes(a) || du.includes(a))));
       if (matched || (isBoss && !best)) {
-        if (!best || (d.lastUpdatedAt || 0) > (best.lastUpdatedAt || 0)) {
+        const dIsApk = (d.deviceId || "").includes("apk") || (d.label || "").toLowerCase().includes("phone") || (d.label || "").toLowerCase().includes("apk");
+        const bestIsApk = best ? ((best.deviceId || "").includes("apk") || (best.label || "").toLowerCase().includes("phone") || (best.label || "").toLowerCase().includes("apk")) : false;
+        if (!best) {
+          best = d;
+        } else if (dIsApk && !bestIsApk && (Date.now() - (d.lastUpdatedAt || 0) < 24 * 3600 * 1000)) {
+          best = d;
+        } else if (!dIsApk && bestIsApk && (Date.now() - (best.lastUpdatedAt || 0) < 24 * 3600 * 1000)) {
+          // keep APK
+        } else if ((d.lastUpdatedAt || 0) > (best.lastUpdatedAt || 0)) {
           best = d;
         }
       }
@@ -538,20 +546,50 @@ class DeviceLocationTrackerService {
 
       // Sort candidates:
       // 1. Decisive score difference (>20) prioritizes matching person (e.g. "bhai" vs "boss")
-      // 2. For matching devices (e.g. multiple Boss devices): The most recent ping ALWAYS wins!
-      // 3. Prefer devices with valid coordinates
+      // 2. Devices WITH VALID COORDINATES (lat !== 0, lon !== 0) ALWAYS beat devices with 0,0!
+      // 3. Mobile APK priority: A mobile phone APK has real GPS and beats a static web browser!
+      // 4. Recency: More recent ping wins
       candidates.sort((a, b) => {
         if (Math.abs(a.score - b.score) > 20) {
           return b.score - a.score;
         }
-        // Both are matching candidates. Prioritize recency!
-        const timeDiff = (b.lastUpdatedAt || 0) - (a.lastUpdatedAt || 0);
-        if (Math.abs(timeDiff) > 60000) { // >1 min difference: newer ping wins
-          return timeDiff;
-        }
+
+        // 1. CRITICAL: A device with REAL coordinates ALWAYS beats a device with 0,0!
         if (a.hasCoords !== b.hasCoords) {
           return a.hasCoords ? -1 : 1;
         }
+
+        // 2. Check if candidates are Mobile APK vs Web Browser
+        const aId = (a.entry.deviceId || "").toLowerCase();
+        const bId = (b.entry.deviceId || "").toLowerCase();
+        const aLabel = (a.entry.label || "").toLowerCase();
+        const bLabel = (b.entry.label || "").toLowerCase();
+        const aIsApk = aId.includes("apk") || aLabel.includes("apk") || aLabel.includes("phone");
+        const bIsApk = bId.includes("apk") || bLabel.includes("apk") || bLabel.includes("phone");
+
+        const now = Date.now();
+        const aAgeMs = now - (a.lastUpdatedAt || 0);
+        const bAgeMs = now - (b.lastUpdatedAt || 0);
+
+        // If one is mobile APK and was active within the last 24h, while the other is web browser:
+        // The mobile phone APK represents the user's real physical GPS movement!
+        if (bIsApk && !aIsApk && bAgeMs < 24 * 3600 * 1000) {
+          return 1; // b (APK) wins!
+        }
+        if (aIsApk && !bIsApk && aAgeMs < 24 * 3600 * 1000) {
+          return -1; // a (APK) wins!
+        }
+
+        // Both are same platform or both older: prioritize the most recent ping!
+        const timeDiff = (b.lastUpdatedAt || 0) - (a.lastUpdatedAt || 0);
+        if (Math.abs(timeDiff) > 60000) { // >1 min difference
+          return timeDiff;
+        }
+
+        if (aIsApk !== bIsApk) {
+          return bIsApk ? 1 : -1;
+        }
+
         return b.score - a.score;
       });
 
@@ -560,12 +598,15 @@ class DeviceLocationTrackerService {
         bestScore = candidates[0].score;
       }
 
-      // Check RAM cache: if RAM cache has a ping that is NEWER than bestMatch, use RAM cache!
+      // Check RAM cache: if RAM cache has a ping with valid coords, prefer it if fresher or if bestMatch lacks coords!
       const ramEntry = getRamCacheEntry(rawQuery || (bestMatch?.label ?? "boss"));
-      if (ramEntry && (ramEntry.lastUpdatedAt || 0) > (bestMatch?.lastUpdatedAt || 0)) {
-        console.log(`[LocationTracker] ⚡ Newer ping found in RAM cache (${new Date(ramEntry.lastUpdatedAt).toISOString()}) vs Firestore (${bestMatch ? new Date(bestMatch.lastUpdatedAt).toISOString() : 'none'})`);
-        bestMatch = ramEntry;
-        bestScore = Math.max(bestScore, 95);
+      if (ramEntry && ramEntry.lat && ramEntry.lon && !(ramEntry.lat === 0 && ramEntry.lon === 0)) {
+        const bestHasCoords = bestMatch && bestMatch.lat && bestMatch.lon && !(bestMatch.lat === 0 && bestMatch.lon === 0);
+        if (!bestMatch || !bestHasCoords || (ramEntry.lastUpdatedAt || 0) > (bestMatch.lastUpdatedAt || 0)) {
+          console.log(`[LocationTracker] ⚡ Fresh ping found in RAM cache (${new Date(ramEntry.lastUpdatedAt).toISOString()}) vs best candidate (${bestMatch ? new Date(bestMatch.lastUpdatedAt).toISOString() : 'none'})`);
+          bestMatch = ramEntry;
+          bestScore = Math.max(bestScore, 95);
+        }
       }
 
       if (!bestMatch || bestScore < 50) {

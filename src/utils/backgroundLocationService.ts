@@ -270,19 +270,23 @@ class BackgroundLocationService {
     if (isNative) {
       try {
         const { Geolocation } = await import('@capacitor/geolocation');
-        // Try high accuracy GPS first
+        // ⭐ FAST PATH: Try low accuracy / fused network first (WiFi / Cell)
+        // On Android, Fused Location Provider returns this in < 500ms!
         try {
-          const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 8000, maximumAge: 10000 });
+          const fastPos = await Geolocation.getCurrentPosition({ enableHighAccuracy: false, timeout: 3000, maximumAge: 60000 });
+          if (fastPos?.coords?.latitude && fastPos?.coords?.longitude) {
+            console.log('[BGLocation] ⚡ Fast fused fix acquired in <1s:', fastPos.coords.latitude, fastPos.coords.longitude);
+            return toCached(fastPos.coords.latitude, fastPos.coords.longitude, fastPos.coords.accuracy ?? 0, fastPos);
+          }
+        } catch {}
+
+        // Fallback: Try high accuracy GPS (satellite)
+        try {
+          const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 6000, maximumAge: 10000 });
           if (pos?.coords?.latitude && pos?.coords?.longitude) {
             return toCached(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy ?? 0, pos);
           }
-        } catch {
-          // Fallback to low accuracy (WiFi & Cell Fused - works immediately indoors!)
-          const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: false, timeout: 5000, maximumAge: 60000 });
-          if (pos?.coords?.latitude && pos?.coords?.longitude) {
-            return toCached(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy ?? 0, pos);
-          }
-        }
+        } catch {}
       } catch (err: any) {
         console.warn('[BGLocation] Capacitor getFreshPosition error:', err?.message);
       }
@@ -291,8 +295,9 @@ class BackgroundLocationService {
     // 2. Web Geolocation API fallback
     if ('geolocation' in navigator) {
       try {
+        // Fast low-accuracy first
         const pos = await new Promise<GeolocationPosition>((res, rej) =>
-          navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: true, timeout: 8000, maximumAge: 10000 })
+          navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: false, timeout: 3000, maximumAge: 60000 })
         );
         if (pos?.coords?.latitude && pos?.coords?.longitude) {
           return toCached(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy ?? 0, pos);
@@ -300,7 +305,7 @@ class BackgroundLocationService {
       } catch {
         try {
           const pos = await new Promise<GeolocationPosition>((res, rej) =>
-            navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: false, timeout: 5000, maximumAge: 60000 })
+            navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: true, timeout: 6000, maximumAge: 10000 })
           );
           if (pos?.coords?.latitude && pos?.coords?.longitude) {
             return toCached(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy ?? 0, pos);
@@ -511,6 +516,8 @@ class BackgroundLocationService {
           this.cachedLast = c;
           this.saveLastKnown(c);
           this.consecutiveErrors = 0;
+          // 🚀 SEND LIVE PING IMMEDIATELY on every watchPosition GPS fix!
+          this.sendPing().catch(() => {});
         }
       );
       console.log('[BGLocation] ✅ Capacitor Geolocation watch active (foreground)');
@@ -526,13 +533,17 @@ class BackgroundLocationService {
     this.webWatchId = navigator.geolocation.watchPosition(
       (pos) => {
         this.lastPosition = pos;
-        this.saveLastKnown({
+        const c: CachedPosition = {
           lat: pos.coords.latitude, lon: pos.coords.longitude,
           accuracy: pos.coords.accuracy ?? 0,
           altitude: pos.coords.altitude ?? null, speed: pos.coords.speed ?? null,
           heading: pos.coords.heading ?? null, timestamp: Date.now(),
-        });
+        };
+        this.cachedLast = c;
+        this.saveLastKnown(c);
         this.consecutiveErrors = 0;
+        // 🚀 SEND LIVE PING IMMEDIATELY on web watch fix as well!
+        this.sendPing().catch(() => {});
       },
       (err) => {
         console.warn('[BGLocation] Web GPS error:', err.message);
@@ -589,7 +600,13 @@ class BackgroundLocationService {
           usingCached = true;
           console.log('[BGLocation] 📦 Using cached last-known coords (all methods failed)');
         } else {
-          console.warn('[BGLocation] No coords at all — skipping this ping');
+          console.warn('[BGLocation] ⏳ Coordinates not yet ready — retrying ping in 2.5s...');
+          if (this.isRunning && !(this as any)._pingRetryTimer) {
+            (this as any)._pingRetryTimer = setTimeout(() => {
+              (this as any)._pingRetryTimer = null;
+              this.sendPing().catch(() => {});
+            }, 2500);
+          }
           return;
         }
       }
@@ -895,11 +912,26 @@ class BackgroundLocationService {
   // ── Helpers ───────────────────────────────────────────────────────────────────
 
   private getOrCreateDeviceId(): string {
-    if (this.deviceId) return this.deviceId;
-    const s = this.readStorage(STORAGE_KEY_DEVICE_ID);
-    if (s) { this.deviceId = s; return s; }
-    const id = 'dev_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 9);
-    this.deviceId = id; this.writeStorage(STORAGE_KEY_DEVICE_ID, id); return id;
+    const user = getStoredUser();
+    const isNative = this.checkNative();
+    const platform = isNative ? 'apk' : 'web';
+    const userTag = user?.username ? user.username.toLowerCase().replace(/[^a-z0-9_]/g, '') : 'boss';
+    const storageKey = `${STORAGE_KEY_DEVICE_ID}_${platform}_${userTag}`;
+
+    if (this.deviceId && this.deviceId.includes(platform) && this.deviceId.includes(userTag)) {
+      return this.deviceId;
+    }
+    const s = this.readStorage(storageKey);
+    if (s && s.includes(platform) && s.includes(userTag)) {
+      this.deviceId = s;
+      return s;
+    }
+
+    const id = `dev_${platform}_${userTag}`;
+    this.deviceId = id;
+    this.writeStorage(storageKey, id);
+    this.writeStorage(STORAGE_KEY_DEVICE_ID, id);
+    return id;
   }
 
   private saveLastKnown(data: CachedPosition): void {
