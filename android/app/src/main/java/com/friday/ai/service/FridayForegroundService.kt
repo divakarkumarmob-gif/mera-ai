@@ -18,6 +18,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.friday.ai.FridayApplication
 import com.friday.ai.MainActivity
+import com.friday.ai.R
 import com.friday.ai.bluetooth.BluetoothControlManager
 import com.friday.ai.network.FridayApiClient
 import com.friday.ai.network.FridayWebSocketClient

@@ -62,11 +62,12 @@ jobs:
         working-directory: android
         run: |
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          gradle wrapper
+          gradle wrapper --gradle-version 8.7
           chmod +x ./gradlew
           ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: 🎮 Build Friday Touch Helper Standalone APK (Optional)
+        continue-on-error: true
         working-directory: android-helper
         run: |
           echo "sdk.dir=$ANDROID_HOME" > local.properties
