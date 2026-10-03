@@ -309,7 +309,14 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
     const [accurateMode, setAccurateMode] = useState(false);
     const [answerLength, setAnswerLength] = useState(() => localStorage.getItem('answerLength') || 'short');
     const [googleSearchMode, setGoogleSearchMode] = useState(false);
-    const [wakeWordActive, setWakeWordActive] = useState(() => localStorage.getItem('wakeWordActive') !== 'false');
+    const [wakeWordActive, setWakeWordActive] = useState(() => {
+        if (typeof window !== 'undefined' && ((window as any).isFridayNativeApp || (window as any).Capacitor)) {
+            // Android APK: Managed via Earbud Bluetooth Triple-Tap hardware bridge
+            return false;
+        }
+        // Web Browser: Default ON — waits for "Hello Friday" before listening
+        return localStorage.getItem('wakeWordActive') !== 'false';
+    });
     const [pairingCode, setPairingCode] = useState<string | null>(null);
     const [dueReminder, setDueReminder] = useState<{ title: string; timeString: string } | null>(null);
     const [whatsappNotif, setWhatsappNotif] = useState<{ sender: string; text: string; isGroup: boolean; groupName?: string | null } | null>(null);
@@ -1538,11 +1545,11 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
 
             const elapsed = Date.now() - lastActivityTimeRef.current;
 
-            if (elapsed >= 75000 && !isWarningSpokenRef.current) {
+            if (elapsed >= 165000 && !isWarningSpokenRef.current) {
                 isWarningSpokenRef.current = true;
                 setInactivityCountdown(15);
             } else if (isWarningSpokenRef.current) {
-                const remaining = Math.max(0, 90 - Math.floor(elapsed / 1000));
+                const remaining = Math.max(0, 180 - Math.floor(elapsed / 1000));
                 setInactivityCountdown(remaining);
 
                 if (remaining <= 0) {
@@ -1550,7 +1557,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                     isWarningSpokenRef.current = false;
                     setInactivityCountdown(null);
                     stopRecording();
-                    setStatus("Session band ho gaya. Say 'Hello Friday' to wake.");
+                    setStatus("Session band ho gaya. Earbud Triple Tap karein.");
                 }
             }
         }, 1000);
@@ -2243,6 +2250,21 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
         if (isRecording) stopRecording();
         else await ensureConnection(true);
     };
+
+    // ── Earbud Bluetooth Triple-Tap Hardware Bridge ───────────────────────────
+    useEffect(() => {
+        const onBluetoothToggleMic = () => {
+            console.log("[LiveAIInterface] 🎧 Earbud Triple-Tap hardware event received! Starting Gemini Live session...");
+            wakeWordManager.stop();
+            handleToggleRecording();
+        };
+
+        window.addEventListener('friday_bluetooth_toggle_mic', onBluetoothToggleMic);
+        return () => {
+            window.removeEventListener('friday_bluetooth_toggle_mic', onBluetoothToggleMic);
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isRecording]);
 
     const handleClose = () => {
         if (isRecording) stopRecording();
@@ -3217,6 +3239,9 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                     <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleFileChange} />
 
                     <button
+                        data-mic="true"
+                        data-mic-trigger="true"
+                        aria-label="Microphone"
                         onClick={handleToggleRecording}
                         className={`p-5 rounded-full text-white backdrop-blur-xl border border-white/30 transition-all ${isRecording ? 'bg-gradient-to-br from-red-500/70 to-rose-700/70 shadow-[0_0_35px_rgba(239,68,68,0.45),inset_0_1px_0_rgba(255,255,255,0.3)] hover:from-red-500/80 hover:to-rose-700/80' : 'bg-gradient-to-br from-purple-500/60 to-pink-600/60 shadow-[0_0_35px_rgba(168,85,247,0.4),inset_0_1px_0_rgba(255,255,255,0.3)] hover:scale-105'}`}
                         title={isRecording ? "Stop Session" : "Start Session"}

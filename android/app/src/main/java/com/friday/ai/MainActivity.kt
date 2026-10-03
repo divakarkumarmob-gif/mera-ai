@@ -108,36 +108,39 @@ class MainActivity : AppCompatActivity() {
             Log.i(TAG, "🎙️ Voice Assist intent detected: action=$action, triggerMic=$triggerMic -> Activating Friday Mic")
 
             // 1. Immediately wake Friday Foreground Service to listen via Bluetooth SCO & chime
+            // NOTE: If triggered via TRIGGER_MIC_ON_START from FridayForegroundService, the service has ALREADY activated SpeechManager!
             val activeService = com.friday.ai.service.FridayForegroundService.instance
-            if (activeService != null && com.friday.ai.service.FridayForegroundService.isRunning) {
-                activeService.handleBluetoothAction(com.friday.ai.bluetooth.BluetoothControlManager.Action.TOGGLE_MIC)
-            } else {
-                val serviceIntent = Intent(this, com.friday.ai.service.FridayForegroundService::class.java).apply {
-                    putExtra(com.friday.ai.service.FridayForegroundService.EXTRA_BLUETOOTH_ACTION, com.friday.ai.bluetooth.BluetoothControlManager.Action.TOGGLE_MIC.name)
-                }
-                try {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        startForegroundService(serviceIntent)
-                    } else {
-                        startService(serviceIntent)
+            if (!triggerMic) {
+                if (activeService != null && com.friday.ai.service.FridayForegroundService.isRunning) {
+                    activeService.handleBluetoothAction(com.friday.ai.bluetooth.BluetoothControlManager.Action.TOGGLE_MIC)
+                } else {
+                    val serviceIntent = Intent(this, com.friday.ai.service.FridayForegroundService::class.java).apply {
+                        putExtra(com.friday.ai.service.FridayForegroundService.EXTRA_BLUETOOTH_ACTION, com.friday.ai.bluetooth.BluetoothControlManager.Action.TOGGLE_MIC.name)
                     }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Failed to start service on assist intent: ${e.message}")
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            startForegroundService(serviceIntent)
+                        } else {
+                            startService(serviceIntent)
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to start service on assist intent: ${e.message}")
+                    }
                 }
             }
 
-            // 2. Also trigger UI Webview mic button if screen is unlocked
+            // 2. Also trigger UI Webview mic button directly to start Gemini Live audio session immediately
             binding.root.postDelayed({
                 binding.webView.evaluateJavascript(
                     """
                     (function() {
                         window.dispatchEvent(new CustomEvent('friday_bluetooth_toggle_mic'));
-                        var btn = document.querySelector('button[aria-label*="Mic"], button[title*="Mic"], .mic-btn, [data-mic="true"]');
+                        var btn = document.querySelector('[data-mic-trigger="true"], [data-mic="true"], button[aria-label*="Mic"], button[title*="Session"]');
                         if (btn) btn.click();
                     })();
                     """.trimIndent(), null
                 )
-            }, 600)
+            }, 300)
         }
     }
 
@@ -485,7 +488,7 @@ class MainActivity : AppCompatActivity() {
                         val script = """
                             (function() {
                                 window.dispatchEvent(new CustomEvent('friday_bluetooth_toggle_mic'));
-                                var btn = document.querySelector('button[aria-label*="Mic"], button[title*="Mic"], .mic-btn, [data-mic="true"]');
+                                var btn = document.querySelector('[data-mic-trigger="true"], [data-mic="true"], button[aria-label*="Mic"], button[title*="Session"]');
                                 if (btn) btn.click();
                             })();
                         """.trimIndent()

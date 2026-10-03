@@ -62,9 +62,12 @@ class WakeWordManager {
 
             this.recognition.onend = () => {
                 this.isRunning = false;
-                // Auto restart if still enabled
+                // Auto restart only in standard desktop browser if still enabled
                 if (this.enabled && this.callbacks.size > 0) {
-                    setTimeout(() => this.start(), 300);
+                    const isNative = typeof window !== 'undefined' && ((window as any).isFridayNativeApp || (window as any).Capacitor);
+                    if (!isNative) {
+                        setTimeout(() => this.start(), 1000);
+                    }
                 }
             };
         } catch (e) {
