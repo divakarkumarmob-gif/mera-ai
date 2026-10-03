@@ -820,25 +820,54 @@ class BackgroundLocationService {
     const url = getApiUrl('/api/location/ping');
     const body = JSON.stringify(payload);
 
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body,
-        signal: AbortSignal.timeout(10000),
-      });
+    // ⭐ Use manual AbortController instead of AbortSignal.timeout()
+    // AbortSignal.timeout() is NOT supported in older Android WebViews!
+    const tryFetch = async (timeoutMs: number): Promise<Response | null> => {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body,
+          signal: ctrl.signal,
+        });
+        clearTimeout(timer);
+        return res;
+      } catch (err: any) {
+        clearTimeout(timer);
+        console.warn('[BGLocation] 📵 Fetch failed:', err?.message || err);
+        return null;
+      }
+    };
 
-      if (res.ok) {
-        console.log(`[BGLocation] 🚀 Live ping delivered to server: lat=${payload.lat}, lon=${payload.lon}`);
+    try {
+      const res = await tryFetch(12000);
+
+      if (res && res.ok) {
+        console.log(`[BGLocation] 🚀 Live ping delivered: lat=${payload.lat}, lon=${payload.lon}`);
         return 'ok';
       }
 
-      console.warn(`[BGLocation] ⚠️ Server ping returned HTTP ${res.status}`);
-      if (res.status >= 400 && res.status < 500) {
-        return `error:${res.status}`;
+      if (res) {
+        console.warn(`[BGLocation] ⚠️ Server ping HTTP ${res.status}`);
+        // 404 = device not registered yet → auto-register then retry once
+        if (res.status === 404 || res.status === 400) {
+          console.log('[BGLocation] 🔄 Device not registered — auto-registering...');
+          await this.registerAndStart(this.getDeviceLabel() || 'Boss Phone');
+          const retry = await tryFetch(10000);
+          if (retry && retry.ok) {
+            console.log(`[BGLocation] ✅ Ping sent after auto-register!`);
+            return 'ok';
+          }
+        }
+        // For 4xx errors that are not recoverable, still queue so we don't lose data
+        if (res.status >= 500) {
+          // Server error — queue it
+        }
       }
     } catch (err: any) {
-      console.warn('[BGLocation] 📵 Live fetch error, falling back to offline queue & SMS:', err?.message);
+      console.warn('[BGLocation] 📵 Live fetch error:', err?.message);
     }
 
     // ── Fallback 1: Beacon API ───────────────────────────────────────────────

@@ -63,6 +63,17 @@ async function startServer() {
   app.set("trust proxy", 1);
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+
+  // ── Explicit CORS for Capacitor APK (capacitor://localhost origin) ─────────
+  // Must be BEFORE the global cors() middleware for location routes to work from APK!
+  app.use("/api/location", (req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Content-Type,Authorization,x-app-key-token");
+    if (req.method === "OPTIONS") { res.sendStatus(200); return; }
+    next();
+  });
+
   app.use(cors());
 
   // ── Industrial-Grade Server Firewall & Attack Sentinel (DPI + Anti-Exploit) ──
