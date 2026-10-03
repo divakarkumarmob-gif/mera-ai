@@ -472,18 +472,9 @@ class MainActivity : AppCompatActivity() {
             (function() {
                 console.log("[FRIDAY Native] Bridge injected into WebView");
                 window.isFridayNativeApp = true;
-                
-                // Listen to Bluetooth Hardware Events dispatched from Kotlin
-                window.addEventListener('friday_bluetooth_toggle_mic', function() {
-                    console.log("[FRIDAY Native] Bluetooth Mic Trigger received in Web App!");
-                    var micBtn = document.querySelector('[data-mic-trigger="true"]') ||
-                                 document.querySelector('button[aria-label*="Mic"]') ||
-                                 document.querySelector('button[title*="Mic"]') ||
-                                 document.querySelector('.live-mic-btn');
-                    if (micBtn) {
-                        micBtn.click();
-                    }
-                });
+                // Note: friday_bluetooth_toggle_mic event is handled directly by
+                // the React LiveAIInterface component listener. No DOM click fallback
+                // here to avoid double-triggering the Gemini Live session.
             })();
         """.trimIndent()
         binding.webView.evaluateJavascript(js, null)

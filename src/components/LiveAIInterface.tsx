@@ -2260,12 +2260,19 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
         else await ensureConnection(true);
     };
 
+    // Keep a ref to latest handleToggleRecording so bluetooth listener never has a stale closure
+    const handleToggleRecordingRef = useRef(handleToggleRecording);
+    useEffect(() => {
+        handleToggleRecordingRef.current = handleToggleRecording;
+    });
+
     // ── Earbud Bluetooth Triple-Tap Hardware Bridge ───────────────────────────
+    // Registered ONCE (empty dep array) - always calls the latest function via ref
     useEffect(() => {
         const onBluetoothToggleMic = () => {
             console.log("[LiveAIInterface] 🎧 Earbud Triple-Tap hardware event received! Starting Gemini Live session...");
             wakeWordManager.stop();
-            handleToggleRecording();
+            handleToggleRecordingRef.current();
         };
 
         window.addEventListener('friday_bluetooth_toggle_mic', onBluetoothToggleMic);
@@ -2273,7 +2280,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
             window.removeEventListener('friday_bluetooth_toggle_mic', onBluetoothToggleMic);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isRecording]);
+    }, []);
 
     const handleClose = () => {
         if (isRecording) stopRecording();
