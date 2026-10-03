@@ -573,8 +573,24 @@ class BackgroundLocationService {
 
   private async startBackgroundGeoService(): Promise<void> {
     try {
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      const { BackgroundGeolocation } = await import(/* @vite-ignore */ '@capacitor-community/background-geolocation');
+      // @capacitor-community/background-geolocation has NO JS files in its npm package
+      // (no main/module/exports in its package.json).
+      // The correct way to use Capacitor community plugins is via registerPlugin()
+      // from @capacitor/core — this wires up to the native Android implementation
+      // that was installed via `npx cap sync`.
+      const { registerPlugin } = await import(/* @vite-ignore */ '@capacitor/core');
+
+      const BackgroundGeolocation = registerPlugin<{
+        addWatcher(options: {
+          backgroundMessage: string;
+          backgroundTitle: string;
+          requestPermissions: boolean;
+          stale: boolean;
+          distanceFilter: number;
+        }, callback: (location: any, error: any) => void): Promise<{ id: string }>;
+        removeWatcher(options: { id: string }): Promise<void>;
+        openSettings(): Promise<void>;
+      }>('BackgroundGeolocation');
 
       // Remove any previous watcher to avoid duplicates
       if (this.bgGeoWatcherId) {
@@ -584,18 +600,18 @@ class BackgroundLocationService {
 
       const watcher = await BackgroundGeolocation.addWatcher(
         {
-          // ⭐ backgroundMessage makes it run even when app is CLOSED
-          // Android will show a persistent notification with this text
+          // backgroundMessage tells Android to run a ForegroundService
+          // App will track location even when CLOSED / screen OFF
           backgroundMessage: 'FRIDAY is tracking your location in background.',
           backgroundTitle: 'FRIDAY Location Active 📍',
           requestPermissions: true,
-          stale: false,         // only fresh locations (not cached)
-          distanceFilter: 10,   // trigger only when moved >10m (battery saving)
+          stale: false,         // only fresh locations
+          distanceFilter: 10,   // meters before next update (battery saving)
         },
-        (location, error) => {
+        (location: any, error: any) => {
           if (error) {
             if (error.code === 'NOT_AUTHORIZED') {
-              console.warn('[BGLocation] BG-geo: Location permission denied. User needs to grant Always Allow.');
+              console.warn('[BGLocation] BG-geo: Location permission denied. Grant "Always Allow" in Settings.');
             } else {
               console.warn('[BGLocation] BG-geo error:', error.message);
             }
@@ -620,27 +636,29 @@ class BackgroundLocationService {
 
           console.log(`[BGLocation] 📍 BG-geo update: lat=${c.lat.toFixed(5)} lon=${c.lon.toFixed(5)} acc=${c.accuracy}m`);
 
-          // Immediately transmit to server (works foreground + background)
+          // Immediately transmit to server (runs in foreground + background)
           this.sendPing().catch(() => {});
         }
       );
 
       this.bgGeoWatcherId = watcher.id;
-      console.log('[BGLocation] ✅ Background geolocation service started (id:', watcher.id, ') — works with app CLOSED ✅');
+      console.log('[BGLocation] ✅ BackgroundGeolocation service started (id:', watcher.id, ') — works with app CLOSED ✅');
     } catch (err: any) {
-      console.warn('[BGLocation] @capacitor-community/background-geolocation error:', err?.message);
-      throw err; // let caller fallback to watchPosition
+      console.warn('[BGLocation] BackgroundGeolocation plugin error:', err?.message);
+      throw err; // caller will fallback to @capacitor/geolocation watchPosition
     }
   }
 
   private async stopBackgroundGeoService(): Promise<void> {
     try {
       if (!this.bgGeoWatcherId) return;
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      const { BackgroundGeolocation } = await import(/* @vite-ignore */ '@capacitor-community/background-geolocation');
+      const { registerPlugin } = await import(/* @vite-ignore */ '@capacitor/core');
+      const BackgroundGeolocation = registerPlugin<{
+        removeWatcher(options: { id: string }): Promise<void>;
+      }>('BackgroundGeolocation');
       await BackgroundGeolocation.removeWatcher({ id: this.bgGeoWatcherId });
       this.bgGeoWatcherId = null;
-      console.log('[BGLocation] ⏹️ Background geolocation service stopped (notification removed)');
+      console.log('[BGLocation] ⏹️ BackgroundGeolocation service stopped (notification removed)');
     } catch (err: any) {
       console.warn('[BGLocation] stopBackgroundGeoService error:', err?.message);
     }

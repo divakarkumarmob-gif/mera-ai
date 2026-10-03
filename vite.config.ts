@@ -3,18 +3,14 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import { defineConfig } from 'vite';
 
-// Capacitor mobile-only packages — not available in Node/browser environments.
-// Vite must skip them during the Render server build.
-// They are only loaded at runtime via dynamic import(), guarded by checkNative().
-const CAPACITOR_MOBILE_EXTERNALS = [
+// Only packages that have NO JavaScript entry in their npm publish go here.
+// @capacitor-community/background-geolocation v1.2.26: ships only native Android/iOS code,
+// no main/module/exports in package.json, no plugin.js in files[] — completely unresolvable by Vite.
+// We access its native plugin via registerPlugin('BackgroundGeolocation') from @capacitor/core instead.
+// capacitor-wifi: similarly broken publish.
+const BROKEN_NATIVE_ONLY_PACKAGES = [
   'capacitor-wifi',
   '@capacitor-community/background-geolocation',
-  '@capacitor/background-runner',
-  '@capacitor/geolocation',
-  '@capacitor/filesystem',
-  '@capacitor/local-notifications',
-  '@capawesome/capacitor-background-task',
-  '@capacitor-community/keep-awake',
 ];
 
 export default defineConfig({
@@ -25,14 +21,14 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
-    exclude: ['motion', ...CAPACITOR_MOBILE_EXTERNALS],
+    exclude: ['motion', ...BROKEN_NATIVE_ONLY_PACKAGES],
   },
   build: {
     sourcemap: false,
     minify: 'esbuild',
     cssMinify: true,
     rollupOptions: {
-      external: CAPACITOR_MOBILE_EXTERNALS,
+      external: BROKEN_NATIVE_ONLY_PACKAGES,
     },
   },
 });
