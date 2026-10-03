@@ -91,6 +91,33 @@ class MainActivity : AppCompatActivity() {
 
         setupWebView()
         setupBluetoothUiBridge()
+        handleAssistIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        setupLockscreenFlags()
+        handleAssistIntent(intent)
+    }
+
+    private fun handleAssistIntent(intent: Intent?) {
+        val action = intent?.action
+        val triggerMic = intent?.getBooleanExtra("TRIGGER_MIC_ON_START", false) ?: false
+        if (action == Intent.ACTION_VOICE_COMMAND || action == Intent.ACTION_ASSIST || triggerMic) {
+            Log.i(TAG, "🎙️ Voice Assist intent detected: action=$action, triggerMic=$triggerMic -> Activating Friday Mic")
+            binding.root.postDelayed({
+                binding.webView.evaluateJavascript(
+                    """
+                    (function() {
+                        window.dispatchEvent(new CustomEvent('friday_bluetooth_toggle_mic'));
+                        var btn = document.querySelector('button[aria-label*="Mic"], button[title*="Mic"], .mic-btn, [data-mic="true"]');
+                        if (btn) btn.click();
+                    })();
+                    """.trimIndent(), null
+                )
+            }, 800)
+        }
     }
 
     private fun setupLockscreenFlags() {
@@ -98,6 +125,8 @@ class MainActivity : AppCompatActivity() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
                 setShowWhenLocked(true)
                 setTurnScreenOn(true)
+                val km = getSystemService(Context.KEYGUARD_SERVICE) as? android.app.KeyguardManager
+                km?.requestDismissKeyguard(this, null)
             } else {
                 @Suppress("DEPRECATION")
                 window.addFlags(
@@ -348,6 +377,25 @@ class MainActivity : AppCompatActivity() {
             @JavascriptInterface
             fun syncDeviceInfo(deviceId: String, username: String, label: String) {
                 FridayApiClient.syncDeviceInfo(this@MainActivity, deviceId, username, label)
+            }
+
+            @JavascriptInterface
+            fun openDefaultAssistantSettings(): Boolean {
+                return try {
+                    val intent = Intent(android.provider.Settings.ACTION_VOICE_INPUT_SETTINGS)
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    this@MainActivity.startActivity(intent)
+                    true
+                } catch (e: Exception) {
+                    try {
+                        val intent = Intent(android.provider.Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        this@MainActivity.startActivity(intent)
+                        true
+                    } catch (e2: Exception) {
+                        false
+                    }
+                }
             }
         }, "FridayNativeBridge")
 

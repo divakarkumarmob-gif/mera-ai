@@ -74,16 +74,22 @@ object FridayWebSocketClient {
             override fun onMessage(ws: WebSocket, text: String) {
                 try {
                     val json = JSONObject(text)
+                    val type = json.optString("type", "")
 
-                    // 1. Text transcript from Friday / Gemini
-                    if (json.has("text")) {
+                    // 1. Explicitly ignore incoming WhatsApp and chat notification payloads from TTS
+                    if (type == "whatsapp_incoming" || type == "telegram_incoming") {
+                        Log.d(TAG, "Skipping TTS speech for incoming chat notification: $type")
+                        return
+                    }
+
+                    // 2. Text transcript from Friday / Gemini AI (only spoken for AI assistant speech)
+                    if (json.has("text") && type.isEmpty()) {
                         val speechText = json.getString("text")
                         handler.post { onMessageReceived?.invoke(speechText) }
                     }
 
-                    // 2. State indicators (Speaking / Thinking)
-                    if (json.has("type")) {
-                        val type = json.getString("type")
+                    // 3. State indicators (Speaking / Thinking)
+                    if (type.isNotEmpty()) {
                         when (type) {
                             "speaking" -> handler.post { onStateChanged?.invoke("SPEAKING") }
                             "thinking" -> handler.post { onStateChanged?.invoke("THINKING") }

@@ -128,7 +128,19 @@ class FridayForegroundService : Service() {
             BluetoothControlManager.Action.TOGGLE_MIC -> {
                 Log.i(TAG, "🎙️ Executing TOGGLE_MIC via Bluetooth")
                 vibrateDevice(50L)
+                wakeScreen()
                 SpeechManager.toggleListening(this)
+
+                // Launch / bring Friday assistant to screen over lockscreen
+                try {
+                    val launchIntent = Intent(this, com.friday.ai.MainActivity::class.java).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                        putExtra("TRIGGER_MIC_ON_START", true)
+                    }
+                    startActivity(launchIntent)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to launch MainActivity on TOGGLE_MIC: ${e.message}")
+                }
             }
 
             BluetoothControlManager.Action.VOICE_BRIEFING -> {
@@ -307,6 +319,21 @@ class FridayForegroundService : Service() {
             if (wifiLock?.isHeld == true) wifiLock?.release()
             wifiLock = null
         } catch (ignored: Exception) {}
+    }
+
+    private fun wakeScreen() {
+        try {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            @Suppress("DEPRECATION")
+            val screenLock = pm.newWakeLock(
+                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.ON_AFTER_RELEASE,
+                "FridayAI:ScreenWakeUp"
+            )
+            screenLock.acquire(3000L)
+            Log.i(TAG, "💡 Screen turned ON via WakeLock for voice interaction")
+        } catch (e: Exception) {
+            Log.w(TAG, "Screen wake error: ${e.message}")
+        }
     }
 
     private fun vibrateDevice(durationMs: Long) {

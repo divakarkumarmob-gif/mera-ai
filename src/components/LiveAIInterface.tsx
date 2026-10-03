@@ -2066,7 +2066,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                 } else if (msg.type === 'whatsapp_incoming') {
                     setWhatsappNotif({
                         sender: msg.sender || 'Unknown',
-                        text: msg.text || '',
+                        text: msg.msgContent || msg.text || '',
                         isGroup: !!msg.isGroup,
                         groupName: msg.groupName,
                     });

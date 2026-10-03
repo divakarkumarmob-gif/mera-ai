@@ -211,7 +211,13 @@ async function startServer() {
 
   whatsappBotService.setMessageCallback((msg) => {
     const payload = JSON.stringify({
-      type: "whatsapp_incoming", sender: msg.senderName, text: msg.text, time: msg.dateStr, isGroup: msg.isGroup, groupName: msg.groupName, });
+      type: "whatsapp_incoming",
+      sender: msg.senderName,
+      msgContent: msg.text,
+      time: msg.dateStr,
+      isGroup: msg.isGroup,
+      groupName: msg.groupName,
+    });
     for (const client of connectedClients) {
       if (client.readyState === client.OPEN) client.send(payload);
     }

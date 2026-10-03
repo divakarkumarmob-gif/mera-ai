@@ -1,6 +1,7 @@
 package com.friday.ai.bluetooth
 
 import android.content.Context
+import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Build
 import android.util.Log
@@ -17,17 +18,33 @@ object BluetoothAudioRouter {
             }
 
             audioManager?.let { am ->
-                if (!am.isBluetoothScoAvailableOffCall) {
-                    Log.w(TAG, "Bluetooth SCO is not available off call on this device")
-                    return
+                if (isScoStarted) return
+
+                am.mode = AudioManager.MODE_IN_COMMUNICATION
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    val devices = am.availableCommunicationDevices
+                    val btDevice = devices.firstOrNull {
+                        it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                        it.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
+                        it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP
+                    }
+                    if (btDevice != null) {
+                        val success = am.setCommunicationDevice(btDevice)
+                        Log.i(TAG, "🎙️ Modern Communication Device set (${btDevice.productName}): $success")
+                        isScoStarted = success
+                        if (success) return
+                    }
                 }
 
-                if (!isScoStarted) {
-                    am.mode = AudioManager.MODE_IN_COMMUNICATION
+                // Fallback for Android < 12 or if modern device selection didn't catch
+                if (am.isBluetoothScoAvailableOffCall) {
                     am.startBluetoothSco()
                     am.isBluetoothScoOn = true
                     isScoStarted = true
-                    Log.i(TAG, "🎙️ Bluetooth SCO started (Mic routed to Bluetooth headset)")
+                    Log.i(TAG, "🎙️ Bluetooth SCO started (Legacy)")
+                } else {
+                    Log.w(TAG, "Bluetooth SCO off-call not available, using standard MODE_IN_COMMUNICATION")
                 }
             }
         } catch (e: Exception) {
@@ -39,15 +56,20 @@ object BluetoothAudioRouter {
         try {
             audioManager?.let { am ->
                 if (isScoStarted) {
-                    am.isBluetoothScoOn = false
-                    am.stopBluetoothSco()
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        am.clearCommunicationDevice()
+                    }
+                    if (am.isBluetoothScoOn) {
+                        am.isBluetoothScoOn = false
+                        am.stopBluetoothSco()
+                    }
                     am.mode = AudioManager.MODE_NORMAL
                     isScoStarted = false
-                    Log.i(TAG, "🛑 Bluetooth SCO stopped (Mic routed back to phone)")
+                    Log.i(TAG, "🛑 Bluetooth audio routing released (Mic returned to phone)")
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error stopping Bluetooth SCO: ${e.message}", e)
+            Log.e(TAG, "Error stopping Bluetooth audio routing: ${e.message}", e)
         }
     }
 }

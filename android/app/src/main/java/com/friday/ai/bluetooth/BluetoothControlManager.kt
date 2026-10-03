@@ -102,14 +102,23 @@ object BluetoothControlManager {
         val action = event.action
 
         // Supported Bluetooth Keys
+        val isAssistKey = keyCode == KeyEvent.KEYCODE_VOICE_ASSIST || keyCode == KeyEvent.KEYCODE_ASSIST
         val isMediaKey = keyCode == KeyEvent.KEYCODE_HEADSETHOOK ||
                 keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE ||
                 keyCode == KeyEvent.KEYCODE_MEDIA_PLAY ||
                 keyCode == KeyEvent.KEYCODE_MEDIA_PAUSE ||
                 keyCode == KeyEvent.KEYCODE_MEDIA_NEXT ||
-                keyCode == KeyEvent.KEYCODE_MEDIA_PREVIOUS
+                keyCode == KeyEvent.KEYCODE_MEDIA_PREVIOUS ||
+                isAssistKey
 
         if (!isMediaKey) return false
+
+        // Instant trigger for Bluetooth Voice Assist key (Earbud Tap & Hold)
+        if (isAssistKey && action == KeyEvent.ACTION_DOWN) {
+            Log.i(TAG, "🎙️ Bluetooth Tap & Hold Assist Key -> Opening Friday & TOGGLE_MIC")
+            dispatchAction(context, Action.TOGGLE_MIC)
+            return true
+        }
 
         // Fast shortcut for Next Track key (often explicit on neckbands)
         if (keyCode == KeyEvent.KEYCODE_MEDIA_NEXT && action == KeyEvent.ACTION_DOWN) {
