@@ -257,6 +257,17 @@ class FridayForegroundService : Service() {
     private fun handleOfflineVoiceCommand(rawText: String): Boolean {
         val query = rawText.lowercase(Locale.getDefault()).trim()
 
+        // 0. Explicit Voice Stop / Standby ("band ho jao", "chup ho jao", "stop", etc.)
+        if (query.contains("band ho jao") || query.contains("band hojao") || query.contains("band ho ja") ||
+            query.contains("chup ho jao") || query.contains("chup hojao") || query.contains("chup raho") ||
+            query.contains("chup ho ja") || query == "stop" || query == "bye" || query == "goodbye" ||
+            query.contains("friday band") || query.contains("standby") || query.contains("band karo") ||
+            query.contains("off ho jao") || query.contains("off karo")) {
+            Log.i(TAG, "🛑 Explicit voice stop command detected: \"$query\" -> Ending Session")
+            SpeechManager.endSession("Theek hai Boss, standby par ja rahi hoon.")
+            return true
+        }
+
         // 1. Torch / Flashlight ON
         if (query.contains("torch on") || query.contains("turn on torch") || query.contains("flashlight on") ||
             query.contains("torch chalu") || query.contains("light on") || query.contains("light chalu") ||
