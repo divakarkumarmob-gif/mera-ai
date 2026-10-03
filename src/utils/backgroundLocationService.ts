@@ -1004,6 +1004,289 @@ class BackgroundLocationService {
   private getNetworkType(): string | null {
     try { const c = (navigator as any).connection || (navigator as any).mozConnection; return c ? (c.effectiveType || c.type || null) : null; } catch { return null; }
   }
+
+  /**
+   * Run a live 4-step diagnostic for Friday APK:
+   * 1. Register device with server
+   * 2. Obtain GPS coordinates
+   * 3. Send ping to server
+   * 4. Verify document in Firestore
+   */
+  public async runFullDiagnostic(onStepUpdate?: (report: DiagnosticReport) => void): Promise<DiagnosticReport> {
+    const startTime = Date.now();
+    const isNative = this.checkNative();
+    const platform = isNative ? 'apk' : 'web';
+    const deviceId = this.getOrCreateDeviceId();
+    const user = getStoredUser();
+    const label = this.getDeviceLabel() || user?.displayName || user?.username || 'Boss Phone';
+    const serverUrl = getApiUrl('');
+
+    const report: DiagnosticReport = {
+      timestamp: startTime,
+      isNative,
+      platform,
+      deviceId,
+      deviceLabel: label,
+      serverUrl,
+      step1_registration: { status: 'running', title: '1. Phone Registration', message: `Registering device "${deviceId}" on server...` },
+      step2_coordinates: { status: 'pending', title: '2. GPS Coordinates', message: 'Waiting for registration...' },
+      step3_serverPing: { status: 'pending', title: '3. Server Ping Transmission', message: 'Waiting for coordinates...' },
+      step4_firestoreVerify: { status: 'pending', title: '4. Firestore Database Verification', message: 'Waiting for ping...' },
+      overallSuccess: false,
+    };
+
+    const notify = () => {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('friday:location_diagnostic', { detail: report }));
+      }
+      onStepUpdate?.({ ...report });
+    };
+
+    notify();
+
+    // ── STEP 1: Phone Registration ──────────────────────────────────────────
+    const t1 = Date.now();
+    try {
+      const regPayload: any = {
+        deviceId,
+        label,
+        ownerName: label,
+        username: user?.username || 'boss',
+        platform,
+        batteryLevel: this.getBatteryLevel(),
+        isCharging: this.getChargingStatus(),
+        networkType: this.getNetworkType(),
+      };
+
+      const ctrl1 = new AbortController();
+      const timer1 = setTimeout(() => ctrl1.abort(), 10000);
+      const regRes = await fetch(getApiUrl('/api/location/register'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(regPayload),
+        signal: ctrl1.signal,
+      });
+      clearTimeout(timer1);
+
+      const regJson = await regRes.json().catch(() => null);
+      if (regRes.ok) {
+        report.step1_registration = {
+          status: 'success',
+          title: '1. Phone Registration',
+          message: `Phone registered successfully! (HTTP ${regRes.status})`,
+          details: { deviceId, platform, response: regJson },
+          durationMs: Date.now() - t1,
+        };
+      } else {
+        report.step1_registration = {
+          status: 'failed',
+          title: '1. Phone Registration',
+          message: `Server returned HTTP ${regRes.status}: ${regJson?.message || 'Registration failed'}`,
+          details: { deviceId, platform, status: regRes.status, response: regJson },
+          durationMs: Date.now() - t1,
+        };
+      }
+    } catch (err: any) {
+      report.step1_registration = {
+        status: 'failed',
+        title: '1. Phone Registration',
+        message: `Registration network error: ${err?.message || 'Server unreachable'}`,
+        details: { deviceId, error: err?.message },
+        durationMs: Date.now() - t1,
+      };
+    }
+
+    report.step2_coordinates.status = 'running';
+    report.step2_coordinates.message = 'Acquiring GPS / Fused location coordinates...';
+    notify();
+
+    // ── STEP 2: GPS Coordinates ─────────────────────────────────────────────
+    const t2 = Date.now();
+    let coords: CachedPosition | null = null;
+    try {
+      coords = await this.getFreshPosition();
+      if (!coords) {
+        coords = this.loadLastKnown();
+      }
+
+      if (coords && coords.lat && coords.lon) {
+        report.step2_coordinates = {
+          status: 'success',
+          title: '2. GPS Coordinates',
+          message: `Coordinates acquired: ${coords.lat.toFixed(5)}, ${coords.lon.toFixed(5)} (±${Math.round(coords.accuracy)}m)`,
+          details: { lat: coords.lat, lon: coords.lon, accuracy: coords.accuracy, altitude: coords.altitude, speed: coords.speed },
+          durationMs: Date.now() - t2,
+        };
+      } else {
+        report.step2_coordinates = {
+          status: 'failed',
+          title: '2. GPS Coordinates',
+          message: 'Could not acquire GPS fix (permission issue or location disabled on device).',
+          details: null,
+          durationMs: Date.now() - t2,
+        };
+      }
+    } catch (err: any) {
+      report.step2_coordinates = {
+        status: 'failed',
+        title: '2. GPS Coordinates',
+        message: `GPS error: ${err?.message || 'Location fetch failed'}`,
+        details: { error: err?.message },
+        durationMs: Date.now() - t2,
+      };
+    }
+
+    report.step3_serverPing.status = 'running';
+    report.step3_serverPing.message = 'Transmitting location ping to server...';
+    notify();
+
+    // ── STEP 3: Server Ping Transmission ────────────────────────────────────
+    const t3 = Date.now();
+    const lat = coords?.lat ?? 0;
+    const lon = coords?.lon ?? 0;
+
+    if (!lat || !lon) {
+      report.step3_serverPing = {
+        status: 'failed',
+        title: '3. Server Ping Transmission',
+        message: 'Skipped: Coordinates not available from Step 2.',
+        durationMs: 0,
+      };
+    } else {
+      try {
+        const pingPayload: GpsPingPayload = {
+          deviceId,
+          username: user?.username || 'boss',
+          label,
+          platform,
+          lat,
+          lon,
+          accuracy: coords?.accuracy ?? 0,
+          altitude: coords?.altitude ?? null,
+          speed: coords?.speed ?? null,
+          heading: coords?.heading ?? null,
+          batteryLevel: this.getBatteryLevel(),
+          isCharging: this.getChargingStatus(),
+          networkType: this.getNetworkType(),
+        };
+
+        const ctrl3 = new AbortController();
+        const timer3 = setTimeout(() => ctrl3.abort(), 12000);
+        const pingRes = await fetch(getApiUrl('/api/location/ping'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(pingPayload),
+          signal: ctrl3.signal,
+        });
+        clearTimeout(timer3);
+
+        const pingJson = await pingRes.json().catch(() => null);
+        if (pingRes.ok && pingJson?.success !== false) {
+          report.step3_serverPing = {
+            status: 'success',
+            title: '3. Server Ping Transmission',
+            message: `Ping delivered to server! (HTTP ${pingRes.status})`,
+            details: { lat, lon, response: pingJson },
+            durationMs: Date.now() - t3,
+          };
+        } else {
+          report.step3_serverPing = {
+            status: 'failed',
+            title: '3. Server Ping Transmission',
+            message: `Server returned HTTP ${pingRes.status}: ${pingJson?.message || 'Ping rejected'}`,
+            details: { status: pingRes.status, response: pingJson },
+            durationMs: Date.now() - t3,
+          };
+        }
+      } catch (err: any) {
+        report.step3_serverPing = {
+          status: 'failed',
+          title: '3. Server Ping Transmission',
+          message: `Network transmission error: ${err?.message || 'Server unreachable'}`,
+          details: { error: err?.message },
+          durationMs: Date.now() - t3,
+        };
+      }
+    }
+
+    report.step4_firestoreVerify.status = 'running';
+    report.step4_firestoreVerify.message = 'Verifying Firestore database document on server...';
+    notify();
+
+    // ── STEP 4: Firestore Verification ──────────────────────────────────────
+    const t4 = Date.now();
+    try {
+      // Small delay to let server async write finish
+      await new Promise(r => setTimeout(r, 800));
+
+      const ctrl4 = new AbortController();
+      const timer4 = setTimeout(() => ctrl4.abort(), 10000);
+      const verifyRes = await fetch(getApiUrl(`/api/location/verify/${encodeURIComponent(deviceId)}`), {
+        method: 'GET',
+        signal: ctrl4.signal,
+      });
+      clearTimeout(timer4);
+
+      const verifyJson = await verifyRes.json().catch(() => null);
+      if (verifyRes.ok && verifyJson?.exists) {
+        const doc = verifyJson.docData;
+        report.step4_firestoreVerify = {
+          status: 'success',
+          title: '4. Firestore Database Verification',
+          message: `✅ Firestore me Saved! (Doc: ${deviceId}, Updated ${doc?.ageSeconds ?? 0}s ago)`,
+          details: doc,
+          durationMs: Date.now() - t4,
+        };
+      } else {
+        report.step4_firestoreVerify = {
+          status: 'failed',
+          title: '4. Firestore Database Verification',
+          message: `❌ Firestore me Save nahi hua! Doc "${deviceId}" Firestore collection me nahi mila.`,
+          details: verifyJson,
+          durationMs: Date.now() - t4,
+        };
+      }
+    } catch (err: any) {
+      report.step4_firestoreVerify = {
+        status: 'failed',
+        title: '4. Firestore Database Verification',
+        message: `Verification check error: ${err?.message || 'Failed to query server'}`,
+        details: { error: err?.message },
+        durationMs: Date.now() - t4,
+      };
+    }
+
+    report.overallSuccess =
+      report.step1_registration.status === 'success' &&
+      report.step2_coordinates.status === 'success' &&
+      report.step3_serverPing.status === 'success' &&
+      report.step4_firestoreVerify.status === 'success';
+
+    notify();
+    return report;
+  }
+}
+
+export interface DiagnosticStepResult {
+  status: 'pending' | 'running' | 'success' | 'failed';
+  title: string;
+  message: string;
+  details?: any;
+  durationMs?: number;
+}
+
+export interface DiagnosticReport {
+  timestamp: number;
+  isNative: boolean;
+  platform: 'apk' | 'web';
+  deviceId: string;
+  deviceLabel: string;
+  serverUrl: string;
+  step1_registration: DiagnosticStepResult;
+  step2_coordinates: DiagnosticStepResult;
+  step3_serverPing: DiagnosticStepResult;
+  step4_firestoreVerify: DiagnosticStepResult;
+  overallSuccess: boolean;
 }
 
 export const backgroundLocationService = new BackgroundLocationService();

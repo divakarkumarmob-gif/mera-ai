@@ -85,6 +85,7 @@ export interface DeviceLocationEntry {
   batteryLevel: number | null;
   isCharging: boolean | null;
   networkType: string | null;
+  platform?: string;
   isCachedLastKnown?: boolean;
 }
 
@@ -291,12 +292,8 @@ class DeviceLocationTrackerService {
       console.warn("[LocationTracker] Firestore boot hydration failed:", err?.message || err);
     }
 
-    // 2️⃣ TG vault as fallback (or supplement) if Firestore had no valid data
     if (!hydratedFromFirestore) {
-      await hydrateCacheFromTelegramVault();
-    } else {
-      // Still hydrate TG vault silently to keep vaultMessageId updated for future writes
-      hydrateCacheFromTelegramVault().catch(() => {});
+      console.log("[LocationTracker] No locations in Firestore yet — awaiting device pings.");
     }
   }
 
@@ -960,6 +957,56 @@ class DeviceLocationTrackerService {
         count: 0,
         devices: [],
         message: `Failed to list devices: ${err?.message || "Unknown error"}`,
+      };
+    }
+  }
+
+  /**
+   * Diagnostic verification: checks if a specific deviceId exists in Firestore
+   * and returns its exact stored data + age.
+   */
+  public async verifyDevice(deviceId: string): Promise<{
+    exists: boolean;
+    deviceId: string;
+    docData?: any;
+    message: string;
+  }> {
+    try {
+      const cleanId = String(deviceId || "").trim();
+      if (!cleanId) {
+        return { exists: false, deviceId: cleanId, message: "deviceId is required" };
+      }
+      const doc = await locationsCollection().doc(cleanId).get();
+      if (!doc.exists) {
+        return {
+          exists: false,
+          deviceId: cleanId,
+          message: `Device document "${cleanId}" not found in Firestore.`,
+        };
+      }
+      const data = doc.data() as DeviceLocationEntry;
+      return {
+        exists: true,
+        deviceId: cleanId,
+        docData: {
+          platform: data.platform || (cleanId.includes("apk") ? "apk" : "web"),
+          label: data.label,
+          username: data.username,
+          lat: data.lat,
+          lon: data.lon,
+          accuracy: data.accuracy,
+          lastUpdatedAt: data.lastUpdatedAt,
+          ageSeconds: Math.round((Date.now() - (data.lastUpdatedAt || 0)) / 1000),
+          address: data.address,
+          batteryLevel: data.batteryLevel,
+        },
+        message: `Device document "${cleanId}" is saved in Firestore!`,
+      };
+    } catch (err: any) {
+      return {
+        exists: false,
+        deviceId,
+        message: `Firestore query error: ${err?.message}`,
       };
     }
   }

@@ -12,6 +12,7 @@ import { getApiUrl } from '@/utils/api';
 import { wakeWordManager } from '@/utils/wakeWord';
 import { screenWakeLock } from '@/utils/screenWakeLock';
 import { backgroundLocationService } from '@/utils/backgroundLocationService';
+import LocationDiagnosticCapsule from './components/LocationDiagnosticCapsule';
 
 export default function App() {
     // Keep device screen permanently ON (no screen sleep or auto-dimming)
@@ -170,32 +171,33 @@ export default function App() {
         );
     }
 
-    if (!isUnlocked) {
-        return <AppKeyLockModal onUnlocked={() => setIsUnlocked(true)} />;
-    }
-
-    if (isOpen) {
-        return <LiveAIInterface onClose={() => setIsOpen(false)} isCallMode={callParams.isCall} callSession={callValidation.session} />;
-    }
-
     return (
-        <div className="fixed inset-0 bg-[#060a19] flex flex-col items-center justify-center gap-4 overflow-hidden">
-            <StarryBackground />
-            <motion.button
-                whileTap={{ scale: 0.92 }}
-                whileHover={{ scale: 1.05 }}
-                onClick={() => {
-                    setIsOpen(true);
-                }}
-                className="cursor-pointer relative z-10 flex flex-col items-center group"
-            >
-                <FridayModel3D status="" volume={0} height={300} />
-                <span className="mt-2 opacity-70"><AgentFace status="" volume={0} size={58} colorIndex={0} /></span>
-            </motion.button>
-            <div className="relative z-10 flex items-center gap-2 px-4 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-xs text-cyan-300 shadow-[0_0_20px_rgba(6,182,212,0.2)] animate-pulse">
-                <span className="w-2 h-2 rounded-full bg-cyan-400" />
-                <span>Say <b>"Hello Friday"</b> or tap to activate</span>
-            </div>
-        </div>
+        <>
+            <LocationDiagnosticCapsule />
+            {!isUnlocked ? (
+                <AppKeyLockModal onUnlocked={() => setIsUnlocked(true)} />
+            ) : isOpen ? (
+                <LiveAIInterface onClose={() => setIsOpen(false)} isCallMode={callParams.isCall} callSession={callValidation.session} />
+            ) : (
+                <div className="fixed inset-0 bg-[#060a19] flex flex-col items-center justify-center gap-4 overflow-hidden">
+                    <StarryBackground />
+                    <motion.button
+                        whileTap={{ scale: 0.92 }}
+                        whileHover={{ scale: 1.05 }}
+                        onClick={() => {
+                            setIsOpen(true);
+                        }}
+                        className="cursor-pointer relative z-10 flex flex-col items-center group"
+                    >
+                        <FridayModel3D status="" volume={0} height={300} />
+                        <span className="mt-2 opacity-70"><AgentFace status="" volume={0} size={58} colorIndex={0} /></span>
+                    </motion.button>
+                    <div className="relative z-10 flex items-center gap-2 px-4 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-xs text-cyan-300 shadow-[0_0_20px_rgba(6,182,212,0.2)] animate-pulse">
+                        <span className="w-2 h-2 rounded-full bg-cyan-400" />
+                        <span>Say <b>"Hello Friday"</b> or tap to activate</span>
+                    </div>
+                </div>
+            )}
+        </>
     );
 }

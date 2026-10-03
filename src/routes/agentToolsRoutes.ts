@@ -807,6 +807,17 @@ export function createAgentToolsRouter(): Router {
     }
   });
 
+  // Verification endpoint for APK Diagnostic Capsule: verifies if deviceId is saved in Firestore
+  router.get("/api/location/verify/:deviceId", async (req, res) => {
+    try {
+      const { deviceLocationTrackerService } = await import("../services/deviceLocationTrackerService");
+      const result = await deviceLocationTrackerService.verifyDevice(req.params.deviceId);
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ exists: false, error: err?.message });
+    }
+  });
+
   // ══════════════════════════════════════════════════════════════════════════
   // PHONE INTELLIGENCE & OSINT
   // ══════════════════════════════════════════════════════════════════════════
