@@ -162,6 +162,17 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        FridayWebSocketClient.onStateChanged = { state ->
+            runOnUiThread {
+                binding.tvOrbState.text = state
+                if (state == "SPEAKING") {
+                    binding.tvOrbState.setTextColor(getColor(R.color.friday_cyan_glow))
+                } else if (state == "THINKING") {
+                    binding.tvOrbState.setTextColor(getColor(R.color.friday_purple))
+                }
+            }
+        }
+
         FridayWebSocketClient.onConnectionStateChanged = { connected ->
             runOnUiThread {
                 if (connected) {

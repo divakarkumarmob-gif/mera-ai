@@ -1,9 +1,11 @@
 package com.friday.ai.network
 
 import android.content.Context
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import com.friday.ai.service.FridayAccessibilityService
 import okhttp3.*
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
@@ -19,6 +21,7 @@ object FridayWebSocketClient {
 
     var onMessageReceived: ((String) -> Unit)? = null
     var onConnectionStateChanged: ((Boolean) -> Unit)? = null
+    var onStateChanged: ((String) -> Unit)? = null
 
     fun connect(context: Context) {
         if (isConnected && webSocket != null) return
@@ -30,13 +33,13 @@ object FridayWebSocketClient {
             else -> "wss://$backendUrl/live"
         }
 
-        Log.i(TAG, "Connecting to Friday WebSocket: $wsUrl")
+        Log.i(TAG, "Connecting to Friday Live WebSocket at: $wsUrl")
 
         if (client == null) {
             client = OkHttpClient.Builder()
                 .readTimeout(0, TimeUnit.MILLISECONDS)
                 .writeTimeout(0, TimeUnit.MILLISECONDS)
-                .pingInterval(25, TimeUnit.SECONDS)
+                .pingInterval(20, TimeUnit.SECONDS)
                 .retryOnConnectionFailure(true)
                 .build()
         }
@@ -45,22 +48,75 @@ object FridayWebSocketClient {
 
         webSocket = client?.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(ws: WebSocket, response: Response) {
-                Log.i(TAG, "🟢 Friday WebSocket connection established!")
+                Log.i(TAG, "🟢 Friday WebSocket connection established with https://mera-ai-3496.onrender.com")
                 isConnected = true
                 handler.post { onConnectionStateChanged?.invoke(true) }
 
-                // Send Device Info Registration Packet
+                // 1. Send Security Authentication Packet
                 val authPacket = JSONObject().apply {
-                    put("type", "device_auth")
-                    put("client", "friday_native_android")
-                    put("model", android.os.Build.MODEL)
+                    put("type", "auth")
+                    put("token", "default_friday_key")
+                    put("isAndroidHelper", true)
+                    put("deviceName", "FRIDAY Native Android")
+                    put("model", Build.MODEL)
                 }
                 ws.send(authPacket.toString())
+
+                // 2. Initialize Gemini Live Assistant Session
+                val initPacket = JSONObject().apply {
+                    put("type", "init")
+                    put("voice", "Aoede")
+                    put("thinkingLevel", "high")
+                }
+                ws.send(initPacket.toString())
             }
 
             override fun onMessage(ws: WebSocket, text: String) {
-                Log.d(TAG, "Received: $text")
-                handler.post { onMessageReceived?.invoke(text) }
+                try {
+                    val json = JSONObject(text)
+
+                    // 1. Text transcript from Friday / Gemini
+                    if (json.has("text")) {
+                        val speechText = json.getString("text")
+                        handler.post { onMessageReceived?.invoke(speechText) }
+                    }
+
+                    // 2. State indicators (Speaking / Thinking)
+                    if (json.has("type")) {
+                        val type = json.getString("type")
+                        when (type) {
+                            "speaking" -> handler.post { onStateChanged?.invoke("SPEAKING") }
+                            "thinking" -> handler.post { onStateChanged?.invoke("THINKING") }
+                            "auth_ack" -> Log.i(TAG, "✅ Server authenticated session token")
+                            "android_helper_registered" -> Log.i(TAG, "🎮 Registered as Accessibility Touch Driver")
+                        }
+                    }
+
+                    // 3. Screen Touch Automation Command (Free Fire / System Control)
+                    if (json.has("action")) {
+                        val action = json.getString("action")
+                        when (action) {
+                            "tap" -> {
+                                val x = json.optDouble("x", 0.0).toFloat()
+                                val y = json.optDouble("y", 0.0).toFloat()
+                                val duration = json.optLong("duration", 50L)
+                                FridayAccessibilityService.dispatchTap(x, y, duration)
+                            }
+                            "drag" -> {
+                                val sx = json.optDouble("startX", 0.0).toFloat()
+                                val sy = json.optDouble("startY", 0.0).toFloat()
+                                val ex = json.optDouble("endX", 0.0).toFloat()
+                                val ey = json.optDouble("endY", 0.0).toFloat()
+                                val duration = json.optLong("duration", 300L)
+                                FridayAccessibilityService.dispatchDrag(sx, sy, ex, ey, duration)
+                            }
+                        }
+                    }
+
+                } catch (e: Exception) {
+                    // Plain text payload fallback
+                    handler.post { onMessageReceived?.invoke(text) }
+                }
             }
 
             override fun onClosing(ws: WebSocket, code: Int, reason: String) {
@@ -74,20 +130,24 @@ object FridayWebSocketClient {
             }
 
             override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
-                Log.e(TAG, "WebSocket error: ${t.message}")
+                Log.e(TAG, "WebSocket connection error: ${t.message}")
                 isConnected = false
                 handler.post { onConnectionStateChanged?.invoke(false) }
 
-                // Auto-reconnect after 5 seconds
+                // Auto-reconnect to backend after 4 seconds
                 handler.postDelayed({
                     connect(context)
-                }, 5000)
+                }, 4000)
             }
         })
     }
 
     fun sendMessage(text: String) {
-        webSocket?.send(text)
+        val payload = JSONObject().apply {
+            put("type", "chat_message")
+            put("text", text)
+        }
+        webSocket?.send(payload.toString())
     }
 
     fun disconnect() {

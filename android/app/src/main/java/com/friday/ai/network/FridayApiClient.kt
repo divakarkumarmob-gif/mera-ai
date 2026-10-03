@@ -1,7 +1,10 @@
 package com.friday.ai.network
 
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.location.Location
+import android.os.BatteryManager
 import android.os.Build
 import android.util.Log
 import okhttp3.*
@@ -13,6 +16,8 @@ import java.util.concurrent.TimeUnit
 
 object FridayApiClient {
     private const val TAG = "FridayApi"
+    
+    // Configured live production backend URL
     const val DEFAULT_BACKEND_URL = "https://mera-ai-3496.onrender.com"
 
     private val client = OkHttpClient.Builder()
@@ -35,23 +40,47 @@ object FridayApiClient {
     }
 
     /**
-     * Pings the server with current device GPS coordinates
+     * Pings the server with current device GPS coordinates + Battery telemetry
+     * Target: POST /api/location/ping
      */
     fun sendLocationPing(context: Context, location: Location) {
         val backendUrl = getBackendUrl(context)
         val url = "$backendUrl/api/location/ping"
 
-        val deviceId = "apk-" + Build.MODEL.replace(" ", "_")
+        // Battery Telemetry
+        var batteryLevel: Int? = null
+        var isCharging: Boolean? = null
+        try {
+            val batteryIntent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            val level = batteryIntent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+            val scale = batteryIntent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+            if (level >= 0 && scale > 0) {
+                batteryLevel = (level * 100) / scale
+            }
+            val status = batteryIntent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+            isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                    status == BatteryManager.BATTERY_STATUS_FULL
+        } catch (ignored: Exception) {}
+
+        val deviceId = "dev_apk_boss"
+        val label = "Boss Phone (${Build.MODEL})"
+        val username = "boss"
+
         val json = JSONObject().apply {
             put("deviceId", deviceId)
-            put("label", Build.MODEL)
+            put("label", label)
+            put("username", username)
+            put("ownerName", username)
+            put("platform", "apk")
             put("lat", location.latitude)
             put("lon", location.longitude)
             put("accuracy", location.accuracy)
             put("altitude", if (location.hasAltitude()) location.altitude else JSONObject.NULL)
             put("speed", if (location.hasSpeed()) location.speed else JSONObject.NULL)
+            put("batteryLevel", batteryLevel ?: JSONObject.NULL)
+            put("isCharging", isCharging ?: JSONObject.NULL)
             put("source", "native-kotlin-service")
-            put("timestamp", System.currentTimeMillis())
+            put("lastUpdatedAt", System.currentTimeMillis())
         }
 
         val body = json.toString().toRequestBody(JSON_MEDIA)
@@ -62,15 +91,15 @@ object FridayApiClient {
 
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                Log.w(TAG, "Location ping failed: ${e.message}")
+                Log.w(TAG, "Location ping failed to $url: ${e.message}")
             }
 
             override fun onResponse(call: Call, response: Response) {
                 response.use {
                     if (it.isSuccessful) {
-                        Log.d(TAG, "✅ Location ping delivered HTTP ${it.code}")
+                        Log.d(TAG, "✅ Location ping delivered to Friday backend HTTP ${it.code}")
                     } else {
-                        Log.w(TAG, "Location ping HTTP ${it.code}")
+                        Log.w(TAG, "Location ping rejected by server HTTP ${it.code}")
                     }
                 }
             }
@@ -84,7 +113,7 @@ object FridayApiClient {
         val backendUrl = getBackendUrl(context)
         val url = "$backendUrl/api/sos/trigger"
 
-        val deviceId = "apk-" + Build.MODEL.replace(" ", "_")
+        val deviceId = "dev_apk_boss"
         val json = JSONObject().apply {
             put("deviceId", deviceId)
             put("triggerSource", "bluetooth_triple_click")
