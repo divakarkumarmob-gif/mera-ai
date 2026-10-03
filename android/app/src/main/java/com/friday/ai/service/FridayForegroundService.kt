@@ -139,7 +139,7 @@ class FridayForegroundService : Service() {
         return START_STICKY
     }
 
-    private fun handleBluetoothAction(action: BluetoothControlManager.Action) {
+    fun handleBluetoothAction(action: BluetoothControlManager.Action) {
         when (action) {
             BluetoothControlManager.Action.TOGGLE_MIC -> {
                 Log.i(TAG, "🎙️ Executing TOGGLE_MIC via Bluetooth")

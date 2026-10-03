@@ -2,6 +2,7 @@ package com.friday.ai.bluetooth
 
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.support.v4.media.session.MediaSessionCompat
@@ -13,24 +14,21 @@ import com.friday.ai.service.FridayForegroundService
 object BluetoothControlManager {
     private const val TAG = "FridayBluetooth"
 
-    // Click Debounce Thresholds
+    // Click Debounce Threshold for 3-tap detection
     private const val MULTI_CLICK_TIMEOUT_MS = 450L
-    private const val LONG_PRESS_TIMEOUT_MS = 900L
 
     private var mediaSession: MediaSessionCompat? = null
     private val handler = Handler(Looper.getMainLooper())
 
     private var clickCount = 0
-    private var lastDownTime = 0L
-    private var isLongPressTriggered = false
 
     var onActionTriggered: ((Action) -> Unit)? = null
 
     enum class Action {
-        TOGGLE_MIC,        // Single Click: Wake Friday / Start or Stop Listening
-        VOICE_BRIEFING,    // Double Click: Weather, Tasks, Unread Messages
-        SILENT_SOS,        // Triple Click: Secret GPS Ping + SMS Alert
-        STOP_SPEAKING      // Long Press: Interrupt Friday TTS Speech
+        TOGGLE_MIC,        // 3 Taps (or Assist Key): Wake Friday / Start or Stop Listening
+        VOICE_BRIEFING,    // 2 Taps: Weather, Tasks, Battery Briefing
+        SILENT_SOS,        // 4+ Taps: Secret GPS Ping + SMS Alert
+        STOP_SPEAKING      // Interrupt Friday TTS Speech
     }
 
     /**
@@ -70,11 +68,11 @@ object BluetoothControlManager {
                     }
 
                     override fun onPlay() {
-                        dispatchAction(context, Action.TOGGLE_MIC)
+                        // Media Play passthrough
                     }
 
                     override fun onPause() {
-                        dispatchAction(context, Action.TOGGLE_MIC)
+                        // Media Pause passthrough
                     }
 
                     override fun onSkipToNext() {
@@ -95,7 +93,11 @@ object BluetoothControlManager {
     }
 
     /**
-     * Core Key Event handler for Bluetooth Headsets (Play/Pause, HeadsetHook, Next, Prev)
+     * Core Key Event handler for Bluetooth Headsets:
+     * - 3 Taps (or Voice Assist key from earbud): Activates FRIDAY (TOGGLE_MIC)
+     * - 2 Taps: Voice Briefing
+     * - 4+ Taps: Emergency SOS
+     * - Tap and hold removed completely as requested.
      */
     fun handleKeyEvent(context: Context, event: KeyEvent): Boolean {
         val keyCode = event.keyCode
@@ -113,9 +115,9 @@ object BluetoothControlManager {
 
         if (!isMediaKey) return false
 
-        // Instant trigger for Bluetooth Voice Assist key (Earbud Tap & Hold)
+        // Instant trigger when earbud 3-tap sends Voice Assist key
         if (isAssistKey && action == KeyEvent.ACTION_DOWN) {
-            Log.i(TAG, "🎙️ Bluetooth Tap & Hold Assist Key -> Opening Friday & TOGGLE_MIC")
+            Log.i(TAG, "🎙️ Earbud Triple-Tap Assist Key detected -> Waking FRIDAY (TOGGLE_MIC)")
             dispatchAction(context, Action.TOGGLE_MIC)
             return true
         }
@@ -127,55 +129,30 @@ object BluetoothControlManager {
         }
 
         if (action == KeyEvent.ACTION_DOWN) {
-            if (event.repeatCount == 0) {
-                lastDownTime = System.currentTimeMillis()
-                isLongPressTriggered = false
-
-                // Schedule long-press / tap-and-hold check
-                handler.postDelayed({
-                    if (!isLongPressTriggered && (System.currentTimeMillis() - lastDownTime >= LONG_PRESS_TIMEOUT_MS)) {
-                        isLongPressTriggered = true
-                        clickCount = 0
-                        if (com.friday.ai.tools.SpeechManager.isSpeaking) {
-                            Log.i(TAG, "🔘 Bluetooth Long Press -> STOP_SPEAKING")
-                            dispatchAction(context, Action.STOP_SPEAKING)
-                        } else {
-                            Log.i(TAG, "🔘 Bluetooth Tap & Hold -> TOGGLE_MIC (Wake Friday)")
-                            dispatchAction(context, Action.TOGGLE_MIC)
-                        }
-                    }
-                }, LONG_PRESS_TIMEOUT_MS)
-            }
             return true
         } else if (action == KeyEvent.ACTION_UP) {
-            val pressDuration = System.currentTimeMillis() - lastDownTime
-
-            // If long press was already dispatched, ignore UP event
-            if (isLongPressTriggered || pressDuration >= LONG_PRESS_TIMEOUT_MS) {
-                return true
-            }
-
             clickCount++
             handler.removeCallbacksAndMessages(null)
 
-            // Multi-click evaluation after debounce window
+            // Multi-tap evaluation after debounce window (450ms)
             handler.postDelayed({
                 when (clickCount) {
                     1 -> {
-                        Log.i(TAG, "🔘 Bluetooth Single Click -> TOGGLE_MIC")
-                        dispatchAction(context, Action.TOGGLE_MIC)
+                        Log.i(TAG, "🔘 Bluetooth Single Tap (Media passthrough)")
                     }
                     2 -> {
-                        Log.i(TAG, "🔘 Bluetooth Double Click -> VOICE_BRIEFING")
+                        Log.i(TAG, "🔘 Bluetooth Double Tap -> VOICE_BRIEFING")
                         dispatchAction(context, Action.VOICE_BRIEFING)
                     }
                     3 -> {
-                        Log.i(TAG, "🚨 Bluetooth Triple Click -> SILENT_SOS")
-                        dispatchAction(context, Action.SILENT_SOS)
+                        Log.i(TAG, "🎙️ Bluetooth 3 Taps -> TOGGLE_MIC (Waking FRIDAY)")
+                        dispatchAction(context, Action.TOGGLE_MIC)
                     }
                     else -> {
-                        Log.i(TAG, "🔘 Bluetooth Multiple Clicks ($clickCount) -> TOGGLE_MIC")
-                        dispatchAction(context, Action.TOGGLE_MIC)
+                        if (clickCount >= 4) {
+                            Log.i(TAG, "🚨 Bluetooth 4+ Taps -> SILENT_SOS")
+                            dispatchAction(context, Action.SILENT_SOS)
+                        }
                     }
                 }
                 clickCount = 0
@@ -190,12 +167,24 @@ object BluetoothControlManager {
     private fun dispatchAction(context: Context, action: Action) {
         onActionTriggered?.invoke(action)
 
-        // Also broadcast command to FridayForegroundService
+        val activeService = FridayForegroundService.instance
+        if (activeService != null && FridayForegroundService.isRunning) {
+            handler.post {
+                activeService.handleBluetoothAction(action)
+            }
+            return
+        }
+
+        // Fallback: Dispatch via Service Intent
         val intent = Intent(context, FridayForegroundService::class.java).apply {
             putExtra(FridayForegroundService.EXTRA_BLUETOOTH_ACTION, action.name)
         }
         try {
-            context.startService(intent)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to forward Bluetooth action to service: ${e.message}")
         }

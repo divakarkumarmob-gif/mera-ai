@@ -106,6 +106,27 @@ class MainActivity : AppCompatActivity() {
         val triggerMic = intent?.getBooleanExtra("TRIGGER_MIC_ON_START", false) ?: false
         if (action == Intent.ACTION_VOICE_COMMAND || action == Intent.ACTION_ASSIST || triggerMic) {
             Log.i(TAG, "🎙️ Voice Assist intent detected: action=$action, triggerMic=$triggerMic -> Activating Friday Mic")
+
+            // 1. Immediately wake Friday Foreground Service to listen via Bluetooth SCO & chime
+            val activeService = com.friday.ai.service.FridayForegroundService.instance
+            if (activeService != null && com.friday.ai.service.FridayForegroundService.isRunning) {
+                activeService.handleBluetoothAction(com.friday.ai.bluetooth.BluetoothControlManager.Action.TOGGLE_MIC)
+            } else {
+                val serviceIntent = Intent(this, com.friday.ai.service.FridayForegroundService::class.java).apply {
+                    putExtra(com.friday.ai.service.FridayForegroundService.EXTRA_BLUETOOTH_ACTION, com.friday.ai.bluetooth.BluetoothControlManager.Action.TOGGLE_MIC.name)
+                }
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        startForegroundService(serviceIntent)
+                    } else {
+                        startService(serviceIntent)
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to start service on assist intent: ${e.message}")
+                }
+            }
+
+            // 2. Also trigger UI Webview mic button if screen is unlocked
             binding.root.postDelayed({
                 binding.webView.evaluateJavascript(
                     """
@@ -116,7 +137,7 @@ class MainActivity : AppCompatActivity() {
                     })();
                     """.trimIndent(), null
                 )
-            }, 800)
+            }, 600)
         }
     }
 
