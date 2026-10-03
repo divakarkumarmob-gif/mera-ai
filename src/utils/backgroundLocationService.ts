@@ -169,14 +169,35 @@ class BackgroundLocationService {
 
   public checkNative(): boolean {
     if (typeof window === 'undefined') return false;
-    return typeof (window as any).Capacitor !== 'undefined' &&
-      Boolean((window as any).Capacitor?.isNativePlatform?.());
+    return typeof (window as any).FridayNativeBridge !== 'undefined' ||
+      Boolean((window as any).isFridayNativeApp) ||
+      (typeof (window as any).Capacitor !== 'undefined' &&
+       Boolean((window as any).Capacitor?.isNativePlatform?.()));
   }
 
   constructor() {
     if (typeof window !== 'undefined') {
       this.isNative = this.checkNative();
       this.loadLastKnown();
+
+      // Listen to real-time native Android GPS coordinate updates from Kotlin
+      window.addEventListener('friday:native_location', (e: any) => {
+        const d = e?.detail;
+        if (d && typeof d.lat === 'number' && typeof d.lon === 'number' && d.lat !== 0 && d.lon !== 0) {
+          const cached: CachedPosition = {
+            lat: d.lat,
+            lon: d.lon,
+            accuracy: d.accuracy || 10,
+            altitude: d.altitude ?? null,
+            speed: d.speed ?? null,
+            heading: d.heading ?? null,
+            timestamp: d.timestamp || Date.now(),
+          };
+          this.cachedLast = cached;
+          this.saveLastKnown(cached);
+          console.log('[BGLocation] ⚡ Native GPS event cached: lat=' + d.lat + ' lon=' + d.lon);
+        }
+      });
 
       // ── Instant flush when internet returns ─────────────────────────────
       // GPS ON + Data OFF case:
@@ -299,7 +320,30 @@ class BackgroundLocationService {
 
     const isNative = this.checkNative();
 
-    // 1. Native Capacitor Geolocation (Fused Location Provider on Android)
+    // 0. Friday Native Android Kotlin Bridge (Pure Native GPS - Instant & Accurate)
+    const nativeBridge = typeof window !== 'undefined' ? (window as any).FridayNativeBridge : null;
+    if (nativeBridge && typeof nativeBridge.getLocation === 'function') {
+      try {
+        const raw = nativeBridge.getLocation();
+        if (raw && raw !== '{}') {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed.lat === 'number' && typeof parsed.lon === 'number' && parsed.lat !== 0 && parsed.lon !== 0) {
+            console.log('[BGLocation] ⚡ Native Android GPS fix acquired:', parsed.lat, parsed.lon, `(±${Math.round(parsed.accuracy || 0)}m)`);
+            return toCached(parsed.lat, parsed.lon, parsed.accuracy ?? 10, {
+              coords: {
+                altitude: parsed.altitude,
+                speed: parsed.speed,
+                heading: parsed.heading,
+              }
+            });
+          }
+        }
+      } catch (err: any) {
+        console.warn('[BGLocation] FridayNativeBridge getLocation notice:', err?.message);
+      }
+    }
+
+    // 1. Native Capacitor Geolocation (Legacy Fallback if installed)
     if (isNative) {
       try {
         const { Geolocation } = await import(/* @vite-ignore */ '@capacitor/geolocation');
