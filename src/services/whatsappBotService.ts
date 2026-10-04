@@ -604,6 +604,53 @@ class WhatsAppBotService {
     }
   }
 
+  // ── Real-Time Incoming Message Alert to Boss WhatsApp ─────────────────────
+  public async alertOwnerIncomingMessage(
+    senderName: string,
+    senderPhone: string,
+    messageText: string
+  ): Promise<void> {
+    try {
+      const cleanSender = (senderPhone || "").replace(/\D/g, "");
+      const ownerPhone = (
+        process.env.WHATSAPP_OWNER_PHONE ||
+        process.env.BOSS_WHATSAPP_PHONE ||
+        process.env.WHATSAPP_OWNER_NUMBER ||
+        process.env.WHATSAPP_BOSS_PHONE ||
+        process.env.OWNER_WHATSAPP_NUMBER ||
+        process.env.BOSS_WHATSAPP_NUMBER ||
+        process.env.OWNER_PHONE ||
+        process.env.BOSS_PHONE ||
+        ""
+      ).replace(/\D/g, "");
+
+      if (!ownerPhone || !cleanSender) return;
+
+      // Do not alert if the sender is Boss himself or the bot's own number
+      if (cleanSender === ownerPhone || cleanSender.slice(-10) === ownerPhone.slice(-10)) return;
+      if (this.dedicatedPhone && cleanSender.slice(-10) === this.dedicatedPhone.replace(/\D/g, "").slice(-10)) return;
+      if (this.isOwnerSender(cleanSender, senderName)) return;
+
+      const senderLabel = senderName && !senderName.startsWith("+") 
+        ? `${senderName} (+${cleanSender})` 
+        : `+${cleanSender}`;
+
+      const alertCard = `📩 *Msg from ${senderLabel}:*\n"${(messageText || "").trim()}"`;
+
+      // Dispatch to Boss WhatsApp directly via Baileys socket
+      const ownerJid = `${ownerPhone}@s.whatsapp.net`;
+      if (this.sock && this.isConnected) {
+        const sent = await this.sock.sendMessage(ownerJid, { text: alertCard });
+        if (sent?.key?.id) {
+          this.botSentMessageIds.add(sent.key.id);
+        }
+        console.log(`[WhatsAppBot] 📩 Relayed incoming message from ${senderLabel} to Boss WhatsApp.`);
+      }
+    } catch (err) {
+      console.warn("[WhatsAppBot] Failed to alert Boss of incoming message:", err);
+    }
+  }
+
   // ── Baileys Message Listener ──────────────────────────────────────────────
 
   private setupMessageListener() {
@@ -1463,6 +1510,9 @@ class WhatsAppBotService {
               msg.key,
               quotedMessage,
               async (sName, sPhone, combText, isUnk, rJid, lKey, qMsg) => {
+                // Real-time relay alert to Boss WhatsApp
+                this.alertOwnerIncomingMessage(sName, sPhone, combText).catch(() => {});
+
                 await whatsappAutoReplyEngine.tryFactualOrChatReply(
                   sName,
                   sPhone,
@@ -1523,6 +1573,9 @@ class WhatsAppBotService {
                 );
               }
             );
+          } else if (!isGroup && !isSenderOwner && this.sock && this.isConnected) {
+            // Auto-reply disabled: still alert Boss of incoming 1-on-1 message!
+            this.alertOwnerIncomingMessage(senderName, senderPhone, text).catch(() => {});
           } else if (isGroup && this.autoReplyEnabled && this.sock && this.isConnected) {
             // Group Mentions
             const botJid = this.sock?.user?.id || "";

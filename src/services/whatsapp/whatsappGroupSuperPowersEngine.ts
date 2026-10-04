@@ -88,7 +88,7 @@ export class WhatsAppGroupSuperPowersEngine {
     // Execute the classified intent
     try {
       return await this.executeClassifiedIntent(classified, {
-        sock, groupJid, groupName, senderName, senderPhone, senderJid, messageKey, quotedMessage, isOwner
+        sock, groupJid, groupName, rawText, senderName, senderPhone, senderJid, messageKey, quotedMessage, isOwner
       });
     } catch (execErr: any) {
       console.warn("[GroupSuperPowers] executeClassifiedIntent failed, falling through:", execErr?.message || execErr);
@@ -102,15 +102,22 @@ export class WhatsAppGroupSuperPowersEngine {
 
   private async executeClassifiedIntent(
     classified: ClassifiedIntent,
-    ctx: { sock: any; groupJid: string; groupName: string; senderName: string; senderPhone: string; senderJid: string; messageKey: any; quotedMessage?: QuotedMessageContext | null; isOwner: boolean }
+    ctx: { sock: any; groupJid: string; groupName: string; rawText?: string; senderName: string; senderPhone: string; senderJid: string; messageKey: any; quotedMessage?: QuotedMessageContext | null; isOwner: boolean }
   ): Promise<{ handled: boolean; replyText?: string; mentions?: string[] }> {
-    const { sock, groupJid, groupName, senderName, senderPhone, senderJid, messageKey, quotedMessage, isOwner } = ctx;
+    const { sock, groupJid, groupName, rawText, senderName, senderPhone, senderJid, messageKey, quotedMessage, isOwner } = ctx;
     const { action, parameters } = classified;
 
     try {
       switch (action) {
         case "make_phone_call": {
-          if (!isOwner) return { handled: true, replyText: "Sirf Boss call laga sakte hain." };
+          if (!isOwner) {
+            const rawTarget = String(parameters.targetPhone || parameters.contactName || "").toLowerCase().trim();
+            const isBossTarget = !rawTarget || /^(me|boss|dk|divakar|owner|mujhe|khud|self)$/i.test(rawTarget);
+            if (isBossTarget) {
+              return { handled: true, replyText: "Theek hai, main Boss (DK) ko inform kar deti hoon ki aap unse baat karna chahte hain." };
+            }
+            return { handled: true, replyText: "Call lagana sirf Boss ke authorization par hota hai, par maine aapka request note kar liya hai." };
+          }
           const { exotelService } = await import("../exotelService");
           const { contactsService } = await import("../contactsService");
           const config = exotelService.getConfig();
@@ -148,14 +155,39 @@ export class WhatsAppGroupSuperPowersEngine {
           };
         }
 
-        case "send_whatsapp_message":
-          if (!isOwner) return { handled: true, replyText: "Sirf Boss message bhej sakte hain." };
+        case "send_whatsapp_message": {
+          const rawTarget = String(parameters.contactNameOrPhone || "").toLowerCase().trim();
+          const isBossTarget = !rawTarget || /^(me|boss|dk|divakar|owner|mujhe|khud|self|sir)$/i.test(rawTarget);
+
+          if (!isOwner) {
+            const ownerPhone = (process.env.OWNER_WHATSAPP_NUMBER || process.env.BOSS_WHATSAPP_NUMBER || "").replace(/\D/g, "");
+            const textToRelay = parameters.messageText || (quotedMessage ? quotedMessage.text : rawText);
+            
+            if (isBossTarget) {
+              if (ownerPhone) {
+                try {
+                  const { sendWhatsAppUnified } = await import("../whatsappService");
+                  const alertCard = `📩 *[Group Message for You]*\n\n👤 *From:* ${senderName} (+${senderPhone})\n👥 *Group:* ${groupName}\n💬 *Message:* ${textToRelay || "Attached update/homework"}\n\n_Relayed by Friday Assistant_`;
+                  await sendWhatsAppUnified(ownerPhone, alertCard).catch(() => {});
+                } catch {}
+              }
+              const snippet = parameters.messageText ? ` ki "${parameters.messageText}"` : "";
+              return { handled: true, replyText: `Theek hai, main Boss (DK) ko forward kar dungi${snippet} 👍` };
+            }
+
+            return {
+              handled: true,
+              replyText: `Theek hai, maine note kar liya hai. Main Boss (DK) ko inform kar dungi ki wo ${parameters.contactNameOrPhone || "unhe"} message bhej dein.`
+            };
+          }
+
           const { sendWhatsAppUnified } = await import("../whatsappService");
           const { contactsService } = await import("../contactsService");
           const contact = await contactsService.findContact(parameters.contactNameOrPhone);
           const targetNum = contact ? contact.phone : String(parameters.contactNameOrPhone).replace(/[\s\-\(\)\+]/g, "");
           const sendRes = await sendWhatsAppUnified(targetNum, parameters.messageText);
           return { handled: true, replyText: sendRes.success ? "✅ Message bhej diya!" : `❌ ${sendRes.message}` };
+        }
 
         case "save_contact":
           const { contactsService: cs } = await import("../contactsService");
@@ -186,33 +218,33 @@ export class WhatsAppGroupSuperPowersEngine {
           return { handled: true, replyText: newsRes.message || "News fetch nahi ho payi." };
 
         case "set_reminder":
-          if (!isOwner) return { handled: true, replyText: "Sirf Boss reminder set kar sakte hain." };
+          if (!isOwner) return { handled: true, replyText: `Theek hai, maine note kar liya hai: "${parameters.title}". Main Boss (DK) ko yaad dila dungi 👍` };
           const { toolsEngine: teRem } = await import("../toolsEngine");
           await teRem.addReminder(parameters.title, parameters.timeString);
           return { handled: true, replyText: `⏰ Reminder set: "${parameters.title}" for ${parameters.timeString}` };
 
         case "save_daily_update":
-          if (!isOwner) return { handled: true, replyText: "Sirf Boss update save kar sakte hain." };
+          if (!isOwner) return { handled: true, replyText: "Ji theek hai, maine ye note kar liya hai. Main Boss (DK) tak aapka update pahuncha dungi." };
           const { dailyUpdateService } = await import("../dailyUpdateService");
           await dailyUpdateService.appendUpdate(parameters.updateText);
           return { handled: true, replyText: "📝 Aaj ka update save kar diya!" };
 
         case "get_daily_update":
-          if (!isOwner) return { handled: true, replyText: "Sirf Boss update dekh sakte hain." };
+          if (!isOwner) return { handled: true, replyText: "Yeh personal updates hain, isliye main sirf Boss (DK) ke sath hi share kar sakti hoon." };
           const { dailyUpdateService: dus, resolveRelativeDateIST } = await import("../dailyUpdateService");
           const date = resolveRelativeDateIST(parameters.dateWord);
           const update = await dus.getUpdateForDate(date);
           return { handled: true, replyText: update?.text || `📅 ${date} ke liye koi update nahi hai.` };
 
         case "search_memory":
-          if (!isOwner) return { handled: true, replyText: "Sirf Boss memory search kar sakte hain." };
+          if (!isOwner) return { handled: true, replyText: "Yeh private memory details hain, isliye main sirf Boss (DK) ke commands par access karti hoon." };
           const { vectorMemoryService } = await import("../vectorMemoryService");
           const results = await vectorMemoryService.searchSemanticMemory(parameters.searchQuery, 5, 0.15, parameters.filterDate ? { exactDate: parameters.filterDate } : undefined);
           if (results.results.length === 0) return { handled: true, replyText: "🔍 Koi purani memory nahi mili." };
           return { handled: true, replyText: results.results.map(r => `📅 ${r.dateRange}: ${r.summary}`).join("\n\n") };
 
         case "remember_fact":
-          if (!isOwner) return { handled: true, replyText: "Sirf Boss fact save kar sakte hain." };
+          if (!isOwner) return { handled: true, replyText: "Ji theek hai, maine note kar liya hai. Main Boss (DK) ko is baare me bata dungi." };
           const { memoryEngine } = await import("../memoryEngine");
           await memoryEngine.addPersonalVaultFact(parameters.category || "general_personal_info", parameters.factText);
           return { handled: true, replyText: "🔒 Fact permanent memory me save kar diya!" };
@@ -255,7 +287,7 @@ export class WhatsAppGroupSuperPowersEngine {
           return { handled: true, replyText: schedRes.message || `📅 Message scheduled for ${parameters.timeInstruction}!` };
 
         case "create_cron_task":
-          if (!isOwner) return { handled: true, replyText: "Sirf Boss cron task bana sakte hain." };
+          if (!isOwner) return { handled: true, replyText: "Automated schedule tasks sirf Boss (DK) configure kar sakte hain." };
           const { scheduledAutomationService } = await import("../scheduledAutomationService");
           await scheduledAutomationService.createCronTask({
             title: parameters.title, timeString: parameters.timeString, frequency: parameters.frequency || "daily",
@@ -274,7 +306,7 @@ export class WhatsAppGroupSuperPowersEngine {
           return { handled: true, replyText: conv.summary || "Conversation history nahi mili." };
 
         case "set_routine":
-          if (!isOwner) return { handled: true, replyText: "Sirf Boss routine set kar sakte hain." };
+          if (!isOwner) return { handled: true, replyText: "Daily routine schedule sirf Boss (DK) apne account ke liye configure kar sakte hain." };
           const { bossRoutineService } = await import("../bossRoutineService");
           if (parameters.slots?.length) {
             await bossRoutineService.setFullRoutine(parameters.slots);
@@ -307,7 +339,7 @@ export class WhatsAppGroupSuperPowersEngine {
           return { handled: true, replyText: routineText };
 
         case "group_admin_action":
-          if (!isOwner) return { handled: true, replyText: "Sirf Boss/Admin ye kar sakte hain." };
+          if (!isOwner) return { handled: true, replyText: "Group admin actions sirf group admin ya Boss ke access me hote hain." };
           const { whatsappGroupSafetyEngine } = await import("./whatsappGroupSafetyEngine");
           switch (parameters.action) {
             case "kick":
@@ -321,7 +353,7 @@ export class WhatsAppGroupSuperPowersEngine {
           }
 
         case "group_safety_toggle":
-          if (!isOwner) return { handled: true, replyText: "Sirf Boss/Admin toggle kar sakte hain." };
+          if (!isOwner) return { handled: true, replyText: "Group safety features sirf admin ya Boss configure kar sakte hain." };
           const { whatsappGroupSafetyEngine: wgse } = await import("./whatsappGroupSafetyEngine");
           switch (parameters.feature) {
             case "block_safe":
@@ -371,19 +403,19 @@ export class WhatsAppGroupSuperPowersEngine {
           return { handled: true, replyText: unpauseRes.message };
 
         case "teach_friday":
-          if (!isOwner) return { handled: true, replyText: "Sirf Boss Friday ko sikha sakte hain." };
+          if (!isOwner) return { handled: true, replyText: "Aapke suggestion ke liye shukriya! Meri core training sirf Boss (DK) manage karte hain." };
           const { fridayChildTrainingService } = await import("../fridayChildTrainingService");
           await fridayChildTrainingService.teachLesson(parameters.situationTrigger, parameters.taughtReaction, { category: parameters.category });
           return { handled: true, replyText: "📚 Lesson sikha diya! Ab main ye yaad rakhungi." };
 
         case "correct_friday":
-          if (!isOwner) return { handled: true, replyText: "Sirf Boss correction de sakte hain." };
+          if (!isOwner) return { handled: true, replyText: "Feedback ke liye shukriya, maine note kar liya hai!" };
           const { fridayChildTrainingService: fcts } = await import("../fridayChildTrainingService");
           await fcts.correctPreviousMistake(parameters.correctionText);
           return { handled: true, replyText: "✅ Correction note kar liya! Dobara nahi hoga." };
 
         case "add_directive":
-          if (!isOwner) return { handled: true, replyText: "Sirf Boss directive de sakte hain." };
+          if (!isOwner) return { handled: true, replyText: "System directives aur rules sirf Boss (DK) set kar sakte hain." };
           const { bossDirectivesService } = await import("../bossDirectivesService");
           await bossDirectivesService.addDirective(parameters.ruleText, { targetWord: parameters.targetWord, replacementWord: parameters.replacementWord, type: parameters.type });
           return { handled: true, replyText: "📋 Directive save kar diya! Strictly follow karungi." };
