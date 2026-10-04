@@ -23,6 +23,7 @@ import { whatsappSessionHealthEngine } from "./whatsapp/whatsappSessionHealthEng
 import { whatsappMetaAiBridgeEngine } from "./whatsapp/whatsappMetaAiBridgeEngine";
 import { girlfriendProfileService } from "./girlfriendProfileService";
 import { whatsappAlertDeskService } from "./whatsapp/whatsappAlertDeskService";
+import { fridayStudyService } from "./fridayStudyService";
 
 export type { QuotedMessageContext, IncomingMessage, WhatsAppStatus };
 
@@ -973,6 +974,34 @@ class WhatsAppBotService {
             }
           }
 
+          // ── FRIDAY STUDY FOR NEET (Groups containing "study" & @study commands) ──
+          if (isGroup && this.sock) {
+            const isStudyGroup =
+              (groupName && fridayStudyService.isStudyGroupName(groupName)) ||
+              text.toLowerCase().startsWith("@study") ||
+              text.toLowerCase().startsWith("/study");
+
+            if (isStudyGroup) {
+              try {
+                const studyRes = await fridayStudyService.handleStudyGroupMessage({
+                  sock: this.sock,
+                  groupJid: remoteJid,
+                  groupName: groupName || "Study Group",
+                  text,
+                  senderName,
+                  senderPhone,
+                  isOwner: isSenderOwner,
+                });
+                if (studyRes.handled && studyRes.replyText) {
+                  await this.sendHumanLikeMessage(remoteJid, studyRes.replyText, text, msg.key);
+                  continue;
+                }
+              } catch (studyErr) {
+                console.warn("[WhatsAppBot] Friday Study group handler error:", studyErr);
+              }
+            }
+          }
+
           // ── SUPER POWER COMMANDS (@song, @hum, @shazam, @reel, @bgm, @groupchart, @quiz, @judge, etc.) ──
           if (this.sock && whatsappGroupSuperPowersEngine.isSuperPowerCommand(text)) {
             try {
@@ -1762,6 +1791,27 @@ class WhatsAppBotService {
       return;
     }
 
+    // ── FRIDAY STUDY DIRECT INTERCEPTOR (Boss 1-on-1 Study Control) ─────────
+    if (rawText.toLowerCase().startsWith("@study") || rawText.toLowerCase().startsWith("/study")) {
+      try {
+        const studyRes = await fridayStudyService.handleStudyGroupMessage({
+          sock: this.sock,
+          groupJid: replyJid,
+          groupName: "Boss Direct Study",
+          text: rawText,
+          senderName,
+          senderPhone,
+          isOwner: true,
+        });
+        if (studyRes.handled && studyRes.replyText) {
+          await this.sendHumanLikeMessage(replyJid, studyRes.replyText, rawText, messageKey);
+          return;
+        }
+      } catch (studyErr) {
+        console.warn("[WhatsAppBot] Friday Study Direct error:", studyErr);
+      }
+    }
+
     // ── WEBSITE VULNERABILITY SCAN (fast regex path — works even if LLM classifier is down) ──
     // Triggers: "find vulnerabilities in example.com", "find error in url xyz", "link scan karo ...", "website security check karo ..."
     try {
@@ -2086,6 +2136,7 @@ class WhatsAppBotService {
           this.qrCodeDataUrl = null;
           this.stopKeepAlive();
           this.stopScheduledMessagesTicker();
+          fridayStudyService.stop();
 
           const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
           const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
@@ -2111,7 +2162,8 @@ class WhatsAppBotService {
           whatsappSessionHealthEngine.recordConnectionOpen();
           this.startKeepAlive();
           this.startScheduledMessagesTicker();
-          console.log("[WhatsAppBot] Connected! Natural Offline mode & Scheduled Ticker active.");
+          fridayStudyService.start(this.sock);
+          console.log("[WhatsAppBot] Connected! Natural Offline mode, Scheduled Ticker & Friday Study active.");
           whatsappAlertDeskService.getOrCreateAlertDeskGroup(this.sock).catch((deskErr) => {
             console.warn("[WhatsAppBot] Friday Alert Desk initialization notice:", deskErr);
           });
@@ -2679,7 +2731,8 @@ class WhatsAppBotService {
 • \`@code <code>\` / \`@debug <code>\` ➔ Programming code explanation & bug fix.
 • \`@translate <lang>: <text>\` ➔ Multi-language translation.
 
-👥 *3. GROUP UTILITIES:*
+👥 *3. GROUP UTILITIES & STUDY:*
+• \`@study\` / \`@study status\` ➔ NEET Daily Study Routine (04:00 AM - 08:10 PM), live current & backlog topics tracker.
 • \`@poll <question>\` ➔ WhatsApp interactive poll create karein.
 • \`@quiz <topic>\` ➔ Group trivia/quiz game start karein.
 • \`@safety <link>\` ➔ Phishing & scam link safety verification.

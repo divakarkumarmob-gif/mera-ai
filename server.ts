@@ -32,6 +32,7 @@ import { appSecurityService } from "./src/services/appSecurityService";
 import { telegramSecurityBotService } from "./src/services/telegramSecurityBotService";
 import { serverFirewallService } from "./src/services/serverFirewallService";
 import { scheduledAutomationService } from "./src/services/scheduledAutomationService";
+import { fridayStudyService } from "./src/services/fridayStudyService";
 import { freeFireGamingService } from "./src/services/freeFireGamingService";
 import { telegramMemoryBotService } from "./src/services/telegramMemoryBotService";
 import { proactiveExecutiveService } from "./src/services/proactiveExecutiveService";
@@ -203,6 +204,7 @@ async function startServer() {
 
   dailyUpdateReminderScheduler.start();
   scheduledAutomationService.start();
+  fridayStudyService.start();
 
   backgroundTasksService.onTaskChange((task) => {
     const payload = JSON.stringify({ type: "background_task_event", task });
