@@ -152,7 +152,113 @@ class TelegramBotService {
     setInterval(() => {
       this.runGirlfriendNightPass().catch(() => {});
       this.runGirlfriendMorningPass().catch(() => {});
+      this.checkAndTriggerCircadian3AMResetTg().catch(() => {});
+      this.checkAndTriggerSundayNudgeTg().catch(() => {});
     }, 15 * 60 * 1000);
+  }
+
+  /**
+   * Records a manual reset of Boss's Telegram session in Firestore.
+   */
+  public async recordBossSessionReset(chatId?: number | string): Promise<void> {
+    try {
+      const nowMs = Date.now();
+      await db.collection("memory").doc("bossTgSessionTracker").set({
+        chatId: chatId ? String(chatId) : (await this.getOwnerOrLatestChatId()) || "boss",
+        sessionStartedAt: nowMs,
+        sessionStartedAtIST: new Date(nowMs).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
+        lastResetSource: "manual_command",
+      }, { merge: true });
+      console.log(`[TelegramBot] Boss Telegram session reset recorded at ${new Date(nowMs).toISOString()}`);
+    } catch (err: any) {
+      console.warn("[TelegramBot] Error writing bossTgSessionTracker:", err?.message || err);
+    }
+  }
+
+  /**
+   * Retrieves the age in days of Boss's active Telegram conversation session.
+   */
+  public async getBossTgSessionAgeDays(): Promise<number> {
+    try {
+      const snap = await db.collection("memory").doc("bossTgSessionTracker").get();
+      if (snap.exists && snap.data()?.sessionStartedAt) {
+        const startedAt = Number(snap.data()!.sessionStartedAt);
+        const diffMs = Math.max(0, Date.now() - startedAt);
+        return Math.floor(diffMs / (24 * 60 * 60 * 1000));
+      }
+    } catch (err: any) {
+      console.warn("[TelegramBot] Error reading bossTgSessionTracker:", err?.message || err);
+    }
+    return 1;
+  }
+
+  /**
+   * Resets non-boss Telegram conversation history cache at 3:00 AM IST.
+   * Boss's conversation session is continuous and 100% exempt from automatic wipes.
+   */
+  public async checkAndTriggerCircadian3AMResetTg(): Promise<void> {
+    try {
+      const istNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+      const hours = istNow.getHours();
+      const minutes = istNow.getMinutes();
+      if (hours === 3 && minutes <= 20) {
+        const ownerChatId = await this.getOwnerOrLatestChatId();
+        TelegramBotService.clearNonBossChatHistory(ownerChatId);
+        console.log("[TelegramBot] 03:00 AM IST Circadian Pass: Non-boss Telegram chat caches cleared. Boss continuous session preserved.");
+      }
+    } catch (err: any) {
+      console.warn("[TelegramBot] Circadian 3AM pass error:", err?.message || err);
+    }
+  }
+
+  /**
+   * Executes every Sunday at 2 distinct times (11:00 AM and 07:30 PM IST)
+   * Nudges Boss gently on Telegram if their continuous session is older than 3 days.
+   */
+  public async checkAndTriggerSundayNudgeTg(): Promise<boolean> {
+    try {
+      const istNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+      if (istNow.getDay() !== 0) return false; // 0 = Sunday
+
+      const hours = istNow.getHours();
+      const minutes = istNow.getMinutes();
+      const yyyy = istNow.getFullYear();
+      const mm = String(istNow.getMonth() + 1).padStart(2, "0");
+      const dd = String(istNow.getDate()).padStart(2, "0");
+      const dateStr = `${yyyy}-${mm}-${dd}`;
+
+      let slotKey: "morning_noon" | "evening" | null = null;
+      if (hours === 11 && minutes <= 20) {
+        slotKey = "morning_noon";
+      } else if (hours === 19 && minutes >= 30 && minutes <= 50) {
+        slotKey = "evening";
+      }
+      if (!slotKey) return false;
+
+      const slotDocId = `sunday_tg_${dateStr}_${slotKey}`;
+      const docRef = db.collection("memory").doc("circadianResetLog").collection("tg_sunday_runs").doc(slotDocId);
+      const snap = await docRef.get();
+      if (snap.exists) return false;
+
+      const ownerChatId = await this.getOwnerOrLatestChatId();
+      if (!ownerChatId) return false;
+
+      const daysOld = await this.getBossTgSessionAgeDays();
+      if (daysOld < 3) {
+        await docRef.set({ skipped: true, reason: `Session only ${daysOld} days old`, timestamp: Date.now() });
+        return false;
+      }
+
+      const nudgeMsg = `Namaste Boss! 🌸\n\nTelegram par hamara continuous session *${daysOld} din* purana ho gaya hai. Sab kuch smooth chal raha hai, lekin agar aap context clean karke fresh session start karna chahein, toh bas *"new session"* ya */newsession* bol ya likh sakte hain! 🚀`;
+
+      await this.sendMessage(ownerChatId, nudgeMsg);
+      await docRef.set({ notified: true, ownerChatId, daysOld, slotKey, timestamp: Date.now() });
+      console.log(`[TelegramBot] Sent Sunday session nudge to Boss on Telegram (Session age: ${daysOld} days).`);
+      return true;
+    } catch (err: any) {
+      console.warn("[TelegramBot] Error in checkAndTriggerSundayNudgeTg:", err?.message || err);
+      return false;
+    }
   }
 
   private isTelegramJid(jid: string): boolean {
@@ -408,6 +514,23 @@ class TelegramBotService {
     }
   }
 
+  public static clearChatHistory(chatId?: string | number) {
+    if (chatId) {
+      this.chatHistoryByChatId.delete(String(chatId));
+    } else {
+      this.chatHistoryByChatId.clear();
+    }
+  }
+
+  public static clearNonBossChatHistory(ownerChatId?: string | number | null) {
+    const ownerKey = ownerChatId ? String(ownerChatId) : "";
+    for (const key of this.chatHistoryByChatId.keys()) {
+      if (!ownerKey || key !== ownerKey) {
+        this.chatHistoryByChatId.delete(key);
+      }
+    }
+  }
+
   public static async getRecentDialogueTranscript(chatId: string | number, senderName: string, limit = 15): Promise<string> {
     const key = String(chatId || "global");
     if (!this.chatHistoryByChatId.has(key)) {
@@ -572,6 +695,11 @@ class TelegramBotService {
           { command: "media_search", description: "🔍 Instant Search Photos, Videos & Files" },
           { command: "vault_stats", description: "📊 View Media Vault Statistics" },
           { command: "lookup", description: "📱 Carrier, Circle & Spam Phone Radar" },
+          { command: "newsession", description: "🔄 Start a fresh continuous session (Clear context)" },
+          { command: "train", description: "🚆 RailRadar Live Train Running Status (/train 12301)" },
+          { command: "pnr", description: "🎫 10-Digit IRCTC PNR Enquiry (/pnr 2849102847)" },
+          { command: "score", description: "🏏 Live Cricket Score & Upcoming Matches" },
+          { command: "news", description: "📰 Top 10 Breaking Headlines & News Briefing" },
         ],
       });
       console.log("[TelegramBot] ✅ Bot Menu Commands registered successfully with Telegram API.");
@@ -2059,7 +2187,7 @@ Provide a 2-4 sentence executive digest of main topics, project updates, member 
       return `Haanji ${senderName} ji! Main Friday hoon — DK Boss abhi busy hain, jaise hi wo aayenge main aapka message unko bata dungi 👍`;
     }
 
-    const priority = isOwner ? "boss" : isGroup ? "public" : "public";
+    const priority = isOwner ? "boss" : (groupInfo ? "public" : "public");
     let allocation = geminiKeyPoolService.getOptimalClient({ priority });
     let ai = allocation.client;
     const recentDialogue = await TelegramBotService.getRecentDialogueTranscript(chatId, senderName, 15);
@@ -2818,6 +2946,21 @@ This format MUST be used:
     if (/^\/(?:lock|logout|exit)/i.test(text)) {
       const lockRes = sensitiveActionGatekeeper.lockSession(String(chatId));
       await this.sendMessage(chatId, lockRes.message);
+      return;
+    }
+
+    // ── Command: /newsession, "new session", "start new session", "reset session" ───
+    const isNewSessionCmd = isOwner && (
+      /^(?:\/newsession|\/reset|new\s*session|start\s*new\s*session|naya\s*session|reset\s*session|fresh\s*session|session\s*reset|@newsession|@reset)$/i.test(text.trim()) ||
+      (/\b(?:new\s*session|fresh\s*session|naya\s*session|reset\s*session)\b/i.test(text) && /\b(?:karo|start|kardo|banao|shuru|karein|chalu)\b/i.test(text))
+    );
+
+    if (isNewSessionCmd) {
+      TelegramBotService.clearChatHistory(chatId);
+      await this.recordBossSessionReset(chatId);
+      const resetMsg = `🔄 *New Session Started, Boss!* 🚀\n\nTelegram par purana context clear kar diya hai. Ab se fresh baatcheet start ho gayi hai!\n\nAapki permanent memory, routine, aur facts 100% surakshit hain. Kahiye, kya sewa karoon? ✨`;
+      await this.sendMessage(chatId, resetMsg);
+      TelegramBotService.recordChatTurn(chatId, "Friday (You)", resetMsg);
       return;
     }
 
@@ -4376,7 +4519,8 @@ INSTRUCTIONS:
 
         case "get_news": {
           const { newsService } = await import("./newsService");
-          const newsRes = await newsService.getLatestNews(parameters.topic, undefined, "in", "en", parameters.count || 5);
+          const count = parameters.count ? Math.min(Math.max(Number(parameters.count), 1), 15) : 10;
+          const newsRes = await newsService.getLatestNews(parameters.topic, undefined, "in", "en", count);
           const replyText = newsRes.message || "News fetch nahi ho payi.";
           await this.sendMessage(chatId, replyText);
           return { handled: true, replyText };
@@ -4455,9 +4599,37 @@ INSTRUCTIONS:
 
         case "get_cricket_scores": {
           const { publicApisService } = await import("./publicApisService");
-          const cricket = await publicApisService.getCricketScores(parameters.team);
+          const query = parameters.team || parameters.query || "";
+          if (/\b(?:upcoming|schedule|fixture|series)\b/i.test(query)) {
+            const upRes = await publicApisService.getUpcomingCricketMatches(query);
+            await this.sendMessage(chatId, upRes.message);
+            return { handled: true, replyText: upRes.message };
+          }
+          const cricket = await publicApisService.getCricketScores(query);
           await this.sendMessage(chatId, cricket || "Cricket score fetch nahi hua.");
           return { handled: true, replyText: cricket };
+        }
+
+        case "get_train_live_status": {
+          const { railRadarService } = await import("./railRadarService");
+          const queryStr = String(parameters.trainNumberOrPnr || "").trim();
+          if (/^\d{10}$/.test(queryStr)) {
+            const pnrRes = await railRadarService.getPnrStatus(queryStr);
+            await this.sendMessage(chatId, pnrRes.message);
+            return { handled: true, replyText: pnrRes.message };
+          } else {
+            const liveRes = await railRadarService.getLiveTrainStatus(queryStr);
+            await this.sendMessage(chatId, liveRes.message);
+            return { handled: true, replyText: liveRes.message };
+          }
+        }
+
+        case "check_pnr_status": {
+          const { railRadarService } = await import("./railRadarService");
+          const cleanPnr = String(parameters.pnr || "").replace(/\D/g, "");
+          const pnrRes = await railRadarService.getPnrStatus(cleanPnr);
+          await this.sendMessage(chatId, pnrRes.message);
+          return { handled: true, replyText: pnrRes.message };
         }
 
         case "search_web": {

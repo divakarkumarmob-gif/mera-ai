@@ -1109,14 +1109,62 @@ ${recentChatMedia.ocrText ? `- Extracted OCR Text: ${recentChatMedia.ocrText}` :
       },
       {
         name: "get_news",
-        description: "Fetch the latest top news headlines or specific topic news.",
+        description: "Fetch the latest top news headlines or specific topic news (e.g. 'top 10 news', 'Bihar news', 'sports news', 'tech headlines').",
         parameters: {
           type: "OBJECT",
           properties: {
-            query: { type: "STRING", description: "Topic e.g. technology, India, sports, AI" },
+            query: { type: "STRING", description: "Topic or keywords e.g. technology, India, Bihar, sports, AI" },
+            category: { type: "STRING", description: "News category e.g. top, national, sports, business, technology, entertainment" },
+            count: { type: "NUMBER", description: "Number of news items to fetch (e.g. 5, 10, default: 10)" },
           },
           required: [],
         },
+      },
+      {
+        name: "get_cricket_scores",
+        description: "Get real-time live cricket match scores, commentary, scorecards, upcoming series, or IPL / World Cup match status. Use whenever Boss asks 'cricket score kya hai', 'India match ka score', 'IPL score', 'aaj kiska match hai', 'live score batao'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            teamOrQuery: { type: "STRING", description: "Team name, match, tournament or query (e.g. 'India', 'CSK', 'IPL', 'live', 'upcoming')" }
+          },
+          required: []
+        }
+      },
+      {
+        name: "get_train_live_status",
+        description: "Check Indian Railways live train running status, current delay, next station, or 10-digit PNR status using RailRadar and IRCTC intelligence. Use whenever Boss asks 'train 12301 kahan pahunchi', 'Rajdhani ka live status kya hai', 'PNR 2849102847 check karo', 'train delay kitna hai'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            trainNumberOrPnr: { type: "STRING", description: "5-digit train number (e.g. '12301', '12309') or train name (e.g. 'Rajdhani Express') or 10-digit PNR number" }
+          },
+          required: ["trainNumberOrPnr"]
+        }
+      },
+      {
+        name: "check_pnr_status",
+        description: "Check 10-digit Indian Railways IRCTC PNR booking status, confirmation probability, berth and coach allocation.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            pnr: { type: "STRING", description: "10-digit PNR number" }
+          },
+          required: ["pnr"]
+        }
+      },
+      {
+        name: "search_trains_between_stations",
+        description: "Find trains between two Indian railway stations, departure/arrival timings, and schedule. Use when Boss says 'Patna se Delhi train batao', 'Kolkata to Mumbai trains'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            fromStation: { type: "STRING", description: "Origin station name or code e.g. 'Patna' or 'PNBE'" },
+            toStation: { type: "STRING", description: "Destination station name or code e.g. 'Delhi' or 'NDLS'" },
+            date: { type: "STRING", description: "Optional journey date (YYYY-MM-DD or DD-MM-YYYY)" }
+          },
+          required: ["fromStation", "toStation"]
+        }
       },
       {
         name: "search_web",
@@ -1607,6 +1655,143 @@ ${recentChatMedia.ocrText ? `- Extracted OCR Text: ${recentChatMedia.ocrText}` :
             }
           },
           required: []
+        }
+      },
+      {
+        name: "instagram_search_user",
+        description: "Search for real Instagram users or profiles by name or query. Use when Boss says 'Instagram par ye ID search karo', 'Instagram pe ye user dhundo'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            query: { type: "STRING", description: "Username or search query to find on Instagram" }
+          },
+          required: ["query"]
+        }
+      },
+      {
+        name: "instagram_get_user_info",
+        description: "Fetch live profile details, bio, follower count, following count, total posts, and recent posts of an Instagram user. Use when Boss says 'Instagram ID ki detail nikalo', 'Instagram profile check karo', 'bio dekho'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            username: { type: "STRING", description: "Instagram username e.g. 'divakar_kumar' or '@username'" }
+          },
+          required: ["username"]
+        }
+      },
+      {
+        name: "instagram_send_dm",
+        description: "Send an Instagram Direct Message (DM) to any user or handle. Use when Boss says 'Instagram par isko DM karo / message bhejo'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            recipient: { type: "STRING", description: "Instagram username or recipient ID" },
+            message: { type: "STRING", description: "Message text to send" }
+          },
+          required: ["recipient", "message"]
+        }
+      },
+      {
+        name: "instagram_follow_user",
+        description: "Follow an Instagram user or account. Use when Boss says 'Instagram par isko follow karo'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            username: { type: "STRING", description: "Instagram username to follow" }
+          },
+          required: ["username"]
+        }
+      },
+      {
+        name: "instagram_unfollow_user",
+        description: "Unfollow an Instagram user or account. Use when Boss says 'Instagram par isko unfollow karo'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            username: { type: "STRING", description: "Instagram username to unfollow" }
+          },
+          required: ["username"]
+        }
+      },
+      {
+        name: "instagram_like_post",
+        description: "Like an Instagram post or Reel using its media ID or URL. Use when Boss says 'Instagram par is post ko like karo'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            mediaId: { type: "STRING", description: "Media ID or post ID of the Instagram post" }
+          },
+          required: ["mediaId"]
+        }
+      },
+      {
+        name: "instagram_comment_post",
+        description: "Post a comment on an Instagram post or Reel. Use when Boss says 'Instagram post par ye comment likho'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            mediaId: { type: "STRING", description: "Media ID of the Instagram post" },
+            commentText: { type: "STRING", description: "Comment text to post" }
+          },
+          required: ["mediaId", "commentText"]
+        }
+      },
+      {
+        name: "instagram_view_user_feed",
+        description: "Inspect and list recent posts, reels, likes, and captions from an Instagram account feed. Use when Boss says 'Instagram par iske recent posts/reels dekho'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            username: { type: "STRING", description: "Instagram username to view feed" },
+            maxPosts: { type: "NUMBER", description: "Number of recent posts to inspect (default: 6)" }
+          },
+          required: ["username"]
+        }
+      },
+      {
+        name: "scan_website_security",
+        description: "Scan a website/URL for vulnerabilities, phishing risk, security headers, SSL and exposed paths. Use when Boss says 'link scan karo', 'website security check karo', 'ye link safe hai kya', 'scan url'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            urlOrDomain: { type: "STRING", description: "URL or domain to scan (e.g. 'example.com', 'https://example.com')" },
+            scanMode: { type: "STRING", description: "Scan depth: 'deep' (vulnerabilities), 'audit' (headers/SSL/grade), 'link' (phishing safety). Default: 'deep'." }
+          },
+          required: ["urlOrDomain"]
+        }
+      },
+      {
+        name: "analyze_youtube_video",
+        description: "Analyze a YouTube video from URL/ID. Extracts transcript, key chapters, summary, and answers specific questions. Use when Boss shares a YouTube link or asks to summarize a video.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            videoUrl: { type: "STRING", description: "YouTube video URL or video ID" },
+            question: { type: "STRING", description: "Optional specific question about the video" }
+          },
+          required: ["videoUrl"]
+        }
+      },
+      {
+        name: "play_next_song",
+        description: "Play or send the next song in the active music playlist or queue.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            reason: { type: "STRING", description: "Optional note e.g. 'Boss skipped track'" }
+          },
+          required: []
+        }
+      },
+      {
+        name: "identify_song",
+        description: "Identify song from humming, audio, lyrics clue, or tune. Use when Boss asks 'ye gaana kaun sa hai', 'shazam karo', 'lyrics se gaana batao'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            songClue: { type: "STRING", description: "Lyrics snippet, humming clue, or song details" }
+          },
+          required: ["songClue"]
         }
       },
     ];
@@ -2532,8 +2717,41 @@ This format MUST be used:
         }
         if (toolName === "get_news") {
           const { newsService } = await import("../newsService");
-          const res = await newsService.getLatestNews(args.query);
-          return { success: res.success, message: res.message, articles: res.articles?.slice(0, 5) };
+          const count = args.count ? Math.min(Math.max(Number(args.count), 1), 15) : 10;
+          const res = await newsService.getLatestNews(args.query, args.category, "in", "en", count);
+          return { success: res.success, message: res.message, articles: res.articles?.slice(0, count) };
+        }
+        if (toolName === "get_cricket_scores") {
+          const { publicApisService } = await import("../publicApisService");
+          const query = args.teamOrQuery || "";
+          if (/\b(?:upcoming|schedule|fixture|series)\b/i.test(query)) {
+            const upRes = await publicApisService.getUpcomingCricketMatches(query);
+            return { success: true, message: upRes.message, matches: upRes.matches };
+          }
+          const cricket = await publicApisService.getCricketScores(query);
+          return { success: true, message: cricket || "Live cricket score abhi available nahi hai." };
+        }
+        if (toolName === "get_train_live_status") {
+          const { railRadarService } = await import("../railRadarService");
+          const queryStr = String(args.trainNumberOrPnr || "").trim();
+          if (/^\d{10}$/.test(queryStr)) {
+            const pnrRes = await railRadarService.getPnrStatus(queryStr);
+            return { success: pnrRes.success, pnrRes, message: pnrRes.message };
+          } else {
+            const liveRes = await railRadarService.getLiveTrainStatus(queryStr);
+            return { success: liveRes.success, liveRes, message: liveRes.message, mapUrl: liveRes.mapTrackingUrl };
+          }
+        }
+        if (toolName === "check_pnr_status") {
+          const { railRadarService } = await import("../railRadarService");
+          const cleanPnr = String(args.pnr || "").replace(/\D/g, "");
+          const pnrRes = await railRadarService.getPnrStatus(cleanPnr);
+          return { success: pnrRes.success, pnrRes, message: pnrRes.message };
+        }
+        if (toolName === "search_trains_between_stations") {
+          const { railRadarService } = await import("../railRadarService");
+          const res = await railRadarService.searchTrainsBetweenStations(args.fromStation, args.toStation, args.date);
+          return { success: res.success, message: res.message, trains: res.trains?.slice(0, 10) };
         }
         if (toolName === "search_web") {
           try {
@@ -2649,6 +2867,37 @@ This format MUST be used:
           const { whatsappBotService } = await import("../whatsappBotService");
           const res = await whatsappBotService.kickGroupMember(args.groupName, args.memberPhoneOrName);
           return res;
+        }
+        if (toolName === "delete_group_message") {
+          const { whatsappBotService } = await import("../whatsappBotService");
+          const { whatsappGroupSafetyEngine } = await import("./whatsappGroupSafetyEngine");
+          const grp = await whatsappBotService.findGroup(args.groupName);
+          if (!grp) return { success: false, message: `Group "${args.groupName}" nahi mila.` };
+
+          if (quotedMessage && quotedMessage.isReply && sock && quotedMessage.stanzaId) {
+            const targetKey = {
+              remoteJid: grp.groupId,
+              id: quotedMessage.stanzaId,
+              fromMe: false,
+              participant: quotedMessage.sender || (quotedMessage.senderPhone ? `${quotedMessage.senderPhone}@s.whatsapp.net` : undefined),
+            };
+            const deleted = await whatsappGroupSafetyEngine.deleteMessage(
+              sock,
+              grp.groupId,
+              targetKey,
+              quotedMessage.senderPhone
+            );
+            return {
+              success: deleted,
+              message: deleted
+                ? `Group "${grp.groupName}" se message delete kar diya gaya.`
+                : `Message delete nahi ho saka. Friday ke paas group admin permissions hona zaroori hai.`,
+            };
+          }
+          return {
+            success: false,
+            message: `Specific message delete karne ke liye us message ko quote karke reply karein ya target message specify karein.`,
+          };
         }
         if (toolName === "toggle_group_welcome") {
           const { whatsappBotService } = await import("../whatsappBotService");
@@ -2918,6 +3167,118 @@ This format MUST be used:
             args?.year ? Number(args.year) : undefined
           );
           return res;
+        }
+
+        // ── Instagram Action Suite ──
+        if (toolName === "instagram_search_user") {
+          const { instagramBotService } = await import("../instagramBotService");
+          return await instagramBotService.searchUserHumanPaced(args.query);
+        }
+        if (toolName === "instagram_get_user_info") {
+          const { instagramBotService } = await import("../instagramBotService");
+          return await instagramBotService.getUserInfoLive(args.username);
+        }
+        if (toolName === "instagram_send_dm") {
+          const { instagramBotService } = await import("../instagramBotService");
+          return await instagramBotService.sendMessageToTarget(args.recipient, args.message);
+        }
+        if (toolName === "instagram_follow_user") {
+          const { instagramBotService } = await import("../instagramBotService");
+          return await instagramBotService.followUserHumanPaced(args.username);
+        }
+        if (toolName === "instagram_unfollow_user") {
+          const { instagramBotService } = await import("../instagramBotService");
+          return await instagramBotService.unfollowUserHumanPaced(args.username);
+        }
+        if (toolName === "instagram_like_post") {
+          const { instagramBotService } = await import("../instagramBotService");
+          return await instagramBotService.likeMediaHumanPaced(args.mediaId);
+        }
+        if (toolName === "instagram_comment_post") {
+          const { instagramBotService } = await import("../instagramBotService");
+          return await instagramBotService.commentMediaHumanPaced(args.mediaId, args.commentText);
+        }
+        if (toolName === "instagram_view_user_feed") {
+          const { instagramBotService } = await import("../instagramBotService");
+          return await instagramBotService.getUserFeedAndPostsHumanPaced(args.username, args.maxPosts || 6);
+        }
+
+        // ── Cyber Security & Media Inspection ──
+        if (toolName === "scan_website_security") {
+          const { runWebsiteSecurityScan } = await import("../websiteSecurityCommands");
+          const target = String(args.urlOrDomain || args.target || "").trim();
+          const mode = args.scanMode === "audit" ? "audit" : args.scanMode === "link" ? "link" : "deep";
+          const scanOutput = await runWebsiteSecurityScan(target, mode);
+          return { success: true, result: scanOutput };
+        }
+        if (toolName === "analyze_youtube_video") {
+          const { youtubeService } = await import("../youtubeService");
+          const videoId = youtubeService.extractVideoId(args.videoUrl);
+          if (!videoId) return { success: false, message: "Valid YouTube URL ya ID chahiye." };
+          const analysis = await youtubeService.analyzeVideo(videoId);
+          return { success: true, analysis };
+        }
+        if (toolName === "play_next_song") {
+          const { whatsappFeatureEngine } = await import("../whatsappFeatureEngine");
+          const nextRes = await whatsappFeatureEngine.handleNextSongInPlaylist(replyJid, senderName);
+          if (nextRes.handled && nextRes.replyText) {
+            if (nextRes.audioBuffer && sendVoiceFn) {
+              try {
+                await sendVoiceFn(replyJid, nextRes.audioBuffer, messageKey, "audio/mp4");
+              } catch {}
+            }
+            return { success: true, message: nextRes.replyText };
+          }
+          return { success: false, message: "Playlist me agla gaana nahi mila." };
+        }
+        if (toolName === "identify_song") {
+          const { musicRecognitionService } = await import("../musicRecognitionService");
+          const songClue = args.songClue || args.clue || args.lyrics || "";
+          return await musicRecognitionService.identifyHummingOrTune(songClue);
+        }
+
+        // ── Universal System Aliases Mappings ──
+        if (toolName === "search_rail_pnr_status") return await executeTool("check_pnr_status", args);
+        if (toolName === "play_music") return await executeTool("search_or_play_music", args);
+        if (toolName === "make_phone_call" || toolName === "trigger_or_schedule_voice_call") return await executeTool("trigger_voice_call", args);
+        if (toolName === "set_reminder_or_alarm") return await executeTool("set_reminder", args);
+        if (toolName === "generate_ai_photo") return await executeTool("generate_ai_image", args);
+        if (toolName === "search_memory") return await executeTool("search_all_memories_and_chats", args);
+        if (toolName === "remember_fact") return await executeTool("remember_personal_fact", args);
+        if (toolName === "set_routine") return await executeTool("update_boss_daily_routine", args);
+        if (toolName === "get_routine") return await executeTool("get_boss_daily_routine", args);
+        if (toolName === "schedule_message") return await executeTool("schedule_whatsapp_message", args);
+        if (toolName === "create_cron_task") return await executeTool("create_automated_cron_task", args);
+        if (toolName === "add_directive") return await executeTool("add_boss_directive", args);
+        if (toolName === "teach_friday") return await executeTool("teach_friday_lesson", args);
+        if (toolName === "correct_friday") return await executeTool("correct_friday_behavior", args);
+        if (toolName === "voice_mode_toggle") return await executeTool("set_friday_voice_tone", args);
+        if (toolName === "check_session_health") return await executeTool("get_whatsapp_session_ban_health", args);
+        if (toolName === "create_poll") return await executeTool("generate_poll", args);
+        if (toolName === "lookup_phone_details") return await executeTool("lookup_phone_number_details", args);
+        if (toolName === "get_whatsapp_messages" || toolName === "get_conversation_history") return await executeTool("get_messages_digest", args);
+        if (toolName === "unpause_bot") {
+          const { humanBotFirewallService } = await import("../humanBotFirewallService");
+          (humanBotFirewallService as any).unpauseAll?.();
+          return { success: true, message: "Bot unpaused successfully across all chats." };
+        }
+
+        // ── UNIVERSAL SEMANTIC ENGINE FALLBACK ──
+        try {
+          const { semanticIntentEngine } = await import("../semanticIntentEngine");
+          const fallbackRes = await semanticIntentEngine.executeTool(toolName, args, {
+            channel: "whatsapp",
+            chatId: replyJid,
+            senderName,
+            messageKey,
+            sendVoiceFn: (t, a, k, m) => sendVoiceFn(t, a, k, m),
+            sendPhotoFn: (t, img, cap, k) => sendPhotoFn(t, img, cap, k),
+          });
+          if (fallbackRes && fallbackRes.status !== "unknown_tool") {
+            return fallbackRes;
+          }
+        } catch (semErr: any) {
+          console.warn(`[WhatsAppBossAI] Semantic fallback notice for "${toolName}":`, semErr?.message || semErr);
         }
       } catch (err: any) {
         return { error: err?.message || String(err) };

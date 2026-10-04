@@ -598,6 +598,41 @@ export class SemanticIntentEngine {
           required: []
         }
       },
+      {
+        name: "get_news",
+        description: "Fetch the latest top news headlines or specific topic news (e.g. 'top 10 news', 'technology', 'sports', 'Bihar', 'national').",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            query: { type: "STRING", description: "Topic or keywords e.g. technology, India, sports, AI" },
+            category: { type: "STRING", description: "Category e.g. top, national, sports, business, tech" },
+            count: { type: "NUMBER", description: "Number of news items to fetch (default: 10)" }
+          },
+          required: []
+        }
+      },
+      {
+        name: "get_cricket_scores",
+        description: "Get real-time live cricket scores, commentary, scorecards, upcoming match series, or IPL / World Cup updates. Use whenever asked 'cricket score', 'India match score', 'IPL score', 'live score batao'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            teamOrQuery: { type: "STRING", description: "Team name, match, tournament or query (e.g. 'India', 'CSK', 'live', 'upcoming')" }
+          },
+          required: []
+        }
+      },
+      {
+        name: "search_rail_pnr_status",
+        description: "Check Indian Railways live train running status, current delay, next station, or 10-digit PNR status using RailRadar and IRCTC. Use when asked 'train status', 'train 12301 live', 'PNR status', 'train delay'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            pnrOrTrain: { type: "STRING", description: "5-digit train number (e.g. '12301') or 10-digit PNR number" }
+          },
+          required: ["pnrOrTrain"]
+        }
+      },
     ];
   }
 
@@ -952,8 +987,20 @@ export class SemanticIntentEngine {
 
       if (toolName === "get_news") {
         const { newsService } = await import("./newsService");
-        const news = await newsService.getLatestNews(args.query);
+        const count = args.count ? Math.min(Math.max(Number(args.count), 1), 15) : 10;
+        const news = await newsService.getLatestNews(args.query, args.category, "in", "en", count);
         return { success: news.success, news, message: news.message };
+      }
+
+      if (toolName === "get_cricket_scores") {
+        const { publicApisService } = await import("./publicApisService");
+        const query = args.teamOrQuery || "";
+        if (/\b(?:upcoming|schedule|fixture|series)\b/i.test(query)) {
+          const upRes = await publicApisService.getUpcomingCricketMatches(query);
+          return { success: true, message: upRes.message, matches: upRes.matches };
+        }
+        const cricket = await publicApisService.getCricketScores(query);
+        return { success: true, message: cricket || "Live cricket score abhi available nahi hai." };
       }
 
       if (toolName === "set_reminder_or_alarm") {

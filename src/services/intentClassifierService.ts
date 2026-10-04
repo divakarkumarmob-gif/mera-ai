@@ -102,7 +102,7 @@ const INTENT_FUNCTION_DECLARATIONS = [
         topic: { type: Type.STRING, description: "News category: top 10, politics, local, sports, business, tech, viral, or city name" },
         count: { type: Type.NUMBER, description: "Number of headlines (default: 10)" }
       },
-      required: ["topic"]
+      required: []
     }
   },
   {
@@ -220,6 +220,28 @@ const INTENT_FUNCTION_DECLARATIONS = [
         team: { type: Type.STRING, description: "Optional team filter" }
       },
       required: []
+    }
+  },
+  {
+    name: "get_train_live_status",
+    description: "Check Indian Railways live train running status, current delay, next station, or 10-digit PNR status using RailRadar and IRCTC. Examples: 'train 12301 live status', 'Rajdhani kahan pahunchi', 'train delay kitna hai', 'PNR 2849102847 check karo'.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        trainNumberOrPnr: { type: Type.STRING, description: "5-digit train number (e.g. '12301', '12309') or 10-digit PNR number" }
+      },
+      required: ["trainNumberOrPnr"]
+    }
+  },
+  {
+    name: "check_pnr_status",
+    description: "Check 10-digit IRCTC PNR booking status, coach, berth, and chart status. Examples: 'PNR 2849102847', 'check PNR status'.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        pnr: { type: Type.STRING, description: "10-digit PNR number" }
+      },
+      required: ["pnr"]
     }
   },
   {
@@ -847,6 +869,28 @@ Be decisive. One function call per classification.`;
         confidence: 0.85,
         parameters: { team: /india/i.test(clean) ? "India" : undefined },
         reasoning: "Fallback offline regex match for cricket score query",
+        originalText: userText
+      };
+    }
+
+    // 14b. Train Running Status & PNR Intent
+    if (/\b(?:train\s*(?:status|running|kahan|delay|live)|pnr\s*(?:status|enquiry|check)?)\b/i.test(clean) || /\b\d{5}\b(?:\s+train|\s+running|\s+status)/i.test(clean)) {
+      const pnrMatch = userText.match(/\b\d{10}\b/);
+      if (pnrMatch) {
+        return {
+          action: "check_pnr_status",
+          confidence: 0.9,
+          parameters: { pnr: pnrMatch[0] },
+          reasoning: "Fallback offline regex match for PNR status query",
+          originalText: userText
+        };
+      }
+      const trainNumMatch = userText.match(/\b\d{4,5}\b/);
+      return {
+        action: "get_train_live_status",
+        confidence: 0.9,
+        parameters: { trainNumberOrPnr: trainNumMatch ? trainNumMatch[0] : userText },
+        reasoning: "Fallback offline regex match for train live status query",
         originalText: userText
       };
     }
