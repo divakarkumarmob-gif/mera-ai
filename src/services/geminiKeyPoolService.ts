@@ -52,6 +52,7 @@ export interface ClientAllocation {
 
 export class GeminiKeyPoolService {
   private keys: KeyRecord[] = [];
+  private roundRobinIndex: number = 0;
   private readonly MAX_RPM_SOFT_CAP = 13; // Google free limit is 15; soft cap at 13 to guarantee Zero-429
   private readonly HARD_DAILY_CAP = 1450; // Google free limit is 1500; soft cap at 1450
   private readonly COOLDOWN_DURATION_MS = 60000; // 60s cooldown if unexpected 429 occurs
@@ -66,12 +67,26 @@ export class GeminiKeyPoolService {
    */
   public reloadKeysFromEnv(): void {
     const rawKeys: string[] = [];
-    // Collect all potential env variable sources (plural or singular)
+    // Collect all potential env variable sources (plural, singular, indexed, or named)
     const envSources = [
       process.env.GEMINI_API_KEYS,
       process.env.GEMINI_API_KEY,
+      process.env.GEMINI_API_KEY_1,
+      process.env.GEMINI_API_KEY_2,
+      process.env.GEMINI_API_KEY_3,
+      process.env.GEMINI_API_KEY_4,
+      process.env.GEMINI_API_KEY_5,
+      process.env.GEMINI_KEY_1,
+      process.env.GEMINI_KEY_2,
+      process.env.GEMINI_KEY_3,
+      process.env.GEMINI_API_KEY_WHATSAPP,
+      process.env.GEMINI_API_KEY_FRIDAY,
+      process.env.GEMINI_API_KEY_MEMORY,
       process.env.GOOGLE_API_KEYS,
       process.env.GOOGLE_API_KEY,
+      process.env.GOOGLE_API_KEY_1,
+      process.env.GOOGLE_API_KEY_2,
+      process.env.GOOGLE_API_KEY_3,
       process.env.VITE_GEMINI_API_KEY,
     ];
 
@@ -162,22 +177,22 @@ export class GeminiKeyPoolService {
   }
 
   /**
-   * Returns a single clean primary GoogleGenAI client (never malformed with commas).
+   * Returns an optimal GoogleGenAI client (balanced across the mesh).
    */
   public getPrimaryClient(): GoogleGenAI {
     if (this.keys.length > 0) {
-      return this.keys[0].client;
+      return this.getOptimalClient().client;
     }
     const cleanKey = (process.env.GEMINI_API_KEY || "").split(/[,;\n]/)[0].trim().replace(/^["']|["']$/g, "");
     return new GoogleGenAI({ apiKey: cleanKey || "placeholder-gemini-key" });
   }
 
   /**
-   * Returns a clean single primary API key string.
+   * Returns an optimal clean API key string (balanced across the mesh).
    */
   public getPrimaryApiKey(): string {
     if (this.keys.length > 0) {
-      return this.keys[0].apiKey;
+      return this.getOptimalClient().apiKey;
     }
     return (process.env.GEMINI_API_KEY || "").split(/[,;\n]/)[0].trim().replace(/^["']|["']$/g, "") || "placeholder-gemini-key";
   }
@@ -272,43 +287,23 @@ export class GeminiKeyPoolService {
     let chosen: KeyRecord;
 
     if (healthyCandidates.length > 0) {
-      // Apply priority bias:
-      if (priority === "boss") {
-        // Boss VIP: Prefer Key 0 if it has headroom (< 13 RPM); otherwise pick lowest loaded healthy
-        const key0 = healthyCandidates.find((k) => k.index === 0);
-        if (key0 && key0.requestTimestamps.length < this.MAX_RPM_SOFT_CAP) {
-          chosen = key0;
-        } else {
-          // Sort by lowest RPM in window
-          healthyCandidates.sort((a, b) => a.requestTimestamps.length - b.requestTimestamps.length);
-          chosen = healthyCandidates[0];
+      // True Least-Loaded Round-Robin Load Balancing:
+      // 1. Find the lowest RPM load currently active across all healthy keys
+      const minRpm = Math.min(...healthyCandidates.map((k) => k.requestTimestamps.length));
+      const leastLoaded = healthyCandidates.filter((k) => k.requestTimestamps.length === minRpm);
+
+      // 2. If a specific preferred index was requested and is healthy with low load, respect it
+      if (options.preferredIndex !== undefined) {
+        const pref = healthyCandidates.find((k) => k.index === options.preferredIndex);
+        if (pref && pref.requestTimestamps.length <= minRpm + 2) {
+          chosen = pref;
         }
-      } else if (priority === "background") {
-        // Background: Prefer Key 1 or Key 2, keeping Key 0 free for Boss
-        const secondary = healthyCandidates.filter((k) => k.index > 0);
-        if (secondary.length > 0) {
-          secondary.sort((a, b) => a.requestTimestamps.length - b.requestTimestamps.length);
-          chosen = secondary[0];
-        } else {
-          // All secondary saturated; use Key 0 only if Key 0 has plenty of headroom (< 8 RPM)
-          const key0 = healthyCandidates.find((k) => k.index === 0);
-          if (key0 && key0.requestTimestamps.length < 8) {
-            chosen = key0;
-          } else {
-            healthyCandidates.sort((a, b) => a.requestTimestamps.length - b.requestTimestamps.length);
-            chosen = healthyCandidates[0];
-          }
-        }
-      } else {
-        // Public / Groups: Prefer highest index keys (e.g. Key 2, Key 1), avoid Key 0
-        const nonBoss = healthyCandidates.filter((k) => k.index > 0);
-        if (nonBoss.length > 0) {
-          nonBoss.sort((a, b) => a.requestTimestamps.length - b.requestTimestamps.length);
-          chosen = nonBoss[0];
-        } else {
-          healthyCandidates.sort((a, b) => a.requestTimestamps.length - b.requestTimestamps.length);
-          chosen = healthyCandidates[0];
-        }
+      }
+
+      // 3. Otherwise distribute requests evenly across the least-loaded keys
+      if (!chosen) {
+        this.roundRobinIndex++;
+        chosen = leastLoaded[this.roundRobinIndex % leastLoaded.length];
       }
     } else {
       // ALL keys are at or above soft cap (13 RPM).
@@ -648,16 +643,20 @@ function _makeClient(key: string): _GoogleGenAI {
   return new _GoogleGenAI({ apiKey: key });
 }
 
-function _resolveKey(dedicatedEnvVar: string): string {
+function _resolveKey(dedicatedEnvVar: string, fallbackIndex: number = 0): string {
   const dedicated = (process.env[dedicatedEnvVar] || "").trim();
   if (dedicated && dedicated.length > 10) return dedicated;
-  // Fallback: general pool ka pehla key
-  return geminiKeyPoolService.getPrimaryApiKey();
+  // Smart fallback to distinct pool key: WhatsApp -> Key 0, Friday -> Key 1, Memory -> Key 2
+  const allClients = geminiKeyPoolService.getAllClients();
+  if (allClients.length > fallbackIndex) {
+    return allClients[fallbackIndex].apiKey;
+  }
+  return geminiKeyPoolService.getActiveKey();
 }
 
 /** Dedicated client + key for WhatsApp conversations */
 export function getWhatsAppGeminiKey(): string {
-  return _resolveKey("GEMINI_API_KEY_WHATSAPP");
+  return _resolveKey("GEMINI_API_KEY_WHATSAPP", 0);
 }
 export function getWhatsAppGeminiClient(): _GoogleGenAI {
   return _makeClient(getWhatsAppGeminiKey());
@@ -665,7 +664,7 @@ export function getWhatsAppGeminiClient(): _GoogleGenAI {
 
 /** Dedicated client + key for Friday Live responses & Tool calls */
 export function getFridayGeminiKey(): string {
-  return _resolveKey("GEMINI_API_KEY_FRIDAY");
+  return _resolveKey("GEMINI_API_KEY_FRIDAY", 1);
 }
 export function getFridayGeminiClient(): _GoogleGenAI {
   return _makeClient(getFridayGeminiKey());
@@ -673,7 +672,7 @@ export function getFridayGeminiClient(): _GoogleGenAI {
 
 /** Dedicated client + key for Memory, learning, background tasks */
 export function getMemoryGeminiKey(): string {
-  return _resolveKey("GEMINI_API_KEY_MEMORY");
+  return _resolveKey("GEMINI_API_KEY_MEMORY", 2);
 }
 export function getMemoryGeminiClient(): _GoogleGenAI {
   return _makeClient(getMemoryGeminiKey());
