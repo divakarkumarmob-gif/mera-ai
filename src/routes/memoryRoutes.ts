@@ -117,6 +117,17 @@ export function createMemoryRouter(): Router {
     }
   });
 
+  router.post("/api/memory/whatsapp-session/test-sunday-nudge", async (req, res) => {
+    try {
+      const { whatsappCircadianSessionService } = await import("../services/whatsapp/whatsappCircadianSessionService");
+      const slot = req.body?.slot === "evening" ? "evening" : "morning_noon";
+      const result = await whatsappCircadianSessionService.forceSendSundayNudge(slot);
+      res.json({ ok: true, result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
   router.get("/api/memory/lifecycle/stats", async (_req, res) => {
     try {
       const vectorStats = await vectorMemoryService.getVectorStoreStats();

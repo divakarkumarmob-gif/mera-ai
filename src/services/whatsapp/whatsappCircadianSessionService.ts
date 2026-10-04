@@ -53,11 +53,15 @@ class WhatsAppCircadianSessionService {
       this.checkAndTriggerCircadianReset().catch((err) => {
         console.warn("[WhatsAppCircadian] Periodic check error:", err?.message || err);
       });
+      this.checkAndTriggerSundayNudge().catch((err) => {
+        console.warn("[WhatsAppCircadian] Sunday nudge check error:", err?.message || err);
+      });
     }, 60 * 1000);
 
     // Initial check 20 seconds after launch
     setTimeout(() => {
       this.checkAndTriggerCircadianReset().catch(() => {});
+      this.checkAndTriggerSundayNudge().catch(() => {});
     }, 20 * 1000);
   }
 
@@ -437,12 +441,130 @@ class WhatsAppCircadianSessionService {
   }
 
   /**
+   * Retrieves the age in days of Boss's current active conversation session.
+   */
+  public async getBossSessionAgeDays(): Promise<number> {
+    try {
+      const snap = await db.collection("memory").doc("bossSessionTracker").get();
+      if (snap.exists && snap.data()?.sessionStartedAt) {
+        const startedAt = Number(snap.data()!.sessionStartedAt);
+        const diffMs = Math.max(0, Date.now() - startedAt);
+        const days = Math.floor(diffMs / (24 * 60 * 60 * 1000));
+        return days;
+      }
+    } catch (err: any) {
+      console.warn("[WhatsAppCircadian] Error reading bossSessionTracker:", err?.message || err);
+    }
+    return 1;
+  }
+
+  /**
+   * Automatically executes every Sunday at 2 distinct times:
+   * Slot 1 (Morning/Noon): 11:00 AM - 11:20 AM IST
+   * Slot 2 (Evening): 07:30 PM - 07:50 PM IST (19:30 - 19:50)
+   * Nudges Boss gently on WhatsApp about session age and offering to start a fresh new session.
+   */
+  public async checkAndTriggerSundayNudge(): Promise<boolean> {
+    const now = new Date();
+    const istNow = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+    const dayOfWeek = istNow.getDay(); // 0 is Sunday
+    if (dayOfWeek !== 0) return false;
+
+    const hours = istNow.getHours();
+    const minutes = istNow.getMinutes();
+    const yyyy = istNow.getFullYear();
+    const mm = String(istNow.getMonth() + 1).padStart(2, "0");
+    const dd = String(istNow.getDate()).padStart(2, "0");
+    const dateStr = `${yyyy}-${mm}-${dd}`;
+
+    let slotKey: "morning_noon" | "evening" | null = null;
+    if (hours === 11 && minutes <= 20) {
+      slotKey = "morning_noon";
+    } else if (hours === 19 && minutes >= 30 && minutes <= 50) {
+      slotKey = "evening";
+    }
+
+    if (!slotKey) return false;
+
+    const slotDocId = `sunday_${dateStr}_${slotKey}`;
+    try {
+      const existingDoc = await db.collection("memory").doc("circadianResetLog").collection("sunday_nudges").doc(slotDocId).get();
+      if (existingDoc.exists) {
+        return false; // Already sent for this slot today
+      }
+    } catch {}
+
+    const res = await this.forceSendSundayNudge(slotKey, dateStr);
+    return res.success;
+  }
+
+  /**
+   * Dispatches the Sunday session nudge message to Boss.
+   */
+  public async forceSendSundayNudge(
+    slot: "morning_noon" | "evening" = "morning_noon",
+    dateStr?: string
+  ): Promise<{ success: boolean; message: string; daysOld: number; sentText: string }> {
+    const ownerPhone = (
+      process.env.OWNER_WHATSAPP_NUMBER ||
+      process.env.BOSS_WHATSAPP_NUMBER ||
+      process.env.OWNER_PHONE ||
+      ""
+    ).replace(/\D/g, "");
+
+    if (!ownerPhone) {
+      return { success: false, message: "No OWNER_WHATSAPP_NUMBER configured", daysOld: 0, sentText: "" };
+    }
+
+    const daysOld = await this.getBossSessionAgeDays();
+    const daysText = daysOld <= 0 ? "aaj hi start hua" : (daysOld === 1 ? "1 din" : `${daysOld} din`);
+
+    let nudgeText = "";
+    if (slot === "morning_noon") {
+      nudgeText = `Boss, Sunday check-in! 🌤️\n\nHamara ongoing conversation session abhi lagbhag *${daysText} purana* ho gaya hai. 🗓️\n\nAap chahein to fresh energy aur high speed ke liye new session start kar sakte hain — bas type ya bol dijiye: *"new session"* ya *"naya session"*.\n(Aapka Personal Vault aur permanent yaadein 100% safe rahengi). Have a wonderful Sunday! ⚡`;
+    } else {
+      nudgeText = `Boss, Sunday evening reminder! 🌆\n\nHamara conversation session *${daysText} purana* chal raha hai. Naye week ke liye agar aap fresh start chahein, to bas bol ya likh dijiye: *"new session"*.\nBaaki continue rakhna ho to koi dikkat nahi, sab safely context me hai. Have a great evening! ✨`;
+    }
+
+    const targetJid = `${ownerPhone}@s.whatsapp.net`;
+    const isConnected = whatsappBotService.getStatus().isConnected;
+
+    if (isConnected) {
+      await whatsappBotService.sendHumanLikeMessage(targetJid, nudgeText);
+      console.log(`[WhatsAppCircadian] 💌 Sent Sunday session age nudge (${slot}, ${daysText} old) to Boss.`);
+    }
+
+    const now = Date.now();
+    const effectiveDateStr = dateStr || new Date(now).toISOString().split("T")[0];
+    const slotDocId = `sunday_${effectiveDateStr}_${slot}`;
+
+    try {
+      await db.collection("memory").doc("circadianResetLog").collection("sunday_nudges").doc(slotDocId).set({
+        slotKey: slot,
+        dateStr: effectiveDateStr,
+        daysOld,
+        sentAt: now,
+        sentAtIST: new Date(now).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
+        sentText: nudgeText,
+      });
+    } catch {}
+
+    return {
+      success: true,
+      message: `Sunday nudge dispatched to Boss (${daysText} old)`,
+      daysOld,
+      sentText: nudgeText,
+    };
+  }
+
+  /**
    * Returns current service status, active cycle, and diagnostic telemetry.
    */
   public async getStatus(): Promise<{
     activeCycleId: string;
     lastCompletedCycle: string;
     istTime: string;
+    bossSessionDaysOld: number;
     eligibleChattersCount: number;
     skippedInactiveCount: number;
     eligibleChatters: Array<{ name: string; hoursSince: number; isBoss: boolean }>;
@@ -451,11 +573,13 @@ class WhatsAppCircadianSessionService {
     const now = new Date();
     const { timeStr } = this.getISTTime(now);
     const { eligible, skippedInactive } = await this.getEligibleChatters();
+    const bossSessionDaysOld = await this.getBossSessionAgeDays();
 
     return {
       activeCycleId: this.getCircadianCycleId(now),
       lastCompletedCycle: this.lastCompletedCycle,
       istTime: timeStr,
+      bossSessionDaysOld,
       eligibleChattersCount: eligible.length,
       skippedInactiveCount: skippedInactive.length,
       eligibleChatters: eligible.map((e) => ({
