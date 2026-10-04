@@ -1318,6 +1318,11 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
     const selectedImagesRef = useRef(selectedImages);
     useEffect(() => { selectedImagesRef.current = selectedImages; }, [selectedImages]);
 
+    // Background pre-connect & keep-alive refs for instant wake
+    const isUnmountedRef = useRef<boolean>(false);
+    const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const pingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
     const compressImageFile = (file: File, maxDim = 1280, quality = 0.8): Promise<{ base64: string; mimeType: string }> => {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -1401,7 +1406,13 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
 
     const stopRecording = () => {
         if (initAckTimeoutRef.current) { clearTimeout(initAckTimeoutRef.current); initAckTimeoutRef.current = null; }
-        ws.current?.close();
+        // 🚀 KEEP WEBSOCKET PRE-CONNECTED IN BACKGROUND!
+        // Do NOT close ws.current! Send stream end signal to server so Gemini flushes turn cleanly:
+        if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+            try {
+                ws.current.send(JSON.stringify({ type: 'audio_stream_end' }));
+            } catch {}
+        }
         processor.current?.disconnect();
         processor.current = null;
         if (inputAudioCtx.current && inputAudioCtx.current.state !== 'closed') {
@@ -1415,7 +1426,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
         turnCompletePendingRef.current = false;
         isConnectingRef.current = false;
         setIsRecording(false);
-        setStatus("Idle");
+        setStatus("Ready");
     };
 
     const toggleMicMute = useCallback(() => {
@@ -1471,8 +1482,12 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
 
     useEffect(() => {
         return () => {
+            isUnmountedRef.current = true;
+            if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+            if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
             stopRecording();
             stopMusicPlayback();
+            try { ws.current?.close(); } catch {}
             if (musicDspAudioCtxRef.current && musicDspAudioCtxRef.current.state !== 'closed') {
                 try { musicDspAudioCtxRef.current.close(); } catch {}
                 musicDspAudioCtxRef.current = null;
@@ -1483,6 +1498,21 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
             }
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // ── Pre-connected WebSocket Heartbeat (Ping every 15s to prevent carrier/router timeouts) ──
+    useEffect(() => {
+        pingIntervalRef.current = setInterval(() => {
+            if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+                try {
+                    ws.current.send(JSON.stringify({ type: 'ping' }));
+                } catch {}
+            }
+        }, 15000);
+
+        return () => {
+            if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
+        };
     }, []);
 
     useEffect(() => {
@@ -1725,6 +1755,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
     const ensureConnection = async (withMic: boolean) => {
         if (withMic && isConnectingRef.current) return;
 
+        // 🚀 SCENARIO 1: WebSocket is ALREADY OPEN in background (Instant wake - 0ms delay!)
         if (ws.current && ws.current.readyState === WebSocket.OPEN) {
             if (withMic && !isRecording) {
                 isConnectingRef.current = true;
@@ -1735,6 +1766,18 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                     setStatus("Listening...");
                     mediaStreamRef.current = stream;
                     await attachMicPipeline(stream);
+
+                    // If session was not initialized for any reason, re-send init
+                    if (!isInitializedRef.current) {
+                        ws.current.send(JSON.stringify({
+                            type: 'init',
+                            voice: selectedVoice,
+                            thinkingLevel,
+                            accurateMode,
+                            answerLength,
+                            googleSearchMode,
+                        }));
+                    }
                 } catch (err) {
                     console.error("Error accessing audio", err);
                     setStatus("Error: Mic Access Failed");
@@ -1745,8 +1788,39 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
             return;
         }
 
+        // 🚀 SCENARIO 2: WebSocket is currently CONNECTING in background
+        if (ws.current && ws.current.readyState === WebSocket.CONNECTING) {
+            if (withMic && !isRecording) {
+                isConnectingRef.current = true;
+                setStatus("Requesting Microphone...");
+                try {
+                    const stream = await requestMicStream();
+                    mediaStreamRef.current = stream;
+                    const checkInterval = setInterval(async () => {
+                        if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+                            clearInterval(checkInterval);
+                            setIsRecording(true);
+                            setStatus("Listening...");
+                            await attachMicPipeline(stream);
+                            isConnectingRef.current = false;
+                        } else if (!ws.current || ws.current.readyState === WebSocket.CLOSED) {
+                            clearInterval(checkInterval);
+                            isConnectingRef.current = false;
+                            setStatus("Error: Connection Failed");
+                        }
+                    }, 50);
+                } catch (err) {
+                    console.error("Error accessing audio", err);
+                    setStatus("Error: Mic Access Failed");
+                    isConnectingRef.current = false;
+                }
+            }
+            return;
+        }
+
+        // 🚀 SCENARIO 3: Fresh connect (on initial mount or after network reconnection)
         if (withMic) isConnectingRef.current = true;
-        setStatus("Connecting...");
+        setStatus(withMic ? "Connecting AI..." : "Connecting...");
         let stream: MediaStream | undefined;
         if (withMic) {
             setStatus("Requesting Microphone...");
@@ -1772,7 +1846,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                 socket.send(JSON.stringify({ type: 'auth', token: appToken }));
             }
             setIsRecording(withMic);
-            setStatus(withMic ? "Connecting AI..." : "Connected");
+            setStatus(withMic ? "Connecting AI..." : "Ready");
             nextStartTime.current = 0;
             isInitializedRef.current = false;
             socket.send(JSON.stringify({
@@ -1785,7 +1859,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
             }));
 
             const initAckTimeout = setTimeout(() => {
-                if (!isInitializedRef.current) setStatus("Starting up, please wait...");
+                if (!isInitializedRef.current && isRecording) setStatus("Starting up, please wait...");
             }, 6000);
             initAckTimeoutRef.current = initAckTimeout;
 
@@ -1803,6 +1877,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
             try {
                 if (typeof event.data !== 'string') return;
                 const msg = JSON.parse(event.data);
+                if (msg.type === 'pong') return; // Heartbeat pong from server
                 if (msg.audio) {
                     if (!outputAudioCtx.current || outputAudioCtx.current.state === 'closed') {
                         outputAudioCtx.current = createAudioContext(24000);
@@ -1867,7 +1942,7 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
                     turnCompletePendingRef.current = false;
                     speakingCooldownUntilRef.current = 0;
                     if (initAckTimeoutRef.current) { clearTimeout(initAckTimeoutRef.current); initAckTimeoutRef.current = null; }
-                    setStatus("Listening...");
+                    setStatus(isRecording ? "Listening..." : "Ready");
                     
                     // 📞 Auto First Greeting when Voice Call connects
                     if ((isCallMode || activeInCallModal) && !callGreetingSentRef.current) {
@@ -2227,22 +2302,34 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
             if (wasActive) {
                 setStatus("⚡ Reconnecting...");
             } else {
-                setStatus("Idle");
+                setStatus("Ready");
             }
             stream?.getTracks().forEach(track => track.stop());
+
+            // 🚀 Keep Pre-Connected: Automatically restore background WebSocket so triple-tap is always instant!
+            if (!isUnmountedRef.current) {
+                if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+                reconnectTimerRef.current = setTimeout(() => {
+                    if (!isUnmountedRef.current && (!ws.current || ws.current.readyState === WebSocket.CLOSED)) {
+                        console.log("[LiveAIInterface] 🔄 Auto-reconnecting background WebSocket for instant wake...");
+                        ensureConnection(false).catch(() => {});
+                    }
+                }, 2000);
+            }
         };
 
         socket.onerror = (error) => {
             console.error("WebSocket error", error);
             isConnectingRef.current = false;
-            setStatus("⚡ Connection issue, retrying...");
-            setTimeout(() => {
-                if (!isInitializedRef.current && isRecording) {
-                    setStatus("Error: Connection lost. Refresh if needed.");
-                    setIsRecording(false);
-                }
-            }, 4000);
             stream?.getTracks().forEach(track => track.stop());
+            if (!isUnmountedRef.current) {
+                if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+                reconnectTimerRef.current = setTimeout(() => {
+                    if (!isUnmountedRef.current && (!ws.current || ws.current.readyState === WebSocket.CLOSED)) {
+                        ensureConnection(false).catch(() => {});
+                    }
+                }, 3000);
+            }
         };
     };
 

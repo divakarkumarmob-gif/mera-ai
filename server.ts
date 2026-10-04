@@ -599,6 +599,12 @@ async function startServer() {
         return;
       }
 
+      // Ping / Pong keep-alive handler (works even during pre-auth / idle connection)
+      if (parsedData.type === "ping") {
+        safeSend(JSON.stringify({ type: "pong", timestamp: Date.now() }));
+        return;
+      }
+
       if (!isAuthorized) {
         console.warn("[Server] WebSocket command blocked: Session is not authorized");
         safeSend(JSON.stringify({ error: "ACCESS_LOCKED", message: "App Key authentication required." }));
@@ -606,17 +612,35 @@ async function startServer() {
       }
 
       if (parsedData.type === "init") {
+        const voice = parsedData.voice || "Aoede";
+        const thinkingLevel = parsedData.thinkingLevel || "high";
+        const accurateMode = !!parsedData.accurateMode;
+        const answerLength = parsedData.answerLength;
+        const googleSearchMode = !!parsedData.googleSearchMode;
+
+        // If a Gemini Live session is already warm and active with matching config, acknowledge instantly!
+        if (currentSession &&
+            lastVoice === voice &&
+            lastThinkingLevel === thinkingLevel &&
+            lastAccurateMode === accurateMode &&
+            lastAnswerLength === answerLength &&
+            lastGoogleSearchMode === googleSearchMode) {
+          console.log(`[Server] ⚡ Gemini Live session already active & pre-warmed (session=${sessionId}). Returning instant init_ack.`);
+          safeSend(JSON.stringify({ type: "init_ack" }));
+          return;
+        }
+
         if (isInitializingSession) {
           console.log(`[Server] Session initialization already in progress (session=${sessionId}), ignoring duplicate init.`);
           return;
         }
         isInitializingSession = true;
         console.log(`[Server] init received (session=${sessionId}), (re)creating Gemini Live session...`);
-        lastVoice = parsedData.voice || "Aoede";
-        lastThinkingLevel = parsedData.thinkingLevel || "high";
-        lastAccurateMode = !!parsedData.accurateMode;
-        lastAnswerLength = parsedData.answerLength;
-        lastGoogleSearchMode = !!parsedData.googleSearchMode;
+        lastVoice = voice;
+        lastThinkingLevel = thinkingLevel;
+        lastAccurateMode = accurateMode;
+        lastAnswerLength = answerLength;
+        lastGoogleSearchMode = googleSearchMode;
 
         try {
           if (currentSession) {

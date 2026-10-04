@@ -142,11 +142,11 @@ class FridayForegroundService : Service() {
     fun handleBluetoothAction(action: BluetoothControlManager.Action) {
         when (action) {
             BluetoothControlManager.Action.TOGGLE_MIC -> {
-                Log.i(TAG, "🎙️ Executing TOGGLE_MIC via Bluetooth")
+                Log.i(TAG, "🎙️ Executing TOGGLE_MIC via Bluetooth -> Routing to Gemini Live")
                 vibrateDevice(50L)
                 wakeScreen()
                 com.friday.ai.bluetooth.BluetoothAudioRouter.startBluetoothSco(this)
-                SpeechManager.toggleListening(this)
+                SpeechManager.stopSpeaking()
 
                 // Launch / bring Friday assistant to screen over lockscreen
                 try {

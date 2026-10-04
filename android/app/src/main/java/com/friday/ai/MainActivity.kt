@@ -129,10 +129,10 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            // 2. Also trigger UI Webview mic button directly to start Gemini Live audio session immediately
+            // 2. Trigger UI Webview mic button directly to start Gemini Live audio session immediately
             binding.root.postDelayed({
                 triggerWebviewMicToggle()
-            }, 300L)
+            }, 150L)
         }
     }
 
