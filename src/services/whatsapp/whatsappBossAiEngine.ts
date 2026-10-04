@@ -3069,26 +3069,27 @@ ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` 
     const sessionKey = replyJid || "boss_dk";
     const existingSession = this.activeBossSessions.get(sessionKey);
 
-    // ── Phase 1: Try Existing Active Circadian Session (Continuous from 03:00 AM to 02:59 AM) ──
-    if (existingSession && existingSession.cycleId === currentCycleId && existingSession.mode === currentMode) {
-      try {
-        console.log(`[WhatsAppBossAI] ⚡ Reusing active circadian session (${currentCycleId}) for Boss. Zero context amnesia across turns.`);
-        let sessionTurnMessage = messageText;
-        if (quotedMessage && quotedMessage.isReply) {
-          const qPhoneMatch = (quotedMessage.text || "").match(/(?:\+?91[\s\-]?)?([6-9]\d{9})\b/) || (quotedMessage.text || "").match(/(\+?\d[\d\s\-]{8,15}\d)/);
-          const extractedPhone = qPhoneMatch ? qPhoneMatch[1].replace(/\D/g, "") : (quotedMessage.senderPhone || "");
-          sessionTurnMessage = `[SWIPE-TO-REPLY CONTEXT: Boss replied by swiping on a previous message/media]
+    // Prepare prompt message with swipe-to-reply or subtext context
+    let promptTurnMessage = messageText;
+    if (quotedMessage && quotedMessage.isReply) {
+      const qPhoneMatch = (quotedMessage.text || "").match(/(?:\+?91[\s\-]?)?([6-9]\d{9})\b/) || (quotedMessage.text || "").match(/(\+?\d[\d\s\-]{8,15}\d)/);
+      const extractedPhone = qPhoneMatch ? qPhoneMatch[1].replace(/\D/g, "") : (quotedMessage.senderPhone || "");
+      promptTurnMessage = `[SWIPE-TO-REPLY CONTEXT: Boss replied by swiping on a previous message/media]
 📩 PREVIOUS QUOTED MESSAGE (From: ${quotedMessage.sender}, Type: ${quotedMessage.mediaType.toUpperCase()}):
 "${quotedMessage.text}"
 ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` : ""}
 
 💬 BOSS'S SWIPE-REPLY & QUESTION/INSTRUCTION:
 "${messageText}"`;
-        } else if (subtextSnippet) {
-          sessionTurnMessage = `${subtextSnippet}\n${messageText}`;
-        }
+    } else if (subtextSnippet) {
+      promptTurnMessage = `${subtextSnippet}\n${messageText}`;
+    }
 
-        const reply = await processChatTurn(existingSession.chat, sessionTurnMessage);
+    // ── Phase 1: Try Existing Active Circadian Session (Continuous from 03:00 AM to 02:59 AM) ──
+    if (existingSession && existingSession.cycleId === currentCycleId && existingSession.mode === currentMode) {
+      try {
+        console.log(`[WhatsAppBossAI] ⚡ Reusing active circadian session (${currentCycleId}) for Boss. Zero context amnesia across turns.`);
+        const reply = await processChatTurn(existingSession.chat, promptTurnMessage);
         if (reply) {
           existingSession.lastActive = Date.now();
           geminiKeyPoolService.recordSuccess(allocation.keyIndex);
@@ -3100,7 +3101,7 @@ ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` 
       }
     }
 
-    // ── Phase 2: Fresh Session Initialization (First message of day or fallback after 3:00 AM reset) ──
+    // ── Phase 2: Fresh Session Initialization (First message of day or fallback after 3:00 AM reset or redeploy) ──
     for (const model of [
       "gemini-3.8-flash",
       "gemini-3.7-flash",
@@ -3122,7 +3123,7 @@ ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` 
           },
         });
 
-        const reply = await processChatTurn(chat, userTurnMessage);
+        const reply = await processChatTurn(chat, promptTurnMessage);
         if (reply) {
           this.activeBossSessions.set(sessionKey, {
             chat,

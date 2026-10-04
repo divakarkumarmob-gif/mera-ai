@@ -45,6 +45,7 @@ import { buildLiveSystemInstruction } from "./src/live/liveSystemPrompt";
 import { createApiRouter } from "./src/routes/apiRoutes";
 
 import { geminiKeyPoolService } from "./src/services/geminiKeyPoolService";
+import { liveCircadianSessionService } from "./src/services/liveCircadianSessionService";
 
 const PORT = Number(process.env.PORT) || 3000;
 const isProduction = process.env.NODE_ENV === "production";
@@ -54,6 +55,7 @@ let baileysEnabled: boolean = true;
 
 // Clean GoogleGenAI client from Predictive Key Pool (handles comma-separated multi-keys properly)
 const ai = geminiKeyPoolService.getPrimaryClient();
+liveCircadianSessionService.setAiClient(ai);
 
 // ---------------------------------------------------------------------------
 // Express Master Server Application
@@ -311,7 +313,9 @@ async function startServer() {
 
     let currentSession: any;
     let currentSessionToken = 0;
-    const sessionId = Date.now().toString();
+    // Continuous 24-hour Live Gemini session anchored at 03:00 AM IST
+    liveCircadianSessionService.checkAndRotateCircadianCycle(ai).catch(() => {});
+    const sessionId = liveCircadianSessionService.getCurrentLiveSessionId();
 
     let isReconnecting = false;
     let isInitializingSession = false;
@@ -401,11 +405,11 @@ async function startServer() {
                   safeSend(JSON.stringify({ turnComplete: true }));
                   if (inputTranscriptBuffer.trim()) {
                     saveMessage("user", inputTranscriptBuffer).catch((e) => console.error("[Server] Failed to save user message:", e));
-                    memoryEngine.recordMessage(sessionId, "user", inputTranscriptBuffer);
+                    liveCircadianSessionService.recordLiveMessage("user", inputTranscriptBuffer);
                   }
                   if (outputTranscriptBuffer.trim()) {
                     saveMessage("ai", outputTranscriptBuffer).catch((e) => console.error("[Server] Failed to save AI message:", e));
-                    memoryEngine.recordMessage(sessionId, "ai", outputTranscriptBuffer);
+                    liveCircadianSessionService.recordLiveMessage("ai", outputTranscriptBuffer);
                     backgroundTasksService.markTaskNotified("all");
                   }
                   // Extract important facts dynamically during conversation
@@ -727,6 +731,10 @@ async function startServer() {
         } else if (parsedData.type === "chat_message" || (parsedData.text && !parsedData.type)) {
           const userQuery = parsedData.text;
           console.log(`[Server] Forwarding voice text query to Gemini Live (session=${sessionId}): "${userQuery}"`);
+          if (userQuery && typeof userQuery === "string" && userQuery.trim()) {
+            saveMessage("user", userQuery.trim()).catch((e) => console.error("[Server] Failed to save user text query:", e));
+            liveCircadianSessionService.recordLiveMessage("user", userQuery.trim());
+          }
           currentSession.sendClientContent({
             turns: [
               {
@@ -745,7 +753,7 @@ async function startServer() {
     });
 
     clientWs.on("close", () => {
-      console.log(`[Server] Client disconnected (session=${sessionId})`);
+      console.log(`[Server] Client disconnected from live stream (circadian_session=${sessionId})`);
       connectedClients.delete(clientWs);
       freeFireGamingService.unregisterAndroidHelper(clientWs);
       if (authTimeout) clearTimeout(authTimeout);
@@ -753,10 +761,10 @@ async function startServer() {
         try { currentSession.close(); } catch {}
         currentSession = undefined;
       }
-      // Persist session to Firestore and extract memory in background
-      memoryEngine.finalizeSession(sessionId, ai).catch((e) => {
-        console.error(`[Server] Error finalizing session ${sessionId} on disconnect:`, e);
-      });
+      // NOTE: We do NOT finalize/wipe the circadian session on socket disconnect!
+      // Today's conversation session stays active across disconnects & page reloads until 03:00 AM IST.
+      // At 03:00 AM IST, liveCircadianSessionService automatically finalizes, summarizes, and archives
+      // the previous day's session while keeping permanent memories in the Vault completely intact.
     });
   });
 

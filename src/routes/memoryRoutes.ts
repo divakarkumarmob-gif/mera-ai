@@ -88,6 +88,15 @@ export function createMemoryRouter(): Router {
     }
   });
 
+  router.get("/api/memory/live-session", async (_req, res) => {
+    try {
+      const { liveCircadianSessionService } = await import("../services/liveCircadianSessionService");
+      res.json({ ok: true, session: liveCircadianSessionService.getStatus() });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
   router.get("/api/memory/lifecycle/stats", async (_req, res) => {
     try {
       const vectorStats = await vectorMemoryService.getVectorStoreStats();

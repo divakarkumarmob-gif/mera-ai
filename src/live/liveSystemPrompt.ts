@@ -5,6 +5,7 @@ import { bossRoutineService } from "../services/bossRoutineService";
 import { fridayLearningService } from "../services/fridayLearningService";
 import { calendarEventService } from "../services/calendarEventService";
 import { toolsEngine } from "../services/toolsEngine";
+import { liveCircadianSessionService } from "../services/liveCircadianSessionService";
 
 import { fridayModeService } from "../services/fridayModeService";
 
@@ -54,6 +55,7 @@ export async function buildLiveSystemInstruction(options: SystemPromptOptions = 
     selfEvolutionContext,
     calendarMeetingsRes,
     activeRemindersList,
+    liveCircadianContext,
   ] = await Promise.all([
     memoryEngine.compileLeanMemoryPrompt(),
     contactsService.compileContactsForPrompt(),
@@ -98,6 +100,7 @@ export async function buildLiveSystemInstruction(options: SystemPromptOptions = 
     })(),
     calendarEventService.getUpcomingMeetings().catch(() => ({ events: [] })),
     toolsEngine.getReminders().catch(() => []),
+    liveCircadianSessionService.compileCircadianPromptContext(20),
   ]);
 
   const lastPhotoStatus = toolsEngine.getLastGeneratedPhotoStatus();
@@ -136,6 +139,8 @@ REAL-TIME TEMPORAL GROUNDING (IST):
 • For Indian festivals, dates & holidays ("Diwali kab hai?", "Holi kab hai?", "Chhath puja kab hai?", "Agla tyohar kab hai?", "Upcoming holidays"): ALWAYS call 'get_public_holidays' with festivalQuery!
 • For live GPS / current location / family tracking ("meri location kya hai?", "current location batao", "main kahan hoon?", "bhai kahan hai?", "papa kahan hain?"): ALWAYS call 'get_family_device_location'!
 • For live cricket, weather, trains, news, or deals, call the respective tools.
+
+${liveCircadianContext}
 
 ============================================================
 ON-DEMAND SYSTEM & TOOL CALLING MANDATE (Zimmedar Tool Calling):

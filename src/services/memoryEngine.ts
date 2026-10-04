@@ -85,6 +85,8 @@ class MemoryEngine {
     if (this.activeSessions.size > 40) {
       const staleCutoff = now - 6 * 60 * 60 * 1000;
       for (const [id, s] of this.activeSessions.entries()) {
+        // Protect active circadian live sessions from pruning
+        if (id.startsWith("live_boss_")) continue;
         if (s.startTime < staleCutoff) {
           this.activeSessions.delete(id);
         }
@@ -101,6 +103,16 @@ class MemoryEngine {
     };
     this.activeSessions.set(sessionId, session);
     return session;
+  }
+
+  public getSession(sessionId: string): ConversationSession | undefined {
+    return this.activeSessions.get(sessionId);
+  }
+
+  public getRecentSessionMessages(sessionId: string, limit = 20): SessionMessage[] {
+    const session = this.activeSessions.get(sessionId);
+    if (!session || !session.messages) return [];
+    return session.messages.slice(-limit);
   }
 
   public getActiveSessions(): ConversationSession[] {
