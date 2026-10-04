@@ -406,6 +406,12 @@ async function startServer() {
                   if (inputTranscriptBuffer.trim()) {
                     saveMessage("user", inputTranscriptBuffer).catch((e) => console.error("[Server] Failed to save user message:", e));
                     liveCircadianSessionService.recordLiveMessage("user", inputTranscriptBuffer);
+
+                    // Boss Mandate: Check if Boss explicitly spoke 'new session' / 'naya session'
+                    if (liveCircadianSessionService.isExplicitNewSessionCommand(inputTranscriptBuffer)) {
+                      console.log(`[Server] 🗣️ Boss explicitly spoke 'new session' command via microphone.`);
+                      liveCircadianSessionService.forceNewSession(ai).catch((e) => console.warn("[Server] Force new session error:", e));
+                    }
                   }
                   if (outputTranscriptBuffer.trim()) {
                     saveMessage("ai", outputTranscriptBuffer).catch((e) => console.error("[Server] Failed to save AI message:", e));
@@ -734,6 +740,13 @@ async function startServer() {
           if (userQuery && typeof userQuery === "string" && userQuery.trim()) {
             saveMessage("user", userQuery.trim()).catch((e) => console.error("[Server] Failed to save user text query:", e));
             liveCircadianSessionService.recordLiveMessage("user", userQuery.trim());
+
+            // Boss Mandate: Check if Boss explicitly typed 'new session' / 'naya session'
+            if (liveCircadianSessionService.isExplicitNewSessionCommand(userQuery)) {
+              console.log(`[Server] ⌨️ Boss explicitly typed 'new session' command in live interface.`);
+              liveCircadianSessionService.forceNewSession(ai).catch((e) => console.warn("[Server] Force new session error:", e));
+              safeSend(JSON.stringify({ text: "Boss, naya live session start ho gaya hai! Pichli baatein memory me safely archive ho chuki hain. Kahiye, ab kya hukum hai? ⚡" }));
+            }
           }
           currentSession.sendClientContent({
             turns: [

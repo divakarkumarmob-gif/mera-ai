@@ -97,6 +97,26 @@ export function createMemoryRouter(): Router {
     }
   });
 
+  router.get("/api/memory/whatsapp-session", async (_req, res) => {
+    try {
+      const { whatsappCircadianSessionService } = await import("../services/whatsapp/whatsappCircadianSessionService");
+      const status = await whatsappCircadianSessionService.getStatus();
+      res.json({ ok: true, whatsappSession: status });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  router.post("/api/memory/whatsapp-session/force-reset", async (_req, res) => {
+    try {
+      const { whatsappCircadianSessionService } = await import("../services/whatsapp/whatsappCircadianSessionService");
+      const result = await whatsappCircadianSessionService.executeNightlyResetRoutine({ force: true });
+      res.json({ ok: true, result });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
   router.get("/api/memory/lifecycle/stats", async (_req, res) => {
     try {
       const vectorStats = await vectorMemoryService.getVectorStoreStats();

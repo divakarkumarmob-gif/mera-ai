@@ -135,6 +135,13 @@ export class WhatsAppHistoryEngine {
   }
 
   /**
+   * Returns a copy of the in-memory message cache.
+   */
+  public getMessageCache(): IncomingMessage[] {
+    return [...this.messageCache];
+  }
+
+  /**
    * Preloads latest messages from Firestore so that server restarts retain active memory.
    * Also primes the Baileys live store so in-memory queries are instant right upon launch.
    */

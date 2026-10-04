@@ -272,6 +272,10 @@ class WhatsAppBotService {
         );
         // Midnight Birthday Auto-Wishes Trigger
         await whatsappGroupSuperPowersEngine.checkAndTriggerMidnightBirthdays(this.sock);
+
+        // 03:00 AM IST WhatsApp Circadian Session Reset Trigger (for users active in last 24h)
+        const { whatsappCircadianSessionService } = await import("./whatsapp/whatsappCircadianSessionService");
+        await whatsappCircadianSessionService.checkAndTriggerCircadianReset();
       } catch (err) {
         console.warn("[WhatsAppBot] Scheduled message ticker error:", err);
       }

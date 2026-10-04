@@ -1,3 +1,4 @@
+import { db } from "./firebaseAdmin";
 import { GoogleGenAI } from "@google/genai";
 import { memoryEngine, SessionMessage } from "./memoryEngine";
 import { liveScratchService } from "./liveScratchService";
@@ -5,30 +6,35 @@ import { liveScratchService } from "./liveScratchService";
 /**
  * Live Circadian Session Service for Friday AI (Gemini Live Audio / WebSocket).
  *
- * Implements a continuous 24-hour conversational session anchored at 03:00 AM IST.
- * - Current circadian cycle: 03:00 AM to 02:59:59 AM next morning.
- * - Preserves conversational turn continuity across WebSocket reconnects, page refreshes,
- *   and multi-turn follow-ups ("haa", "nahi", "kal ka kya", "aur batao").
- * - At 03:00 AM IST, safely finalizes and archives the previous day's live session into
- *   Firestore and Vector Store, starting a fresh clean day session.
+ * Implements a continuous conversational session for Boss DK:
+ * - Session remains active indefinitely across 03:00 AM IST and across multiple days.
+ * - OWNER MANDATE: Session NEVER auto-resets at 03:00 AM IST!
+ * - Session ONLY resets when Boss explicitly speaks or writes "new session" / "naya session".
+ * - When reset, the previous session is safely finalized and archived into Firestore
+ *   and Vector Store, and a fresh session is seamlessly started.
  * - Permanent memories (Personal Vault, Pinned Memories, Profile Facts) are NEVER flushed.
  */
 class LiveCircadianSessionService {
   private activeCycleId: string;
+  private activeSessionId: string = "live_boss_continuous";
   private geminiAi?: GoogleGenAI;
   private rotationCheckInterval?: NodeJS.Timeout;
 
   constructor() {
     this.activeCycleId = this.getCircadianCycleId();
-    // Ensure memoryEngine has the active circadian session initialized
+    // Ensure memoryEngine has the active continuous session initialized
     memoryEngine.startSession(this.getCurrentLiveSessionId());
+    this.initSessionFromDb().catch(() => {});
+  }
 
-    // Run a periodic rotation check every 60 seconds to detect 03:00 AM IST rollover
-    this.rotationCheckInterval = setInterval(() => {
-      this.checkAndRotateCircadianCycle(this.geminiAi).catch((err) => {
-        console.warn("[LiveCircadianSession] Periodic rotation check error:", err?.message || err);
-      });
-    }, 60000);
+  private async initSessionFromDb(): Promise<void> {
+    try {
+      const snap = await db.collection("memory").doc("liveSessionState").get();
+      if (snap.exists && snap.data()?.activeSessionId) {
+        this.activeSessionId = snap.data()!.activeSessionId;
+        memoryEngine.startSession(this.activeSessionId);
+      }
+    } catch {}
   }
 
   /**
@@ -56,21 +62,71 @@ class LiveCircadianSessionService {
   }
 
   /**
-   * Returns the stable circadian session ID for Live Gemini.
+   * Returns the stable active session ID for Live Gemini (Continuous for Boss).
    */
-  public getCurrentLiveSessionId(now: Date = new Date()): string {
-    return `live_boss_${this.getCircadianCycleId(now)}`;
+  public getCurrentLiveSessionId(): string {
+    return this.activeSessionId || "live_boss_continuous";
   }
 
   /**
-   * Returns time until the next 03:00 AM IST reset.
+   * Checks if user prompt or voice transcript is an explicit 'new session' command.
+   */
+  public isExplicitNewSessionCommand(text: string): boolean {
+    if (!text || typeof text !== "string") return false;
+    const clean = text.trim().toLowerCase();
+    return /^(?:new\s*session|start\s*new\s*session|naya\s*session|reset\s*session|fresh\s*session|session\s*reset)$/i.test(clean) ||
+      /\b(new\s*session\s*(?:start|banao|karo)|start\s*fresh\s*session|naya\s*session\s*shuru)\b/i.test(clean) ||
+      (/\b(new\s*session|naya\s*session)\b/i.test(clean) && /\b(start|shuru|karo|banao|reset)\b/i.test(clean));
+  }
+
+  /**
+   * Resets the Live session ONLY when Boss explicitly writes or speaks 'new session'.
+   * 1. Safely archives the previous live session into Firestore and Vector Store.
+   * 2. Clears the live scratch turn cache.
+   * 3. Initializes a fresh continuous session for Boss.
+   */
+  public async forceNewSession(ai?: GoogleGenAI): Promise<string> {
+    const oldSessionId = this.getCurrentLiveSessionId();
+    console.log(`[LiveCircadianSession] 🔄 Boss explicit 'new session' command received. Finalizing session ${oldSessionId}...`);
+
+    const effectiveAi = ai || this.geminiAi;
+    try {
+      await memoryEngine.finalizeSession(oldSessionId, effectiveAi);
+      console.log(`[LiveCircadianSession] ✅ Session ${oldSessionId} safely archived.`);
+    } catch (e: any) {
+      console.warn(`[LiveCircadianSession] Notice while archiving previous session ${oldSessionId}:`, e?.message || e);
+    }
+
+    // Generate new active continuous live session ID
+    this.activeSessionId = `live_boss_continuous_${Date.now()}`;
+    memoryEngine.startSession(this.activeSessionId);
+
+    // Run scratch lifecycle archive
+    try {
+      await liveScratchService.runScratchLifecycle(effectiveAi);
+    } catch {}
+
+    // Persist new session ID to Firestore
+    try {
+      await db.collection("memory").doc("liveSessionState").set({
+        activeSessionId: this.activeSessionId,
+        startedAt: Date.now(),
+        startedAtIST: new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
+      });
+    } catch {}
+
+    console.log(`[LiveCircadianSession] ✨ Fresh Live Voice Session started for Boss: ${this.activeSessionId}`);
+    return this.activeSessionId;
+  }
+
+  /**
+   * Returns time until the next 03:00 AM IST cycle marker.
    */
   public getNextResetInfo(): { nextResetDateIST: string; msRemaining: number; humanHoursRemaining: string } {
     const now = new Date();
     const istNow = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
     const nextReset = new Date(istNow);
-    
-    // If before 3 AM, next reset is 3 AM today. Otherwise, 3 AM tomorrow.
+
     if (istNow.getHours() < 3) {
       nextReset.setHours(3, 0, 0, 0);
     } else {
@@ -90,43 +146,17 @@ class LiveCircadianSessionService {
   }
 
   /**
-   * Checks if 03:00 AM IST has passed and rotates the circadian live session if needed.
-   * If rotated:
-   * 1. Safely archives the previous day's session via memoryEngine.finalizeSession.
-   * 2. Starts a fresh new day session.
-   * 3. Leaves all permanent memories (Vault, Profile, Vector Store) completely intact.
+   * 3:00 AM IST check:
+   * Boss live session is EXEMPT from auto-reset per Boss mandate.
+   * It only resets when Boss explicitly types or speaks 'new session'.
    */
-  public async checkAndRotateCircadianCycle(ai?: GoogleGenAI): Promise<boolean> {
+  public async checkAndRotateCircadianCycle(_ai?: GoogleGenAI): Promise<boolean> {
     const currentCycle = this.getCircadianCycleId();
-    if (currentCycle === this.activeCycleId) {
-      return false; // Still within the same circadian day cycle
+    if (currentCycle !== this.activeCycleId) {
+      this.activeCycleId = currentCycle;
+      console.log(`[LiveCircadianSession] 🌅 03:00 AM IST Day Cycle is now: ${currentCycle}. Boss continuous live session remains active.`);
     }
-
-    const previousCycle = this.activeCycleId;
-    const previousSessionId = `live_boss_${previousCycle}`;
-    const newSessionId = `live_boss_${currentCycle}`;
-
-    console.log(`[LiveCircadianSession] 🌅 03:00 AM IST Circadian Day Rollover detected!`);
-    console.log(`[LiveCircadianSession] Archiving yesterday's live session (${previousSessionId}) and initializing today's session (${newSessionId})...`);
-
-    const effectiveAi = ai || this.geminiAi;
-
-    try {
-      // Finalize and archive yesterday's live session (generates summary, stores in Firestore, vectors)
-      await memoryEngine.finalizeSession(previousSessionId, effectiveAi);
-      console.log(`[LiveCircadianSession] ✅ Yesterday's live session ${previousSessionId} safely archived.`);
-    } catch (e: any) {
-      console.warn(`[LiveCircadianSession] Notice while archiving previous session ${previousSessionId}:`, e?.message || e);
-    }
-
-    // Switch active cycle
-    this.activeCycleId = currentCycle;
-
-    // Start fresh circadian session in memoryEngine
-    memoryEngine.startSession(newSessionId);
-    console.log(`[LiveCircadianSession] ✨ Fresh Live Circadian Day Session initialized: ${newSessionId}`);
-
-    return true;
+    return false;
   }
 
   /**
@@ -197,16 +227,17 @@ class LiveCircadianSessionService {
 
     return `
 ============================================================
-TODAY'S ACTIVE LIVE VOICE SESSION (03:00 AM IST CIRCADIAN CYCLE):
-• Active Day Cycle ID: ${this.activeCycleId} (Runs 03:00 AM to 02:59:59 AM next morning)
-• Next Scheduled 3:00 AM Reset: in ${resetInfo.humanHoursRemaining} (${resetInfo.nextResetDateIST})
-• Total Spoken Turns Today: ${turns.length}
+BOSS'S ACTIVE CONTINUOUS LIVE VOICE SESSION:
+• Active Live Session ID: ${this.activeSessionId}
+• Continuity Mode: Continuous across days & 3:00 AM (Owner Mandate: Never auto-resets at 3:00 AM)
+• Explicit Reset Rule: This live session ONLY resets when Boss explicitly speaks or writes "new session" / "naya session"!
+• Total Spoken Turns in Session: ${turns.length}
 
-🗣️ RECENT TURNS SPOKEN TODAY IN THIS ACTIVE LIVE SESSION:
-${turnsText ? turnsText : "(No prior spoken turns yet today in this circadian cycle — this is the first interaction of the day)"}
+🗣️ RECENT SPOKEN TURNS IN THIS ACTIVE LIVE SESSION:
+${turnsText ? turnsText : "(No prior spoken turns yet recorded in this active session)"}
 
 ⚡ CONVERSATIONAL CONTINUITY MANDATE (ZERO AMNESIA LAW):
-1. The dialogue above represents what Boss DK and Friday discussed earlier today in this live session!
+1. The dialogue above represents what Boss DK and Friday discussed earlier in this session!
 2. Boss often gives short follow-ups like:
    • "haan", "nahi", "haa kal ka batao"
    • "aur batao", "phir kya hua"
@@ -214,6 +245,7 @@ ${turnsText ? turnsText : "(No prior spoken turns yet today in this circadian cy
    • "meri baat suno", "wahi jo pucha tha"
 3. NEVER say generic filler like "Haan boss kuch kaam hai kya?" when Boss responds with "haan" or "nahi"!
 4. IMMEDIATELY connect Boss's follow-up to the latest question or pending topic from the turns above and answer smoothly and helpfully.
+5. If Boss explicitly speaks "new session" or "naya session", enthusiastically confirm that a fresh new session has started!
 ============================================================`.trim();
   }
 
@@ -230,19 +262,17 @@ ${turnsText ? turnsText : "(No prior spoken turns yet today in this circadian cy
       sessionId,
       turnCount: session?.messages.length || 0,
       startTime: session?.startTime || Date.now(),
+      autoResetAt3Am: false,
+      mode: "continuous_until_explicit_new_session_command",
       nextReset: resetInfo,
     };
   }
 
   /**
-   * Manual trigger for testing or admin override.
+   * Manual trigger or voice command execution.
    */
-  public async forceResetSession(ai?: GoogleGenAI): Promise<void> {
-    const sessionId = this.getCurrentLiveSessionId();
-    console.log(`[LiveCircadianSession] Manual force reset triggered for ${sessionId}`);
-    await memoryEngine.finalizeSession(sessionId, ai || this.geminiAi);
-    this.activeCycleId = this.getCircadianCycleId();
-    memoryEngine.startSession(this.getCurrentLiveSessionId());
+  public async forceResetSession(ai?: GoogleGenAI): Promise<string> {
+    return await this.forceNewSession(ai);
   }
 }
 

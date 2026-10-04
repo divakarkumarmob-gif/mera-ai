@@ -47,11 +47,33 @@ export class WhatsAppBossAiEngine {
     console.log(`[WhatsAppBossAI] 🔄 Boss active working session reset. Permanent memories remain fully intact.`);
   }
 
+  /**
+   * Resets active working sessions for non-boss contacts only, keeping Boss's session continuous.
+   */
+  public resetNonBossSessions(): void {
+    const ownerPhone = (process.env.OWNER_WHATSAPP_NUMBER || process.env.BOSS_WHATSAPP_NUMBER || "").replace(/\D/g, "");
+    for (const key of Array.from(this.activeBossSessions.keys())) {
+      const isBoss = key === "boss_dk" || (ownerPhone && key.includes(ownerPhone.slice(-10)));
+      if (!isBoss) {
+        this.activeBossSessions.delete(key);
+      }
+    }
+    console.log(`[WhatsAppBossAI] 🔄 Non-boss working sessions reset at 3:00 AM. Boss session remains continuous.`);
+  }
+
   public getActiveSessionInfo(replyJid = ""): { hasActiveSession: boolean; cycleId?: string; lastActive?: number; model?: string } {
     const sessionKey = replyJid || "boss_dk";
     const s = this.activeBossSessions.get(sessionKey);
     if (!s) return { hasActiveSession: false };
     return { hasActiveSession: true, cycleId: s.cycleId, lastActive: s.lastActive, model: s.model };
+  }
+
+  public getAllActiveSessions(): Map<string, { cycleId: string; lastActive: number; model: string }> {
+    const map = new Map<string, { cycleId: string; lastActive: number; model: string }>();
+    this.activeBossSessions.forEach((val, key) => {
+      map.set(key, { cycleId: val.cycleId, lastActive: val.lastActive, model: val.model });
+    });
+    return map;
   }
 
   public setCallTriggerCallback(cb: (data: { callerName: string; isOwner: boolean; callId: string }) => void) {
@@ -82,6 +104,15 @@ export class WhatsAppBossAiEngine {
     if (messageText.trim().startsWith("[Reaction:") || /^\[Reaction/i.test(messageText.trim()) || isSingleReactionEmoji) {
       console.log(`[WhatsAppBossAI] Boss sent reaction "${messageText.trim()}" — remaining silent per Boss directive.`);
       return "";
+    }
+
+    // 0. Explicit 'New Session' Command for Boss (Owner mandate: Session only resets when explicitly written or spoken)
+    const isNewSessionCmd = /^(?:new\s*session|start\s*new\s*session|naya\s*session|reset\s*session|fresh\s*session|session\s*reset|\/newsession|\/reset|@newsession|@reset)$/i.test(messageText.trim()) ||
+      /\b(new\s*session\s*start|start\s*fresh\s*session|naya\s*session\s*shuru)\b/i.test(messageText.trim());
+
+    if (isNewSessionCmd) {
+      this.resetBossSession(replyJid);
+      return `Boss, aapka conversation session successfully reset kar diya gaya hai! 🔄\n\nPichli saari baatein memory me safely archive ho chuki hain aur aapka Personal Vault 100% intact hai.\nAb hum bilkul fresh naye session me hain. Kahiye Boss, kya hukum hai? ⚡`;
     }
 
     // Boss Deletion 2FA Approval Check
@@ -3085,10 +3116,13 @@ ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` 
       promptTurnMessage = `${subtextSnippet}\n${messageText}`;
     }
 
-    // ── Phase 1: Try Existing Active Circadian Session (Continuous from 03:00 AM to 02:59 AM) ──
-    if (existingSession && existingSession.cycleId === currentCycleId && existingSession.mode === currentMode) {
+    // ── Phase 1: Try Existing Active Session (Continuous across 03:00 AM for Boss until 'new session' command) ──
+    const ownerPhone = (process.env.OWNER_WHATSAPP_NUMBER || process.env.BOSS_WHATSAPP_NUMBER || "").replace(/\D/g, "");
+    const isBossUser = sessionKey === "boss_dk" || !replyJid || replyJid.includes("boss") || (ownerPhone && sessionKey.includes(ownerPhone.slice(-10)));
+
+    if (existingSession && (isBossUser || existingSession.cycleId === currentCycleId) && existingSession.mode === currentMode) {
       try {
-        console.log(`[WhatsAppBossAI] ⚡ Reusing active circadian session (${currentCycleId}) for Boss. Zero context amnesia across turns.`);
+        console.log(`[WhatsAppBossAI] ⚡ Reusing active continuous session (${existingSession.cycleId}) for Boss. Zero context amnesia across turns.`);
         const reply = await processChatTurn(existingSession.chat, promptTurnMessage);
         if (reply) {
           existingSession.lastActive = Date.now();
