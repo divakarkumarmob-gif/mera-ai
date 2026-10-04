@@ -13,6 +13,12 @@
  *    - 'public': Uses tertiary/public keys (Groups & stranger auto-replies).
  * 5. Automatic 429 Quarantine & Instant Rerouting: If Google still throttles, quarantine for 60s and reroute.
  * 6. Daily Quota Guard (1500 RPD free tier envelope).
+ *
+ * === DEDICATED KEY BUCKETS (3-Key Architecture) ===
+ * GEMINI_API_KEY_WHATSAPP  → Key #1: Sirf WhatsApp conversations ke liye
+ * GEMINI_API_KEY_FRIDAY    → Key #2: Friday Live responses + Tool calls ke liye
+ * GEMINI_API_KEY_MEMORY    → Key #3: Memory, learning, background tasks ke liye
+ * GEMINI_API_KEY / GEMINI_API_KEYS → General pool (fallback if dedicated key missing)
  */
 
 import { GoogleGenAI } from "@google/genai";
@@ -624,3 +630,71 @@ export class GeminiKeyPoolService {
 }
 
 export const geminiKeyPoolService = new GeminiKeyPoolService();
+
+// ---------------------------------------------------------------------------
+// === DEDICATED 3-KEY SERVICE BUCKETS ===
+//
+// Har service ka apna dedicated Gemini key hai:
+//   GEMINI_API_KEY_WHATSAPP  → WhatsApp conversations
+//   GEMINI_API_KEY_FRIDAY    → Friday Live + Tool calls
+//   GEMINI_API_KEY_MEMORY    → Memory, learning, nightly dreaming
+//
+// Agar dedicated key set nahi hai toh automatically general pool se fallback.
+// ---------------------------------------------------------------------------
+
+import { GoogleGenAI as _GoogleGenAI } from "@google/genai";
+
+function _makeClient(key: string): _GoogleGenAI {
+  return new _GoogleGenAI({ apiKey: key });
+}
+
+function _resolveKey(dedicatedEnvVar: string): string {
+  const dedicated = (process.env[dedicatedEnvVar] || "").trim();
+  if (dedicated && dedicated.length > 10) return dedicated;
+  // Fallback: general pool ka pehla key
+  return geminiKeyPoolService.getPrimaryApiKey();
+}
+
+/** Dedicated client + key for WhatsApp conversations */
+export function getWhatsAppGeminiKey(): string {
+  return _resolveKey("GEMINI_API_KEY_WHATSAPP");
+}
+export function getWhatsAppGeminiClient(): _GoogleGenAI {
+  return _makeClient(getWhatsAppGeminiKey());
+}
+
+/** Dedicated client + key for Friday Live responses & Tool calls */
+export function getFridayGeminiKey(): string {
+  return _resolveKey("GEMINI_API_KEY_FRIDAY");
+}
+export function getFridayGeminiClient(): _GoogleGenAI {
+  return _makeClient(getFridayGeminiKey());
+}
+
+/** Dedicated client + key for Memory, learning, background tasks */
+export function getMemoryGeminiKey(): string {
+  return _resolveKey("GEMINI_API_KEY_MEMORY");
+}
+export function getMemoryGeminiClient(): _GoogleGenAI {
+  return _makeClient(getMemoryGeminiKey());
+}
+
+/**
+ * Universal helper: service naam de, correct Gemini client aur key milega.
+ * @param service - "whatsapp" | "friday" | "memory" | "general"
+ */
+export function getKeyForService(service: "whatsapp" | "friday" | "memory" | "general"): {
+  client: _GoogleGenAI;
+  apiKey: string;
+} {
+  switch (service) {
+    case "whatsapp":
+      return { client: getWhatsAppGeminiClient(), apiKey: getWhatsAppGeminiKey() };
+    case "friday":
+      return { client: getFridayGeminiClient(), apiKey: getFridayGeminiKey() };
+    case "memory":
+      return { client: getMemoryGeminiClient(), apiKey: getMemoryGeminiKey() };
+    default:
+      return { client: geminiKeyPoolService.getPrimaryClient(), apiKey: geminiKeyPoolService.getPrimaryApiKey() };
+  }
+}

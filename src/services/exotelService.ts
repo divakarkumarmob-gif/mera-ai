@@ -340,8 +340,9 @@ class ExotelService {
    * 3. Friday Brain Voice Dialogue Generator with Model Fallback Chain
    */
   private async generateFridayVoiceResponse(userInput: string, session: ExotelCallSession): Promise<string> {
-    const apiKey = process.env.GEMINI_API_KEY?.trim();
-    if (!apiKey) {
+    const { getFridayGeminiKey } = await import("./geminiKeyPoolService");
+    const apiKey = getFridayGeminiKey();
+    if (!apiKey || apiKey === "placeholder-gemini-key") {
       return "जी Boss, मैंने आपकी बात नोट कर ली है। मैं आपकी क्या मदद करूँ?";
     }
 

@@ -52,8 +52,9 @@ class WhatsAppFeatureEngine {
   ];
 
   private async callGeminiWithFallback(prompt: string, timeoutMs = 9000): Promise<string | null> {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) return null;
+    const { getWhatsAppGeminiKey } = await import("./geminiKeyPoolService");
+    const apiKey = getWhatsAppGeminiKey();
+    if (!apiKey || apiKey === "placeholder-gemini-key") return null;
     const ai = new GoogleGenAI({ apiKey });
 
     const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T> =>

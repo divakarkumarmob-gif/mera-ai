@@ -135,8 +135,9 @@ class UnifiedMemoryService {
     messageText: string,
     source: "whatsapp" | "telegram" | "live_ui"
   ): Promise<void> {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) return;
+    const { getMemoryGeminiKey } = await import("./geminiKeyPoolService");
+    const apiKey = getMemoryGeminiKey();
+    if (!apiKey || apiKey === "placeholder-gemini-key") return;
 
     // Security: JSON-escape messageText to prevent prompt injection payload breakout
     const sanitizedMessage = JSON.stringify(messageText);
@@ -503,12 +504,13 @@ ${waTranscript || "No recent cross-platform messages."}
       this.listAllFacts(),
     ]);
 
-    const apiKey = process.env.GEMINI_API_KEY;
+    const { getMemoryGeminiKey } = await import("./geminiKeyPoolService");
+    const apiKey = getMemoryGeminiKey();
     let summary = `Consolidated memory replay for ${todayStr}. Active tracking across WhatsApp & Telegram.`;
     let keyEvents: string[] = [];
     let bossMoodInsights = "Focused and productive.";
 
-    if (apiKey) {
+    if (apiKey && apiKey !== "placeholder-gemini-key") {
       try {
         const ai = new GoogleGenAI({ apiKey });
         const waText = waRes.map((m) => `${m.senderName}: ${m.text}`).join("\n");

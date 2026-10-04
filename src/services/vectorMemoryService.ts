@@ -60,8 +60,9 @@ class VectorMemoryService {
     const cleanText = text?.trim() || "";
     if (!cleanText) return this.generateLocalFallbackEmbedding("empty");
 
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (apiKey) {
+    const { getMemoryGeminiKey } = await import("./geminiKeyPoolService");
+    const apiKey = getMemoryGeminiKey();
+    if (apiKey && apiKey !== "placeholder-gemini-key") {
       try {
         const ai = new GoogleGenAI({ apiKey });
 

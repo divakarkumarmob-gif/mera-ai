@@ -19,8 +19,9 @@ class NightlyDreamingService {
    * Consolidates the day's conversations, life stories, and memories into deep episodic wisdom.
    */
   public async runNightlyConsolidation(forcedDate?: string): Promise<NightlyDreamInsight | null> {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) return null;
+    const { getMemoryGeminiKey } = await import("./geminiKeyPoolService");
+    const apiKey = getMemoryGeminiKey();
+    if (!apiKey || apiKey === "placeholder-gemini-key") return null;
 
     const dateStr = forcedDate || new Date().toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" });
     const ai = new GoogleGenAI({ apiKey });
