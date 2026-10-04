@@ -298,7 +298,9 @@ export class WhatsAppBossAiEngine {
 
     const { bossDirectivesService } = await import("../bossDirectivesService");
     const { fridayChildTrainingService } = await import("../fridayChildTrainingService");
+    const { contactsService } = await import("../contactsService");
     const directivesContext = await bossDirectivesService.compileDirectivesPrompt();
+    const contactsListContext = await contactsService.compileContactsForPrompt();
     const trainingLessonsContext = await fridayChildTrainingService.compileTrainingPrompt(messageText);
     const memoryContext = await memoryEngine.compileLeanMemoryPrompt();
     const { chatGptMemoryEngine } = await import("../chatGptMemoryEngine");
@@ -778,6 +780,18 @@ ${recentChatMedia.ocrText ? `- Extracted OCR Text: ${recentChatMedia.ocrText}` :
             relation: { type: "STRING", description: "Relationship (e.g. 'girlfriend', 'bestfriend', 'friend', 'brother', 'sister', 'family')" },
           },
           required: ["contactNameOrPhone", "relation"],
+        },
+      },
+      {
+        name: "list_contacts",
+        description: "List or search all contacts, friends, family members, and saved phone numbers in DK's contacts book. Use when Boss asks 'mere dost kaun kaun hain', 'mere contacts dikhao', 'dosto ke naam batao', 'list contacts', 'kiska number save hai', or queries any saved relationship.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            query: { type: "STRING", description: "Optional name, keyword, or relationship to search (e.g. 'Rahul', 'dost', 'friend', 'family')" },
+            relation: { type: "STRING", description: "Optional relation filter (e.g. 'dost', 'friend', 'brother', 'girlfriend', 'family')" },
+          },
+          required: [],
         },
       },
       {
@@ -1873,6 +1887,9 @@ RULE: You MUST FIRST read and understand the PREVIOUS QUOTED MESSAGE, and THEN a
 BOSS IDENTITY & MEMORY:
 ${directivesContext}
 
+DK'S CONTACTS BOOK & RELATIONSHIPS (Friends, Family & Contacts):
+${contactsListContext}
+
 ${trainingLessonsContext}
 
 ${memoryContext}
@@ -2392,6 +2409,33 @@ This format MUST be used:
           return updated
             ? { success: true, message: `Relationship for ${updated.name} successfully updated to "${args.relation}". Friday will treat them with special tailored warmth!` }
             : { success: false, message: `Contact "${args.contactNameOrPhone}" not found to update relation.` };
+        }
+
+        if (toolName === "list_contacts") {
+          const { contactsService } = await import("../contactsService");
+          const all = await contactsService.getAllContacts();
+          let filtered = all.filter((c) => c.id !== "owner_default" && c.id !== "temp");
+          if (args.relation) {
+            const r = String(args.relation).toLowerCase().trim();
+            filtered = filtered.filter((c) => c.relation && c.relation.toLowerCase().includes(r));
+          }
+          if (args.query) {
+            const q = String(args.query).toLowerCase().trim();
+            filtered = filtered.filter((c) =>
+              (c.name && c.name.toLowerCase().includes(q)) ||
+              (c.relation && c.relation.toLowerCase().includes(q)) ||
+              (c.phone && c.phone.includes(q))
+            );
+          }
+          return {
+            total: filtered.length,
+            contacts: filtered.map((c) => ({
+              name: c.name,
+              phone: c.phone,
+              relation: c.relation || "Contact",
+              dateAdded: c.dateAdded,
+            })),
+          };
         }
 
         if (toolName === "set_boss_full_routine") {

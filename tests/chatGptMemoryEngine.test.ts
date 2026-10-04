@@ -23,4 +23,13 @@ describe("ChatGPT-Style Lifelong Memory Engine", () => {
     const recall = await chatGptMemoryEngine.recallRelevantMemories("Main Patna ja raha hoon ghumne");
     expect(typeof recall).toBe("string");
   });
+
+  it("should recall contacts and relationships when asked about friends/dost", async () => {
+    const { contactsService } = await import("../src/services/contactsService");
+    await contactsService.saveContact("Rohan TestFriend", "9876543210", "dost");
+    const recall = await chatGptMemoryEngine.recallRelevantMemories("mera dost kaun kaun h");
+    expect(recall).toContain("Rohan TestFriend");
+    expect(recall).toContain("dost");
+    await contactsService.deleteContact("Rohan TestFriend");
+  });
 });

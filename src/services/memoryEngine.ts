@@ -620,8 +620,8 @@ ${transcript}`;
 
     try {
       const [vaultSnap, pinnedSnap, profileSnap, recentSessionsSnap, recentTurns, recentSummaries] = await Promise.all([
-        vaultCol().limit(25).get(),
-        pinnedCol().orderBy("timestamp", "desc").limit(15).get(),
+        vaultCol().limit(100).get(),
+        pinnedCol().orderBy("timestamp", "desc").limit(50).get(),
         profileDoc().get(),
         sessionsCol().orderBy("startTime", "desc").limit(5).get().catch(() => ({ docs: [], empty: true } as any)),
         liveScratchService.getRecentScratchTurns(48).catch(() => []),

@@ -32,15 +32,31 @@ class ContactsService {
 
     let id = Math.random().toString(36).substring(2, 9);
 
-    // Try finding existing contact in Firestore or memory by name OR by phone
+    // 1. Check in-memory cache first for instant hit without waiting for Firestore
+    for (const [memId, c] of this.inMemoryContacts.entries()) {
+      const cPhone10 = (c.phone || "").replace(/\D/g, "").slice(-10);
+      if ((cleanName && c.name.toLowerCase() === cleanName.toLowerCase()) || (last10.length === 10 && cPhone10 === last10)) {
+        id = memId;
+        if (!normalizedPhone && c.phone) normalizedPhone = c.phone;
+        if (cleanName === "Contact" && c.name) cleanName = c.name;
+        if (!cleanRelation && c.relation) cleanRelation = c.relation;
+        break;
+      }
+    }
+
+    // 2. Try Firestore with a quick timeout fallback
     try {
       if (cleanName && cleanName.toLowerCase() !== "contact") {
-        const existingSnap = await contactsCollection()
+        const snapPromise = contactsCollection()
           .where("nameLower", "==", cleanName.toLowerCase())
           .limit(1)
           .get();
+        const existingSnap = await Promise.race([
+          snapPromise,
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Timeout")), 1000)),
+        ]);
 
-        if (!existingSnap.empty) {
+        if (existingSnap && !existingSnap.empty) {
           id = existingSnap.docs[0].id;
           const oldData = existingSnap.docs[0].data() as ContactEntry;
           if (!normalizedPhone && oldData.phone) normalizedPhone = oldData.phone;
@@ -49,12 +65,16 @@ class ContactsService {
       }
 
       if (last10.length === 10) {
-        const existingPhoneSnap = await contactsCollection()
+        const snapPromise = contactsCollection()
           .where("phoneLast10", "==", last10)
           .limit(1)
           .get();
+        const existingPhoneSnap = await Promise.race([
+          snapPromise,
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Timeout")), 1000)),
+        ]);
 
-        if (!existingPhoneSnap.empty) {
+        if (existingPhoneSnap && !existingPhoneSnap.empty) {
           id = existingPhoneSnap.docs[0].id;
           const oldData = existingPhoneSnap.docs[0].data() as ContactEntry;
           if (cleanName === "Contact" && oldData.name) cleanName = oldData.name;
@@ -62,17 +82,7 @@ class ContactsService {
         }
       }
     } catch {
-      // Memory fallback lookup
-      for (const [memId, c] of this.inMemoryContacts.entries()) {
-        const cPhone10 = (c.phone || "").replace(/\D/g, "").slice(-10);
-        if ((cleanName && c.name.toLowerCase() === cleanName.toLowerCase()) || (last10.length === 10 && cPhone10 === last10)) {
-          id = memId;
-          if (!normalizedPhone && c.phone) normalizedPhone = c.phone;
-          if (cleanName === "Contact" && c.name) cleanName = c.name;
-          if (!cleanRelation && c.relation) cleanRelation = c.relation;
-          break;
-        }
-      }
+      // Memory fallback lookup already performed above
     }
 
     const entry: ContactEntry = {
@@ -238,13 +248,17 @@ class ContactsService {
    * Retrieves all contacts, merging Firestore results and local memory cache.
    */
   public async getAllContacts(forceRefresh = false): Promise<ContactEntry[]> {
-    if (this.isHydrated && !forceRefresh && this.inMemoryContacts.size > 0) {
+    if (!forceRefresh && this.inMemoryContacts.size > 0) {
       return Array.from(this.inMemoryContacts.values()).sort((a, b) => b.timestamp - a.timestamp);
     }
 
     let contacts: ContactEntry[] = [];
     try {
-      const snap = await contactsCollection().orderBy("timestamp", "desc").get();
+      const snapPromise = contactsCollection().orderBy("timestamp", "desc").get();
+      const snap = await Promise.race([
+        snapPromise,
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Contacts Firestore timeout")), 1500)),
+      ]);
       contacts = snap.docs.map((d) => this.stripInternal(d.data()));
       this.isHydrated = true;
     } catch {
