@@ -232,14 +232,21 @@ class ContactsService {
     }
   }
 
+  private isHydrated = false;
+
   /**
    * Retrieves all contacts, merging Firestore results and local memory cache.
    */
-  public async getAllContacts(): Promise<ContactEntry[]> {
+  public async getAllContacts(forceRefresh = false): Promise<ContactEntry[]> {
+    if (this.isHydrated && !forceRefresh && this.inMemoryContacts.size > 0) {
+      return Array.from(this.inMemoryContacts.values()).sort((a, b) => b.timestamp - a.timestamp);
+    }
+
     let contacts: ContactEntry[] = [];
     try {
       const snap = await contactsCollection().orderBy("timestamp", "desc").get();
       contacts = snap.docs.map((d) => this.stripInternal(d.data()));
+      this.isHydrated = true;
     } catch {
       contacts = Array.from(this.inMemoryContacts.values()).sort((a, b) => b.timestamp - a.timestamp);
     }

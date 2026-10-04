@@ -132,6 +132,29 @@ const MAX_CACHED_LOCATION_AGE_MS = 48 * 60 * 60 * 1000; // 48 hours - cached pos
 const locationRamCache = new Map<string, DeviceLocationEntry>();  // key = deviceId
 const ramCacheIndex    = new Map<string, string>();               // key = alias → deviceId
 
+interface PersistedLocationState {
+  lat: number;
+  lon: number;
+  lastPersistedAt: number;
+  address?: string;
+}
+
+const lastPersistedLocationMap = new Map<string, PersistedLocationState>();
+
+function calculateDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
 function isApkDevice(entry: DeviceLocationEntry): boolean {
   const id = (entry.deviceId || '').toLowerCase();
   // ONLY check deviceId — labels like 'Boss Phone' are NOT reliable
@@ -470,16 +493,7 @@ class DeviceLocationTrackerService {
     if (data.isCharging !== undefined) updateData.isCharging = data.isCharging;
     if (data.networkType !== undefined) updateData.networkType = data.networkType;
 
-    try {
-      // Save coordinates immediately so they're never lost
-      await locationsCollection().doc(deviceId).set(updateData, { merge: true });
-      console.log(`[LocationTracker] ✅ Ping saved: deviceId=${deviceId}, lat=${lat}, lon=${lon}`);
-    } catch (err: any) {
-      console.error("[LocationTracker] ❌ Firestore write FAILED for ping:", err?.message || err);
-      // Even if Firestore fails, still update RAM cache so queries work!
-    }
-
-    // ⭐ Always update RAM cache immediately (works even if Firestore fails)
+    // ⭐ 1. Always update RAM cache immediately so all real-time voice & UI queries work with 0ms latency
     updateRamCache({
       deviceId,
       label: (data.label || "Boss").trim(),
@@ -499,18 +513,48 @@ class DeviceLocationTrackerService {
       isCachedLastKnown: isCached,
     });
 
-    // Async geocoding — update address in background (non-blocking)
-    this.reverseGeocode(lat, lon).then(async (address) => {
-      try {
-        await locationsCollection().doc(deviceId).update({ address });
-        // Also update RAM cache with real address
-        updateRamCache({ ...locationRamCache.get(deviceId.toLowerCase()) ?? {}, deviceId, label: (data.label || "Boss").trim(), ownerName: (data.label || "Boss").trim(), username: (data.username || "").toLowerCase(), lat, lon, accuracy: data.accuracy || 0, altitude: data.altitude ?? null, speed: data.speed ?? null, heading: data.heading ?? null, address, lastUpdatedAt: now, registeredAt: now, batteryLevel: data.batteryLevel ?? null, isCharging: data.isCharging ?? null, networkType: data.networkType ?? null });
-        savePingToTelegram((data.label || "Boss").trim(), lat, lon, address, now).catch(() => {});
-      } catch { /* non-critical */ }
-    }).catch(() => {
-      // geocoding failed — still save to TG with coordinate-based address
-      savePingToTelegram((data.label || "Boss").trim(), lat, lon, fallbackAddress, now).catch(() => {});
-    });
+    // ⭐ 2. Intelligent Firestore write throttling (Preserves free quota on Spark/Render):
+    // Only write to Firestore if:
+    // a) Device moved >= 50 meters, OR
+    // b) > 15 minutes passed since last Firestore write (heartbeat)
+    const devKey = deviceId.toLowerCase();
+    const lastPersisted = lastPersistedLocationMap.get(devKey);
+    const distMoved = lastPersisted
+      ? calculateDistanceMeters(lastPersisted.lat, lastPersisted.lon, lat, lon)
+      : Infinity;
+    const timeSinceLastPersist = lastPersisted
+      ? now - lastPersisted.lastPersistedAt
+      : Infinity;
+
+    const shouldPersist = !lastPersisted || distMoved >= 50 || timeSinceLastPersist >= 15 * 60 * 1000;
+
+    if (shouldPersist) {
+      // Fetch address and write coordinates + address together in a SINGLE operation (saving 50% writes)
+      this.reverseGeocode(lat, lon).then(async (resolvedAddress) => {
+        const finalAddress = resolvedAddress || fallbackAddress;
+        updateData.address = finalAddress;
+        try {
+          await locationsCollection().doc(deviceId).set(updateData, { merge: true });
+          lastPersistedLocationMap.set(devKey, { lat, lon, lastPersistedAt: now, address: finalAddress });
+          updateRamCache({
+            ...(locationRamCache.get(devKey) ?? {}),
+            ...updateData,
+            deviceId,
+            address: finalAddress,
+          });
+          console.log(`[LocationTracker] 📍 Persisted to Firestore (${distMoved === Infinity ? "new device" : distMoved.toFixed(0) + "m moved"}): ${deviceId} -> ${finalAddress}`);
+        } catch (err: any) {
+          console.error("[LocationTracker] ❌ Firestore write failed:", err?.message || err);
+        }
+      }).catch(async () => {
+        try {
+          await locationsCollection().doc(deviceId).set(updateData, { merge: true });
+          lastPersistedLocationMap.set(devKey, { lat, lon, lastPersistedAt: now, address: fallbackAddress });
+        } catch {}
+      });
+    } else {
+      console.log(`[LocationTracker] 🔋 Stationary: ${distMoved.toFixed(0)}m < 50m (${Math.round(timeSinceLastPersist / 1000)}s ago) — skipping Firestore write (RAM cache updated).`);
+    }
 
     return { success: true, message: "Location ping received." };
   }

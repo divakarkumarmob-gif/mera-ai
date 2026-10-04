@@ -43,6 +43,34 @@ export interface LiveCallSession {
 
 class WhatsAppFeatureEngine {
   private activeCallSessions = new Map<string, LiveCallSession>();
+  private inMemoryScheduled = new Map<string, ScheduledMessageDoc>();
+  private isScheduledHydrated = false;
+  private scheduledHydratePromise: Promise<void> | null = null;
+
+  public async ensureScheduledHydrated(): Promise<void> {
+    if (this.isScheduledHydrated) return;
+    if (this.scheduledHydratePromise) return this.scheduledHydratePromise;
+
+    this.scheduledHydratePromise = (async () => {
+      try {
+        const snap = await scheduledCol()
+          .where("status", "==", "pending")
+          .limit(50)
+          .get();
+        snap.docs.forEach((d) => {
+          const item = d.data() as ScheduledMessageDoc;
+          this.inMemoryScheduled.set(item.id, item);
+        });
+        this.isScheduledHydrated = true;
+      } catch (err) {
+        console.warn("[FeatureEngine] Failed to hydrate scheduled messages:", err);
+      } finally {
+        this.scheduledHydratePromise = null;
+      }
+    })();
+
+    return this.scheduledHydratePromise;
+  }
 
   private static readonly MODEL_CHAIN = [
     "gemini-3.1-flash-lite",
@@ -265,6 +293,7 @@ OUTPUT RULES:
       createdAt: now,
     };
 
+    this.inMemoryScheduled.set(docId, schedDoc);
     await scheduledCol().doc(docId).set(schedDoc);
 
     return {
@@ -277,30 +306,33 @@ OUTPUT RULES:
     sendFn: (toPhone: string, text: string) => Promise<any>
   ): Promise<number> {
     try {
+      await this.ensureScheduledHydrated();
+      if (this.inMemoryScheduled.size === 0) return 0;
+
       const now = Date.now();
-      // Query single field 'status' only so Firestore never requires a composite index
-      const snap = await scheduledCol()
-        .where("status", "==", "pending")
-        .limit(25)
-        .get();
-
-      if (snap.empty) return 0;
-
       let count = 0;
-      for (const doc of snap.docs) {
-        const item = doc.data() as ScheduledMessageDoc;
-        // Check if scheduled time has arrived in memory
+
+      for (const [id, item] of this.inMemoryScheduled.entries()) {
+        if (item.status !== "pending") {
+          this.inMemoryScheduled.delete(id);
+          continue;
+        }
         if (item.scheduledForTs && item.scheduledForTs > now) {
           continue; // Not yet time to deliver
         }
+
         try {
           console.log(`[FeatureEngine] Delivering scheduled message to ${item.recipientName} (+${item.recipientPhone})...`);
           await sendFn(item.recipientPhone, item.messageText);
-          await doc.ref.update({ status: "sent", sentAt: Date.now() });
+          item.status = "sent";
+          this.inMemoryScheduled.delete(id);
+          await scheduledCol().doc(id).update({ status: "sent", sentAt: Date.now() }).catch(() => {});
           count++;
         } catch (err) {
           console.error(`[FeatureEngine] Failed to deliver scheduled msg ${item.id}:`, err);
-          await doc.ref.update({ status: "failed", error: String(err) });
+          item.status = "failed";
+          this.inMemoryScheduled.delete(id);
+          await scheduledCol().doc(id).update({ status: "failed", error: String(err) }).catch(() => {});
         }
       }
       return count;

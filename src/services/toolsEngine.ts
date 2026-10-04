@@ -61,6 +61,32 @@ const notesCollection = () => db.collection("notes");
 class ToolsEngine {
   private inMemoryReminders = new Map<string, ReminderItem>();
   private inMemoryNotes = new Map<string, NoteItem>();
+  private isRemindersHydrated = false;
+  private remindersHydratePromise: Promise<void> | null = null;
+
+  public async ensureRemindersHydrated(): Promise<void> {
+    if (this.isRemindersHydrated) return;
+    if (this.remindersHydratePromise) return this.remindersHydratePromise;
+
+    this.remindersHydratePromise = (async () => {
+      try {
+        const snap = await remindersCollection()
+          .where("isCompleted", "==", false)
+          .get();
+        snap.docs.forEach((d) => {
+          const item = d.data() as ReminderItem;
+          this.inMemoryReminders.set(item.id, item);
+        });
+        this.isRemindersHydrated = true;
+      } catch (err) {
+        console.warn("[ToolsEngine] Failed to hydrate reminders from Firestore:", err);
+      } finally {
+        this.remindersHydratePromise = null;
+      }
+    })();
+
+    return this.remindersHydratePromise;
+  }
 
   /**
    * Parses a natural-language time string into a future IST timestamp.
@@ -195,30 +221,16 @@ class ToolsEngine {
   }
 
   public async getReminders(): Promise<ReminderItem[]> {
-    try {
-      const snap = await remindersCollection().orderBy("dueTimestamp", "asc").get();
-      const items = snap.docs.map((d) => d.data() as ReminderItem);
-      items.forEach((r) => this.inMemoryReminders.set(r.id, r));
-      return items;
-    } catch {
-      return Array.from(this.inMemoryReminders.values()).sort((a, b) => a.dueTimestamp - b.dueTimestamp);
-    }
+    await this.ensureRemindersHydrated();
+    return Array.from(this.inMemoryReminders.values()).sort((a, b) => a.dueTimestamp - b.dueTimestamp);
   }
 
-  /** Reminders whose due time has passed and haven't fired yet. */
+  /** Reminders whose due time has passed and haven't fired yet (RAM cache first, zero redundant Firestore reads). */
   public async getDueReminders(now = Date.now()): Promise<ReminderItem[]> {
-    try {
-      const snap = await remindersCollection()
-        .where("isCompleted", "==", false)
-        .get();
-      return snap.docs
-        .map((d) => d.data() as ReminderItem)
-        .filter((r) => r.dueTimestamp <= now);
-    } catch {
-      return Array.from(this.inMemoryReminders.values()).filter(
-        (r) => !r.isCompleted && r.dueTimestamp <= now
-      );
-    }
+    await this.ensureRemindersHydrated();
+    return Array.from(this.inMemoryReminders.values()).filter(
+      (r) => !r.isCompleted && r.dueTimestamp <= now
+    );
   }
 
   public async markReminderCompleted(id: string): Promise<void> {

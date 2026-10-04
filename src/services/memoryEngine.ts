@@ -62,6 +62,7 @@ const sessionsCol = () => db.collection("memory").doc("sessions").collection("en
 class MemoryEngine {
   private activeSessions: Map<string, ConversationSession> = new Map();
   private initPromise: Promise<void>;
+  private cachedLeanPrompt: { text: string; expiresAt: number } | null = null;
 
   constructor() {
     this.initPromise = this.ensureDefaultVaultEntry();
@@ -120,10 +121,12 @@ class MemoryEngine {
     } catch (e) {
       console.warn("[MemoryEngine] Failed to save pinned memory:", e);
     }
+    this.cachedLeanPrompt = null;
     return { success: true, id, fact: fact.trim() };
   }
 
   public async addVaultFact(category: string, fact: string): Promise<{ success: boolean; id: string; fact: string }> {
+    this.cachedLeanPrompt = null;
     const id = "vlt_" + Math.random().toString(36).substring(2, 9);
     const now = Date.now();
     const entry: PersonalVaultEntry = {
@@ -594,7 +597,12 @@ ${transcript}`;
    * Priority: Essential core vault facts, pinned memories, profile overview, and IMMEDIATE PRIOR CONVERSATIONS.
    * Ensures 100% memory continuity across reconnects and consecutive sessions.
    */
-  public async compileLeanMemoryPrompt(): Promise<string> {
+  public async compileLeanMemoryPrompt(forceRefresh = false): Promise<string> {
+    const now = Date.now();
+    if (!forceRefresh && this.cachedLeanPrompt && this.cachedLeanPrompt.expiresAt > now) {
+      return this.cachedLeanPrompt.text;
+    }
+
     await this.initPromise;
     const sections: string[] = [];
 
@@ -701,11 +709,12 @@ ${transcript}`;
       console.error("[MemoryEngine] Failed to compile lean memory prompt:", e);
     }
 
-    if (sections.length === 0) {
-      return "Core Profile: DK is your creator and Boss. You are Friday, his loyal AI companion.";
-    }
+    const result = sections.length === 0
+      ? "Core Profile: DK is your creator and Boss. You are Friday, his loyal AI companion."
+      : sections.join("\n\n");
 
-    return sections.join("\n\n");
+    this.cachedLeanPrompt = { text: result, expiresAt: Date.now() + 3 * 60 * 1000 };
+    return result;
   }
 
   /**
