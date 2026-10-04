@@ -22,6 +22,7 @@ import { whatsappGroupSuperPowersEngine } from "./whatsapp/whatsappGroupSuperPow
 import { whatsappSessionHealthEngine } from "./whatsapp/whatsappSessionHealthEngine";
 import { whatsappMetaAiBridgeEngine } from "./whatsapp/whatsappMetaAiBridgeEngine";
 import { girlfriendProfileService } from "./girlfriendProfileService";
+import { whatsappAlertDeskService } from "./whatsapp/whatsappAlertDeskService";
 
 export type { QuotedMessageContext, IncomingMessage, WhatsAppStatus };
 
@@ -637,14 +638,23 @@ class WhatsAppBotService {
 
       const alertCard = `📩 *Msg from ${senderLabel}:*\n"${(messageText || "").trim()}"`;
 
-      // Dispatch to Boss WhatsApp directly via Baileys socket
-      const ownerJid = `${ownerPhone}@s.whatsapp.net`;
+      // Dispatch to Alert Desk Group (or fallback to Boss WhatsApp 1v1 if Desk unavailable)
       if (this.sock && this.isConnected) {
-        const sent = await this.sock.sendMessage(ownerJid, { text: alertCard });
-        if (sent?.key?.id) {
-          this.botSentMessageIds.add(sent.key.id);
+        const relayed = await whatsappAlertDeskService.relayOutsiderMessageToDesk(this.sock, {
+          senderName,
+          senderPhone: cleanSender,
+          text: messageText,
+          isGroup: false,
+        });
+
+        if (!relayed) {
+          const ownerJid = `${ownerPhone}@s.whatsapp.net`;
+          const sent = await this.sock.sendMessage(ownerJid, { text: alertCard });
+          if (sent?.key?.id) {
+            this.botSentMessageIds.add(sent.key.id);
+          }
         }
-        console.log(`[WhatsAppBot] 📩 Relayed incoming message from ${senderLabel} to Boss WhatsApp.`);
+        console.log(`[WhatsAppBot] 📩 Relayed incoming message from ${senderLabel} to Alert Desk.`);
       }
     } catch (err) {
       console.warn("[WhatsAppBot] Failed to alert Boss of incoming message:", err);
@@ -1167,6 +1177,14 @@ class WhatsAppBotService {
                     });
                   } catch {}
 
+                  whatsappAlertDeskService.recordRawMedia(
+                    replyJid,
+                    { key: msg.key, message: realM || msg.message },
+                    isVideo ? "video" : isPhoto ? "photo" : isDoc ? "document" : "voice",
+                    caption,
+                    fileName
+                  );
+
                   const { visionMemoryService } = await import("./visionMemoryService");
 
                   if (isVoice) {
@@ -1424,6 +1442,38 @@ class WhatsAppBotService {
                     incoming.text = `${incoming.text} | AI Summary: ${analyzed.shortSummary}`;
                     whatsappHistoryEngine.saveToFirestore(incoming).catch(() => {});
                   }
+
+                  // ── Forward Media to Alert Desk if requested in caption ──
+                  const cleanCap = (caption || "").trim().toLowerCase();
+                  const isForwardMediaReq =
+                    !isSenderOwner &&
+                    /\b(?:bhej\s*(?:dena|do|dijiye|de)|forward|send\s*(?:kar|karo|do|karna)|de\s*dena)\b/i.test(cleanCap) &&
+                    /\b(?:boss|dk|divakar|owner|unko|unhe|sir|isko|ye)\b/i.test(cleanCap);
+
+                  if (isForwardMediaReq && this.sock) {
+                    await whatsappAlertDeskService.forwardMediaToDesk(this.sock, {
+                      senderName,
+                      senderPhone,
+                      sourceName: isGroup ? (groupName || "WhatsApp Group") : "Direct 1-on-1 Chat",
+                      userNote: caption,
+                      timestamp: ts,
+                      rawMessage: { key: msg.key, message: realM || msg.message },
+                      mediaBuffer: buffer,
+                      mimeType,
+                      mediaType: isVideo ? "video" : isPhoto ? "photo" : isDoc ? "document" : "voice",
+                      fileName,
+                      contextDescription: analyzed.shortSummary || analyzed.analysis,
+                    });
+
+                    const mediaWord = isVideo ? "video" : isPhoto ? "photo" : isDoc ? "document" : "media";
+                    await this.sendHumanLikeMessage(
+                      replyJid,
+                      `Theek hai, maine ye ${mediaWord} Boss (DK) ke Desk par stamp ke saath forward kar diya hai 👍`,
+                      caption,
+                      msg.key
+                    );
+                    continue;
+                  }
                 }
               }
             } catch (mediaErr) {
@@ -1577,11 +1627,12 @@ class WhatsAppBotService {
             // Auto-reply disabled: still alert Boss of incoming 1-on-1 message!
             this.alertOwnerIncomingMessage(senderName, senderPhone, text).catch(() => {});
           } else if (isGroup && this.autoReplyEnabled && this.sock && this.isConnected) {
-            // Group Mentions
+            // Group Mentions or Friday Desk Direct Owner Commands
             const botJid = this.sock?.user?.id || "";
             const isMentioned = whatsappAutoReplyEngine.isBotMentionedInGroup(msg, text, botJid, this.dedicatedPhone, quotedMessage);
+            const isDeskGroup = whatsappAlertDeskService.isDeskGroup(remoteJid);
 
-            if (isMentioned) {
+            if (isMentioned || (isDeskGroup && isSenderOwner)) {
               if (isSenderOwner) {
                 this.handleOwnerWhatsAppMessage(senderName, senderPhone, text, remoteJid, msg.key, quotedMessage).catch((e) =>
                   console.error("[WhatsAppBot] Group Boss Friday error:", e)
@@ -2060,8 +2111,10 @@ class WhatsAppBotService {
           whatsappSessionHealthEngine.recordConnectionOpen();
           this.startKeepAlive();
           this.startScheduledMessagesTicker();
-          this.sock.sendPresenceUpdate("unavailable").catch(() => {});
           console.log("[WhatsAppBot] Connected! Natural Offline mode & Scheduled Ticker active.");
+          whatsappAlertDeskService.getOrCreateAlertDeskGroup(this.sock).catch((deskErr) => {
+            console.warn("[WhatsAppBot] Friday Alert Desk initialization notice:", deskErr);
+          });
         }
       });
     } catch (err) {

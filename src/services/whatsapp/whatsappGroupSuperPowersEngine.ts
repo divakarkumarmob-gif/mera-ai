@@ -185,22 +185,32 @@ export class WhatsAppGroupSuperPowersEngine {
           const isBossTarget = !rawTarget || /^(me|boss|dk|divakar|owner|mujhe|khud|self|sir)$/i.test(rawTarget);
 
           if (!isOwner) {
-            const ownerPhone = (process.env.OWNER_WHATSAPP_NUMBER || process.env.BOSS_WHATSAPP_NUMBER || "").replace(/\D/g, "");
             const textToRelay = parameters.messageText || (quotedMessage ? quotedMessage.text : rawText);
             const refContext = parameters.referencedContext || (classified as any).resolvedEntity;
-            const refItemStr = refContext ? `\n📎 *Referenced Item:* ${refContext}` : "";
             
             if (isBossTarget) {
-              if (ownerPhone) {
-                try {
-                  const { sendWhatsAppUnified } = await import("../whatsappService");
-                  const alertCard = `📩 *[Group Message for You]*\n\n👤 *From:* ${senderName} (+${senderPhone})\n👥 *Group:* ${groupName}\n💬 *Message:* ${textToRelay || "Attached update/homework"}${refItemStr}\n\n_Relayed by Friday Assistant_`;
-                  await sendWhatsAppUnified(ownerPhone, alertCard).catch(() => {});
-                } catch {}
-              }
+              const { whatsappAlertDeskService } = await import("./whatsappAlertDeskService");
+              const resolvedMedia = await whatsappAlertDeskService.resolveMediaForForward(groupJid, quotedMessage, sock);
+
+              await whatsappAlertDeskService.forwardMediaToDesk(sock, {
+                senderName,
+                senderPhone,
+                sourceName: groupName,
+                userNote: textToRelay,
+                rawMessage: resolvedMedia?.rawMessage,
+                mediaBuffer: resolvedMedia?.buffer,
+                mimeType: resolvedMedia?.mimeType,
+                mediaType: resolvedMedia?.mediaType,
+                fileName: resolvedMedia?.fileName,
+                contextDescription: refContext || resolvedMedia?.summary,
+              });
+
               const snippet = parameters.messageText ? ` ki "${parameters.messageText}"` : "";
               const refSnippet = refContext ? ` (${refContext})` : "";
-              return { handled: true, replyText: `Theek hai, main Boss (DK) ko forward kar dungi${refSnippet}${snippet} 👍` };
+              return { 
+                handled: true, 
+                replyText: `Theek hai, maine Boss (DK) ke Desk par stamp ke saath forward kar diya hai${refSnippet}${snippet} 👍` 
+              };
             }
 
             return {
