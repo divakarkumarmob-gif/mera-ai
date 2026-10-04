@@ -974,14 +974,17 @@ class WhatsAppBotService {
             }
           }
 
-          // ── FRIDAY STUDY FOR NEET (Groups containing "study" & @study commands) ──
+          // ── FRIDAY STUDY FOR NEET (Groups containing "study", approved groups, activation & @study commands) ──
           if (isGroup && this.sock) {
-            const isStudyGroup =
+            const isStudy =
               (groupName && fridayStudyService.isStudyGroupName(groupName)) ||
+              fridayStudyService.isApprovedStudyGroup(remoteJid);
+            const isStudyActivation = fridayStudyService.isStudyGroupActivationRequest(text);
+            const isStudyCmd =
               text.toLowerCase().startsWith("@study") ||
               text.toLowerCase().startsWith("/study");
 
-            if (isStudyGroup) {
+            if (isStudy || isStudyActivation || isStudyCmd) {
               try {
                 const studyRes = await fridayStudyService.handleStudyGroupMessage({
                   sock: this.sock,
@@ -990,6 +993,7 @@ class WhatsAppBotService {
                   text,
                   senderName,
                   senderPhone,
+                  senderJid,
                   isOwner: isSenderOwner,
                 });
                 if (studyRes.handled && studyRes.replyText) {
@@ -1791,6 +1795,43 @@ class WhatsAppBotService {
       return;
     }
 
+    // ── FRIDAY STUDY APPROVAL INTERCEPTOR (Boss Approves/Rejects Study Group) ──
+    const cleanBossCmd = rawText.trim().toLowerCase();
+    const isStudyApproveCmd = /^(?:approve\s+study|approve|haa|haan|yes|approve\s+group|approved)$/i.test(cleanBossCmd);
+    const isStudyRejectCmd = /^(?:reject\s+study|reject|nahi|no|mat\s+karo)$/i.test(cleanBossCmd);
+
+    if ((isStudyApproveCmd || isStudyRejectCmd) && fridayStudyService.hasPendingApproval()) {
+      try {
+        if (isStudyApproveCmd) {
+          const res = await fridayStudyService.approveStudyGroup();
+          if (res && res.success) {
+            await this.sendHumanLikeMessage(replyJid, res.bossConfirmation, rawText, messageKey);
+            if (this.sock && res.groupJid) {
+              try {
+                await this.sock.sendMessage(res.groupJid, { text: res.announcement });
+              } catch (grpErr) {
+                console.warn("[WhatsAppBot] Failed to send announcement to study group:", grpErr);
+              }
+            }
+            return;
+          }
+        } else {
+          const res = await fridayStudyService.rejectStudyGroup();
+          if (res) {
+            await this.sendHumanLikeMessage(replyJid, res.bossConfirmation, rawText, messageKey);
+            if (this.sock && res.groupJid) {
+              try {
+                await this.sock.sendMessage(res.groupJid, { text: res.announcement });
+              } catch {}
+            }
+            return;
+          }
+        }
+      } catch (apprErr) {
+        console.warn("[WhatsAppBot] Study group approval error:", apprErr);
+      }
+    }
+
     // ── FRIDAY STUDY DIRECT INTERCEPTOR (Boss 1-on-1 Study Control) ─────────
     if (rawText.toLowerCase().startsWith("@study") || rawText.toLowerCase().startsWith("/study")) {
       try {
@@ -1801,6 +1842,7 @@ class WhatsAppBotService {
           text: rawText,
           senderName,
           senderPhone,
+          senderJid: replyJid,
           isOwner: true,
         });
         if (studyRes.handled && studyRes.replyText) {

@@ -284,7 +284,7 @@ describe("Friday Study — NEET Preparation Routine & Tracker", () => {
     });
 
     expect(switchBacklogRes.handled).toBe(true);
-    expect(switchBacklogRes.replyText).toContain("SHABASH BOSS! PRESENT TOPIC COMPLETE");
+    expect(switchBacklogRes.replyText).toContain("SHABASH DK! PRESENT TOPIC COMPLETE");
     expect(switchBacklogRes.replyText).toContain("SWITCHED TO BACKLOG");
     expect(switchBacklogRes.replyText).toContain("Human Reproduction 30 MCQs");
     expect(switchBacklogRes.replyText).toContain("backlog done");
@@ -349,7 +349,7 @@ describe("Friday Study — NEET Preparation Routine & Tracker", () => {
     });
 
     expect(res.handled).toBe(true);
-    expect(res.replyText).toContain("SHABASH BOSS! PRESENT TOPIC COMPLETE");
+    expect(res.replyText).toContain("SHABASH DK! PRESENT TOPIC COMPLETE");
     expect(res.replyText).toContain("Chemical Bonding PYQs");
 
     const plan = await fridayStudyService.getDailyPlan(testGroupJid);
@@ -371,5 +371,434 @@ describe("Friday Study — NEET Preparation Routine & Tracker", () => {
     expect(doneRes.replyText).toContain("MISSION ACCOMPLISHED");
     const planFinal = await fridayStudyService.getDailyPlan(testGroupJid);
     expect(planFinal.chemistry.status).toBe("done");
+  });
+
+  it("should accurately parse three topics from comma, space, newline, numbered, and labelled strings", () => {
+    // 1. Comma separated: x, y, z
+    expect(fridayStudyService.parseThreeTopics("x, y, z")).toEqual(["x", "y", "z"]);
+    expect(fridayStudyService.parseThreeTopics("x,y,z")).toEqual(["x", "y", "z"]);
+    expect(fridayStudyService.parseThreeTopics("Genetics, Electrostatics, Thermodynamics")).toEqual([
+      "Genetics",
+      "Electrostatics",
+      "Thermodynamics",
+    ]);
+
+    // 2. Space separated: x y z
+    expect(fridayStudyService.parseThreeTopics("x y z")).toEqual(["x", "y", "z"]);
+    expect(fridayStudyService.parseThreeTopics("Genetics Kinematics Thermodynamics")).toEqual([
+      "Genetics",
+      "Kinematics",
+      "Thermodynamics",
+    ]);
+
+    // 3. Numbered: 1. x 2. y 3. z
+    expect(fridayStudyService.parseThreeTopics("1. Cell Biology 2. Laws of Motion 3. Solutions")).toEqual([
+      "Cell Biology",
+      "Laws of Motion",
+      "Solutions",
+    ]);
+
+    // 4. Newline separated
+    expect(fridayStudyService.parseThreeTopics("Biotechnology\nMagnetism\nEquilibrium")).toEqual([
+      "Biotechnology",
+      "Magnetism",
+      "Equilibrium",
+    ]);
+
+    // 5. Labelled: bio: ..., phys: ..., chem: ...
+    expect(fridayStudyService.parseThreeTopics("bio: Human Physiology, phys: Optics, chem: Organic Chemistry")).toEqual([
+      "Human Physiology",
+      "Optics",
+      "Organic Chemistry",
+    ]);
+
+    // 6. Invalid / incomplete inputs
+    expect(fridayStudyService.parseThreeTopics("singleTopic")).toBeNull();
+    expect(fridayStudyService.parseThreeTopics("two topics")).toBeNull();
+    expect(fridayStudyService.parseThreeTopics("four words without comma")).toBeNull();
+    expect(fridayStudyService.parseThreeTopics("")).toBeNull();
+  });
+
+  it("should execute 2:00 PM interactive flow: Running Chapters (x, y, z) -> Backlog Chapters (a, b, c)", async () => {
+    // 1. 2:00 PM slot card asks the questions and sets setupState to awaiting_current
+    const planInitial = await fridayStudyService.getDailyPlan(testGroupJid);
+    const card2PM = fridayStudyService.generateSlotCard(FIXED_STUDY_SLOTS[3], planInitial); // slot_14_00
+    expect(card2PM).toContain("RUNNING CHAPTERS SETUP");
+    expect(card2PM).toContain("Running Biology Chapter");
+    expect(card2PM).toContain("Running Physics Chapter");
+    expect(card2PM).toContain("Running Chemistry Chapter");
+    expect(card2PM).toContain("x, y, z");
+
+    expect(planInitial.setupState).toBe("awaiting_current");
+
+    // 2. User answers with comma-separated running chapters: "Genetics, Electrostatics, Thermodynamics"
+    const currentReplyRes = await fridayStudyService.handleStudyGroupMessage({
+      sock: null,
+      groupJid: testGroupJid,
+      groupName: testGroupName,
+      text: "Genetics, Electrostatics, Thermodynamics",
+      senderName: "DK",
+      senderPhone: "919876543210",
+      isOwner: true,
+    });
+
+    expect(currentReplyRes.handled).toBe(true);
+    expect(currentReplyRes.replyText).toContain("Running Chapters Note Ho Gaye");
+    expect(currentReplyRes.replyText).toContain("Genetics");
+    expect(currentReplyRes.replyText).toContain("Electrostatics");
+    expect(currentReplyRes.replyText).toContain("Thermodynamics");
+    expect(currentReplyRes.replyText).toContain("RUNNING BACKLOG CHAPTERS");
+
+    const planAfterCurrent = await fridayStudyService.getDailyPlan(testGroupJid);
+    expect(planAfterCurrent.setupState).toBe("awaiting_backlog");
+    expect(planAfterCurrent.pendingCurrentTopics).toEqual({
+      biology: "Genetics",
+      physics: "Electrostatics",
+      chemistry: "Thermodynamics",
+    });
+
+    // 3. User answers with space-separated backlog chapters: "CellDivision Kinematics Solutions"
+    const backlogReplyRes = await fridayStudyService.handleStudyGroupMessage({
+      sock: null,
+      groupJid: testGroupJid,
+      groupName: testGroupName,
+      text: "CellDivision Kinematics Solutions",
+      senderName: "DK",
+      senderPhone: "919876543210",
+      isOwner: true,
+    });
+
+    expect(backlogReplyRes.handled).toBe(true);
+    expect(backlogReplyRes.replyText).toContain("AWESOME! AAJ KA NEET TARGET 100% SET HO GAYA");
+    expect(backlogReplyRes.replyText).toContain("Genetics");
+    expect(backlogReplyRes.replyText).toContain("CellDivision");
+    expect(backlogReplyRes.replyText).toContain("Kinematics");
+    expect(backlogReplyRes.replyText).toContain("Solutions");
+    expect(backlogReplyRes.replyText).toContain("power nap le lo");
+
+    // 4. Verify that DayStudyPlan now has both running and backlog topics saved
+    const planFinal = await fridayStudyService.getDailyPlan(testGroupJid);
+    expect(planFinal.setupState).toBe("idle");
+    expect(planFinal.pendingCurrentTopics).toBeUndefined();
+
+    expect(planFinal.biologyAfternoon.currentTopic).toBe("Genetics");
+    expect(planFinal.biologyAfternoon.backlogTopic).toBe("CellDivision");
+
+    expect(planFinal.physics.currentTopic).toBe("Electrostatics");
+    expect(planFinal.physics.backlogTopic).toBe("Kinematics");
+
+    expect(planFinal.chemistry.currentTopic).toBe("Thermodynamics");
+    expect(planFinal.chemistry.backlogTopic).toBe("Solutions");
+  });
+
+  it("should allow manual trigger via @study ask and cancellation via @study reset", async () => {
+    // 1. Manual trigger
+    const askRes = await fridayStudyService.handleStudyGroupMessage({
+      sock: null,
+      groupJid: testGroupJid,
+      groupName: testGroupName,
+      text: "@study ask",
+      senderName: "DK",
+      senderPhone: "919876543210",
+      isOwner: true,
+    });
+
+    expect(askRes.handled).toBe(true);
+    expect(askRes.replyText).toContain("RUNNING CHAPTERS SETUP");
+
+    const plan = await fridayStudyService.getDailyPlan(testGroupJid);
+    expect(plan.setupState).toBe("awaiting_current");
+
+    // 2. Cancel
+    const cancelRes = await fridayStudyService.handleStudyGroupMessage({
+      sock: null,
+      groupJid: testGroupJid,
+      groupName: testGroupName,
+      text: "@study reset",
+      senderName: "DK",
+      senderPhone: "919876543210",
+      isOwner: true,
+    });
+
+    expect(cancelRes.handled).toBe(true);
+    expect(cancelRes.replyText).toContain("reset ho gaya hai");
+
+    const planAfterReset = await fridayStudyService.getDailyPlan(testGroupJid);
+    expect(planAfterReset.setupState).toBe("idle");
+  });
+
+  it("should keep shared class chapters common while tracking individual attendance for every student", async () => {
+    // 1. Set common class curriculum (same for everyone in the batch)
+    await fridayStudyService.setSessionTopics(
+      testGroupJid,
+      "physics",
+      "Electrostatics & Gauss Law",
+      "Kinematics Graph Numericals"
+    );
+
+    // 2. Student 1 (DK Boss) starts current topic in Physics
+    const dkRes = await fridayStudyService.handleStudyGroupMessage({
+      sock: null,
+      groupJid: testGroupJid,
+      groupName: testGroupName,
+      text: "physics current padh raha hu",
+      senderName: "DK",
+      senderPhone: "919876543210",
+      senderJid: "919876543210@s.whatsapp.net",
+      isOwner: true,
+    });
+
+    expect(dkRes.handled).toBe(true);
+    expect(dkRes.replyText).toContain("⭐ DK");
+    expect(dkRes.replyText).toContain("Electrostatics & Gauss Law");
+
+    // 3. Student 2 (Amit Kumar) does a direct attendance check-in
+    const amitCheckinRes = await fridayStudyService.handleStudyGroupMessage({
+      sock: null,
+      groupJid: testGroupJid,
+      groupName: testGroupName,
+      text: "present",
+      senderName: "Amit Kumar",
+      senderPhone: "919811111111",
+      senderJid: "919811111111@s.whatsapp.net",
+      isOwner: false,
+    });
+
+    expect(amitCheckinRes.handled).toBe(true);
+    expect(amitCheckinRes.replyText).toContain("ATTENDANCE REGISTERED");
+    expect(amitCheckinRes.replyText).toContain("Amit Kumar");
+    expect(amitCheckinRes.replyText).toContain("Common Class Target");
+
+    // 4. Student 3 (Rahul Sharma) progresses through Current -> Backlog -> Done in Physics
+    const rahulStartRes = await fridayStudyService.handleStudyGroupMessage({
+      sock: null,
+      groupJid: testGroupJid,
+      groupName: testGroupName,
+      text: "physics current padh raha hu",
+      senderName: "Rahul Sharma",
+      senderPhone: "919822222222",
+      senderJid: "919822222222@s.whatsapp.net",
+      isOwner: false,
+    });
+    expect(rahulStartRes.handled).toBe(true);
+    expect(rahulStartRes.replyText).toContain("Rahul Sharma");
+
+    const rahulSwitchRes = await fridayStudyService.handleStudyGroupMessage({
+      sock: null,
+      groupJid: testGroupJid,
+      groupName: testGroupName,
+      text: "physics current done, ab backlog padh raha hu",
+      senderName: "Rahul Sharma",
+      senderPhone: "919822222222",
+      senderJid: "919822222222@s.whatsapp.net",
+      isOwner: false,
+    });
+    expect(rahulSwitchRes.handled).toBe(true);
+    expect(rahulSwitchRes.replyText).toContain("RAHUL SHARMA");
+    expect(rahulSwitchRes.replyText).toContain("SWITCHED TO BACKLOG");
+    expect(rahulSwitchRes.replyText).toContain("Kinematics Graph Numericals");
+
+    const rahulDoneRes = await fridayStudyService.handleStudyGroupMessage({
+      sock: null,
+      groupJid: testGroupJid,
+      groupName: testGroupName,
+      text: "physics backlog done",
+      senderName: "Rahul Sharma",
+      senderPhone: "919822222222",
+      senderJid: "919822222222@s.whatsapp.net",
+      isOwner: false,
+    });
+    expect(rahulDoneRes.handled).toBe(true);
+    expect(rahulDoneRes.replyText).toContain("Rahul Sharma");
+    expect(rahulDoneRes.replyText).toContain("100% SUCCESS");
+
+    // 5. Verify DayStudyPlan has tracked all 3 members individually
+    const plan = await fridayStudyService.getDailyPlan(testGroupJid);
+    expect(plan.membersAttendance).toBeDefined();
+
+    const dkKey = fridayStudyService.getUserKey({ senderName: "DK", senderPhone: "919876543210" });
+    const amitKey = fridayStudyService.getUserKey({ senderName: "Amit Kumar", senderPhone: "919811111111" });
+    const rahulKey = fridayStudyService.getUserKey({ senderName: "Rahul Sharma", senderPhone: "919822222222" });
+
+    expect(plan.membersAttendance![dkKey]).toBeDefined();
+    expect(plan.membersAttendance![dkKey].userName).toBe("DK");
+    expect(plan.membersAttendance![dkKey].isOwner).toBe(true);
+
+    const activeSessionKey = fridayStudyService.getActiveOrRelevantSession().key;
+    expect(plan.membersAttendance![amitKey]).toBeDefined();
+    expect(plan.membersAttendance![amitKey].userName).toBe("Amit Kumar");
+    expect(plan.membersAttendance![amitKey].sessions[activeSessionKey].attended).toBe(true);
+
+    expect(plan.membersAttendance![rahulKey]).toBeDefined();
+    expect(plan.membersAttendance![rahulKey].userName).toBe("Rahul Sharma");
+    expect(plan.membersAttendance![rahulKey].sessions.physics.status).toBe("done");
+    expect(plan.membersAttendance![rahulKey].sessions.physics.currentStatus).toBe("done");
+    expect(plan.membersAttendance![rahulKey].sessions.physics.backlogStatus).toBe("done");
+    expect(plan.membersAttendance![rahulKey].totalCompletedCount).toBe(1);
+
+    // 6. Test @study attendance register output
+    const attendanceRes = await fridayStudyService.handleStudyGroupMessage({
+      sock: null,
+      groupJid: testGroupJid,
+      groupName: testGroupName,
+      text: "@study attendance",
+      senderName: "DK",
+      senderPhone: "919876543210",
+      isOwner: true,
+    });
+
+    expect(attendanceRes.handled).toBe(true);
+    expect(attendanceRes.replyText).toContain("BATCH ATTENDANCE REGISTER");
+    expect(attendanceRes.replyText).toContain("⭐ DK");
+    expect(attendanceRes.replyText).toContain("Amit Kumar");
+    expect(attendanceRes.replyText).toContain("Rahul Sharma");
+    expect(attendanceRes.replyText).toContain("Common Class Syllabus");
+    expect(attendanceRes.replyText).toContain("Electrostatics & Gauss Law");
+
+    // 7. Test formatDailyScorecard includes the batch leaderboard
+    const scorecard = fridayStudyService.formatDailyScorecard(plan);
+    expect(scorecard).toContain("Batch Leaderboard & Attendance");
+    expect(scorecard).toContain("Rahul Sharma");
+  });
+
+  it("should support direct attendance check-ins like 'present', 'p', 'mai aa gaya'", async () => {
+    const pRes = await fridayStudyService.handleStudyGroupMessage({
+      sock: null,
+      groupJid: testGroupJid,
+      groupName: testGroupName,
+      text: "p",
+      senderName: "Pooja",
+      senderPhone: "919833333333",
+      isOwner: false,
+    });
+    expect(pRes.handled).toBe(true);
+    expect(pRes.replyText).toContain("ATTENDANCE REGISTERED");
+    expect(pRes.replyText).toContain("Pooja");
+
+    const aagayaRes = await fridayStudyService.handleStudyGroupMessage({
+      sock: null,
+      groupJid: testGroupJid,
+      groupName: testGroupName,
+      text: "mai aa gaya",
+      senderName: "Vikas",
+      senderPhone: "919844444444",
+      isOwner: false,
+    });
+    expect(aagayaRes.handled).toBe(true);
+    expect(aagayaRes.replyText).toContain("ATTENDANCE REGISTERED");
+    expect(aagayaRes.replyText).toContain("Vikas");
+  });
+
+  it("should detect study group activation triggers correctly", () => {
+    expect(fridayStudyService.isStudyGroupActivationRequest("this is study group")).toBe(true);
+    expect(fridayStudyService.isStudyGroupActivationRequest("this is a study group")).toBe(true);
+    expect(fridayStudyService.isStudyGroupActivationRequest("ye study group hai")).toBe(true);
+    expect(fridayStudyService.isStudyGroupActivationRequest("ye study group h")).toBe(true);
+    expect(fridayStudyService.isStudyGroupActivationRequest("is group ko study group bana do")).toBe(true);
+    expect(fridayStudyService.isStudyGroupActivationRequest("@study activate")).toBe(true);
+    expect(fridayStudyService.isStudyGroupActivationRequest("kuch aur general baat")).toBe(false);
+  });
+
+  it("should handle 'this is study group' trigger with wait confirmation message and send request to Boss", async () => {
+    const rawGroupJid = "120363999999999999@g.us";
+    const rawGroupName = "Class 12 Batch";
+
+    const res = await fridayStudyService.handleStudyGroupMessage({
+      sock: null,
+      groupJid: rawGroupJid,
+      groupName: rawGroupName,
+      text: "this is study group",
+      senderName: "Aman",
+      senderPhone: "919811111111",
+      isOwner: false,
+    });
+
+    expect(res.handled).toBe(true);
+    expect(res.replyText).toContain("wait for confirmation from Boss");
+    expect(fridayStudyService.hasPendingApproval()).toBe(true);
+
+    const pending = fridayStudyService.getPendingApprovals();
+    expect(pending.length).toBeGreaterThan(0);
+    const item = pending.find((p) => p.groupJid === rawGroupJid);
+    expect(item).toBeDefined();
+    expect(item?.groupName).toBe("Class 12 Batch");
+    expect(item?.requesterName).toBe("Aman");
+  });
+
+  it("should approve pending study group when Boss approves, notify group with mentor announcement, and enforce no-boss policy", async () => {
+    const rawGroupJid = `120363888888_${Date.now()}@g.us`;
+    const rawGroupName = "Target Batch 2026";
+
+    // 1. Someone asks to declare it a study group
+    const initRes = await fridayStudyService.handleStudyGroupMessage({
+      sock: null,
+      groupJid: rawGroupJid,
+      groupName: rawGroupName,
+      text: "ye study group hai",
+      senderName: "Pooja",
+      senderPhone: "919822222222",
+      isOwner: false,
+    });
+    expect(initRes.handled).toBe(true);
+    expect(initRes.replyText).toContain("wait for confirmation from Boss");
+
+    // 2. Boss approves
+    const approveRes = await fridayStudyService.approveStudyGroup(rawGroupJid);
+    expect(approveRes).not.toBeNull();
+    expect(approveRes?.success).toBe(true);
+    expect(approveRes?.announcement).toContain("Approved, now I am your mentor");
+    expect(approveRes?.announcement).toContain("No Boss Policy");
+    expect(approveRes?.announcement).toContain("No Wake-Word Needed");
+    expect(approveRes?.bossConfirmation).toContain("ko NEET Study Group approve kar diya gaya hai");
+
+    // 3. Now verify group is marked as approved study group
+    expect(fridayStudyService.isApprovedStudyGroup(rawGroupJid)).toBe(true);
+    expect(fridayStudyService.isStudyGroup(rawGroupJid, rawGroupName)).toBe(true);
+  });
+
+  it("should reply to all doubts/questions in study group WITHOUT requiring 'Friday' wake-word, acting as NEET mentor", async () => {
+    const studyGroupJid = "120363777777777777@g.us";
+    const studyGroupName = "NEET Biology Squad Study";
+
+    // In a study group, a student asks a direct academic question without mentioning "Friday"
+    const doubtRes = await fridayStudyService.handleStudyGroupMessage({
+      sock: null,
+      groupJid: studyGroupJid,
+      groupName: studyGroupName,
+      text: "cell wall kis cheez ki bani hoti hai plants me?",
+      senderName: "Rohan",
+      senderPhone: "919833333333",
+      isOwner: false,
+    });
+
+    expect(doubtRes.handled).toBe(true);
+    expect(doubtRes.replyText).toBeDefined();
+    expect(doubtRes.replyText?.length).toBeGreaterThan(10);
+    // Strict zero Boss policy: response should never call anyone "Boss"
+    expect(doubtRes.replyText).not.toContain("Boss");
+  });
+
+  it("should handle Boss rejection of a pending study group request", async () => {
+    const rawGroupJid = "120363666666666666@g.us";
+    const rawGroupName = "Timepass Group";
+
+    // Request activation
+    await fridayStudyService.handleStudyGroupMessage({
+      sock: null,
+      groupJid: rawGroupJid,
+      groupName: rawGroupName,
+      text: "is group ko study group bana do",
+      senderName: "Unknown",
+      senderPhone: "919844444444",
+      isOwner: false,
+    });
+
+    // Boss rejects
+    const rejectRes = await fridayStudyService.rejectStudyGroup(rawGroupJid);
+    expect(rejectRes).not.toBeNull();
+    expect(rejectRes?.success).toBe(true);
+    expect(rejectRes?.announcement).toContain("Study Group Request Not Approved");
+    expect(rejectRes?.bossConfirmation).toContain("request reject kar di gayi hai");
+    expect(fridayStudyService.isApprovedStudyGroup(rawGroupJid)).toBe(false);
   });
 });
