@@ -43,10 +43,17 @@ jobs:
 
       - name: 📁 Bundle Web Assets into Android APK Assets
         run: |
-          mkdir -p android/app/src/main/assets/public
-          cp -r dist/* android/app/src/main/assets/public/
-          echo "✅ Bundled assets verified:"
-          ls -lh android/app/src/main/assets/public/
+          mkdir -p android/app/src/main/assets
+          # Clean previous assets folder completely so no stale JS/CSS or duplicate files remain
+          rm -rf android/app/src/main/assets/*
+          # Copy fresh web build output directly to assets root
+          cp -r dist/* android/app/src/main/assets/
+          # Exclude Node.js backend server code and sourcemaps (not used in Android APK)
+          rm -f android/app/src/main/assets/server.cjs android/app/src/main/assets/server.cjs.map
+          # Exclude unused large 3D models
+          rm -f android/app/src/main/assets/iPhone+14+Pro.fbx
+          echo "✅ Clean bundled assets verified:"
+          ls -lh android/app/src/main/assets/
 
       - name: 🐘 Setup Gradle Cache
         uses: actions/cache@v4

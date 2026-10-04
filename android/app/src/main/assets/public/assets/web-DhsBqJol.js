@@ -1,1 +1,0 @@
-import{W as t}from"./index-CBpnInNX.js";class i extends t{beforeExit(e){throw this.unimplemented("Not implemented on web.")}finish(e){throw this.unimplemented("Not implemented on web.")}}export{i as BackgroundTaskWeb};
