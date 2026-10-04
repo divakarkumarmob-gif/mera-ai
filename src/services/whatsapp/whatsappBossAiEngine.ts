@@ -4,8 +4,55 @@ import { whatsappHistoryEngine } from "./whatsappHistoryEngine";
 import { fridayModeService, UNCENSORED_SAFETY_SETTINGS } from "../fridayModeService";
 import { geminiKeyPoolService } from "../geminiKeyPoolService";
 
+export interface ActiveBossChatSession {
+  chat: any;
+  cycleId: string;
+  lastActive: number;
+  mode: string;
+  model: string;
+}
+
 export class WhatsAppBossAiEngine {
   private callTriggerCallback: ((data: { callerName: string; isOwner: boolean; callId: string }) => void) | null = null;
+  private activeBossSessions = new Map<string, ActiveBossChatSession>();
+
+  /**
+   * Calculates the current 24-hour circadian cycle ID anchored at 03:00 AM IST.
+   * Day runs continuously from 03:00 AM to 02:59:59 AM next morning.
+   * e.g., 2026-10-04.
+   */
+  public getCircadianCycleId(now: Date = new Date()): string {
+    const istNow = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+    const hours = istNow.getHours();
+    const d = new Date(istNow);
+    if (hours < 3) {
+      d.setDate(d.getDate() - 1);
+    }
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  /**
+   * Resets active working chat session (leaves all permanent Firestore memories 100% intact).
+   */
+  public resetBossSession(replyJid = ""): void {
+    if (replyJid) {
+      this.activeBossSessions.delete(replyJid);
+      this.activeBossSessions.delete("boss_dk");
+    } else {
+      this.activeBossSessions.clear();
+    }
+    console.log(`[WhatsAppBossAI] 🔄 Boss active working session reset. Permanent memories remain fully intact.`);
+  }
+
+  public getActiveSessionInfo(replyJid = ""): { hasActiveSession: boolean; cycleId?: string; lastActive?: number; model?: string } {
+    const sessionKey = replyJid || "boss_dk";
+    const s = this.activeBossSessions.get(sessionKey);
+    if (!s) return { hasActiveSession: false };
+    return { hasActiveSession: true, cycleId: s.cycleId, lastActive: s.lastActive, model: s.model };
+  }
 
   public setCallTriggerCallback(cb: (data: { callerName: string; isOwner: boolean; callId: string }) => void) {
     this.callTriggerCallback = cb;
@@ -2910,7 +2957,150 @@ ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` 
       }
     }
 
-    // ── Standard Mode A: Gemini Multimodal & Tool-Calling Loop ─────────────────
+    // Helper to process tool calling and post-processing on any active or fresh Gemini Chat session
+    const processChatTurn = async (chatInstance: any, promptMessage: string): Promise<string> => {
+      let response = await chatInstance.sendMessage({ message: promptMessage });
+
+      let turns = 0;
+      let lastToolResult: any = null;
+      let didSendWhatsAppMessage = false;
+
+      while (response.functionCalls && response.functionCalls.length > 0 && turns < 4) {
+        turns++;
+        const call = response.functionCalls[0];
+        console.log(`[WhatsAppBossAI] Boss Tool Call: ${call.name} with args:`, call.args);
+        if (call.name === "send_whatsapp_message") {
+          didSendWhatsAppMessage = true;
+        }
+        const toolResult = await executeTool(call.name, call.args);
+        lastToolResult = toolResult;
+
+        response = await chatInstance.sendMessage({
+          message: [
+            {
+              functionResponse: {
+                name: call.name,
+                response: toolResult,
+              },
+            },
+          ],
+        });
+      }
+
+      let replyText = response.text?.trim() || "";
+
+      // ── ZERO-HALLUCINATION DISPATCH SENTINEL ──
+      if (!didSendWhatsAppMessage) {
+        const manaoIntentMatch =
+          messageText.match(/(?:jao\s+)?(?:abb\s+)?([a-zA-Z\u0900-\u097F]+)\s+ko\s+(?:bhi\s+)?(?:manao|manana|manaoo|sorry\s+bolo|msg\s+bhej\s+do|message\s+bhejo|bolo)/i) ||
+          messageText.match(/([a-zA-Z\u0900-\u097F]+)\s+20\s+dino\s+se\s+msg\s+nhi\s+ki\s+h\s+mujhe\s+usse\s+manana\s+h/i);
+
+        const claimedSent = /(?:message|msg)\s+(?:bhej\s+diya|chala\s+gaya|deliver\s+ho\s+gaya|send\s+kar\s+diya)/i.test(replyText);
+
+        if (manaoIntentMatch || claimedSent) {
+          const targetName = manaoIntentMatch
+            ? manaoIntentMatch[1].trim()
+            : (replyText.match(/([a-zA-Z\u0900-\u097F]+)\s+ko\s+(?:message|msg|bheja|bhej)/i)?.[1] || "");
+
+          let extractedMsg = "";
+          const quoteMatch = replyText.match(/(?:Message|Message:|"Message:)?\s*["“]([^"”]{10,500})["”]/i);
+          if (quoteMatch) {
+            extractedMsg = quoteMatch[1].trim();
+          } else {
+            const dashMatch = replyText.match(/---\s*\n?([\s\S]*?)\n?---/);
+            if (dashMatch) {
+              extractedMsg = dashMatch[1].replace(/["“]/g, "").replace(/Message:\s*/i, "").trim();
+            }
+          }
+
+          if (targetName && targetName.toLowerCase() !== "boss") {
+            try {
+              const { contactsService } = await import("../contactsService");
+              const { sendWhatsAppUnified } = await import("../whatsappService");
+              const contact = await contactsService.findContact(targetName);
+              if (contact && contact.phone && extractedMsg) {
+                console.log(`[WhatsAppBossAI] 🚀 Auto-Dispatching message to ${contact.name} (+${contact.phone}): "${extractedMsg}"`);
+                await sendWhatsAppUnified(contact.phone, extractedMsg, { channel: "whatsapp2" });
+              }
+            } catch (autoErr) {
+              console.warn("[WhatsAppBossAI] Auto-dispatch sentinel error:", autoErr);
+            }
+          }
+        }
+      }
+
+      // Raw output / format sanitizer
+      if (
+        !replyText ||
+        replyText.startsWith("out:default_api:") ||
+        replyText.startsWith("call:default_api:") ||
+        replyText.includes("default_api:") ||
+        (replyText.startsWith("{") && replyText.endsWith("}"))
+      ) {
+        if (lastToolResult && lastToolResult.summary) {
+          replyText = lastToolResult.summary;
+        } else if (lastToolResult && lastToolResult.message) {
+          replyText = lastToolResult.message;
+        } else {
+          replyText = "Boss, task execute kar diya gaya hai! ✅";
+        }
+      }
+
+      if (replyText) {
+        const { bossDirectivesService } = await import("../bossDirectivesService");
+        const { aiAdvancedLearningService } = await import("../aiAdvancedLearningService");
+        const { neurotransmitterEngine } = await import("../frontierHumanEngines");
+        const { machineUnlearningSentinel, cognitiveScaffoldingEngine } = await import("../frontierTrainingEngine");
+        const replaced = bossDirectivesService.applyWordReplacements(replyText);
+        const finalReply = await aiAdvancedLearningService.runConstitutionalCritique(replaced, { isToBoss: true });
+        const { cleanText } = machineUnlearningSentinel.scrubRoboticArtifacts(finalReply);
+        if (!isModeB && fridayModeService.isUncensoredExplicitSexualContent(cleanText)) {
+          return "Main nahi samjha Boss. Kripya bataiye main aapki kya madad kar sakti hoon?";
+        }
+        cognitiveScaffoldingEngine.addMasteryPoints(2).catch(() => {});
+        neurotransmitterEngine.updateEmotionalMomentum(messageText, cleanText);
+        chatGptMemoryEngine.learnFromMessageTurn("Boss DK", messageText, cleanText, "whatsapp").catch(() => {});
+        return cleanText;
+      }
+      return "";
+    };
+
+    const currentCycleId = this.getCircadianCycleId();
+    const sessionKey = replyJid || "boss_dk";
+    const existingSession = this.activeBossSessions.get(sessionKey);
+
+    // ── Phase 1: Try Existing Active Circadian Session (Continuous from 03:00 AM to 02:59 AM) ──
+    if (existingSession && existingSession.cycleId === currentCycleId && existingSession.mode === currentMode) {
+      try {
+        console.log(`[WhatsAppBossAI] ⚡ Reusing active circadian session (${currentCycleId}) for Boss. Zero context amnesia across turns.`);
+        let sessionTurnMessage = messageText;
+        if (quotedMessage && quotedMessage.isReply) {
+          const qPhoneMatch = (quotedMessage.text || "").match(/(?:\+?91[\s\-]?)?([6-9]\d{9})\b/) || (quotedMessage.text || "").match(/(\+?\d[\d\s\-]{8,15}\d)/);
+          const extractedPhone = qPhoneMatch ? qPhoneMatch[1].replace(/\D/g, "") : (quotedMessage.senderPhone || "");
+          sessionTurnMessage = `[SWIPE-TO-REPLY CONTEXT: Boss replied by swiping on a previous message/media]
+📩 PREVIOUS QUOTED MESSAGE (From: ${quotedMessage.sender}, Type: ${quotedMessage.mediaType.toUpperCase()}):
+"${quotedMessage.text}"
+${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` : ""}
+
+💬 BOSS'S SWIPE-REPLY & QUESTION/INSTRUCTION:
+"${messageText}"`;
+        } else if (subtextSnippet) {
+          sessionTurnMessage = `${subtextSnippet}\n${messageText}`;
+        }
+
+        const reply = await processChatTurn(existingSession.chat, sessionTurnMessage);
+        if (reply) {
+          existingSession.lastActive = Date.now();
+          geminiKeyPoolService.recordSuccess(allocation.keyIndex);
+          return reply;
+        }
+      } catch (sessionErr: any) {
+        console.warn(`[WhatsAppBossAI] Active session sendMessage failed (${sessionErr?.message || sessionErr}). Evicting session and initializing fresh...`);
+        this.activeBossSessions.delete(sessionKey);
+      }
+    }
+
+    // ── Phase 2: Fresh Session Initialization (First message of day or fallback after 3:00 AM reset) ──
     for (const model of [
       "gemini-3.8-flash",
       "gemini-3.7-flash",
@@ -2932,109 +3122,17 @@ ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` 
           },
         });
 
-        let response = await chat.sendMessage({ message: userTurnMessage });
-
-        let turns = 0;
-        let lastToolResult: any = null;
-        let didSendWhatsAppMessage = false;
-
-        while (response.functionCalls && response.functionCalls.length > 0 && turns < 4) {
-          turns++;
-          const call = response.functionCalls[0];
-          console.log(`[WhatsAppBossAI] Boss Tool Call: ${call.name} with args:`, call.args);
-          if (call.name === "send_whatsapp_message") {
-            didSendWhatsAppMessage = true;
-          }
-          const toolResult = await executeTool(call.name, call.args);
-          lastToolResult = toolResult;
-
-          response = await chat.sendMessage({
-            message: [
-              {
-                functionResponse: {
-                  name: call.name,
-                  response: toolResult,
-                },
-              },
-            ],
+        const reply = await processChatTurn(chat, userTurnMessage);
+        if (reply) {
+          this.activeBossSessions.set(sessionKey, {
+            chat,
+            cycleId: currentCycleId,
+            lastActive: Date.now(),
+            mode: currentMode,
+            model,
           });
-        }
-
-        let replyText = response.text?.trim() || "";
-
-        // ── ZERO-HALLUCINATION DISPATCH SENTINEL ──
-        if (!didSendWhatsAppMessage) {
-          const manaoIntentMatch =
-            messageText.match(/(?:jao\s+)?(?:abb\s+)?([a-zA-Z\u0900-\u097F]+)\s+ko\s+(?:bhi\s+)?(?:manao|manana|manaoo|sorry\s+bolo|msg\s+bhej\s+do|message\s+bhejo|bolo)/i) ||
-            messageText.match(/([a-zA-Z\u0900-\u097F]+)\s+20\s+dino\s+se\s+msg\s+nhi\s+ki\s+h\s+mujhe\s+usse\s+manana\s+h/i);
-
-          const claimedSent = /(?:message|msg)\s+(?:bhej\s+diya|chala\s+gaya|deliver\s+ho\s+gaya|send\s+kar\s+diya)/i.test(replyText);
-
-          if (manaoIntentMatch || claimedSent) {
-            const targetName = manaoIntentMatch
-              ? manaoIntentMatch[1].trim()
-              : (replyText.match(/([a-zA-Z\u0900-\u097F]+)\s+ko\s+(?:message|msg|bheja|bhej)/i)?.[1] || "");
-
-            let extractedMsg = "";
-            const quoteMatch = replyText.match(/(?:Message|Message:|"Message:)?\s*["“]([^"”]{10,500})["”]/i);
-            if (quoteMatch) {
-              extractedMsg = quoteMatch[1].trim();
-            } else {
-              const dashMatch = replyText.match(/---\s*\n?([\s\S]*?)\n?---/);
-              if (dashMatch) {
-                extractedMsg = dashMatch[1].replace(/["“]/g, "").replace(/Message:\s*/i, "").trim();
-              }
-            }
-
-            if (targetName && targetName.toLowerCase() !== "boss") {
-              try {
-                const { contactsService } = await import("../contactsService");
-                const { sendWhatsAppUnified } = await import("../whatsappService");
-                const contact = await contactsService.findContact(targetName);
-                if (contact && contact.phone && extractedMsg) {
-                  console.log(`[WhatsAppBossAI] 🚀 Auto-Dispatching message to ${contact.name} (+${contact.phone}): "${extractedMsg}"`);
-                  await sendWhatsAppUnified(contact.phone, extractedMsg, { channel: "whatsapp2" });
-                }
-              } catch (autoErr) {
-                console.warn("[WhatsAppBossAI] Auto-dispatch sentinel error:", autoErr);
-              }
-            }
-          }
-        }
-
-        // Raw output / format sanitizer
-        if (
-          !replyText ||
-          replyText.startsWith("out:default_api:") ||
-          replyText.startsWith("call:default_api:") ||
-          replyText.includes("default_api:") ||
-          (replyText.startsWith("{") && replyText.endsWith("}"))
-        ) {
-          if (lastToolResult && lastToolResult.summary) {
-            replyText = lastToolResult.summary;
-          } else if (lastToolResult && lastToolResult.message) {
-            replyText = lastToolResult.message;
-          } else {
-            replyText = "Boss, task execute kar diya gaya hai! ✅";
-          }
-        }
-
-        if (replyText) {
-          const { bossDirectivesService } = await import("../bossDirectivesService");
-          const { aiAdvancedLearningService } = await import("../aiAdvancedLearningService");
-          const { neurotransmitterEngine } = await import("../frontierHumanEngines");
-          const { machineUnlearningSentinel, cognitiveScaffoldingEngine } = await import("../frontierTrainingEngine");
-          const replaced = bossDirectivesService.applyWordReplacements(replyText);
-          const finalReply = await aiAdvancedLearningService.runConstitutionalCritique(replaced, { isToBoss: true });
-          const { cleanText } = machineUnlearningSentinel.scrubRoboticArtifacts(finalReply);
-          if (!isModeB && fridayModeService.isUncensoredExplicitSexualContent(cleanText)) {
-            return "Main nahi samjha Boss. Kripya bataiye main aapki kya madad kar sakti hoon?";
-          }
-          cognitiveScaffoldingEngine.addMasteryPoints(2).catch(() => {});
-          neurotransmitterEngine.updateEmotionalMomentum(messageText, cleanText);
-          chatGptMemoryEngine.learnFromMessageTurn("Boss DK", messageText, cleanText, "whatsapp").catch(() => {});
           geminiKeyPoolService.recordSuccess(allocation.keyIndex);
-          return cleanText;
+          return reply;
         }
       } catch (e: any) {
         console.warn(`[WhatsAppBossAI] Model ${model} on Key #${allocation.keyIndex + 1} failed (${e?.message || e}), trying next model...`);

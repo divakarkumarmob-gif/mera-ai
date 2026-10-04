@@ -241,12 +241,18 @@ export class WhatsAppHistoryEngine {
    * Checks Baileys Live Store first for zero-latency direct retrieval, then falls back to Firestore.
    */
   public async getRecentBossContext(replyJid = "", limit = 15): Promise<IncomingMessage[]> {
-    const liveMsgs = baileysLiveStore.getLiveMessages("me", limit);
-    if (liveMsgs && liveMsgs.length >= 3) {
+    const targetKey = replyJid || "me";
+    const liveMsgs =
+      baileysLiveStore.getLiveMessages(targetKey, limit) ||
+      (replyJid ? baileysLiveStore.getLiveMessages("me", limit) : null);
+    if (liveMsgs && liveMsgs.length >= 2) {
       return liveMsgs;
     }
 
     await this.warmUpCacheFromFirestore();
+
+    const cleanJidDigits = (replyJid || "").replace(/\D/g, "");
+    const last10Target = cleanJidDigits.slice(-10);
 
     const isBossMatch = (m: IncomingMessage) => {
       if (m.isGroup) return false;
@@ -255,7 +261,12 @@ export class WhatsAppHistoryEngine {
       const sPhone = (m.senderPhone || "").toLowerCase();
       const isBossSender = sName.includes("boss") || sName.includes("dk") || sPhone === "me";
       const isBotSender = sName.includes("friday") || sPhone === "bot";
-      const isTargetJid = !!(replyJid && (m.replyJid === replyJid || m.senderPhone === replyJid.split("@")[0]));
+      const isTargetJid = !!(
+        replyJid &&
+        (m.replyJid === replyJid ||
+          m.senderPhone === replyJid.split("@")[0] ||
+          (last10Target && m.senderPhone?.includes(last10Target)))
+      );
       return isBossSender || isBotSender || isTargetJid;
     };
 

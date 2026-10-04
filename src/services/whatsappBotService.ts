@@ -2760,6 +2760,7 @@ class WhatsAppBotService {
     senderPhone: string = "owner",
     isVoiceInput: boolean = false
   ): Promise<{ handled: boolean; replyText?: string }> {
+    const recentBossMsgs = await whatsappHistoryEngine.getRecentBossContext(replyJid, 5);
     const context: IntentContext = {
       platform: "whatsapp",
       isGroup: false,
@@ -2767,6 +2768,7 @@ class WhatsAppBotService {
       senderName,
       senderPhone,
       quotedMessage: quotedMessage?.text,
+      recentMessages: recentBossMsgs.slice(-4).map((m) => `${m.senderName}: "${m.text}"`),
       timeOfDay: new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" }),
       userTimezone: "Asia/Kolkata"
     };
