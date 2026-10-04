@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { geminiKeyPoolService } from "./geminiKeyPoolService";
+import { dialogueStateTrackerService } from "./dialogueStateTrackerService";
 
 export interface ClassifiedIntent {
   action: string;
@@ -7,6 +8,8 @@ export interface ClassifiedIntent {
   parameters: Record<string, any>;
   reasoning: string;
   originalText: string;
+  rewrittenText?: string;
+  resolvedEntity?: string;
 }
 
 export interface IntentContext {
@@ -15,6 +18,7 @@ export interface IntentContext {
   isOwner: boolean;
   senderName: string;
   senderPhone: string;
+  chatId?: string;
   groupName?: string;
   quotedMessage?: string;
   recentMessages?: string[];
@@ -512,12 +516,48 @@ class IntentClassifierService {
   ];
 
   async classifyIntent(userText: string, context: IntentContext): Promise<ClassifiedIntent> {
+    const chatId = context.chatId || (context.isGroup ? context.groupName : context.senderPhone) || "";
+
+    // ── Phase 1: Query Rewriting / Co-reference Resolution ──
+    const rewriteRes = dialogueStateTrackerService.rewriteQueryWithContext(userText, chatId, context.quotedMessage);
+    const effectiveUserText = rewriteRes.isRewritten ? rewriteRes.rewrittenText : userText;
+
+    // Record turn in Dialogue State Tracker
+    dialogueStateTrackerService.recordUserTurn(chatId, userText);
+
     if (!geminiKeyPoolService.hasAvailableKey()) {
-      return this.fallbackClassification(userText, context);
+      return this.fallbackClassification(effectiveUserText, context);
     }
 
     const priority = context.isOwner ? "boss" : context.isGroup ? "public" : "background";
     const systemPrompt = this.buildSystemPrompt(context);
+
+    // ── Phase 2: Multi-Turn Conversation History Structuring ──
+    const multiTurnContents: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }> = [];
+
+    if (context.recentMessages && context.recentMessages.length > 0) {
+      for (const m of context.recentMessages.slice(-6)) {
+        if (!m || typeof m !== "string") continue;
+        const isBot = /^(?:Friday|Bot|Assistant|AI|🌙 Personal chief executive)/i.test(m);
+        multiTurnContents.push({
+          role: isBot ? "model" : "user",
+          parts: [{ text: m }],
+        });
+      }
+    }
+
+    // Ensure valid turn alternation before the final user message
+    if (multiTurnContents.length > 0 && multiTurnContents[multiTurnContents.length - 1].role === "user") {
+      multiTurnContents.push({
+        role: "model",
+        parts: [{ text: "Context acknowledged." }],
+      });
+    }
+
+    multiTurnContents.push({
+      role: "user",
+      parts: [{ text: effectiveUserText }],
+    });
 
     // Try each model in the 5-model chain sequentially with predictive key allocation
     for (const model of this.models) {
@@ -527,7 +567,7 @@ class IntentClassifierService {
       try {
         const response = await ai.models.generateContent({
           model,
-          contents: [{ role: "user", parts: [{ text: userText }] }],
+          contents: multiTurnContents,
           config: {
             systemInstruction: systemPrompt,
             tools: [{ functionDeclarations: INTENT_FUNCTION_DECLARATIONS as any }],
@@ -539,9 +579,6 @@ class IntentClassifierService {
 
         geminiKeyPoolService.recordSuccess(allocation.keyIndex);
 
-        // Robust functionCall extraction:
-        // 1. response.functionCalls accessor in @google/genai
-        // 2. Search parts array for any part containing functionCall (handles thinking/prelude parts)
         let functionCall: any = null;
         if (response.functionCalls && response.functionCalls.length > 0) {
           functionCall = response.functionCalls[0];
@@ -554,12 +591,19 @@ class IntentClassifierService {
         }
 
         if (functionCall && functionCall.name) {
+          const params = (functionCall.args as Record<string, any>) || {};
+          if (rewriteRes.isRewritten && rewriteRes.resolvedEntity) {
+            params.referencedContext = rewriteRes.resolvedEntity.label;
+          }
+
           return {
             action: functionCall.name,
             confidence: 0.95,
-            parameters: (functionCall.args as Record<string, any>) || {},
-            reasoning: `LLM (${model}) classified intent as ${functionCall.name} based on natural language understanding`,
-            originalText: userText
+            parameters: params,
+            reasoning: `LLM (${model}) classified intent as ${functionCall.name}${rewriteRes.isRewritten ? ` [Resolved Co-reference: "${effectiveUserText}"]` : ""}`,
+            originalText: userText,
+            rewrittenText: rewriteRes.isRewritten ? effectiveUserText : undefined,
+            resolvedEntity: rewriteRes.resolvedEntity?.label,
           };
         }
 
@@ -570,7 +614,9 @@ class IntentClassifierService {
           confidence: 0.9,
           parameters: { response: textResponse },
           reasoning: `LLM (${model}) responded naturally without tool call - general conversation`,
-          originalText: userText
+          originalText: userText,
+          rewrittenText: rewriteRes.isRewritten ? effectiveUserText : undefined,
+          resolvedEntity: rewriteRes.resolvedEntity?.label,
         };
       } catch (error: any) {
         console.warn(`[IntentClassifier] Model ${model} on Key #${allocation.keyIndex + 1} failed, trying next:`, error?.message || error);
@@ -585,11 +631,13 @@ class IntentClassifierService {
     }
 
     console.warn("[IntentClassifier] All 5 LLM models failed or exhausted, using fallback classification.");
-    return this.fallbackClassification(userText, context);
+    return this.fallbackClassification(effectiveUserText, context);
   }
 
   private buildSystemPrompt(context: IntentContext): string {
-    const { platform, isGroup, isOwner, senderName, groupName, timeOfDay, quotedMessage } = context;
+    const { platform, isGroup, isOwner, senderName, groupName, timeOfDay, quotedMessage, chatId } = context;
+    const effectiveChatId = chatId || (isGroup ? groupName : context.senderPhone) || "";
+    const dstState = effectiveChatId ? dialogueStateTrackerService.formatStateForPrompt(effectiveChatId) : "";
     
     return `You are FRIDAY, an intelligent AI assistant for Boss DK (Divakar). Classify the user's intent and call the appropriate function.
 
@@ -599,31 +647,38 @@ CONTEXT:
 - User: ${senderName} (${isOwner ? "BOSS/OWNER" : "Regular contact"})
 - Time: ${timeOfDay} IST
 ${quotedMessage ? `- Quoted/Replied to: "${quotedMessage}"` : ""}
+${dstState ? `\n[DIALOGUE STATE TRACKING - ACTIVE FOCUS]:\n${dstState}\n` : ""}
+${context.recentMessages && context.recentMessages.length > 0 ? `\n[RECENT CHAT TURNS]:\n${context.recentMessages.map(m => `• ${m}`).join("\n")}\n` : ""}
 
 CRITICAL RULES:
 1. **CALL vs MESSAGE**: "call me", "mujhe call karo", "phone lagao" → make_phone_call (real cellular call via Exotel)
    "message me", "msg karo", "bhej do", "whatsapp par bolo" → send_whatsapp_message
    
-2. **OWNER PRIVILEGES**: Only the OWNER can: make calls, set reminders, save updates, manage routine, teach/correct Friday, add directives, check session health, unpause bot, admin group actions.
+2. **CO-REFERENCE & PRONOUN RESOLUTION ("isko", "usko", "ye", "wo", "ise", "it", "this")**:
+   - If user says "isko DK ko bhej do", "isko call karo", "ye bhej do":
+     Resolve "isko" to the active media, homework, document, or contact in [ACTIVE FOCUS] or [RECENT CHAT TURNS].
+   - If user asks to convey/forward something to DK/Boss, set contactNameOrPhone to "dk" and messageText to what they said or the referenced item.
 
-3. **GROUP CONTEXT**: In groups, non-owner commands like @song, @poll, @quiz, safety toggles work for everyone. Admin actions only for owner/admins.
+3. **OWNER PRIVILEGES**: Only the OWNER can: make calls, set reminders, save updates, manage routine, teach/correct Friday, add directives, check session health, unpause bot, admin group actions.
 
-4. **QUOTED MESSAGE**: If user replied to a message, the action likely relates to that content (e.g. "summary" on quoted PDF, "translate" on quoted text, "call" on quoted number).
+4. **GROUP CONTEXT**: In groups, non-owner commands like @song, @poll, @quiz, safety toggles work for everyone. Admin actions only for owner/admins.
 
-5. **NATURAL LANGUAGE**: Understand Hindi/Hinglish naturally. "abhi call karo" = call now. "baad me call karna" = schedule call. "isko save karo" = save contact. "ye kiska number" = lookup.
+5. **QUOTED MESSAGE**: If user replied to a message, the action likely relates to that content (e.g. "summary" on quoted PDF, "translate" on quoted text, "call" on quoted number).
 
-6. **AMBIGUOUS CASES**: 
+6. **NATURAL LANGUAGE**: Understand Hindi/Hinglish naturally. "abhi call karo" = call now. "baad me call karna" = schedule call. "isko save karo" = save contact. "ye kiska number" = lookup.
+
+7. **AMBIGUOUS CASES**: 
    - "Ram ko contact karo" → Could be call OR message. Check context: if urgent/immediate → call. If info-sharing → message.
    - "number do" → Could be save contact OR lookup. Check: "save karo" = save, "kiska hai" = lookup.
 
-7. **WHATSAPP STATUS vs BAN HEALTH DISAMBIGUATION**:
+8. **WHATSAPP STATUS vs BAN HEALTH DISAMBIGUATION**:
    - If user asks about ban risk, account safety, session health, or bot health ("whatsapp ban status", "session health kaisa hai", "whatsapp safe hai na", "account ban risk") → check_session_health.
    - If user asks about their personal WhatsApp Story/Status post ("mera status laga do", "whatsapp par status dalo", "status post karo", "story update") → Personal WhatsApp Story/Status, NOT check_session_health.
 
-8. **ROUTINE / SCHEDULE CONFIRMATION**:
+9. **ROUTINE / SCHEDULE CONFIRMATION**:
    - If user confirms routine/timetable suggestions or says "haan set kar do", "routine set karo", "photo wala routine save karo", "schedule set kar do", "haan routine bana do", "set routine", "reminders set kar do" → call set_routine!
 
-9. **TEXT / VOICE SCHEDULE DETECTION**:
+10. **TEXT / VOICE SCHEDULE DETECTION**:
    - If Boss verbally describes a schedule or timetable (e.g. "somwar ko 9 bje school hai", "monday 9am school, tuesday 7am gym", "mera routine: subah 7 uthna, 9 bje office, raat 10 sona", "mere schedule me likha hai...") → use general_chat BUT format the reply EXACTLY like:
 
    🗓️ *Schedule / Routine:*
@@ -634,7 +689,7 @@ CRITICAL RULES:
    🔔 *Boss, kya main yeh schedule set kar doon?*
    Reply karo: _"Haan set kar do"_ ya _"Set routine"_
 
-10. **NO FUNCTION MATCH**: If no function fits, use general_chat with a natural response.
+11. **NO FUNCTION MATCH**: If no function fits, use general_chat with a natural response.
 
 Be decisive. One function call per classification.`;
   }

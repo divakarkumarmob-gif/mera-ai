@@ -365,6 +365,16 @@ ${caption ? `User caption: "${caption}"` : ""}`;
       if (cleanPhone && !isStatusMedia) {
         this.latestMediaPerChat.set(cleanPhone, cachedItem);
       }
+      if (!isStatusMedia) {
+        import("./dialogueStateTrackerService").then(({ dialogueStateTrackerService }) => {
+          dialogueStateTrackerService.pushEntity(chatId, {
+            type: "media",
+            label: shortSummary || fileName || "Scanned Photo / Document",
+            description: (analysis || "").slice(0, 300),
+            timestamp: cachedItem.timestamp,
+          });
+        }).catch(() => {});
+      }
     }
 
     // Store in Firestore archive

@@ -60,15 +60,18 @@ export class WhatsAppGroupSuperPowersEngine {
     quotedMessage?: QuotedMessageContext | null,
     isOwner = false
   ): Promise<{ handled: boolean; replyText?: string; mentions?: string[] }> {
+    const recentMessages = await this.getRecentGroupMessages(groupJid, 6);
+
     const context: IntentContext = {
       platform: "whatsapp",
       isGroup: true,
       isOwner,
       senderName,
       senderPhone,
+      chatId: groupJid,
       groupName,
       quotedMessage: quotedMessage?.text,
-      recentMessages: [],
+      recentMessages,
       timeOfDay: new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" }),
       userTimezone: "Asia/Kolkata"
     };
@@ -87,16 +90,38 @@ export class WhatsAppGroupSuperPowersEngine {
 
     // Execute the classified intent
     try {
-      return await this.executeClassifiedIntent(classified, {
+      const execResult = await this.executeClassifiedIntent(classified, {
         sock, groupJid, groupName, rawText, senderName, senderPhone, senderJid, messageKey, quotedMessage, isOwner
       });
+      if (execResult.handled && execResult.replyText) {
+        import("../dialogueStateTrackerService").then(({ dialogueStateTrackerService }) => {
+          dialogueStateTrackerService.recordBotTurn(groupJid, execResult.replyText!);
+        }).catch(() => {});
+      }
+      return execResult;
     } catch (execErr: any) {
       console.warn("[GroupSuperPowers] executeClassifiedIntent failed, falling through:", execErr?.message || execErr);
       return { handled: false };
     }
   }
 
-  private async getRecentGroupMessages(_groupJid: string, _limit: number): Promise<string[]> {
+  private async getRecentGroupMessages(groupJid: string, limit = 6): Promise<string[]> {
+    try {
+      const { baileysLiveStore } = await import("./baileysLiveStore");
+      const live = baileysLiveStore.getLiveMessages(groupJid, limit);
+      if (live && live.length > 0) {
+        return live.map((m) => `[${m.senderName || "User"}]: ${m.text}`);
+      }
+
+      const { whatsappHistoryEngine } = await import("./whatsappHistoryEngine");
+      const msgs = await whatsappHistoryEngine.getMessages({
+        groupName: groupJid,
+        limit,
+      });
+      if (msgs && msgs.length > 0) {
+        return msgs.map((m) => `[${m.senderName || "User"}]: ${m.text}`);
+      }
+    } catch {}
     return [];
   }
 
@@ -162,17 +187,20 @@ export class WhatsAppGroupSuperPowersEngine {
           if (!isOwner) {
             const ownerPhone = (process.env.OWNER_WHATSAPP_NUMBER || process.env.BOSS_WHATSAPP_NUMBER || "").replace(/\D/g, "");
             const textToRelay = parameters.messageText || (quotedMessage ? quotedMessage.text : rawText);
+            const refContext = parameters.referencedContext || (classified as any).resolvedEntity;
+            const refItemStr = refContext ? `\n📎 *Referenced Item:* ${refContext}` : "";
             
             if (isBossTarget) {
               if (ownerPhone) {
                 try {
                   const { sendWhatsAppUnified } = await import("../whatsappService");
-                  const alertCard = `📩 *[Group Message for You]*\n\n👤 *From:* ${senderName} (+${senderPhone})\n👥 *Group:* ${groupName}\n💬 *Message:* ${textToRelay || "Attached update/homework"}\n\n_Relayed by Friday Assistant_`;
+                  const alertCard = `📩 *[Group Message for You]*\n\n👤 *From:* ${senderName} (+${senderPhone})\n👥 *Group:* ${groupName}\n💬 *Message:* ${textToRelay || "Attached update/homework"}${refItemStr}\n\n_Relayed by Friday Assistant_`;
                   await sendWhatsAppUnified(ownerPhone, alertCard).catch(() => {});
                 } catch {}
               }
               const snippet = parameters.messageText ? ` ki "${parameters.messageText}"` : "";
-              return { handled: true, replyText: `Theek hai, main Boss (DK) ko forward kar dungi${snippet} 👍` };
+              const refSnippet = refContext ? ` (${refContext})` : "";
+              return { handled: true, replyText: `Theek hai, main Boss (DK) ko forward kar dungi${refSnippet}${snippet} 👍` };
             }
 
             return {
