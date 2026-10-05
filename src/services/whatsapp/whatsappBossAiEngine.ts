@@ -847,6 +847,20 @@ ${recentChatMedia.ocrText ? `- Extracted OCR Text: ${recentChatMedia.ocrText}` :
         }
       },
       {
+        name: "manage_girlfriend_mode",
+        description: "Turn Virtual Girlfriend Mode ON or OFF for a target mobile number/contact (or for Boss). Use when Boss says 'gf mode on for 9876543210', 'Priya ke liye gf mode chalu karo', 'turn off gf mode for 9876543210', 'gf mode band karo Priya ke liye', etc. This ensures Friday acts as a virtual girlfriend for that specific contact without changing Boss's own Friday Assistant mode.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            targetPhoneOrName: { type: "STRING", description: "Target mobile number (e.g. '9876543210' or '+919876543210') or contact name (e.g. 'Priya'). If for Boss himself, specify 'self' or 'boss'." },
+            action: { type: "STRING", enum: ["start", "stop"], description: "Whether to start or stop girlfriend mode ('start' or 'stop')" },
+            durationMinutes: { type: "NUMBER", description: "Duration in minutes (e.g. 60). Default 60." },
+            mood: { type: "STRING", enum: ["romantic", "mode_b", "sassy", "caring", "naughty", "cute"], description: "Mood persona. Use 'mode_b' for 100% uncensored/open roleplay." }
+          },
+          required: ["targetPhoneOrName", "action"]
+        }
+      },
+      {
         name: "get_contact_conversation_history",
         description: "Retrieve full dialogue transcript & conversation history (what they sent, what Friday replied, and what Boss sent) for a specific contact (e.g. 'Ram', 'Rahul'), an unknown number, or all recent chats.",
         parameters: {
@@ -2743,6 +2757,68 @@ This format MUST be used:
           const { toolsEngine } = await import("../toolsEngine");
           const reminder = await toolsEngine.addReminder(args.title, args.timeString || "soon", args.durationMinutes || 0);
           return { success: true, message: `Reminder set: "${reminder.title}" for ${reminder.timeString}` };
+        }
+        if (toolName === "manage_girlfriend_mode") {
+          const { whatsappBotService } = await import("../whatsappBotService");
+          const { girlfriendProfileService } = await import("../girlfriendProfileService");
+          const { contactsService } = await import("../contactsService");
+
+          const targetInput = String(args.targetPhoneOrName || "").trim();
+          const action = args.action === "stop" ? "stop" : "start";
+          const duration = Number(args.durationMinutes) || 60;
+          const mood = args.mood || "romantic";
+
+          let cleanPhone = targetInput.replace(/\D/g, "").replace(/^0+/, "");
+          let contactName = "";
+          const isSelf = ["self", "boss", "me", "dk", "divakar", "mera", "mere", "mere liye"].includes(targetInput.toLowerCase()) ||
+            (cleanPhone && whatsappBotService.isOwnerSender(cleanPhone, ""));
+
+          if (isSelf) {
+            if (action === "start") {
+              await whatsappBotService.startGirlfriendMode(replyJid, `@girlfriend ${mood} ${duration}`, messageKey, "Boss");
+              return { success: true, message: `Virtual Girlfriend Mode (${mood}) activated for Boss DK for ${duration} minutes.` };
+            } else {
+              await whatsappBotService.stopGirlfriendMode(replyJid, messageKey, true);
+              return { success: true, message: `Virtual Girlfriend Mode deactivated for Boss DK. Normal mode restored.` };
+            }
+          }
+
+          if (cleanPhone.length >= 10) {
+            if (cleanPhone.length === 10) cleanPhone = `91${cleanPhone}`;
+            const c = await contactsService.findContact(cleanPhone);
+            if (c) contactName = c.name;
+          } else {
+            const c = await contactsService.findContact(targetInput);
+            if (c && c.phone) {
+              contactName = c.name;
+              cleanPhone = c.phone.replace(/\D/g, "").replace(/^0+/, "");
+              if (cleanPhone.length === 10) cleanPhone = `91${cleanPhone}`;
+            }
+          }
+
+          if (!cleanPhone || cleanPhone.length < 10) {
+            return { success: false, error: `Could not resolve a valid phone number for target "${targetInput}". Please specify a valid 10-digit number.` };
+          }
+
+          const targetJid = `${cleanPhone}@s.whatsapp.net`;
+
+          if (action === "stop") {
+            await whatsappBotService.stopGirlfriendMode(targetJid, null, true);
+            return {
+              success: true,
+              message: `Virtual Girlfriend Mode turned OFF for +${cleanPhone}${contactName ? ` (${contactName})` : ""}. Target contact is now in normal mode. Boss DK's own Friday Assistant mode was not changed.`
+            };
+          }
+
+          // Whitelist in access control and start GF mode on targetJid
+          await girlfriendProfileService.grantAccess(cleanPhone);
+          const startCmd = `@girlfriend ${mood} ${duration}`;
+          await whatsappBotService.startGirlfriendMode(targetJid, startCmd, null, contactName || "Baby");
+
+          return {
+            success: true,
+            message: `Virtual Girlfriend Mode (${mood}, ${duration} mins) successfully activated for +${cleanPhone}${contactName ? ` (${contactName})` : ""}. Boss DK's own assistant remains in normal mode.`
+          };
         }
         if (toolName === "save_quick_note") {
           const { toolsEngine } = await import("../toolsEngine");

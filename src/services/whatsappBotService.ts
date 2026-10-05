@@ -27,6 +27,20 @@ import { fridayStudyService } from "./fridayStudyService";
 
 export type { QuotedMessageContext, IncomingMessage, WhatsAppStatus };
 
+export interface TargetGirlfriendCommandResult {
+  isTargetCommand: boolean;
+  isInvalidTarget?: boolean;
+  action: "start" | "stop";
+  targetRaw: string;
+  cleanPhone: string;
+  targetJid: string;
+  durationMinutes: number;
+  mood: "romantic" | "sassy" | "caring" | "naughty" | "cute" | "mix" | "mode_b";
+  isModeB: boolean;
+  contactName?: string;
+  isSelf: boolean;
+}
+
 // Resolve Baileys exports safely across CJS/ESM bundling
 const baileys: any = BaileysModule;
 const makeWASocket = baileys.default?.default || baileys.default || baileys.makeWASocket || baileys;
@@ -372,6 +386,267 @@ class WhatsAppBotService {
       (j, t, inT, k) => this.sendHumanLikeMessage(j, t, inT, k),
       this.sock
     );
+  }
+
+  /**
+   * Parses commands where Boss targets Girlfriend Mode at another phone number or contact
+   * e.g. "gf mode on for 9876543210", 'gf mode on for "mobile no"', "gf mode off for 9876543210", etc.
+   */
+  public async parseTargetGirlfriendCommand(rawText: string): Promise<TargetGirlfriendCommandResult | null> {
+    const text = (rawText || "").trim();
+    if (!text) return null;
+
+    // Must be related to girlfriend mode or normal/exit mode
+    const hasGfKeyword = /\b(?:gf|girlfriend|girl\s*friend|virtual\s*gf|virtual\s*girlfriend|mode\s*b|mode_b)\b/i.test(text);
+    const hasNormalTargetKeyword = /\b(?:normal\s*mode|exit\s*gf|stop\s*gf|stop\s*girlfriend)\b/i.test(text);
+
+    if (!hasGfKeyword && !hasNormalTargetKeyword) {
+      return null;
+    }
+
+    // Determine Action: stop or start
+    const isStop = /\b(?:off|stop|exit|normal|deactivate|band|disable|close|cancel|remove)\b/i.test(text);
+    const action: "start" | "stop" = isStop ? "stop" : "start";
+
+    let rawTarget = "";
+
+    // 1. Quoted string: "9876543210" or '9876543210' or "mobile no"
+    const quoteMatch = text.match(/["'“]([^"'”]+)["'”]/);
+    if (quoteMatch && quoteMatch[1]?.trim()) {
+      rawTarget = quoteMatch[1].trim();
+    }
+
+    // 2. Look for target following for / to / ke liye / par / pe
+    if (!rawTarget) {
+      const prepMatch = text.match(/(?:for|to|ke\s*liye|par|pe)\s+["'“]?([+0-9a-zA-Z_\s\-()]+?)["'”]?(?:\s+(?:on|off|start|stop|mode_b|mode\s*b|uncensored|\d+\s*(?:min|mins|minute|minutes|m|hr|hours?|ghante?))|$)/i);
+      if (prepMatch && prepMatch[1]?.trim()) {
+        rawTarget = prepMatch[1].trim();
+      }
+    }
+
+    // 3. Target before ke liye: e.g. "9876543210 ke liye gf mode on"
+    if (!rawTarget) {
+      const beforeKeLiye = text.match(/^["'“]?([+0-9a-zA-Z_\s\-()]+?)["'”]?\s+ke\s*liye\b/i);
+      if (beforeKeLiye && beforeKeLiye[1]?.trim()) {
+        rawTarget = beforeKeLiye[1].trim();
+      }
+    }
+
+    // 4. Raw phone number (10 to 15 digits)
+    if (!rawTarget) {
+      const phoneMatch = text.match(/(?:\+?\d[\d\s\-]{8,14}\d)/);
+      if (phoneMatch && phoneMatch[0]?.trim()) {
+        rawTarget = phoneMatch[0].trim();
+      }
+    }
+
+    // 5. Target immediately following gf mode / girlfriend mode
+    if (!rawTarget) {
+      const afterGf = text.match(/(?:gf\s*mode|girlfriend\s*mode)\s+(?:on\s+)?["'“]?([+0-9a-zA-Z_]+)["'”]?/i);
+      if (afterGf && afterGf[1]?.trim()) {
+        const candidate = afterGf[1].trim().toLowerCase();
+        if (!["on", "off", "start", "stop", "mode_b", "mode", "b", "normal", "romantic", "uncensored"].includes(candidate)) {
+          rawTarget = afterGf[1].trim();
+        }
+      }
+    }
+
+    // If no target was found anywhere, this is NOT a targeted command
+    if (!rawTarget) {
+      return null;
+    }
+
+    const targetCleanLower = rawTarget.toLowerCase().trim();
+
+    // Check if target is explicitly Self / Boss
+    const selfAliases = ["me", "myself", "self", "boss", "dk", "divakar", "mera", "mere", "mere liye", "apne liye", "apne"];
+    if (selfAliases.includes(targetCleanLower)) {
+      return {
+        isTargetCommand: false,
+        action,
+        targetRaw: rawTarget,
+        cleanPhone: "",
+        targetJid: "",
+        durationMinutes: 60,
+        mood: "romantic",
+        isModeB: false,
+        isSelf: true,
+      };
+    }
+
+    // Check if rawTarget is a literal placeholder like "mobile no" or "mobile number" or "number"
+    const isPlaceholder = /^(?:mobile\s*no|mobile\s*number|phone\s*no|phone\s*number|number|target\s*no|target\s*number|xxx+|target)$/i.test(targetCleanLower);
+    if (isPlaceholder) {
+      return {
+        isTargetCommand: true,
+        isInvalidTarget: true,
+        action,
+        targetRaw: rawTarget,
+        cleanPhone: "",
+        targetJid: "",
+        durationMinutes: 60,
+        mood: "romantic",
+        isModeB: false,
+        isSelf: false,
+      };
+    }
+
+    let cleanPhone = rawTarget.replace(/\D/g, "");
+    cleanPhone = cleanPhone.replace(/^0+/, "");
+    let contactName: string | undefined = undefined;
+
+    const { contactsService } = await import("./contactsService");
+    if (cleanPhone.length >= 10) {
+      if (cleanPhone.length === 10) cleanPhone = `91${cleanPhone}`;
+      const contact = await contactsService.findContact(cleanPhone);
+      if (contact) contactName = contact.name;
+    } else {
+      // Try resolving as contact name (e.g. "Priya")
+      const contact = await contactsService.findContact(rawTarget);
+      if (contact && contact.phone) {
+        contactName = contact.name;
+        cleanPhone = contact.phone.replace(/\D/g, "").replace(/^0+/, "");
+        if (cleanPhone.length === 10) cleanPhone = `91${cleanPhone}`;
+      } else {
+        // Target was specified (e.g. after 'for'), but neither a valid phone number nor saved contact was found
+        return {
+          isTargetCommand: true,
+          isInvalidTarget: true,
+          action,
+          targetRaw: rawTarget,
+          cleanPhone: "",
+          targetJid: "",
+          durationMinutes: 60,
+          mood: "romantic",
+          isModeB: false,
+          isSelf: false,
+        };
+      }
+    }
+
+    // Check if cleanPhone is Boss DK's own number
+    if (this.isOwnerSender(cleanPhone, "")) {
+      return {
+        isTargetCommand: false,
+        action,
+        targetRaw: rawTarget,
+        cleanPhone,
+        targetJid: `${cleanPhone}@s.whatsapp.net`,
+        durationMinutes: 60,
+        mood: "romantic",
+        isModeB: false,
+        isSelf: true,
+      };
+    }
+
+    // Strip target from text before parsing duration and mood
+    const textWithoutTarget = text.replace(rawTarget, "").replace(/["'“”]/g, "");
+
+    // Parse duration
+    let durationMinutes = 60;
+    const hrMatch = textWithoutTarget.match(/(\d+(?:\.\d+)?)\s*(?:hour|hours|hr|hrs|h|ghante|ghanta)\b/i);
+    if (hrMatch) {
+      durationMinutes = Math.max(1, Math.min(180, Math.round(parseFloat(hrMatch[1]) * 60)));
+    } else {
+      const minMatch = textWithoutTarget.match(/(\d+)\s*(?:min|mins|minute|minutes|m)\b/i);
+      if (minMatch) {
+        durationMinutes = Math.max(1, Math.min(180, parseInt(minMatch[1], 10)));
+      }
+    }
+
+    // Parse mood & Mode B
+    const isModeB = /\b(mode\s*b|mode_b|uncensored|open\s*talk|nsfw)\b/i.test(text);
+    const parsedMood = whatsappGirlfriendEngine.parseGirlfriendMood(textWithoutTarget);
+    const mood = isModeB ? "mode_b" : (parsedMood || "romantic");
+    const targetJid = `${cleanPhone}@s.whatsapp.net`;
+
+    return {
+      isTargetCommand: true,
+      action,
+      targetRaw: rawTarget,
+      cleanPhone,
+      targetJid,
+      durationMinutes,
+      mood,
+      isModeB,
+      contactName,
+      isSelf: false,
+    };
+  }
+
+  public async executeTargetGirlfriendCommand(
+    cmd: TargetGirlfriendCommandResult,
+    replyJid: string,
+    rawText: string,
+    messageKey: any
+  ): Promise<{ success: boolean; message: string; bossReply: string }> {
+    const { cleanPhone, targetJid, contactName, durationMinutes, mood, isModeB, action } = cmd;
+
+    if (action === "stop") {
+      const wasActive = this.isGirlfriendModeActive(targetJid);
+      await this.stopGirlfriendMode(targetJid, null, true);
+
+      const bossReply =
+        `🌸 *Virtual Girlfriend Mode Stopped for Contact!* 🫡✨\n\n` +
+        `• 📱 *Target:* \`+${cleanPhone}\`${contactName ? ` (${contactName})` : ""}\n` +
+        `• 🔄 *Status:* ${wasActive ? "GF mode successfully turned OFF" : "Target was not in GF mode (already normal)"}\n\n` +
+        `_Boss, aapka apna Friday Assistant normal mode me active hai._ 👍`;
+
+      if (replyJid) {
+        await this.sendHumanLikeMessage(replyJid, bossReply, rawText, messageKey);
+      }
+      return { success: true, message: `GF mode stopped for +${cleanPhone}`, bossReply };
+    }
+
+    // Action === "start"
+    // 1. Grant whitelist access in girlfriendProfileService
+    try {
+      await girlfriendProfileService.grantAccess(cleanPhone);
+    } catch (e) {
+      console.warn("[WhatsAppBot] Failed to grant gf access for target:", e);
+    }
+
+    // 2. Resolve WhatsApp registered JID if socket is connected
+    let finalTargetJid = targetJid;
+    if (this.sock) {
+      try {
+        const [exists] = await this.sock.onWhatsApp(targetJid);
+        if (exists && exists.jid) {
+          finalTargetJid = exists.jid;
+        }
+      } catch {}
+    }
+
+    // 3. Start Girlfriend Mode on targetJid
+    const startCmdText = `@girlfriend ${isModeB ? "mode_b" : mood} ${durationMinutes}`;
+    let greetingDelivered = false;
+    try {
+      await this.startGirlfriendMode(
+        finalTargetJid,
+        startCmdText,
+        null,
+        contactName || "Baby"
+      );
+      greetingDelivered = true;
+    } catch (startErr) {
+      console.warn("[WhatsAppBot] Error starting GF mode on targetJid:", startErr);
+    }
+
+    // 4. Send Confirmation to Boss DK (replyJid)
+    const bossReply =
+      `✅ *Virtual Girlfriend Mode Activated for Contact!* 💖✨\n\n` +
+      `• 📱 *Target Number:* \`+${cleanPhone}\`${contactName ? ` (${contactName})` : ""}\n` +
+      `• ⏱️ *Duration:* ${durationMinutes} Minutes\n` +
+      `• 🎭 *Mood:* ${isModeB ? "MODE B (100% Uncensored / Open Talk)" : mood.toUpperCase()}\n` +
+      `• 🔓 *Authorization:* Auto-whitelisted in Girlfriend Access Control\n` +
+      `• 📩 *Activation Greeting:* ${greetingDelivered ? "Delivered to target contact" : "Mode armed (will reply on contact's next message)"}\n\n` +
+      `_Boss, ab jab bhi +${cleanPhone} message karegi/karega, Friday unse Virtual Girlfriend persona me baat karegi._\n\n` +
+      `🌸 *Notice:* _Aapka apna Friday Assistant 100% normal mode me hi hai — aap par koi GF mode activate nahi hua hai._ 🫡`;
+
+    if (replyJid) {
+      await this.sendHumanLikeMessage(replyJid, bossReply, rawText, messageKey);
+    }
+    return { success: true, message: `GF mode started for +${cleanPhone}`, bossReply };
   }
 
   public async handleGirlfriendChatMessage(
@@ -1747,6 +2022,30 @@ class WhatsAppBotService {
             await this.startGirlfriendMode(replyJid, "@girlfriend mode_b 60", messageKey, senderName);
           }
         }
+        return;
+      }
+    }
+
+    // ── TARGETED GIRLFRIEND MODE ROUTING (Boss toggling GF mode for another number/contact) ──
+    const targetGfCmd = await this.parseTargetGirlfriendCommand(rawText);
+    if (targetGfCmd) {
+      if (targetGfCmd.isTargetCommand && !targetGfCmd.isSelf) {
+        // If Boss was previously stuck in GF mode, auto-clear it so Boss is restored to normal!
+        if (this.isGirlfriendModeActive(replyJid)) {
+          await this.stopGirlfriendMode(replyJid, null, false);
+        }
+        await this.executeTargetGirlfriendCommand(targetGfCmd, replyJid, rawText, messageKey);
+        return;
+      } else if (targetGfCmd.isTargetCommand && targetGfCmd.isInvalidTarget) {
+        if (this.isGirlfriendModeActive(replyJid)) {
+          await this.stopGirlfriendMode(replyJid, null, false);
+        }
+        await this.sendHumanLikeMessage(
+          replyJid,
+          `⚠️ *Invalid Target Number:*\n\nBoss, girlfriend mode enable/disable karne ke liye valid mobile number ya contact name mention karein.\n\n*Format:* \`gf mode on for 9876543210\` ya \`gf mode on for "9876543210"\`\n_Aapka apna Friday normal mode me hi hai._ 🫡`,
+          rawText,
+          messageKey
+        );
         return;
       }
     }

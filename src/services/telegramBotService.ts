@@ -3022,6 +3022,31 @@ This format MUST be used:
       }
     }
 
+    // ── TARGETED GIRLFRIEND MODE (Boss toggling GF mode for WhatsApp contact via Telegram) ──
+    if (chatId && isOwner) {
+      const { whatsappBotService } = await import("./whatsappBotService");
+      const targetGfCmd = await whatsappBotService.parseTargetGirlfriendCommand(text);
+      if (targetGfCmd) {
+        if (targetGfCmd.isTargetCommand && !targetGfCmd.isSelf) {
+          if (this.isGirlfriendModeActive(chatId)) {
+            this.stopGirlfriendMode(chatId);
+          }
+          const execRes = await whatsappBotService.executeTargetGirlfriendCommand(targetGfCmd, "", text, null);
+          await this.sendMessage(chatId, execRes.bossReply);
+          return;
+        } else if (targetGfCmd.isTargetCommand && targetGfCmd.isInvalidTarget) {
+          if (this.isGirlfriendModeActive(chatId)) {
+            this.stopGirlfriendMode(chatId);
+          }
+          await this.sendMessage(
+            chatId,
+            `⚠️ *Invalid Target Number:*\n\nBoss, girlfriend mode enable/disable karne ke liye valid mobile number ya contact name mention karein.\n\n*Format:* \`gf mode on for 9876543210\` ya \`gf mode on for "9876543210"\`\n_Aapka apna Telegram assistant normal mode me hi hai._ 🫡`
+          );
+          return;
+        }
+      }
+    }
+
     // ── VIRTUAL GIRLFRIEND MODE ACTIVATION / STOP (TELEGRAM) ──
     if (chatId && isGfActivationIntent) {
       // Already active → NEVER restart (would wipe timer + sext-state = "mode bhoolna" glitch).
