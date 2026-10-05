@@ -1207,7 +1207,7 @@ ${recentChatMedia.ocrText ? `- Extracted OCR Text: ${recentChatMedia.ocrText}` :
       },
       {
         name: "remember_personal_fact",
-        description: "Save an important personal fact or memory about DK permanently.",
+        description: "Save an important personal fact or memory about DK permanently. ONLY use when Boss explicitly instructs to remember or note a personal fact ('yaad rakhna', 'note karo', 'save this fact'). NEVER use for commands, mode toggles, settings, or operational actions.",
         parameters: {
           type: "OBJECT",
           properties: {
@@ -3500,6 +3500,20 @@ ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` 
       }
 
       let replyText = response.text?.trim() || "";
+
+      // If an actionable tool was executed and Gemini returned a generic/lame acknowledgement (e.g. "isse yaad rakhunga", "theek hai"), override with the actual tool confirmation card
+      if (lastToolResult && (lastToolResult.message || lastToolResult.bossReply)) {
+        const toolMsg = lastToolResult.bossReply || lastToolResult.message;
+        const isGenericLameAcknowledgement =
+          !replyText ||
+          /^(?:(?:theek|thik|haan|ha|ji)?\s*(?:boss|bhai)?[\s,.]*)?(?:isse?\s*yaad\s*rakhung[ai]|yaad\s*rakhung[ai]|note\s*kar\s*liy[aa]|samajh\s*gay[ai]|ok|theek\s*hai|done)\.?$/i.test(replyText);
+
+        if (isGenericLameAcknowledgement && toolMsg) {
+          replyText = toolMsg.startsWith("✅") || toolMsg.startsWith("🌸") || toolMsg.startsWith("⚠️")
+            ? toolMsg
+            : `✅ ${toolMsg}`;
+        }
+      }
 
       // ── ZERO-HALLUCINATION DISPATCH SENTINEL ──
       if (!didSendWhatsAppMessage) {

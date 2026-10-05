@@ -4492,6 +4492,41 @@ INSTRUCTIONS:
           return { handled: true, replyText };
         }
 
+        case "manage_girlfriend_mode": {
+          const targetInput = String(parameters.targetPhoneOrName || "").trim();
+          const action = parameters.action === "stop" ? "stop" : "start";
+          const duration = Number(parameters.durationMinutes) || 60;
+          const mood = parameters.mood || "romantic";
+
+          const isSelf = !targetInput || ["self", "boss", "me", "dk", "divakar", "mera", "mere", "mere liye"].includes(targetInput.toLowerCase());
+
+          if (isSelf) {
+            if (action === "start") {
+              this.startGirlfriendMode(chatId, duration);
+              const replyText = `💖 *Virtual Girlfriend Mode (${mood}) Activated on Telegram for ${duration} mins!* 🥰✨\n\n👉 *Exit karne ke liye:* \`/normal\``;
+              await this.sendMessage(chatId, replyText);
+              return { handled: true, replyText };
+            } else {
+              this.stopGirlfriendMode(chatId);
+              const replyText = `🌸 *Normal Friday AI Mode Activated!* 🫡✨`;
+              await this.sendMessage(chatId, replyText);
+              return { handled: true, replyText };
+            }
+          }
+
+          const { whatsappBotService } = await import("./whatsappBotService");
+          const targetCmd = await whatsappBotService.parseTargetGirlfriendCommand(`gf mode ${action === "stop" ? "off" : "on"} for "${targetInput}" ${duration} min ${mood}`);
+          if (targetCmd && targetCmd.isTargetCommand && !targetCmd.isInvalidTarget) {
+            const execRes = await whatsappBotService.executeTargetGirlfriendCommand(targetCmd, "", "", null);
+            await this.sendMessage(chatId, execRes.bossReply);
+            return { handled: true, replyText: execRes.bossReply };
+          }
+
+          const replyText = `⚠️ Target "${targetInput}" ke liye girlfriend mode execute nahi ho paaya. Kripya valid 10-digit mobile number mention karein.`;
+          await this.sendMessage(chatId, replyText);
+          return { handled: true, replyText };
+        }
+
         case "send_whatsapp_message": {
           const { sendWhatsAppUnified } = await import("./whatsappService");
           const { contactsService } = await import("./contactsService");
