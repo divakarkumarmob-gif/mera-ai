@@ -1881,7 +1881,10 @@ class WhatsAppBotService {
                   qMsg,
                   (j, t, inT, k) => this.sendHumanLikeMessage(j, t, inT, k),
                   async (gText, gJid, gName, gKey) => {
-                    const isGfAct = /^(?:@girlfriend|\/girlfriend|@gf|\/gf|girlfriend\s*mode|gf\s*mode|virtual\s*girlfriend|girlfriend)\b/i.test(gText);
+                    const isGfAct =
+                      /^(?:@girlfriend|\/girlfriend|@gf|\/gf|girlfriend\s*mode|gf\s*mode|virtual\s*girlfriend)\b/i.test(gText) ||
+                      /^(?:girlfriend|gf)\s+(?:mode|on|start|chalu|activate|banao)\b/i.test(gText) ||
+                      /^(?:girlfriend|gf)$/i.test(gText.trim());
                     const isGfStop = /^(?:@normal|\/normal|normal\s*mode|normal|@stop\s*gf|@stop\s*girlfriend|stop\s*girlfriend|stop\s*gf|exit\s*girlfriend|exit\s*gf)$/i.test(gText);
                     const isProfileCmd = girlfriendProfileService.isProfileCommand(gText) || girlfriendProfileService.isOnboardingActive(gJid);
                     const isAllowed = girlfriendProfileService.isAuthorized(sPhone, false);
@@ -2052,7 +2055,9 @@ class WhatsAppBotService {
 
     // ── VIRTUAL GIRLFRIEND MODE ROUTING ──
     const isGfActivationIntent =
-      /^(?:@girlfriend|\/girlfriend|@gf|\/gf|girlfriend\s*mode|gf\s*mode|virtual\s*girlfriend|girlfriend|mode\s*b|mode_b)\b/i.test(rawText);
+      /^(?:@girlfriend|\/girlfriend|@gf|\/gf|girlfriend\s*mode|gf\s*mode|virtual\s*girlfriend|mode\s*b|mode_b)\b/i.test(rawText) ||
+      /^(?:girlfriend|gf)\s+(?:mode|on|start|chalu|activate|banao)\b/i.test(rawText) ||
+      /^(?:girlfriend|gf)$/i.test(rawText.trim());
 
     const isGfStopIntent =
       /^(?:@normal|\/normal|normal\s*mode|normal|@stop\s*gf|@stop\s*girlfriend|stop\s*girlfriend|stop\s*gf|exit\s*girlfriend|exit\s*gf)$/i.test(rawText);
@@ -2096,8 +2101,16 @@ class WhatsAppBotService {
 
     // ── FRIDAY STUDY APPROVAL INTERCEPTOR (Boss Approves/Rejects Study Group) ──
     const cleanBossCmd = rawText.trim().toLowerCase();
-    const isStudyApproveCmd = /^(?:approve\s+study|approve|haa|haan|yes|approve\s+group|approved)$/i.test(cleanBossCmd);
-    const isStudyRejectCmd = /^(?:reject\s+study|reject|nahi|no|mat\s+karo)$/i.test(cleanBossCmd);
+    const isExplicitStudyMention = /\b(study|padhai|group)\b/i.test(cleanBossCmd);
+    const isQuotingStudyPrompt = quotedMessage?.text ? /\b(study|backlog|neet|routine|approve)\b/i.test(quotedMessage.text) : false;
+    const isStudyApproveCmd =
+      /^(?:approve\s+study|approve\s+group|approved|study\s+approved?)$/i.test(cleanBossCmd) ||
+      ((isExplicitStudyMention || isQuotingStudyPrompt) && /^(?:approve|haa|haan|yes)$/i.test(cleanBossCmd)) ||
+      /^approve$/i.test(cleanBossCmd);
+    const isStudyRejectCmd =
+      /^(?:reject\s+study|reject\s+group|rejected|study\s+rejected?)$/i.test(cleanBossCmd) ||
+      ((isExplicitStudyMention || isQuotingStudyPrompt) && /^(?:reject|nahi|no|mat\s+karo)$/i.test(cleanBossCmd)) ||
+      /^reject$/i.test(cleanBossCmd);
 
     if ((isStudyApproveCmd || isStudyRejectCmd) && fridayStudyService.hasPendingApproval()) {
       try {
@@ -2352,8 +2365,14 @@ class WhatsAppBotService {
       replyText = match[2].trim();
       target = awaiting.find((q) => q.senderName.toLowerCase().includes(namePart));
     } else if (awaiting.length === 1) {
-      target = awaiting[0];
-      replyText = text.trim();
+      // Require explicit reply prefix (e.g. "reply: ...", "ans: ...", "unko bolo ...") so random Boss commands are never hijacked
+      const explicitReplyMatch = text.match(/^(?:reply|ans|answer|unko\s*bolo|unhe\s*bolo|unko\s*bhejo)\s*[:=-]?\s*(.+)/i);
+      if (explicitReplyMatch) {
+        target = awaiting[0];
+        replyText = explicitReplyMatch[1].trim();
+      } else {
+        return false;
+      }
     } else {
       return false;
     }
@@ -3343,6 +3362,38 @@ class WhatsAppBotService {
             ? `📞 *Ji Boss! Main abhi ${displayName} (+${targetNumber}) par Exotel Telephony se call laga rahi hoon... Phone uthaiye!* ⚡`
             : `⚠️ *Call connect nahi ho paayi:* ${callRes.message}\n_Kripya Exotel settings me API keys aur Virtual number check karein._`;
 
+          await this.sendHumanLikeMessage(replyJid, replyText, rawText, messageKey);
+          return { handled: true, replyText };
+        }
+
+        case "manage_girlfriend_mode": {
+          const targetInput = String(parameters.targetPhoneOrName || "").trim();
+          const action = parameters.action === "stop" ? "stop" : "start";
+          const duration = Number(parameters.durationMinutes) || 60;
+          const mood = parameters.mood || "romantic";
+
+          // If no target or target is self
+          const isSelf = !targetInput || ["self", "boss", "me", "dk", "divakar", "mera", "mere", "mere liye"].includes(targetInput.toLowerCase()) ||
+            this.isOwnerSender(targetInput.replace(/\D/g, ""), "");
+
+          if (isSelf) {
+            if (action === "start") {
+              await this.startGirlfriendMode(replyJid, `@girlfriend ${mood} ${duration}`, messageKey, senderName);
+              return { handled: true, replyText: `Virtual Girlfriend Mode (${mood}) activated for Boss DK.` };
+            } else {
+              await this.stopGirlfriendMode(replyJid, messageKey, true);
+              return { handled: true, replyText: `Virtual Girlfriend Mode stopped for Boss DK.` };
+            }
+          }
+
+          // Otherwise, it's for a target contact/number
+          const targetCmd = await this.parseTargetGirlfriendCommand(`gf mode ${action === "stop" ? "off" : "on"} for "${targetInput}" ${duration} min ${mood}`);
+          if (targetCmd && targetCmd.isTargetCommand && !targetCmd.isInvalidTarget) {
+            const execRes = await this.executeTargetGirlfriendCommand(targetCmd, replyJid, rawText, messageKey);
+            return { handled: true, replyText: execRes.bossReply };
+          }
+
+          const replyText = `⚠️ Target "${targetInput}" ke liye girlfriend mode execute nahi ho paaya. Kripya valid 10-digit number provide karein.`;
           await this.sendHumanLikeMessage(replyJid, replyText, rawText, messageKey);
           return { handled: true, replyText };
         }

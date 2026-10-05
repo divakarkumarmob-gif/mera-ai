@@ -2982,7 +2982,9 @@ This format MUST be used:
 
     // ── GIRLFRIEND PROFILE ONBOARDING & COMMANDS (TELEGRAM) ──
     const isGfActivationIntent =
-      /^(?:\/girlfriend|\/gf|@girlfriend|@gf|girlfriend\s*mode|gf\s*mode|virtual\s*girlfriend|girlfriend)\b/i.test(text);
+      /^(?:\/girlfriend|\/gf|@girlfriend|@gf|girlfriend\s*mode|gf\s*mode|virtual\s*girlfriend)\b/i.test(text) ||
+      /^(?:girlfriend|gf)\s+(?:mode|on|start|chalu|activate|banao)\b/i.test(text) ||
+      /^(?:girlfriend|gf)$/i.test(text.trim());
     const isGfStopIntent =
       /^(?:\/normal|normal\s*mode|normal|\/stop\s*gf|\/stop\s*girlfriend|stop\s*girlfriend|stop\s*gf|exit\s*girlfriend|exit\s*gf)$/i.test(text);
     const isProfileCmd = girlfriendProfileService.isProfileCommand(text) || (chatId && girlfriendProfileService.isOnboardingActive(String(chatId)));
@@ -3386,10 +3388,10 @@ This format MUST be used:
     }
 
     // 2.0F Handle RailRadar 10-Digit PNR Status ("/pnr <10-digits>" or "pnr status <10-digits>")
-    const pnrMatch = text.match(/^(?:\/pnr|pnr|pnr\s*status)\s+(\d{10})/i) ||
-      text.match(/\b(\d{10})\b/i);
+    const pnrMatch = text.match(/^(?:\/pnr|pnr|pnr\s*status)\s*[:=-]?\s*(\d{10})/i) ||
+      (/\bpnr\b/i.test(text) ? text.match(/\b(\d{10})\b/) : null);
 
-    if (pnrMatch && (/pnr/i.test(text) || pnrMatch[0].startsWith("/pnr") || text.length === 10)) {
+    if (pnrMatch && pnrMatch[1]) {
       const pnrNum = pnrMatch[1];
       try {
         await this.sendMessage(chatId, `🎫 *RailRadar PNR Enquiry:* Fetching booking & chart status for *${pnrNum}*... 🔍`);
@@ -4139,9 +4141,14 @@ INSTRUCTIONS:
       }
     }
 
-    // 7. Handle Music Finder Requests ("gana chalao ...", "song ...")
-    if (/(gana chalao|song|music|spotify)/i.test(text)) {
-      const songQuery = text.replace(/(gana chalao|gana sunao|song|play|music)/gi, "").trim();
+    // 7. Handle Music Finder Requests ("gana chalao ...", "play song ...", "spotify: ...")
+    const isExplicitMusicReq =
+      /^(?:play|gana\s*chalao|gana\s*sunao|gaana\s*sunao|bajao|spotify\s*search)\s+(.+)/i.test(text.trim()) ||
+      /^(?:song|music|spotify)\s*[:=-]\s*(.+)/i.test(text.trim()) ||
+      /(?:gaana|song|music)\s+(?:sunao|chalao|play|bajao)/i.test(text.trim());
+
+    if (isExplicitMusicReq) {
+      const songQuery = text.replace(/(?:gana\s*chalao|gana\s*sunao|gaana\s*sunao|bajao|spotify\s*search|song|play|music)/gi, "").trim();
       if (songQuery) {
         const musicRes = await publicApisService.searchMusic(songQuery);
         if (musicRes.success && musicRes.spotifyUrl) {
@@ -4154,9 +4161,13 @@ INSTRUCTIONS:
       }
     }
 
-    // 8. Handle Daily Updates ("aaj ka update note karo ...")
-    if (/^(aaj ka update|update note|log update)/i.test(text)) {
-      const cleanUpdate = text.replace(/^(aaj ka update note karo|aaj ka update|update note karo)/gi, "").trim();
+    // 8. Handle Daily Updates ("aaj ka update note karo ...", "log update ...")
+    const isUpdateNoteCmd = /^(?:aaj\s*ka\s*update\s*note\s*karo|update\s*note\s*karo|log\s*update|note\s*update)\s*[:=-]?\s*(.+)/i.exec(text.trim()) ||
+      (/^aaj\s*ka\s*update\s*[:=-]\s*(.+)/i.exec(text.trim()));
+    const isUpdateQuery = /\b(kya\s*hai|batao|dikhao|sunao|dekhna|check|status|\?)\b/i.test(text);
+
+    if (isUpdateNoteCmd && !isUpdateQuery) {
+      const cleanUpdate = isUpdateNoteCmd[1].trim();
       if (cleanUpdate) {
         await dailyUpdateService.appendUpdate(cleanUpdate);
         await this.sendMessage(chatId, "✅ *Boss, aaj ka update successfully log aur save kar liya hai!*");

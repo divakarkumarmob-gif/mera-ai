@@ -305,6 +305,20 @@ const INTENT_FUNCTION_DECLARATIONS = [
     }
   },
   {
+    name: "manage_girlfriend_mode",
+    description: "Activate or deactivate Virtual Girlfriend Mode for a specific contact/number or for Boss himself. Examples: 'gf mode on for 9876543210', 'Priya ke liye gf mode chalu karo', 'stop gf mode for 9876543210', 'gf mode band karo Priya ke liye', 'mera gf mode on karo', 'girlfriend mode band karo'.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        targetPhoneOrName: { type: Type.STRING, description: "Target phone number or contact name. If for Boss himself, specify 'self' or 'boss'." },
+        action: { type: Type.STRING, description: "Action: 'start' (enable/on) or 'stop' (disable/off)" },
+        durationMinutes: { type: Type.NUMBER, description: "Duration in minutes (default: 60)" },
+        mood: { type: Type.STRING, description: "Mood persona: 'romantic', 'mode_b' (uncensored), 'sassy', 'caring', 'naughty', 'cute'" }
+      },
+      required: ["action"]
+    }
+  },
+  {
     name: "get_conversation_history",
     description: "Get full conversation history with a contact. Examples: 'Ram se kya baat hui', 'Rahul ne kya msg kiya', 'conversation history dikhao'.",
     parameters: {
