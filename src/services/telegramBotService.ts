@@ -2193,7 +2193,12 @@ Provide a 2-4 sentence executive digest of main topics, project updates, member 
     const recentDialogue = await TelegramBotService.getRecentDialogueTranscript(chatId, senderName, 15);
     const crossPlatformMemory = await unifiedMemoryService.getCrossPlatformWorkingMemoryPrompt();
     const { chatGptMemoryEngine } = await import("./chatGptMemoryEngine");
-    const chatGptRecallContext = await chatGptMemoryEngine.recallRelevantMemories(messageText);
+    const cachedTurns = TelegramBotService.chatHistoryByChatId.get(String(chatId || "global")) || [];
+    const recentTgTurns = cachedTurns.slice(-4).map((t) => ({
+      role: (t.senderName === "Friday" ? "assistant" : "user") as "user" | "assistant",
+      text: t.text || "",
+    }));
+    const chatGptRecallContext = await chatGptMemoryEngine.recallRelevantMemories(messageText, recentTgTurns);
 
     const prompt = `YOU ARE FRIDAY: DK's (Divakar Kumar) ultra-intelligent, loyal, warm, human-like AI companion.
 

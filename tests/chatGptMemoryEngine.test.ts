@@ -32,4 +32,15 @@ describe("ChatGPT-Style Lifelong Memory Engine", () => {
     expect(recall).toContain("dost");
     await contactsService.deleteContact("Rohan TestFriend");
   });
+
+  it("should support resolving ambiguous in-session query context with previous turn history", async () => {
+    const history = [
+      { role: "user" as const, text: "Mere paas ek German Shepherd dog hai" },
+      { role: "assistant" as const, text: "Wah, German Shepherd bohot loyal aur active hote hain!" }
+    ];
+
+    const resolved = await chatGptMemoryEngine.resolveContextualQuery("Uske kapde kharidne hain", history);
+    expect(typeof resolved).toBe("string");
+    expect(resolved.length).toBeGreaterThan(0);
+  });
 });

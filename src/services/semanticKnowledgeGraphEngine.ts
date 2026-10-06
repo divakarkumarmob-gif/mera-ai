@@ -127,6 +127,38 @@ class SemanticKnowledgeGraphEngine {
   }
 
   /**
+   * Finds relevant associative edges matching query keywords
+   */
+  public async findRelevantAssociations(queryText: string): Promise<string[]> {
+    await this.init();
+    if (this.edges.size === 0 || !queryText) return [];
+
+    const lowerQuery = queryText.toLowerCase();
+    const matches: string[] = [];
+
+    for (const e of this.edges.values()) {
+      const srcNode = this.nodes.get(e.sourceNodeId);
+      const tgtNode = this.nodes.get(e.targetNodeId);
+      const srcName = (srcNode?.name || e.sourceNodeId).toLowerCase();
+      const tgtName = (tgtNode?.name || e.targetNodeId).toLowerCase();
+      const rel = e.relationship.toLowerCase();
+
+      if (
+        lowerQuery.includes(srcName) ||
+        lowerQuery.includes(tgtName) ||
+        srcName.includes(lowerQuery) ||
+        tgtName.includes(lowerQuery) ||
+        lowerQuery.includes(rel)
+      ) {
+        matches.push(`[${srcNode?.name || e.sourceNodeId}] ➔ (${e.relationship}) ➔ [${tgtNode?.name || e.targetNodeId}]`);
+        if (matches.length >= 6) break;
+      }
+    }
+
+    return matches;
+  }
+
+  /**
    * Compiles the Knowledge Graph mind-map into prompt format
    */
   public async compileKnowledgeGraphPrompt(): Promise<string> {

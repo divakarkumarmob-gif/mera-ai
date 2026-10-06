@@ -304,7 +304,11 @@ export class WhatsAppBossAiEngine {
     const trainingLessonsContext = await fridayChildTrainingService.compileTrainingPrompt(messageText);
     const memoryContext = await memoryEngine.compileLeanMemoryPrompt();
     const { chatGptMemoryEngine } = await import("../chatGptMemoryEngine");
-    const chatGptRecallContext = await chatGptMemoryEngine.recallRelevantMemories(messageText);
+    const recentBossTurns = recentBossMsgs.slice(-4).map((m) => ({
+      role: (m.senderPhone === "bot" ? "assistant" : "user") as "user" | "assistant",
+      text: m.text || "",
+    }));
+    const chatGptRecallContext = await chatGptMemoryEngine.recallRelevantMemories(messageText, recentBossTurns);
     const humanComprehensionContext = await humanComprehensionEngine.compileHumanComprehensionPrompt("boss_dk", "DK (Boss)", "boss");
     const circadianContext = circadianEnergyEngine.compileCircadianPrompt();
     const opinionsContext = personalOpinionsEngine.compileOpinionsPrompt();
