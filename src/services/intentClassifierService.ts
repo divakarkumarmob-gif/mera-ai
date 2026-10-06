@@ -522,11 +522,14 @@ const INTENT_FUNCTION_DECLARATIONS = [
 
 class IntentClassifierService {
   private readonly models = [
-    "gemini-3.8-flash",
-    "gemini-3.5-flash",
-    "gemini-3.6-flash",
-    "gemini-3.1-flash-lite",
     "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-2.5-flash-lite",
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-2.5-flash",
   ];
 
   async classifyIntent(userText: string, context: IntentContext): Promise<ClassifiedIntent> {
@@ -573,11 +576,11 @@ class IntentClassifierService {
       parts: [{ text: effectiveUserText }],
     });
 
-    // Try each model in the 5-model chain sequentially with predictive key allocation
-    for (const model of this.models) {
-      const allocation = geminiKeyPoolService.getOptimalClient({ priority });
-      const ai = allocation.client;
+    // Try each model in the model chain sequentially with Tier 3 Intent Client
+    const { getIntentGeminiClient } = await import("./geminiKeyPoolService");
+    const ai = getIntentGeminiClient();
 
+    for (const model of this.models) {
       try {
         const response = await ai.models.generateContent({
           model,
@@ -633,13 +636,7 @@ class IntentClassifierService {
           resolvedEntity: rewriteRes.resolvedEntity?.label,
         };
       } catch (error: any) {
-        console.warn(`[IntentClassifier] Model ${model} on Key #${allocation.keyIndex + 1} failed, trying next:`, error?.message || error);
-        const errMsg = String(error?.message || error);
-        if (error?.status === 429 || errMsg.includes("429") || errMsg.includes("RESOURCE_EXHAUSTED")) {
-          geminiKeyPoolService.recordRateLimitError(allocation.keyIndex);
-        } else {
-          geminiKeyPoolService.recordGenericError(allocation.keyIndex);
-        }
+        console.warn(`[IntentClassifier] Model ${model} failed, trying next:`, error?.message || error);
         // Continue to next model in the chain
       }
     }

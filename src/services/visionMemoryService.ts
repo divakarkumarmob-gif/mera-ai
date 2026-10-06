@@ -1,6 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import { db } from "./firebaseAdmin";
-import { geminiKeyPoolService } from "./geminiKeyPoolService";
+import { DEFAULT_GEMINI_MODEL_CHAIN, geminiKeyPoolService } from "./geminiKeyPoolService";
 
 export interface StoredPersonMemory {
   id: string;
@@ -91,8 +91,7 @@ class VisionMemoryService {
 
   private getGenAI(): GoogleGenAI | null {
     if (!geminiKeyPoolService.hasAvailableKey()) return null;
-    const allocation = geminiKeyPoolService.getOptimalClient({ priority: "background" });
-    return allocation.client;
+    return geminiKeyPoolService.getWhatsAppGeminiClient();
   }
 
   /**
@@ -276,17 +275,7 @@ ${caption ? `User caption: "${caption}"` : ""}`;
               ? (lowerMime.includes("ogg") ? "audio/ogg" : "audio/mp3")
               : (lowerMime.includes("png") ? "image/png" : lowerMime.includes("webp") ? "image/webp" : "image/jpeg");
 
-        const VISION_FALLBACK_MODELS = [
-          "gemini-3.8-flash",
-          "gemini-3.7-flash",
-          "gemini-3.6-flash",
-          "gemini-3.5-flash",
-          "gemini-3.5-flash-lite",
-          "gemini-3.1-flash-lite",
-          "gemini-3-flash",
-          "gemini-2.5-flash",
-          "gemini-2.5-flash-lite",
-        ];
+        const VISION_FALLBACK_MODELS = DEFAULT_GEMINI_MODEL_CHAIN;
 
         for (const model of VISION_FALLBACK_MODELS) {
           try {
@@ -550,17 +539,7 @@ AT THE VERY END (hidden from view), append: [ROUTINE_DATA: [{"title": "School", 
 
 Use WhatsApp markdown (*bold*, _italic_, bullet points). Keep it clean and accurate.`;
 
-    const VISION_FALLBACK_MODELS = [
-      "gemini-3.8-flash",
-      "gemini-3.7-flash",
-      "gemini-3.6-flash",
-      "gemini-3.5-flash",
-      "gemini-3.5-flash-lite",
-      "gemini-3.1-flash-lite",
-      "gemini-3-flash",
-      "gemini-2.5-flash",
-      "gemini-2.5-flash-lite",
-    ];
+    const VISION_FALLBACK_MODELS = DEFAULT_GEMINI_MODEL_CHAIN;
 
     for (const model of VISION_FALLBACK_MODELS) {
       try {

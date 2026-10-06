@@ -1,5 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
-import { geminiKeyPoolService } from "../geminiKeyPoolService";
+import { DEFAULT_GEMINI_MODEL_CHAIN, geminiKeyPoolService } from "../geminiKeyPoolService";
 import { db } from "../firebaseAdmin";
 import { contactsService } from "../contactsService";
 import { dailyUpdateService } from "../dailyUpdateService";
@@ -40,17 +40,7 @@ export class WhatsAppAutoReplyEngine {
     }
   > = new Map();
 
-  public static readonly AUTO_REPLY_MODEL_CHAIN = [
-    "gemini-3.8-flash",
-    "gemini-3.7-flash",
-    "gemini-3.6-flash",
-    "gemini-3.5-flash",
-    "gemini-3.5-flash-lite",
-    "gemini-3.1-flash-lite",
-    "gemini-3-flash",
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
-  ];
+  public static readonly AUTO_REPLY_MODEL_CHAIN = DEFAULT_GEMINI_MODEL_CHAIN;
 
   public queueIncomingForAutoReply(
     senderName: string,
@@ -397,8 +387,7 @@ export class WhatsAppAutoReplyEngine {
       return fallbackText();
     }
 
-    const allocation = geminiKeyPoolService.getOptimalClient({ priority: "non-boss" });
-    const ai = allocation.client;
+    const ai = geminiKeyPoolService.getWhatsAppGeminiClient();
     const quotedSnippet = quotedMessage && quotedMessage.isReply
       ? `\n- PREVIOUS QUOTED MESSAGE (Sender: ${quotedMessage.sender}, Type: ${quotedMessage.mediaType}): "${quotedMessage.text}"`
       : "";
@@ -904,8 +893,7 @@ TONE & STYLE (STRICT WHATSAPP FORMATTING):
       return;
     }
 
-    const groupAlloc = geminiKeyPoolService.getOptimalClient({ priority: "non-boss" });
-    const ai = groupAlloc.client;
+    const ai = geminiKeyPoolService.getWhatsAppGeminiClient();
     const quotedSnippet = quotedMessage && quotedMessage.isReply
       ? `\n- PREVIOUS QUOTED MESSAGE IN GROUP (From: ${quotedMessage.sender}, Type: ${quotedMessage.mediaType}): "${quotedMessage.text}"`
       : "";

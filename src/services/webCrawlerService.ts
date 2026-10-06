@@ -14,30 +14,33 @@ import { db } from "./firebaseAdmin";
 // ---------------------------------------------------------------------------
 
 const MODEL_CHAIN = [
-  "gemini-3.1-flash-lite",
   "gemini-3.5-flash-lite",
-  "gemini-3.5-flash",
   "gemini-3.1-flash-lite",
+  "gemini-2.5-flash-lite",
+  "gemini-3.8-flash",
+  "gemini-3.7-flash",
   "gemini-3.6-flash",
   "gemini-3.5-flash",
-  "gemini-3.5-flash",
-  "gemini-3.5-flash-lite",
-  "gemini-3.1-flash-lite",
+  "gemini-2.5-flash",
 ];
 
-// Map Grounding Chain: 3.8 flash -> 3.5 flash -> 3.1 flash lite
+// Map Grounding Chain: 3.5 flash lite -> 3.1 flash lite -> 2.5 flash lite -> 3.8 flash -> 3.7 flash -> 3.5 flash
 const MAP_GROUNDING_CHAIN = [
-  "gemini-3.8-flash",
-  "gemini-3.5-flash",
-  "gemini-3.1-flash-lite",
   "gemini-3.5-flash-lite",
+  "gemini-3.1-flash-lite",
+  "gemini-2.5-flash-lite",
+  "gemini-3.8-flash",
+  "gemini-3.7-flash",
+  "gemini-3.5-flash",
 ];
 
-// Search Grounding Chain: 3.8 flash -> 3.5 flash
+// Search Grounding Chain: 3.5 flash lite -> 3.1 flash lite -> 2.5 flash lite -> 3.8 flash -> 3.5 flash
 const SEARCH_GROUNDING_CHAIN = [
+  "gemini-3.5-flash-lite",
+  "gemini-3.1-flash-lite",
+  "gemini-2.5-flash-lite",
   "gemini-3.8-flash",
   "gemini-3.5-flash",
-  "gemini-3.5-flash-lite",
 ];
 
 // Vector Embedding Model Chain: Gemini Embedding 1 -> Gemini Embedding 2 -> Legacy 001

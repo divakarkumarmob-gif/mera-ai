@@ -18,6 +18,7 @@ import { execSync } from "child_process";
 import puppeteerExtra from "puppeteer-extra";
 import StealthPlugin from "puppeteer-extra-plugin-stealth";
 import { Browser, Page } from "puppeteer-core";
+import { DEFAULT_GEMINI_MODEL_CHAIN, geminiKeyPoolService } from "./geminiKeyPoolService";
 
 // Register Stealth Plugin
 puppeteerExtra.use(StealthPlugin());
@@ -659,7 +660,7 @@ STRICT RULES:
 - Output clean readable text with blank lines between every numbered step and section.
 - NEVER squash text into a single paragraph or line.`;
 
-        const models = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"];
+        const models = DEFAULT_GEMINI_MODEL_CHAIN;
         const overview = await geminiKeyPoolService.executeWithRetry(
           async (ai) => {
             for (const model of models) {
