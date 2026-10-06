@@ -308,7 +308,10 @@ export default function LiveAIInterface({ onClose, isCallMode, callSession }: Li
     const [thinkingLevel, setThinkingLevel] = useState('low');
     const [accurateMode, setAccurateMode] = useState(false);
     const [answerLength, setAnswerLength] = useState(() => localStorage.getItem('answerLength') || 'short');
-    const [googleSearchMode, setGoogleSearchMode] = useState(false);
+    const [googleSearchMode, setGoogleSearchMode] = useState(() => {
+        const saved = localStorage.getItem('googleSearchMode');
+        return saved !== null ? saved === 'true' : true;
+    });
     const [wakeWordActive, setWakeWordActive] = useState(() => {
         if (typeof window !== 'undefined' && ((window as any).isFridayNativeApp || (window as any).Capacitor)) {
             // Android APK: Managed via Earbud Bluetooth Triple-Tap hardware bridge

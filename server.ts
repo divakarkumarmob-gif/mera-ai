@@ -328,10 +328,10 @@ async function startServer() {
     let lastThinkingLevel = "high";
     let lastAccurateMode = false;
     let lastAnswerLength: string | undefined;
-    let lastGoogleSearchMode = false;
+    let lastGoogleSearchMode = true;
 
     const createSession = async (
-      voice: string, thinkingLevel: string, accurateMode: boolean, answerLength: string, googleSearchMode: boolean
+      voice: string, thinkingLevel: string, accurateMode: boolean, answerLength: string, googleSearchMode: boolean = true
     ) => {
       const effectiveThinking = accurateMode || googleSearchMode ? "high" : (thinkingLevel || "high");
       const systemInstruction = await buildLiveSystemInstruction({
@@ -628,7 +628,7 @@ async function startServer() {
         const thinkingLevel = parsedData.thinkingLevel || "high";
         const accurateMode = !!parsedData.accurateMode;
         const answerLength = parsedData.answerLength;
-        const googleSearchMode = !!parsedData.googleSearchMode;
+        const googleSearchMode = parsedData.googleSearchMode !== undefined ? !!parsedData.googleSearchMode : true;
 
         // If a Gemini Live session is already warm and active with matching config, acknowledge instantly!
         if (currentSession &&

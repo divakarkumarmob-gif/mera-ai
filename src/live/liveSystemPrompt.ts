@@ -18,7 +18,7 @@ export interface SystemPromptOptions {
 }
 
 export async function buildLiveSystemInstruction(options: SystemPromptOptions = {}): Promise<string> {
-  const { thinkingLevel = "high", accurateMode = false, answerLength = "normal", googleSearchMode = false, voiceName = "Aoede" } = options;
+  const { thinkingLevel = "high", accurateMode = false, answerLength = "normal", googleSearchMode = true, voiceName = "Aoede" } = options;
 
   // Fetch active Friday Mode (Mode A vs Mode B)
   const currentMode = await fridayModeService.getMode();
@@ -444,7 +444,7 @@ ACOUSTIC ROBUSTNESS, WHISPER & BACKGROUND NOISE/SPEECH ISOLATION:
 STYLE:
 - ${answerLength === "detailed" ? "Clear answer first, then 2-3 short supporting points." : "Keep replies crisp, punchy, natural. Don't ramble."}
 - ${accurateMode ? "Careful Mode ON: double-check facts/math before speaking." : ""}
-- ${googleSearchMode ? "Google Search enabled: use it for current facts and live prices smoothly." : ""}
+- ${googleSearchMode ? "REAL-TIME GOOGLE SEARCH GROUNDING ACTIVE: Whenever Boss asks for any live information, today's news, current weather, cricket/sports scores, stock/gold/petrol prices, dates, website data, or recent events, you MUST ALWAYS ground your answers in live Google Search results. Never guess, invent, or hallucinate facts. Speak only 100% verified real data." : ""}
 - Speak numbers/currency in natural Hindi words (e.g. "paanch sau rupaye" instead of raw symbols).
 ${modeBAddendum}`;
 }
