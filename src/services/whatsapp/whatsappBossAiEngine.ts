@@ -3635,19 +3635,12 @@ ${extractedPhone ? `📱 EXTRACTED PHONE NUMBER FROM QUOTE: +${extractedPhone}` 
     }
 
     // ── Phase 2: Fresh Session Initialization (First message of day or fallback after 3:00 AM reset or redeploy) ──
-    for (const model of [
-      "gemini-3.8-flash",
-      "gemini-3.7-flash",
-      "gemini-3.6-flash",
-      "gemini-3.5-flash",
-      "gemini-3.5-flash-lite",
-      "gemini-3.1-flash-lite",
-      "gemini-3-flash",
-      "gemini-2.5-flash",
-      "gemini-2.5-flash-lite",
-    ]) {
+    const { getMessengerGeminiClient, DEFAULT_GEMINI_MODEL_CHAIN } = await import("../geminiKeyPoolService");
+    const geminiClient = getMessengerGeminiClient();
+
+    for (const model of DEFAULT_GEMINI_MODEL_CHAIN) {
       try {
-        const chat = ai.chats.create({
+        const chat = geminiClient.chats.create({
           model,
           config: {
             systemInstruction,

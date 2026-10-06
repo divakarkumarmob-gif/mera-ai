@@ -555,7 +555,8 @@ Even agar Firebase configured nahi hai, ye bot Telegram ke Cloud Servers ko **da
    * Generates smart context-aware conversational AI reply using Gemini, Function Calling, and Boss Memory.
    */
   private async generateCognitiveMemoryAiReply(promptText: string, senderName: string, chatId: number | string): Promise<string> {
-    const apiKey = process.env.GEMINI_API_KEY;
+    const { getTelegramGeminiKey } = await import("./geminiKeyPoolService");
+    const apiKey = getTelegramGeminiKey();
     if (!apiKey) return "";
 
     try {
@@ -622,18 +623,11 @@ ${dialogueContext}
 3. If Boss teaches you a behavior or gives feedback, acknowledge like an eager, loyal learner.
 4. Keep the reply concise, energetic, crisp, and under 3-4 sentences.`;
 
+      const { DEFAULT_GEMINI_MODEL_CHAIN } = await import("./geminiKeyPoolService");
       const ai = new GoogleGenAI({ apiKey });
       const tools = semanticIntentEngine.getBossFunctionDeclarations();
 
-      const modelFallbackChain = [
-        "gemini-3.8-flash",
-        "gemini-3.5-flash",
-        "gemini-3.6-flash",
-        "gemini-3.1-flash-lite",
-        "gemini-3.5-flash-lite",
-      ];
-
-      for (const model of modelFallbackChain) {
+      for (const model of DEFAULT_GEMINI_MODEL_CHAIN) {
         try {
           const response = await ai.models.generateContent({
             model,

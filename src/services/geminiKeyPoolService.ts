@@ -23,6 +23,17 @@
 
 import { GoogleGenAI } from "@google/genai";
 
+export const DEFAULT_GEMINI_MODEL_CHAIN = [
+  "gemini-3.5-flash-lite",
+  "gemini-3.1-flash-lite",
+  "gemini-2.5-flash-lite",
+  "gemini-3.8-flash",
+  "gemini-3.7-flash",
+  "gemini-3.6-flash",
+  "gemini-3.5-flash",
+  "gemini-2.5-flash",
+];
+
 export type WorkloadPriority = "boss" | "background" | "public";
 export type KeyHealthStatus = "healthy" | "saturated" | "cooling_down" | "daily_exhausted";
 
@@ -627,72 +638,119 @@ export class GeminiKeyPoolService {
 export const geminiKeyPoolService = new GeminiKeyPoolService();
 
 // ---------------------------------------------------------------------------
-// === DEDICATED 3-KEY SERVICE BUCKETS ===
+// === DEDICATED 4-TIER GEMINI API KEY ARCHITECTURE ===
 //
-// Har service ka apna dedicated Gemini key hai:
-//   GEMINI_API_KEY_WHATSAPP  → WhatsApp conversations
-//   GEMINI_API_KEY_FRIDAY    → Friday Live + Tool calls
-//   GEMINI_API_KEY_MEMORY    → Memory, learning, nightly dreaming
+// 1. GEMINI_API_KEY_1  → Tier 1: AI Live Voice/Video Sessions & Live-associated Tool Calls
+// 2. GEMINI_API_KEY_2  → Tier 2: WhatsApp Bot & Telegram Bot conversations & auto-replies
+// 3. GEMINI_API_KEY_3  → Tier 3: Intent Classifier, Semantic Routing & Memory Extractors
+// 4. GEMINI_API_KEY_4  → Tier 4: Universal Fallback Key (Auto-used if Key 1, 2, or 3 hit rate limits)
 //
-// Agar dedicated key set nahi hai toh automatically general pool se fallback.
+// Plus legacy fallback to GEMINI_API_KEY / Key Pool Mesh if dedicated key is missing.
 // ---------------------------------------------------------------------------
 
 import { GoogleGenAI as _GoogleGenAI } from "@google/genai";
 
 function _makeClient(key: string): _GoogleGenAI {
-  return new _GoogleGenAI({ apiKey: key });
+  return new _GoogleGenAI({ apiKey: key || "placeholder-gemini-key" });
 }
 
-function _resolveKey(dedicatedEnvVar: string, fallbackIndex: number = 0): string {
-  const dedicated = (process.env[dedicatedEnvVar] || "").trim();
-  if (dedicated && dedicated.length > 10) return dedicated;
-  // Smart fallback to distinct pool key: WhatsApp -> Key 0, Friday -> Key 1, Memory -> Key 2
+function _resolveKeyWithFallback(
+  primaryEnvVars: string[],
+  fallbackIndex: number = 0
+): string {
+  // 1. Check primary dedicated env vars (e.g. GEMINI_API_KEY_1, GEMINI_KEY_LIVE)
+  for (const envVar of primaryEnvVars) {
+    const val = (process.env[envVar] || "").trim();
+    if (val && val.length > 10) return val;
+  }
+
+  // 2. Fallback to Tier 4 Universal Fallback Key (GEMINI_API_KEY_4)
+  const tier4Fallback = (process.env.GEMINI_API_KEY_4 || process.env.GEMINI_KEY_4 || process.env.GEMINI_API_KEY_FALLBACK || "").trim();
+  if (tier4Fallback && tier4Fallback.length > 10) return tier4Fallback;
+
+  // 3. Smart fallback to indexed pool key if available
   const allClients = geminiKeyPoolService.getAllClients();
   if (allClients.length > fallbackIndex) {
     return allClients[fallbackIndex].apiKey;
   }
-  return geminiKeyPoolService.getActiveKey();
+
+  // 4. Global pool active key or GEMINI_API_KEY
+  return geminiKeyPoolService.getActiveKey() || (process.env.GEMINI_API_KEY || "").trim();
 }
 
-/** Dedicated client + key for WhatsApp conversations */
-export function getWhatsAppGeminiKey(): string {
-  return _resolveKey("GEMINI_API_KEY_WHATSAPP", 0);
+/** Tier 1: AI Live Voice/Video Sessions & Live-associated Tool Calls */
+export function getLiveGeminiKey(): string {
+  return _resolveKeyWithFallback(
+    ["GEMINI_API_KEY_1", "GEMINI_KEY_1", "GEMINI_API_KEY_LIVE", "GEMINI_API_KEY_FRIDAY"],
+    0
+  );
 }
-export function getWhatsAppGeminiClient(): _GoogleGenAI {
-  return _makeClient(getWhatsAppGeminiKey());
+export function getLiveGeminiClient(): _GoogleGenAI {
+  return _makeClient(getLiveGeminiKey());
 }
+export const getFridayGeminiKey = getLiveGeminiKey;
+export const getFridayGeminiClient = getLiveGeminiClient;
 
-/** Dedicated client + key for Friday Live responses & Tool calls */
-export function getFridayGeminiKey(): string {
-  return _resolveKey("GEMINI_API_KEY_FRIDAY", 1);
+/** Tier 2: WhatsApp Bot & Telegram Bot conversations */
+export function getMessengerGeminiKey(): string {
+  return _resolveKeyWithFallback(
+    ["GEMINI_API_KEY_2", "GEMINI_KEY_2", "GEMINI_API_KEY_BOTS", "GEMINI_API_KEY_WHATSAPP", "GEMINI_API_KEY_TELEGRAM"],
+    1
+  );
 }
-export function getFridayGeminiClient(): _GoogleGenAI {
-  return _makeClient(getFridayGeminiKey());
+export function getMessengerGeminiClient(): _GoogleGenAI {
+  return _makeClient(getMessengerGeminiKey());
 }
+export const getWhatsAppGeminiKey = getMessengerGeminiKey;
+export const getWhatsAppGeminiClient = getMessengerGeminiClient;
+export const getTelegramGeminiKey = getMessengerGeminiKey;
+export const getTelegramGeminiClient = getMessengerGeminiClient;
 
-/** Dedicated client + key for Memory, learning, background tasks */
-export function getMemoryGeminiKey(): string {
-  return _resolveKey("GEMINI_API_KEY_MEMORY", 2);
+/** Tier 3: Intent Classifier, Semantic Routing & Memory Extractors */
+export function getIntentGeminiKey(): string {
+  return _resolveKeyWithFallback(
+    ["GEMINI_API_KEY_3", "GEMINI_KEY_3", "GEMINI_API_KEY_INTENT", "GEMINI_API_KEY_MEMORY"],
+    2
+  );
 }
-export function getMemoryGeminiClient(): _GoogleGenAI {
-  return _makeClient(getMemoryGeminiKey());
+export function getIntentGeminiClient(): _GoogleGenAI {
+  return _makeClient(getIntentGeminiKey());
+}
+export const getMemoryGeminiKey = getIntentGeminiKey;
+export const getMemoryGeminiClient = getIntentGeminiClient;
+
+/** Tier 4: Universal Fallback Key */
+export function getFallbackGeminiKey(): string {
+  return _resolveKeyWithFallback(
+    ["GEMINI_API_KEY_4", "GEMINI_KEY_4", "GEMINI_API_KEY_FALLBACK"],
+    3
+  );
+}
+export function getFallbackGeminiClient(): _GoogleGenAI {
+  return _makeClient(getFallbackGeminiKey());
 }
 
 /**
- * Universal helper: service naam de, correct Gemini client aur key milega.
- * @param service - "whatsapp" | "friday" | "memory" | "general"
+ * Universal helper: Service name de, correct 4-tier Gemini client aur key milega.
+ * @param service - "live" | "messenger" | "intent" | "fallback" | "whatsapp" | "telegram" | "friday" | "memory" | "general"
  */
-export function getKeyForService(service: "whatsapp" | "friday" | "memory" | "general"): {
+export function getKeyForService(service: "live" | "messenger" | "intent" | "fallback" | "whatsapp" | "telegram" | "friday" | "memory" | "general"): {
   client: _GoogleGenAI;
   apiKey: string;
 } {
   switch (service) {
-    case "whatsapp":
-      return { client: getWhatsAppGeminiClient(), apiKey: getWhatsAppGeminiKey() };
+    case "live":
     case "friday":
-      return { client: getFridayGeminiClient(), apiKey: getFridayGeminiKey() };
+      return { client: getLiveGeminiClient(), apiKey: getLiveGeminiKey() };
+    case "messenger":
+    case "whatsapp":
+    case "telegram":
+      return { client: getMessengerGeminiClient(), apiKey: getMessengerGeminiKey() };
+    case "intent":
     case "memory":
-      return { client: getMemoryGeminiClient(), apiKey: getMemoryGeminiKey() };
+      return { client: getIntentGeminiClient(), apiKey: getIntentGeminiKey() };
+    case "fallback":
+      return { client: getFallbackGeminiClient(), apiKey: getFallbackGeminiKey() };
     default:
       return { client: geminiKeyPoolService.getPrimaryClient(), apiKey: geminiKeyPoolService.getPrimaryApiKey() };
   }

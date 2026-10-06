@@ -12,8 +12,8 @@ export interface ScreenAnalysisResult {
 
 class ScreenVisionService {
   private getGenAI(): GoogleGenAI | null {
-    if (!geminiKeyPoolService.hasAvailableKey()) return null;
-    return geminiKeyPoolService.getClient({ priority: "boss" }).client;
+    const { getLiveGeminiClient } = require("./geminiKeyPoolService");
+    return getLiveGeminiClient();
   }
 
   /**

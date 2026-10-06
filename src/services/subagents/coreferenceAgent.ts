@@ -1,9 +1,14 @@
 import { GoogleGenAI } from "@google/genai";
 
 const COREFERENCE_MODELS = [
-  "gemini-3.1-flash-lite",
   "gemini-3.5-flash-lite",
+  "gemini-3.1-flash-lite",
+  "gemini-2.5-flash-lite",
+  "gemini-3.8-flash",
+  "gemini-3.7-flash",
+  "gemini-3.6-flash",
   "gemini-3.5-flash",
+  "gemini-2.5-flash",
 ];
 
 export interface ChatTurnContext {
@@ -41,7 +46,8 @@ export class CoreferenceAgent {
       return query;
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
+    const { getIntentGeminiKey } = await import("../geminiKeyPoolService");
+    const apiKey = getIntentGeminiKey();
     if (!apiKey) return query;
 
     const formattedHistory = recentHistory

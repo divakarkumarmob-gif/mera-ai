@@ -10,10 +10,14 @@ const vaultCol = () => db.collection("memory").doc("personalVault").collection("
 const pinnedCol = () => db.collection("memory").doc("pinnedMemories").collection("entries");
 
 const EXTRACTION_MODELS = [
-  "gemini-3.8-flash",
-  "gemini-3.5-flash",
-  "gemini-3.1-flash-lite",
   "gemini-3.5-flash-lite",
+  "gemini-3.1-flash-lite",
+  "gemini-2.5-flash-lite",
+  "gemini-3.8-flash",
+  "gemini-3.7-flash",
+  "gemini-3.6-flash",
+  "gemini-3.5-flash",
+  "gemini-2.5-flash",
 ];
 
 function withTimeout<T>(p: Promise<T>, ms = 2500, fallback: T): Promise<T> {
@@ -252,7 +256,8 @@ ${recalledPoints.slice(0, 8).map((p) => `• ${p}`).join("\n")}
       return;
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
+    const { getIntentGeminiKey } = await import("../geminiKeyPoolService");
+    const apiKey = getIntentGeminiKey();
     if (!apiKey) return;
 
     const extractionPrompt = `You are Friday AI's lifelong cognitive memory & contradiction extractor.

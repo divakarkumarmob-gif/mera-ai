@@ -1,5 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
-import { geminiKeyPoolService } from "./geminiKeyPoolService";
+import { geminiKeyPoolService, DEFAULT_GEMINI_MODEL_CHAIN } from "./geminiKeyPoolService";
 import { db } from "./firebaseAdmin";
 import { contactsService } from "./contactsService";
 import { visionMemoryService } from "./visionMemoryService";
@@ -2189,7 +2189,8 @@ Provide a 2-4 sentence executive digest of main topics, project updates, member 
 
     const priority = isOwner ? "boss" : (groupInfo ? "public" : "public");
     let allocation = geminiKeyPoolService.getOptimalClient({ priority });
-    let ai = allocation.client;
+    const { getTelegramGeminiClient } = await import("./geminiKeyPoolService");
+    let ai = getTelegramGeminiClient();
     const recentDialogue = await TelegramBotService.getRecentDialogueTranscript(chatId, senderName, 15);
     const crossPlatformMemory = await unifiedMemoryService.getCrossPlatformWorkingMemoryPrompt();
     const { chatGptMemoryEngine } = await import("./chatGptMemoryEngine");
@@ -2529,7 +2530,7 @@ This format MUST be used:
     }
 
     // ── Standard Mode A: Gemini Multimodal & Tool Execution Loop ───────────────
-    for (const model of TelegramBotService.MODEL_FALLBACK_CHAIN) {
+    for (const model of DEFAULT_GEMINI_MODEL_CHAIN) {
       try {
         let reply: string | undefined;
 

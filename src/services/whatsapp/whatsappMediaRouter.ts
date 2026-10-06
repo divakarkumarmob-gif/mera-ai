@@ -251,11 +251,12 @@ export class WhatsAppMediaRouter {
               const targetLanguage = targetLangMatch ? targetLangMatch[1].trim() : null;
               const isVoiceOutputRequested = /\b(voice|audio|speak|bolo|sunao|bol\s*kar|bol\s*ke|padh\s*ke|voice\s*me)\b/i.test(cleanText);
 
-              const apiKey = process.env.GEMINI_API_KEY;
+              const { getWhatsAppGeminiKey } = await import("../geminiKeyPoolService");
+              const apiKey = getWhatsAppGeminiKey();
               let replyText = "";
               let speechScript = "";
 
-              if (apiKey) {
+              if (apiKey && apiKey !== "placeholder-gemini-key") {
                 const ai = new GoogleGenAI({ apiKey });
                 const prompt = `You are Friday AI, DK's (Divakar Kumar) warm, affectionate, intelligent assistant.
 Boss (DK) swiped-up / replied to an audio recording and asked: "${rawText}".
@@ -517,9 +518,10 @@ CRITICAL INSTRUCTIONS:
 
       if (isExplicitAnalysisRequested || isSummaryIntent) {
         const { voiceBridgeService } = await import("../voiceBridgeService");
-        const apiKey = process.env.GEMINI_API_KEY;
+        const { getWhatsAppGeminiKey } = await import("../geminiKeyPoolService");
+        const apiKey = getWhatsAppGeminiKey();
 
-        if (apiKey) {
+        if (apiKey && apiKey !== "placeholder-gemini-key") {
           const ai = new GoogleGenAI({ apiKey });
           const prompt = `You are Friday AI, DK's (Divakar Kumar) warm, affectionate, ultra-intelligent companion.
 Boss (DK) swiped-up / quoted a message and asked for analysis/summary: "${rawText}".
