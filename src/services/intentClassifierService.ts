@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { geminiKeyPoolService } from "./geminiKeyPoolService";
+import { DEFAULT_GEMINI_MODEL_CHAIN, geminiKeyPoolService } from "./geminiKeyPoolService";
 import { dialogueStateTrackerService } from "./dialogueStateTrackerService";
 
 export interface ClassifiedIntent {
@@ -521,16 +521,7 @@ const INTENT_FUNCTION_DECLARATIONS = [
 ];
 
 class IntentClassifierService {
-  private readonly models = [
-    "gemini-3.5-flash-lite",
-    "gemini-3.1-flash-lite",
-    "gemini-2.5-flash-lite",
-    "gemini-3.8-flash",
-    "gemini-3.7-flash",
-    "gemini-3.6-flash",
-    "gemini-3.5-flash",
-    "gemini-2.5-flash",
-  ];
+  private readonly models = DEFAULT_GEMINI_MODEL_CHAIN;
 
   async classifyIntent(userText: string, context: IntentContext): Promise<ClassifiedIntent> {
     const chatId = context.chatId || (context.isGroup ? context.groupName : context.senderPhone) || "";
@@ -593,8 +584,6 @@ class IntentClassifierService {
             maxOutputTokens: 1024,
           },
         });
-
-        geminiKeyPoolService.recordSuccess(allocation.keyIndex);
 
         let functionCall: any = null;
         if (response.functionCalls && response.functionCalls.length > 0) {

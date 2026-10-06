@@ -54,4 +54,20 @@ describe("4-Tier Dedicated Gemini API Key Architecture", () => {
     expect(getIntentGeminiKey()).toBe("test_tier4_fallback_key_1234567890");
     expect(getFallbackGeminiKey()).toBe("test_tier4_fallback_key_1234567890");
   });
+
+  it("should instantiate IntentClassifierService with DEFAULT_GEMINI_MODEL_CHAIN without reference errors", async () => {
+    const { intentClassifierService } = await import("../src/services/intentClassifierService");
+    expect(intentClassifierService).toBeDefined();
+    const result = await intentClassifierService.classifyIntent("Hello", {
+      platform: "whatsapp",
+      isGroup: false,
+      isOwner: true,
+      senderName: "DK",
+      senderPhone: "919999999999",
+      timeOfDay: "morning",
+      userTimezone: "Asia/Kolkata",
+    });
+    expect(result).toBeDefined();
+    expect(result.action).toBeDefined();
+  });
 });
