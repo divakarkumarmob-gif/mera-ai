@@ -24,6 +24,7 @@ import { whatsappMetaAiBridgeEngine } from "./whatsapp/whatsappMetaAiBridgeEngin
 import { girlfriendProfileService } from "./girlfriendProfileService";
 import { whatsappAlertDeskService } from "./whatsapp/whatsappAlertDeskService";
 import { fridayStudyService } from "./fridayStudyService";
+import { whatsappChatQueueEngine } from "./whatsapp/whatsappChatQueueEngine";
 
 export type { QuotedMessageContext, IncomingMessage, WhatsAppStatus };
 
@@ -1851,34 +1852,58 @@ class WhatsAppBotService {
               } catch {}
             }
 
-            // 3. MASTER BOSS FRIDAY ASSISTANT
+            // 3. MASTER BOSS FRIDAY ASSISTANT (Batch Debounced & Queued)
             if (!consumedByDailyUpdate && this.sock && this.isConnected) {
-              this.handleOwnerWhatsAppMessage(senderName, senderPhone, text, replyJid, msg.key, quotedMessage).catch((e) =>
-                console.error("[WhatsAppBot] Owner Master Friday error:", e)
+              whatsappChatQueueEngine.enqueue(
+                replyJid,
+                {
+                  text,
+                  messageKey: msg.key,
+                  quotedMessage,
+                  senderName,
+                  senderPhone,
+                  isFromOwner: true,
+                  isGroup: false,
+                  timestamp: Date.now(),
+                },
+                async (batch) => {
+                  await this.handleOwnerWhatsAppMessage(
+                    batch.senderName,
+                    batch.senderPhone,
+                    batch.combinedText,
+                    replyJid,
+                    batch.latestMessageKey,
+                    batch.quotedMessage
+                  ).catch((e) => console.error("[WhatsAppBot] Owner Master Friday error:", e));
+                }
               );
             }
           } else if (!isGroup && this.autoReplyEnabled && this.sock && this.isConnected) {
-            // 1-on-1 Personal Chats
-            whatsappAutoReplyEngine.queueIncomingForAutoReply(
-              senderName,
-              senderPhone,
-              text,
-              isUnknownContact,
+            // 1-on-1 Personal Chats (Batch Debounced & Queued with in-flight mutex)
+            whatsappChatQueueEngine.enqueue(
               replyJid,
-              msg.key,
-              quotedMessage,
-              async (sName, sPhone, combText, isUnk, rJid, lKey, qMsg) => {
+              {
+                text,
+                messageKey: msg.key,
+                quotedMessage,
+                senderName,
+                senderPhone,
+                isFromOwner: false,
+                isGroup: false,
+                timestamp: Date.now(),
+              },
+              async (batch) => {
                 // Real-time relay alert to Boss WhatsApp
-                this.alertOwnerIncomingMessage(sName, sPhone, combText).catch(() => {});
+                this.alertOwnerIncomingMessage(batch.senderName, batch.senderPhone, batch.combinedText).catch(() => {});
 
                 await whatsappAutoReplyEngine.tryFactualOrChatReply(
-                  sName,
-                  sPhone,
-                  combText,
-                  isUnk,
-                  rJid,
-                  lKey,
-                  qMsg,
+                  batch.senderName,
+                  batch.senderPhone,
+                  batch.combinedText,
+                  isUnknownContact,
+                  replyJid,
+                  batch.latestMessageKey,
+                  batch.quotedMessage,
                   (j, t, inT, k) => this.sendHumanLikeMessage(j, t, inT, k),
                   async (gText, gJid, gName, gKey) => {
                     const isGfAct =
@@ -1887,12 +1912,12 @@ class WhatsAppBotService {
                       /^(?:girlfriend|gf)$/i.test(gText.trim());
                     const isGfStop = /^(?:@normal|\/normal|normal\s*mode|normal|@stop\s*gf|@stop\s*girlfriend|stop\s*girlfriend|stop\s*gf|exit\s*girlfriend|exit\s*gf)$/i.test(gText);
                     const isProfileCmd = girlfriendProfileService.isProfileCommand(gText) || girlfriendProfileService.isOnboardingActive(gJid);
-                    const isAllowed = girlfriendProfileService.isAuthorized(sPhone, false);
+                    const isAllowed = girlfriendProfileService.isAuthorized(batch.senderPhone, false);
 
                     if ((isGfAct || isProfileCmd) && !isAllowed) {
                       await this.sendHumanLikeMessage(
                         gJid,
-                        `⚠️ *Access Restricted:* Virtual Girlfriend Mode & Profile Management sirf Boss (DK) ke liye authorized hai.\n\n_Agar aapko access chahiye to Boss DK se unke WhatsApp par request karein:_ \`pass allow all to ${sPhone}\``,
+                        `⚠️ *Access Restricted:* Virtual Girlfriend Mode & Profile Management sirf Boss (DK) ke liye authorized hai.\n\n_Agar aapko access chahiye to Boss DK se unke WhatsApp par request karein:_ \`pass allow all to ${batch.senderPhone}\``,
                         gText,
                         gKey
                       );
@@ -1944,25 +1969,45 @@ class WhatsAppBotService {
             const isDeskGroup = whatsappAlertDeskService.isDeskGroup(remoteJid);
 
             if (isMentioned || (isDeskGroup && isSenderOwner)) {
-              if (isSenderOwner) {
-                this.handleOwnerWhatsAppMessage(senderName, senderPhone, text, remoteJid, msg.key, quotedMessage).catch((e) =>
-                  console.error("[WhatsAppBot] Group Boss Friday error:", e)
-                );
-              } else {
-                whatsappAutoReplyEngine.handleGroupMentionAutoReply(
+              whatsappChatQueueEngine.enqueue(
+                remoteJid,
+                {
+                  text,
+                  messageKey: msg.key,
+                  quotedMessage,
                   senderName,
                   senderPhone,
-                  text,
-                  remoteJid,
-                  groupName || "Group",
-                  msg.key,
-                  quotedMessage,
-                  (j, t, inT, k) => this.sendHumanLikeMessage(j, t, inT, k),
-                  (j, img, cap, k) => this.sendPhotoMessage(j, img, cap, k),
-                  this.getGroupSafeCommandsCard(),
-                  (j, rT, q, k) => this.handleQuotedMediaSummary(j, rT, q, k)
-                ).catch((e) => console.error("[WhatsAppBot] Group Mention AI error:", e));
-              }
+                  isFromOwner: isSenderOwner,
+                  isGroup: true,
+                  timestamp: Date.now(),
+                },
+                async (batch) => {
+                  if (batch.isFromOwner) {
+                    await this.handleOwnerWhatsAppMessage(
+                      batch.senderName,
+                      batch.senderPhone,
+                      batch.combinedText,
+                      remoteJid,
+                      batch.latestMessageKey,
+                      batch.quotedMessage
+                    ).catch((e) => console.error("[WhatsAppBot] Group Boss Friday error:", e));
+                  } else {
+                    await whatsappAutoReplyEngine.handleGroupMentionAutoReply(
+                      batch.senderName,
+                      batch.senderPhone,
+                      batch.combinedText,
+                      remoteJid,
+                      groupName || "Group",
+                      batch.latestMessageKey,
+                      batch.quotedMessage,
+                      (j, t, inT, k) => this.sendHumanLikeMessage(j, t, inT, k),
+                      (j, img, cap, k) => this.sendPhotoMessage(j, img, cap, k),
+                      this.getGroupSafeCommandsCard(),
+                      (j, rT, q, k) => this.handleQuotedMediaSummary(j, rT, q, k)
+                    ).catch((e) => console.error("[WhatsAppBot] Group Mention AI error:", e));
+                  }
+                }
+              );
             }
           }
 

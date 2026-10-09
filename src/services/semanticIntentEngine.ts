@@ -16,7 +16,7 @@ export class SemanticIntentEngine {
    * that covers all Boss capabilities across WhatsApp and Telegram.
    */
   public getBossFunctionDeclarations(): any[] {
-    return [
+    const declarations: any[] = [
       {
         name: "search_or_play_music",
         description: "Search, stream, and send an audio preview card or lyrics for a song. ONLY invoke this when Boss explicitly asks to listen to, search, or play a specific song, artist, or music track. NEVER call this during emotional venting or regular chatting.",
@@ -260,17 +260,6 @@ export class SemanticIntentEngine {
         },
       },
       {
-        name: "search_rail_pnr_status",
-        description: "Check live Indian Railway PNR status or train running status for Boss.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            pnrOrTrain: { type: "STRING", description: "10-digit PNR number or 5-digit train number" },
-          },
-          required: ["pnrOrTrain"],
-        },
-      },
-      {
         name: "search_web",
         description: "Search the web/Google for live information, facts, latest updates, or answers.",
         parameters: {
@@ -290,17 +279,6 @@ export class SemanticIntentEngine {
             city: { type: "STRING", description: "City name e.g. Patna, Delhi, Mumbai" },
           },
           required: ["city"],
-        },
-      },
-      {
-        name: "get_news",
-        description: "Fetch the latest top news headlines or topic news.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            query: { type: "STRING", description: "Topic e.g. technology, India, sports, AI" },
-          },
-          required: [],
         },
       },
       {
@@ -634,6 +612,14 @@ export class SemanticIntentEngine {
         }
       },
     ];
+
+    // Deduplicate by function name to protect against Gemini API 400 "Duplicate function declaration found" errors
+    const seen = new Set<string>();
+    return declarations.filter((fn: any) => {
+      if (!fn?.name || seen.has(fn.name)) return false;
+      seen.add(fn.name);
+      return true;
+    });
   }
 
   /**
