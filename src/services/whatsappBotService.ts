@@ -25,6 +25,7 @@ import { girlfriendProfileService } from "./girlfriendProfileService";
 import { whatsappAlertDeskService } from "./whatsapp/whatsappAlertDeskService";
 import { fridayStudyService } from "./fridayStudyService";
 import { whatsappChatQueueEngine } from "./whatsapp/whatsappChatQueueEngine";
+import { whatsappTieredRouterAgent } from "./whatsapp/whatsappTieredRouterAgent";
 
 export type { QuotedMessageContext, IncomingMessage, WhatsAppStatus };
 
@@ -1896,67 +1897,74 @@ class WhatsAppBotService {
                 // Real-time relay alert to Boss WhatsApp
                 this.alertOwnerIncomingMessage(batch.senderName, batch.senderPhone, batch.combinedText).catch(() => {});
 
-                await whatsappAutoReplyEngine.tryFactualOrChatReply(
-                  batch.senderName,
-                  batch.senderPhone,
-                  batch.combinedText,
-                  isUnknownContact,
-                  replyJid,
-                  batch.latestMessageKey,
-                  batch.quotedMessage,
-                  (j, t, inT, k) => this.sendHumanLikeMessage(j, t, inT, k),
-                  async (gText, gJid, gName, gKey) => {
-                    const isGfAct =
-                      /^(?:@girlfriend|\/girlfriend|@gf|\/gf|girlfriend\s*mode|gf\s*mode|virtual\s*girlfriend)\b/i.test(gText) ||
-                      /^(?:girlfriend|gf)\s+(?:mode|on|start|chalu|activate|banao)\b/i.test(gText) ||
-                      /^(?:girlfriend|gf)$/i.test(gText.trim());
-                    const isGfStop = /^(?:@normal|\/normal|normal\s*mode|normal|@stop\s*gf|@stop\s*girlfriend|stop\s*girlfriend|stop\s*gf|exit\s*girlfriend|exit\s*gf)$/i.test(gText);
-                    const isProfileCmd = girlfriendProfileService.isProfileCommand(gText) || girlfriendProfileService.isOnboardingActive(gJid);
-                    const isAllowed = girlfriendProfileService.isAuthorized(batch.senderPhone, false);
+                // 1. Check if Girlfriend mode is active for this chat
+                if (this.isGirlfriendModeActive(replyJid)) {
+                  await this.handleGirlfriendChatMessage(replyJid, batch.combinedText, batch.latestMessageKey, false);
+                  return;
+                }
 
-                    if ((isGfAct || isProfileCmd) && !isAllowed) {
-                      await this.sendHumanLikeMessage(
-                        gJid,
-                        `⚠️ *Access Restricted:* Virtual Girlfriend Mode & Profile Management sirf Boss (DK) ke liye authorized hai.\n\n_Agar aapko access chahiye to Boss DK se unke WhatsApp par request karein:_ \`pass allow all to ${batch.senderPhone}\``,
-                        gText,
-                        gKey
-                      );
-                      return true;
-                    }
+                // 2. Check if explicit Girlfriend activation command or Profile command
+                const isGfActivation =
+                  /^(?:@girlfriend|\/girlfriend|@gf|\/gf|girlfriend\s*mode|gf\s*mode|virtual\s*girlfriend)\b/i.test(batch.combinedText) ||
+                  /^(?:girlfriend|gf)\s+(?:mode|on|start|chalu|activate|banao)\b/i.test(batch.combinedText) ||
+                  /^(?:girlfriend|gf)$/i.test(batch.combinedText.trim());
+                const isProfileCmd = girlfriendProfileService.isProfileCommand(batch.combinedText) || girlfriendProfileService.isOnboardingActive(replyJid);
 
-                    if (isProfileCmd) {
-                      if (girlfriendProfileService.isOnboardingActive(gJid)) {
-                        const onboardRes = await girlfriendProfileService.handleOnboardingTurn(gJid, gText, "whatsapp");
-                        if (onboardRes.handled) {
-                          await this.sendHumanLikeMessage(gJid, onboardRes.replyText, gText, gKey);
-                          if (onboardRes.isComplete && !this.isGirlfriendModeActive(gJid)) {
-                            await this.startGirlfriendMode(gJid, "@girlfriend mode_b 60", gKey, gName);
-                          }
-                          return true;
-                        }
-                      }
-                      const cmdRes = await girlfriendProfileService.handleProfileCommand(gText, gJid, "whatsapp");
-                      if (cmdRes.handled) {
-                        await this.sendHumanLikeMessage(gJid, cmdRes.replyText, gText, gKey);
-                        return true;
-                      }
-                    }
-
-                    if (isGfAct) {
-                      await this.startGirlfriendMode(gJid, gText, gKey, gName);
-                      return true;
-                    }
-                    if (isGfStop) {
-                      await this.stopGirlfriendMode(gJid, gKey, true);
-                      return true;
-                    }
-                    if (this.isGirlfriendModeActive(gJid)) {
-                      await this.handleGirlfriendChatMessage(gJid, gText, gKey, false);
-                      return true;
-                    }
-                    return false;
+                if (isGfActivation || isProfileCmd) {
+                  const isAllowed = girlfriendProfileService.isAuthorized(batch.senderPhone, false);
+                  if (!isAllowed) {
+                    await this.sendHumanLikeMessage(
+                      replyJid,
+                      `⚠️ *Access Restricted:* Virtual Girlfriend Mode & Profile Management sirf Boss (DK) ke liye authorized hai.\n\n_Agar aapko access chahiye to Boss DK se unke WhatsApp par request karein:_ \`pass allow all to ${batch.senderPhone}\``,
+                      batch.combinedText,
+                      batch.latestMessageKey
+                    );
+                    return;
                   }
+                  if (isProfileCmd) {
+                    if (girlfriendProfileService.isOnboardingActive(replyJid)) {
+                      const onboardRes = await girlfriendProfileService.handleOnboardingTurn(replyJid, batch.combinedText, "whatsapp");
+                      if (onboardRes.handled) {
+                        await this.sendHumanLikeMessage(replyJid, onboardRes.replyText, batch.combinedText, batch.latestMessageKey);
+                        if (onboardRes.isComplete && !this.isGirlfriendModeActive(replyJid)) {
+                          await this.startGirlfriendMode(replyJid, "@girlfriend mode_b 60", batch.latestMessageKey, batch.senderName);
+                        }
+                        return;
+                      }
+                    }
+                    const cmdRes = await girlfriendProfileService.handleProfileCommand(batch.combinedText, replyJid, "whatsapp");
+                    if (cmdRes.handled) {
+                      await this.sendHumanLikeMessage(replyJid, cmdRes.replyText, batch.combinedText, batch.latestMessageKey);
+                      return;
+                    }
+                  }
+                  if (isGfActivation) {
+                    await this.startGirlfriendMode(replyJid, batch.combinedText, batch.latestMessageKey, batch.senderName);
+                    return;
+                  }
+                }
+
+                // 3. Process via Sub-Agent Pipeline:
+                // Identity -> Privacy Guardian -> Intent & Memory -> (Contacts Human / Unknown Assistant)
+                const pipelineResult = await whatsappTieredRouterAgent.processIncomingMessage(
+                  batch.combinedText,
+                  batch.senderPhone,
+                  batch.senderName,
+                  replyJid,
+                  false,
+                  batch.latestMessageKey,
+                  batch.quotedMessage
                 );
+
+                if (pipelineResult.handled && pipelineResult.replyText) {
+                  await this.sendHumanLikeMessage(
+                    replyJid,
+                    pipelineResult.replyText,
+                    batch.combinedText,
+                    batch.latestMessageKey
+                  );
+                  return;
+                }
               }
             );
           } else if (!isGroup && !isSenderOwner && this.sock && this.isConnected) {

@@ -2,6 +2,8 @@ import { db } from "../firebaseAdmin";
 import { whatsappHistoryEngine } from "./whatsappHistoryEngine";
 import { whatsappBossAiEngine } from "./whatsappBossAiEngine";
 import { whatsappBotService } from "../whatsappBotService";
+import { whatsappContactsHumanEngine } from "./whatsappContactsHumanEngine";
+import { whatsappUnknownAssistantEngine } from "./whatsappUnknownAssistantEngine";
 
 export interface ActiveWhatsAppChatter {
   key: string;
@@ -371,6 +373,8 @@ class WhatsAppCircadianSessionService {
 
       // Also reset any remaining in-memory sessions for non-boss contacts only (Boss session is persistent)
       whatsappBossAiEngine.resetNonBossSessions();
+      whatsappContactsHumanEngine.resetSessions();
+      whatsappUnknownAssistantEngine.resetSessions();
 
       // 4. Mark cycle run as completed in Firestore
       this.lastCompletedCycle = cycleId;

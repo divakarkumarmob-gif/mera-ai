@@ -82,7 +82,12 @@ if (!admin.apps.length) {
 export const db = admin.apps.length ? admin.firestore() : (null as unknown as admin.firestore.Firestore);
 if (db) {
   try {
-    db.settings({ ignoreUndefinedProperties: true });
+    db.settings({
+      ignoreUndefinedProperties: true,
+      // Use REST transport instead of gRPC to prevent "stream reading error: wsarecv" 
+      // crashes on Windows / IPv6 connections where Google forcibly resets gRPC streams.
+      preferRest: true,
+    });
   } catch {
     // ignore if settings already applied
   }
