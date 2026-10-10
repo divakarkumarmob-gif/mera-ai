@@ -3087,11 +3087,20 @@ class WhatsAppBotService {
         }
       }
 
+      let resolvedMime = mimetype;
+      if (Buffer.isBuffer(audioBuffer) && audioBuffer.length >= 4) {
+        if (audioBuffer.subarray(0, 4).toString("ascii") === "RIFF") {
+          resolvedMime = "audio/wav";
+        } else if (audioBuffer.subarray(0, 4).toString("ascii") === "OggS") {
+          resolvedMime = "audio/ogg; codecs=opus";
+        }
+      }
+
       let sendRes: any = null;
       try {
-        sendRes = await this.sock.sendMessage(jid, { audio: audioBuffer, mimetype, ptt: false }, sendOptions);
+        sendRes = await this.sock.sendMessage(jid, { audio: audioBuffer, mimetype: resolvedMime, ptt: false }, sendOptions);
       } catch {
-        sendRes = await this.sock.sendMessage(jid, { audio: audioBuffer, mimetype, ptt: false });
+        sendRes = await this.sock.sendMessage(jid, { audio: audioBuffer, mimetype: resolvedMime, ptt: false });
       }
 
       if (sendRes?.key?.id) {

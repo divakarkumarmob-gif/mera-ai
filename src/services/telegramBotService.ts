@@ -987,16 +987,25 @@ class TelegramBotService {
         return { success: true, messageId: res.message_id };
       }
 
+      const isWav = Buffer.isBuffer(voice) && voice.length >= 4 && voice.subarray(0, 4).toString("ascii") === "RIFF";
+      const isOgg = Buffer.isBuffer(voice) && voice.length >= 4 && voice.subarray(0, 4).toString("ascii") === "OggS";
+      const mimeType = isOgg ? "audio/ogg" : isWav ? "audio/wav" : "audio/mpeg";
+      const filename = isOgg ? "voice.ogg" : isWav ? "voice.wav" : "voice.mp3";
+
       const url = `https://api.telegram.org/bot${this.token}/sendVoice`;
       const formData = new FormData();
       formData.append("chat_id", String(chatId));
-      const blob = new Blob([voice], { type: "audio/mpeg" });
-      formData.append("voice", blob, "voice.mp3");
+      const blob = new Blob([voice], { type: mimeType });
+      formData.append("voice", blob, filename);
       if (caption) formData.append("caption", caption);
 
       const res = await fetch(url, { method: "POST", body: formData, signal: AbortSignal.timeout(35000) });
       const json = await res.json();
-      if (!json.ok) throw new Error(json.description || "sendVoice API failed");
+      if (!json.ok) {
+        // Fallback to sendAudio if sendVoice format (e.g. WAV) is not accepted by Telegram voice note codec
+        console.warn(`[TelegramBot] sendVoice failed (${json.description}), falling back to sendAudio for ${chatId}...`);
+        return await this.sendAudio(chatId, voice, caption || "Voice Note", caption);
+      }
       return { success: true, messageId: json.result.message_id };
     } catch (e: any) {
       console.error(`[TelegramBot] sendVoice failed to ${chatId}:`, e?.message);
