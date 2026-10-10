@@ -357,6 +357,7 @@ async function startServer() {
         for (const modelCandidate of liveModelsToTry) {
           try {
             console.log(`[Server] Connecting to Gemini Live with model: ${modelCandidate} on Key #${clientItem.keyIndex + 1} (session=${sessionId})`);
+            let isSpeakingNotified = false;
             newSession = await clientItem.client.live.connect({
             model: modelCandidate,
             callbacks: {
@@ -383,7 +384,10 @@ async function startServer() {
                 for (const part of parts) {
                   if (part.inlineData?.data) {
                     hasAudio = true;
-                    safeSend(JSON.stringify({ type: "speaking" }));
+                    if (!isSpeakingNotified) {
+                      isSpeakingNotified = true;
+                      safeSend(JSON.stringify({ type: "speaking" }));
+                    }
                     safeSend(JSON.stringify({ audio: part.inlineData.data }));
                   }
                 }
@@ -402,8 +406,12 @@ async function startServer() {
                   outputTranscriptBuffer += transcript;
                 }
                 if (inputTranscript) inputTranscriptBuffer += inputTranscript;
-                if (message.serverContent?.interrupted) safeSend(JSON.stringify({ interrupted: true }));
+                if (message.serverContent?.interrupted) {
+                  isSpeakingNotified = false;
+                  safeSend(JSON.stringify({ interrupted: true }));
+                }
                 if (message.serverContent?.turnComplete) {
+                  isSpeakingNotified = false;
                   safeSend(JSON.stringify({ turnComplete: true }));
                   if (inputTranscriptBuffer.trim()) {
                     saveMessage("user", inputTranscriptBuffer).catch((e) => console.error("[Server] Failed to save user message:", e));
@@ -464,9 +472,9 @@ async function startServer() {
               thinkingConfig: { thinkingLevel: (["low", "medium", "high"].includes(effectiveThinking) ? effectiveThinking : "high") as any },
               realtimeInputConfig: {
                 automaticActivityDetection: {
-                  startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_HIGH,
+                  startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_LOW,
                   endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_LOW,
-                  silenceDurationMs: 500,
+                  silenceDurationMs: 600,
                   prefixPaddingMs: 160,
                 },
               },

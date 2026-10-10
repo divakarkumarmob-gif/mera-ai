@@ -165,7 +165,12 @@ async function playAudioChunk(
             speechAnalyser.connect(audioCtx.destination);
         }
 
-        source.connect(speechAnalyser);
+        // ── Adaptive Jitter Buffer (Prevents Network Jitter Stutter / Audio Cuts) ──
+        // If current playback timeline has elapsed (new turn or underrun), provide a 100ms safety lead buffer
+        // so upcoming chunks can queue up smoothly without audio gaps.
+        if (nextStartTime.current < audioCtx.currentTime) {
+            nextStartTime.current = audioCtx.currentTime + 0.10; // 100ms lead buffer
+        }
 
         const startTime = Math.max(audioCtx.currentTime, nextStartTime.current);
         source.start(startTime);
