@@ -371,10 +371,11 @@ export const CyberMonkeyMechanic: React.FC = () => {
               fill="none"
               animate={
                 isWelding
-                  ? { d: 'M 28 65 Q 14 58 12 42 Q 10 30 18 26 Q 24 26 22 34' }
-                  : { d: 'M 28 65 Q 10 52 8 36 Q 7 20 18 18 Q 26 18 24 28' }
+                  ? { rotate: [-6, 8, -6], scaleY: [1, 1.05, 1] }
+                  : { rotate: [-3, 5, -3], scaleY: [1, 1.02, 1] }
               }
-              transition={{ repeat: Infinity, repeatType: 'reverse', duration: 0.8 }}
+              transition={{ repeat: Infinity, repeatType: 'reverse', duration: 0.8, ease: 'easeInOut' }}
+              style={{ transformOrigin: '28px 65px' }}
             />
             {/* Tail glowing tip node */}
             <circle cx="23" cy="28" r="3.5" fill="#38bdf8" className="animate-pulse" />

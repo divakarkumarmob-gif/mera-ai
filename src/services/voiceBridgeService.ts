@@ -2,6 +2,14 @@ import { MsEdgeTTS, OUTPUT_FORMAT } from "msedge-tts";
 import { GoogleGenAI } from "@google/genai";
 import { db } from "./firebaseAdmin";
 import { humanSpeechProsodyEngine } from "./humanSpeechProsodyEngine";
+import { getMessengerGeminiKey } from "./geminiKeyPoolService";
+
+export const GEMINI_TTS_PRIORITY_MODELS = [
+  "gemini-3.1-flash-tts-preview",
+  "gemini-2.5-flash-preview-tts",
+  "gemini-3.8-flash-lite-tts",
+  "gemini-3.8-flash-tts",
+] as const;
 
 export interface BridgeSession {
   userA_chatId: number; // Text user (Types text -> becomes voice for B)
@@ -59,18 +67,39 @@ export class VoiceBridgeService {
    */
   public async setBossGlobalVoice(voiceChoice: string): Promise<{ success: boolean; voice: string; voiceName: string }> {
     let resolved = VoiceBridgeService.FEMALE_VOICE;
-    let name = "Female Hindi (Swara)";
+    let name = "Female Hindi (Swara / Aoede)";
 
     const clean = voiceChoice.toLowerCase().trim();
-    if (clean.includes("male") || clean.includes("ladka") || clean.includes("madhur") || clean.includes("aadmi") || clean.includes("man") || clean.includes("purush")) {
+    if (clean.includes("puck")) {
+      resolved = "Puck";
+      name = "Gemini Puck (Male Upbeat)";
+    } else if (clean.includes("charon")) {
+      resolved = "Charon";
+      name = "Gemini Charon (Male Informative)";
+    } else if (clean.includes("fenrir")) {
+      resolved = "Fenrir";
+      name = "Gemini Fenrir (Male Excitable)";
+    } else if (clean.includes("aoede")) {
+      resolved = "Aoede";
+      name = "Gemini Aoede (Female Melodic)";
+    } else if (clean.includes("kore")) {
+      resolved = "Kore";
+      name = "Gemini Kore (Female Calm)";
+    } else if (clean.includes("leda")) {
+      resolved = "Leda";
+      name = "Gemini Leda (Female Youthful)";
+    } else if (clean.includes("zephyr")) {
+      resolved = "Zephyr";
+      name = "Gemini Zephyr (Female Warm)";
+    } else if (clean.includes("male") || clean.includes("ladka") || clean.includes("madhur") || clean.includes("aadmi") || clean.includes("man") || clean.includes("purush")) {
       resolved = VoiceBridgeService.DEFAULT_VOICE; // Madhur Male
-      name = "Male Hindi (Madhur)";
+      name = "Male Hindi (Madhur / Puck)";
     } else if (clean.includes("english") || clean.includes("prabhat") || clean.includes("en")) {
       resolved = VoiceBridgeService.ENGLISH_VOICE; // Prabhat
       name = "Indian English (Prabhat)";
     } else if (clean.includes("swara") || clean.includes("female") || clean.includes("ladki") || clean.includes("aurat") || clean.includes("woman") || clean.includes("stri")) {
       resolved = VoiceBridgeService.FEMALE_VOICE; // Swara
-      name = "Female Hindi (Swara)";
+      name = "Female Hindi (Swara / Aoede)";
     }
 
     this.bossGlobalVoice = resolved;
@@ -211,10 +240,233 @@ export class VoiceBridgeService {
   }
 
   /**
+   * Helper: Package raw PCM (16-bit linear PCM) into a standard RIFF WAV buffer.
+   * Ensures seamless playback on WhatsApp (Baileys) and Telegram.
+   */
+  public pcmToWav(
+    pcmBuffer: Buffer,
+    sampleRate: number = 24000,
+    numChannels: number = 1,
+    bitsPerSample: number = 16
+  ): Buffer {
+    if (pcmBuffer.length >= 4 && pcmBuffer.subarray(0, 4).toString("ascii") === "RIFF") {
+      return pcmBuffer;
+    }
+    const header = Buffer.alloc(44);
+    const dataLength = pcmBuffer.length;
+    const byteRate = (sampleRate * numChannels * bitsPerSample) / 8;
+    const blockAlign = (numChannels * bitsPerSample) / 8;
+
+    header.write("RIFF", 0);
+    header.writeUInt32LE(36 + dataLength, 4);
+    header.write("WAVE", 8);
+    header.write("fmt ", 12);
+    header.writeUInt32LE(16, 16);
+    header.writeUInt16LE(1, 20); // 1 = PCM format
+    header.writeUInt16LE(numChannels, 22);
+    header.writeUInt32LE(sampleRate, 24);
+    header.writeUInt32LE(byteRate, 28);
+    header.writeUInt16LE(blockAlign, 32);
+    header.writeUInt16LE(bitsPerSample, 34);
+    header.write("data", 36);
+    header.writeUInt32LE(dataLength, 40);
+
+    return Buffer.concat([header, pcmBuffer]);
+  }
+
+  /**
+   * Resolves appropriate Gemini prebuilt voice name (Aoede, Kore, Puck, Charon, etc.)
+   */
+  public resolveGeminiVoice(targetVoice?: string): string {
+    if (!targetVoice) return "Aoede";
+    const clean = targetVoice.toLowerCase().trim();
+
+    // Direct Gemini prebuilt voice names
+    if (clean.includes("puck")) return "Puck";
+    if (clean.includes("charon")) return "Charon";
+    if (clean.includes("fenrir")) return "Fenrir";
+    if (clean.includes("orus")) return "Orus";
+    if (clean.includes("kore")) return "Kore";
+    if (clean.includes("aoede")) return "Aoede";
+    if (clean.includes("leda")) return "Leda";
+    if (clean.includes("zephyr")) return "Zephyr";
+
+    // Female keywords checked FIRST (prevents 'female' containing 'male')
+    if (
+      clean.includes("swara") ||
+      clean.includes("female") ||
+      clean.includes("ladki") ||
+      clean.includes("aurat") ||
+      clean.includes("woman") ||
+      clean.includes("stri") ||
+      clean.includes("girl")
+    ) {
+      return "Aoede";
+    }
+
+    // Male keywords
+    if (
+      clean.includes("madhur") ||
+      clean.includes("kabir") ||
+      clean.includes("aadmi") ||
+      clean.includes("ladka") ||
+      clean.includes("purush") ||
+      clean.includes("boy") ||
+      /\bmale\b/.test(clean) ||
+      /\bman\b/.test(clean)
+    ) {
+      return "Puck";
+    }
+
+    if (clean.includes("prabhat") || clean.includes("en-in")) {
+      return "Puck";
+    }
+
+    return "Aoede";
+  }
+
+  /**
+   * Primary Text-to-Speech (TTS) Engine using Google Gemini REST Endpoints
+   * Priority Order based on Google documentation & user specification:
+   * 1. 3.1 Flash TTS (gemini-3.1-flash-tts-preview / gemini-3.1-flash-tts)
+   * 2. 2.5 Flash TTS (gemini-2.5-flash-preview-tts / gemini-2.5-flash-tts)
+   * 3. 3.8 Flash Lite TTS (gemini-3.8-flash-lite-tts)
+   * 4. 3.8 Flash TTS (gemini-3.8-flash-tts)
+   *
+   * Endpoint: POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={apiKey}
+   */
+  public async geminiTTS(
+    text: string,
+    targetVoice?: string,
+    modelOverride?: string
+  ): Promise<{ buffer: Buffer; mimeType: string; modelUsed: string } | null> {
+    let apiKey = "";
+    try {
+      apiKey = getMessengerGeminiKey?.() || "";
+    } catch {}
+    if (!apiKey) {
+      apiKey = (
+        process.env.GEMINI_API_KEY ||
+        process.env.GEMINI_API_KEY_2 ||
+        process.env.GEMINI_API_KEY_1 ||
+        process.env.GOOGLE_API_KEY ||
+        ""
+      ).trim();
+    }
+
+    if (!apiKey) return null;
+
+    const voiceName = this.resolveGeminiVoice(targetVoice);
+
+    const modelTiers: string[][] = modelOverride
+      ? [[modelOverride]]
+      : [
+          // 1. 3.1 Flash TTS
+          ["gemini-3.1-flash-tts-preview", "gemini-3.1-flash-tts"],
+          // 2. 2.5 Flash TTS
+          ["gemini-2.5-flash-preview-tts", "gemini-2.5-flash-tts"],
+          // 3. 3.8 Flash Lite TTS
+          ["gemini-3.8-flash-lite-tts"],
+          // 4. 3.8 Flash TTS
+          ["gemini-3.8-flash-tts"],
+        ];
+
+    for (const tier of modelTiers) {
+      for (const model of tier) {
+        try {
+          const endpointUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+          const requestBody = {
+            contents: [
+              {
+                role: "user",
+                parts: [
+                  {
+                    text: text.trim(),
+                  },
+                ],
+              },
+            ],
+            generationConfig: {
+              responseModalities: ["AUDIO"],
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: {
+                    voiceName,
+                  },
+                },
+              },
+            },
+          };
+
+          const res = await fetch(endpointUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(requestBody),
+            signal: AbortSignal.timeout(18000),
+          });
+
+          if (!res.ok) {
+            const errBody = await res.text().catch(() => "");
+            console.warn(`[VoiceBridge] Gemini TTS (${model}) notice [${res.status}]: ${errBody.slice(0, 160)}`);
+            continue;
+          }
+
+          const json = await res.json();
+          const candidate = json.candidates?.[0];
+          const parts = candidate?.content?.parts;
+          if (!parts || !Array.isArray(parts)) continue;
+
+          const audioPart = parts.find((p: any) => p.inlineData?.data || p.inline_data?.data);
+          const rawInlineData = audioPart?.inlineData || audioPart?.inline_data;
+
+          if (!rawInlineData?.data) {
+            console.warn(`[VoiceBridge] Gemini TTS (${model}) response has no audio inlineData.`);
+            continue;
+          }
+
+          const rawBuffer = Buffer.from(rawInlineData.data, "base64");
+          if (!rawBuffer || rawBuffer.length === 0) continue;
+
+          let rawMime = (rawInlineData.mimeType || "audio/wav").toLowerCase();
+          let finalBuffer = rawBuffer;
+          let finalMime = "audio/wav";
+
+          if (rawMime.includes("mp3") || rawMime.includes("mpeg")) {
+            finalMime = "audio/mpeg";
+          } else if (rawMime.includes("ogg") || rawMime.includes("opus")) {
+            finalMime = "audio/ogg";
+          } else {
+            const isPcm = rawMime.includes("pcm") || rawMime.includes("l16");
+            const hasRiffHeader = rawBuffer.length >= 4 && rawBuffer.subarray(0, 4).toString("ascii") === "RIFF";
+
+            if (isPcm || !hasRiffHeader) {
+              const rateMatch = rawMime.match(/rate=(\d+)/i);
+              const sampleRate = rateMatch ? parseInt(rateMatch[1], 10) : 24000;
+              finalBuffer = this.pcmToWav(rawBuffer, sampleRate, 1, 16);
+            }
+            finalMime = "audio/wav";
+          }
+
+          console.log(`[VoiceBridge] 🎙️ Synthesized speech via Gemini TTS (${model} | Voice: ${voiceName} | ${finalBuffer.length} bytes)`);
+          return { buffer: finalBuffer, mimeType: finalMime, modelUsed: model };
+        } catch (callErr: any) {
+          console.warn(`[VoiceBridge] Gemini TTS error calling ${model}:`, callErr?.message || callErr);
+          continue;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * Universal Smart Text-to-Speech (TTS) Pipeline with Human Speech Prosody:
-   * 1. ElevenLabs TTS (Primary - If ELEVENLABS_API_KEY present)
-   * 2. Sarvam AI TTS (Secondary - If SARVAM_API_KEY present)
-   * 3. Microsoft Edge Neural Engine (Fallback - 100% Free & Unlimited)
+   * 1. Google Gemini Flash TTS (Priority: 3.1 Flash -> 2.5 Flash -> 3.8 Flash Lite -> 3.8 Flash)
+   * 2. ElevenLabs TTS (Secondary - If ELEVENLABS_API_KEY present)
+   * 3. Sarvam AI TTS (Tertiary - If SARVAM_API_KEY present)
+   * 4. Microsoft Edge Neural Engine (Fallback - 100% Free & Unlimited)
    */
   public async generateSpeech(
     text: string,
@@ -237,7 +489,18 @@ export class VoiceBridgeService {
     const isMale = targetVoice.toLowerCase().includes("madhur") || targetVoice.toLowerCase().includes("male") || targetVoice.toLowerCase().includes("kabir") || targetVoice.toLowerCase().includes("aadmi") || targetVoice.toLowerCase().includes("ladka");
     const isEnglish = targetVoice.toLowerCase().includes("prabhat") || targetVoice.toLowerCase().includes("en-in") || targetVoice.toLowerCase().includes("english");
 
-    // 1. ElevenLabs TTS (Super realistic human voice)
+    // 1. Google Gemini Flash TTS Priority Chain (3.1 Flash -> 2.5 Flash -> 3.8 Flash Lite -> 3.8 Flash)
+    try {
+      const geminiRes = await this.geminiTTS(textToSpeak, targetVoice);
+      if (geminiRes && geminiRes.buffer.length > 0) {
+        console.log(`[VoiceBridge] Generated voice via Gemini TTS (${geminiRes.modelUsed} - ${prosody.vibeDescription})`);
+        return { buffer: geminiRes.buffer, mimeType: geminiRes.mimeType };
+      }
+    } catch (gErr: any) {
+      console.warn("[VoiceBridge] Gemini TTS priority chain fallback:", gErr?.message || gErr);
+    }
+
+    // 2. ElevenLabs TTS (Secondary Fallback)
     try {
       const elevenRes = await this.elevenLabsTTS(textToSpeak);
       if (elevenRes && elevenRes.buffer.length > 0) {
